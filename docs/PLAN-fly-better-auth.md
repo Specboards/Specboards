@@ -1,8 +1,24 @@
 # Migration Plan — Fly.io Hosting + Better Auth (drop Supabase)
 
-**Status:** planned, not yet executed. Amends the stack decision in
-[`PLAN.md`](./PLAN.md) and the deployment section of
-[`ARCHITECTURE.md`](../ARCHITECTURE.md).
+**Status: executed 2026-06-12** (Phases 1–3 complete; see [Next steps](#next-steps)
+for what remains). Amends the stack decision in [`PLAN.md`](./PLAN.md) and the
+deployment section of [`ARCHITECTURE.md`](../ARCHITECTURE.md).
+
+Landed beyond the original scope of this plan, same date:
+
+- **Consumer email-domain blocking** — sign-ups from gmail/outlook/yahoo/etc.
+  are rejected when `SPECBOARD_BLOCK_PUBLIC_EMAIL_DOMAINS` is truthy
+  (helper + list in `@specboard/core`, hook in `apps/web/src/lib/auth.ts`).
+  On for both Fly apps, off by default for self-host.
+- **Versioned API layer** — `GET /api/v1/features`,
+  `GET`/`PATCH /api/v1/features/:specId` (`lib/features-service.ts`); all UI
+  mutations go through it (`lib/api-client.ts`), server actions removed.
+- **Postmark email delivery** — `lib/email.ts` posts to Postmark's HTTP API;
+  Better Auth verification + password-reset emails. No-op with a logged
+  warning when `POSTMARK_SERVER_TOKEN` / `EMAIL_FROM` are unset.
+- The RLS policies became a **journaled** drizzle migration
+  (`infra/migrations/0002_rls_policies.sql`) instead of a manual psql step —
+  `pnpm db:migrate` applies the entire chain.
 
 ## Decision & rationale
 
@@ -312,6 +328,16 @@ Notes:
 
 ## Phase 3 — Verification
 
+> **Executed 2026-06-12**, against the live test environment
+> (test.specboard.ai) rather than local compose: build/typecheck/test green;
+> board + `/api/v1` list/detail/404/422 verified; gmail.com sign-up rejected
+> 400; work-domain sign-up created `users`/`sessions` rows (UUID ids minted
+> by Postgres); metadata PATCH persisted. Production (app.specboard.ai)
+> verified the same way after promote, minus the user-creating sign-up.
+> Items 4 (RLS as non-owner) and 5 (compose boot) were **not** exercised —
+> RLS verification needs the `specboard_app` role (next steps), and compose
+> parity wasn't re-tested this round.
+
 1. `pnpm build && pnpm typecheck && pnpm test` — green.
 2. Local, no `DATABASE_URL`: app runs in file mode; `GET /api/auth/session`
    returns the 501 "auth disabled" response.
@@ -323,13 +349,49 @@ Notes:
    the member's workspace rows appear.
 5. `docker compose -f infra/docker-compose.yml up` still boots (self-host
    parity, auth disabled).
-6. On Fly: `fly deploy` succeeds, `https://specboard.fly.dev` serves the
-   boards, sign-up round-trip works against MPG.
+6. On Fly: `fly deploy` succeeds, the boards are served, sign-up round-trip
+   works against MPG.
 
-## Explicitly deferred (separate efforts)
+## Next steps
 
-- Sign-in/sign-up UI and session-aware server actions (gate metadata writes
-  by `getAuth().api.getSession(...)`).
-- Workspace bootstrap on first sign-up (create workspace + admin member).
-- `specboard_app` non-owner DB role migration for the SaaS connection (1.5).
-- SSO/SAML/SCIM (commercial tier) — Better Auth has plugins for this later.
+Rough priority order; the first three unblock real multi-user usage.
+
+1. **Sign-in / sign-up UI + session-gated writes.** Auth endpoints exist but
+   there is no browser way to authenticate. Add the pages, then gate
+   `PATCH /api/v1/*` (and future write routes) on
+   `getAuth().api.getSession({ headers })` — today writes are open, matching
+   the pre-auth behavior.
+2. **Workspace bootstrap on first sign-up** — create workspace + admin
+   `members` row; until then signed-up users own nothing and the prod board
+   stays empty (its DB is migrated but intentionally unseeded).
+3. **`specboard_app` non-owner DB role** so RLS actually enforces on the SaaS
+   (the app currently connects as the table owner, which bypasses RLS), plus
+   a request-scoped db helper that runs `set_config('app.user_id', …, true)`
+   per transaction. Then run verification item 4 above.
+4. **Flip `requireEmailVerification`** in `lib/auth.ts` once the Postmark
+   sender domain (specboard.ai DKIM + Return-Path DNS) is verified.
+5. **GitHub App sync** (`packages/git` is still stubbed): webhook endpoint
+   `/api/webhooks/github`; before going live, production already runs
+   `min_machines_running = 1` so deliveries won't hit cold starts.
+6. **Remote MCP server** — second process group in the Fly apps or its own
+   app; should consume `/api/v1` (or the shared service layer), not the DB
+   directly.
+7. **Cost check-in:** two MPG basic clusters run $76/mo. If that's heavy
+   pre-launch, both environments can share one cluster (~$38/mo) with
+   separate databases — revisit before the bill matters.
+8. SSO/SAML/SCIM (commercial tier) — Better Auth has plugins for this later.
+
+### Operational reference (as deployed)
+
+| | test | production |
+| --- | --- | --- |
+| URL | https://test.specboard.ai | https://app.specboard.ai |
+| Fly app (org `specboard`) | `specboard-test` | `specboard` |
+| MPG cluster (sjc, basic) | `specboard-db-test` (seeded from repo specs) | `specboard-db` (empty) |
+| Deploy | auto on push to `main` | GitHub Actions → "Fly Deploy" → run workflow → `production` |
+| Email | Postmark (test server token) | Postmark (prod server token) |
+
+Secrets per app: `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`,
+`SPECBOARD_BLOCK_PUBLIC_EMAIL_DOMAINS=true`, `POSTMARK_SERVER_TOKEN`,
+`EMAIL_FROM`. DB migrations are applied from a workstation via
+`fly mpg proxy <cluster-id>` + `pnpm db:migrate` (no release command yet).

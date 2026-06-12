@@ -23,6 +23,12 @@ fills the gap.
 > superseded — the hosted SaaS will run on Fly.io with plain managed Postgres,
 > and auth moves to Better Auth (in-app, works identically for self-host).
 > Details and execution steps: [`PLAN-fly-better-auth.md`](./PLAN-fly-better-auth.md).
+>
+> **Executed later the same day:** both Fly environments are live
+> (test.specboard.ai auto-deploys from `main`; app.specboard.ai promotes via
+> manual workflow dispatch), with Better Auth endpoints, consumer
+> email-domain blocking, a versioned `/api/v1` layer, and Postmark email.
+> Current next steps live in that doc's [Next steps] section.
 
 ### Decisions locked with the user
 - **Source of truth:** spec **content lives in git** (canonical); **metadata lives in the DB**,
