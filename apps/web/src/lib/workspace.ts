@@ -1,8 +1,34 @@
-import { asc, eq, members, workspaces, type Database } from "@specboard/db";
+import { asc, eq, members, users, workspaces, type Database } from "@specboard/db";
 
 export type Workspace = typeof workspaces.$inferSelect;
 export type Member = typeof members.$inferSelect;
 export type MemberRole = Member["role"];
+
+/** A workspace member with their display identity, for assignment UIs. */
+export interface WorkspaceMember {
+  userId: string;
+  name: string;
+  email: string;
+  role: MemberRole;
+}
+
+/** List a workspace's members joined to their user records, ordered by name. */
+export async function listWorkspaceMembers(
+  db: Database,
+  workspaceId: string,
+): Promise<WorkspaceMember[]> {
+  return db
+    .select({
+      userId: members.userId,
+      name: users.name,
+      email: users.email,
+      role: members.role,
+    })
+    .from(members)
+    .innerJoin(users, eq(users.id, members.userId))
+    .where(eq(members.workspaceId, workspaceId))
+    .orderBy(asc(users.name));
+}
 
 /** Roles allowed to mutate workspace data. `viewer` (the default for everyone
  * past the first user) is read-only. */

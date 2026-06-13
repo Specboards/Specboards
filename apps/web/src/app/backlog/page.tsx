@@ -9,12 +9,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { EmptyState } from "@/components/empty-state";
 import { StatusDot } from "@/components/status-dot";
 import { StatusSelect } from "@/components/status-select";
 import { priorityLabel, sortFeatures } from "@/lib/feature-helpers";
 import { getStore } from "@/lib/store";
 import { canWrite } from "@/lib/workspace";
-import { requireWorkspaceAccess } from "@/lib/workspace-access";
+import { canConnectRepos, requireWorkspaceAccess } from "@/lib/workspace-access";
 
 export const dynamic = "force-dynamic";
 
@@ -40,10 +41,7 @@ export default async function BacklogPage() {
         </p>
       </div>
       {features.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No specs found. Add a <code>specs/&lt;feature&gt;/spec.md</code> with{" "}
-          <code>id</code> and <code>title</code> frontmatter.
-        </p>
+        <EmptyState canConnect={canConnectRepos(access)} />
       ) : (
         <Table>
           <TableHeader>

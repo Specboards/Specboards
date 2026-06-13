@@ -9,6 +9,14 @@ import { ensureMembership, type MemberRole } from "@/lib/workspace";
 export type PageAccess = WorkspaceScope & { role: MemberRole };
 
 /**
+ * Whether the viewer can connect a GitHub repository (admin-only). `null`
+ * access is local file mode, where repo connection isn't a concept.
+ */
+export function canConnectRepos(access: PageAccess | null): boolean {
+  return access?.role === "admin";
+}
+
+/**
  * Page-level access gate for content routes. When auth is enabled:
  * - no session            → redirect to /sign-in
  * - session, no workspace → redirect to /setup (first user names the org)

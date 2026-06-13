@@ -24,11 +24,12 @@ export function SetupForm() {
     e.preventDefault();
     const data = new FormData(e.currentTarget);
     const name = String(data.get("name") ?? "").trim();
+    const seedSampleData = data.get("start") === "sample";
 
     startTransition(async () => {
       setError(null);
       try {
-        await createWorkspace(name);
+        await createWorkspace(name, seedSampleData);
         router.push("/backlog");
         router.refresh();
       } catch (err) {
@@ -58,6 +59,35 @@ export function SetupForm() {
             </span>
             <Input name="name" placeholder="Acme Inc." maxLength={80} required />
           </label>
+          <fieldset className="space-y-2">
+            <legend className="text-xs font-medium text-muted-foreground">
+              How should we start?
+            </legend>
+            <label className="flex items-start gap-2 rounded-md border p-2.5 text-sm has-[:checked]:border-foreground">
+              <input
+                type="radio"
+                name="start"
+                value="sample"
+                defaultChecked
+                className="mt-0.5"
+              />
+              <span>
+                <span className="font-medium">Explore with sample data</span>
+                <span className="block text-xs text-muted-foreground">
+                  A starter board so you can try it out right away.
+                </span>
+              </span>
+            </label>
+            <label className="flex items-start gap-2 rounded-md border p-2.5 text-sm has-[:checked]:border-foreground">
+              <input type="radio" name="start" value="empty" className="mt-0.5" />
+              <span>
+                <span className="font-medium">Start empty</span>
+                <span className="block text-xs text-muted-foreground">
+                  A clean slate — connect a GitHub repo to import your specs.
+                </span>
+              </span>
+            </label>
+          </fieldset>
           {error ? <p className="text-xs text-destructive">{error}</p> : null}
           <Button type="submit" className="w-full" disabled={pending}>
             {pending ? "…" : "Create organization"}

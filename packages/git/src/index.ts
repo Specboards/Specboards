@@ -17,8 +17,8 @@ export interface GitRepoClient {
   listSpecFiles(globs: string[]): Promise<SpecFile[]>;
   /** Read a single file's contents + sha at the current ref. */
   readFile(path: string): Promise<SpecFile>;
-  /** Write a file back, returning the new commit/blob sha. */
-  writeFile(input: WriteFileInput): Promise<{ commitSha: string }>;
+  /** Write a file back, returning the new commit sha and the new blob sha. */
+  writeFile(input: WriteFileInput): Promise<{ commitSha: string; blobSha: string }>;
 }
 
 export interface WriteFileInput {
@@ -59,13 +59,14 @@ export async function reconcileSpecs(
 
     if (!hasSpecId(raw)) {
       raw = injectSpecId(raw, randomUUID());
-      const { commitSha } = await client.writeFile({
+      const written = await client.writeFile({
         path: file.path,
         content: raw,
         message: `chore(specboard): assign stable id to ${file.path}`,
         mode: "direct",
       });
-      blobSha = commitSha;
+      // Track the new blob sha so a later tree walk sees this file as unchanged.
+      blobSha = written.blobSha;
       idInjected = true;
     }
 

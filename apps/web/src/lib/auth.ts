@@ -30,6 +30,10 @@ function createAuth(url: string) {
     }),
     emailAndPassword: {
       enabled: true,
+      // Block sign-in until the address is confirmed. Combined with
+      // `sendOnSignUp` below this closes the gap where a fresh deployment's
+      // first-user admin slot could be claimed without mailbox control.
+      requireEmailVerification: true,
       sendResetPassword: async ({ user, url }) => {
         await sendEmail({
           to: user.email,
@@ -39,10 +43,12 @@ function createAuth(url: string) {
       },
     },
     emailVerification: {
-      // Delivered via Postmark when POSTMARK_SERVER_TOKEN is set; sign-in is
-      // not blocked on verification yet (flip requireEmailVerification once
-      // the sending domain is verified and a sign-up UI exists).
+      // Delivered via Postmark when POSTMARK_SERVER_TOKEN is set. Sign-in is
+      // gated on verification (see requireEmailVerification above); a failed
+      // sign-in by an unverified user re-sends this email automatically.
       sendOnSignUp: true,
+      // Land verified users back in the app rather than on a bare API 200.
+      autoSignInAfterVerification: true,
       sendVerificationEmail: async ({ user, url }) => {
         await sendEmail({
           to: user.email,

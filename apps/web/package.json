@@ -12,6 +12,7 @@
   "dependencies": {
     "@specboard/core": "workspace:*",
     "@specboard/db": "workspace:*",
+    "@specboard/git": "workspace:*",
     "@specboard/ui": "workspace:*",
     "@tailwindcss/postcss": "^4.3.0",
     "better-auth": "^1.6.18",

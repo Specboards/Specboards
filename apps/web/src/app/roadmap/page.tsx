@@ -7,6 +7,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { EmptyState } from "@/components/empty-state";
 import { StatusDot } from "@/components/status-dot";
 import {
   priorityLabel,
@@ -14,7 +15,7 @@ import {
   statusLabel,
 } from "@/lib/feature-helpers";
 import { getStore } from "@/lib/store";
-import { requireWorkspaceAccess } from "@/lib/workspace-access";
+import { canConnectRepos, requireWorkspaceAccess } from "@/lib/workspace-access";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +40,9 @@ export default async function RoadmapPage() {
   return (
     <section className="space-y-4">
       <h1 className="text-lg font-semibold tracking-tight">Roadmap</h1>
+      {features.length === 0 ? (
+        <EmptyState canConnect={canConnectRepos(access)} />
+      ) : (
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {groups.map(({ label, quarter }) => {
           const items = features.filter((f) => f.roadmapQuarter === quarter);
@@ -78,6 +82,7 @@ export default async function RoadmapPage() {
           );
         })}
       </div>
+      )}
     </section>
   );
 }

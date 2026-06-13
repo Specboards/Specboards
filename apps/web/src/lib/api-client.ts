@@ -32,12 +32,18 @@ export async function patchFeature(
   }
 }
 
-/** Create the organization (first user only). Returns the workspace slug. */
-export async function createWorkspace(name: string): Promise<{ slug: string }> {
+/**
+ * Create the organization (first user only). `seedSampleData` populates a
+ * starter board; otherwise the workspace begins empty. Returns the workspace slug.
+ */
+export async function createWorkspace(
+  name: string,
+  seedSampleData: boolean,
+): Promise<{ slug: string }> {
   const res = await fetch("/api/v1/workspaces", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name, seedSampleData }),
   });
   if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as

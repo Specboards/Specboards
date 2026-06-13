@@ -4,6 +4,7 @@ import path from "node:path";
 import { parseSpec } from "@specboard/core";
 
 import type {
+  CustomFieldValue,
   FeatureDetail,
   FeaturePatch,
   FeatureRecord,
@@ -16,6 +17,8 @@ interface LocalMetadata {
   priority?: number | null;
   tags?: string[];
   roadmapQuarter?: string | null;
+  assigneeId?: string | null;
+  customFields?: Record<string, CustomFieldValue>;
 }
 
 type MetadataFile = Record<string, LocalMetadata>;
@@ -95,6 +98,9 @@ export class LocalFileStore implements FeatureStore {
         priority: m.priority ?? null,
         tags: m.tags ?? [],
         roadmapQuarter: m.roadmapQuarter ?? null,
+        assigneeId: m.assigneeId ?? null,
+        assigneeName: null, // no user records in local file mode
+        customFields: m.customFields ?? {},
         path: path.relative(this.root, file),
         content: parsed.content,
         sections: parsed.sections,

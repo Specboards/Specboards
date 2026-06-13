@@ -1,5 +1,6 @@
 import { getSessionUser } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
+import { seedSampleData } from "@/lib/sample-data";
 import { createWorkspaceWithOwner, getMembership } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
@@ -34,15 +35,27 @@ export async function POST(req: Request) {
     return Response.json({ error: "Request body must be JSON." }, { status: 400 });
   }
 
-  const rawName = (body as { name?: unknown } | null)?.name;
-  const name = typeof rawName === "string" ? rawName.trim() : "";
+  const rawBody = (body ?? {}) as { name?: unknown; seedSampleData?: unknown };
+  const name = typeof rawBody.name === "string" ? rawBody.name.trim() : "";
   if (!name || name.length > NAME_MAX) {
     return Response.json(
       { error: `Organization name is required (max ${NAME_MAX} characters).` },
       { status: 422 },
     );
   }
+  const wantsSampleData = rawBody.seedSampleData === true;
 
   const workspace = await createWorkspaceWithOwner(db, name, user.id);
-  return Response.json({ workspace }, { status: 201 });
+
+  // Only seed when this user actually created the org (became admin) — a
+  // concurrent setup could have joined them to an existing one as a viewer.
+  let seeded = 0;
+  if (wantsSampleData) {
+    const membership = await getMembership(db, user.id);
+    if (membership?.role === "admin") {
+      seeded = await seedSampleData(db, workspace.id);
+    }
+  }
+
+  return Response.json({ workspace, seeded }, { status: 201 });
 }

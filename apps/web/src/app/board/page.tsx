@@ -4,6 +4,7 @@ import { DEFAULT_STATUSES } from "@specboard/core";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { EmptyState } from "@/components/empty-state";
 import { StatusDot } from "@/components/status-dot";
 import { StatusSelect } from "@/components/status-select";
 import {
@@ -13,7 +14,7 @@ import {
 } from "@/lib/feature-helpers";
 import { getStore } from "@/lib/store";
 import { canWrite } from "@/lib/workspace";
-import { requireWorkspaceAccess } from "@/lib/workspace-access";
+import { canConnectRepos, requireWorkspaceAccess } from "@/lib/workspace-access";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +30,9 @@ export default async function BoardPage() {
   return (
     <section className="space-y-4">
       <h1 className="text-lg font-semibold tracking-tight">Board</h1>
+      {features.length === 0 ? (
+        <EmptyState canConnect={canConnectRepos(access)} />
+      ) : (
       <div className="flex gap-3 overflow-x-auto pb-4">
         {COLUMNS.map((status) => {
           const cards = features.filter((f) => f.status === status);
@@ -96,6 +100,7 @@ export default async function BoardPage() {
           );
         })}
       </div>
+      )}
     </section>
   );
 }

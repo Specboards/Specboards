@@ -28,9 +28,9 @@ export async function GET(req: Request, { params }: Params) {
 }
 
 /**
- * PATCH /api/v1/features/:specId — update PM metadata
- * (status / priority / roadmapQuarter / tags). Status changes are validated
- * against the workflow state machine.
+ * PATCH /api/v1/features/:specId — update PM metadata (status / priority /
+ * roadmapQuarter / tags / assigneeId / customFields). Status changes are
+ * validated against the workflow state machine.
  */
 export async function PATCH(req: Request, { params }: Params) {
   const authz = await authorizeWrite(req);

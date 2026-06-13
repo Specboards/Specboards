@@ -6,16 +6,25 @@ import {
   features,
   sql,
   specIndex,
+  users,
   type Database,
 } from "@specboard/db";
 
 import type {
+  CustomFieldValue,
   FeatureDetail,
   FeaturePatch,
   FeatureRecord,
   FeatureStore,
   WorkspaceScope,
 } from "./types";
+
+/** Normalize the jsonb custom-fields column into the UI's value map. */
+function toCustomFields(value: unknown): Record<string, CustomFieldValue> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, CustomFieldValue>)
+    : {};
+}
 
 type Tx = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
@@ -61,6 +70,8 @@ export class DbStore implements FeatureStore {
         priority: row.priority,
         tags: row.tags,
         roadmapQuarter: row.roadmapQuarter,
+        assigneeId: row.assigneeId,
+        customFields: toCustomFields(row.customFields),
         path: row.index?.path ?? "",
       }));
     });
@@ -80,6 +91,16 @@ export class DbStore implements FeatureStore {
       });
       if (!row) return null;
       const content = row.index?.content ?? "";
+      // Resolve the assignee's display name (separate lookup — there's no
+      // features→users relation, and assignees are usually few).
+      let assigneeName: string | null = null;
+      if (row.assigneeId) {
+        const assignee = await tx.query.users.findFirst({
+          where: eq(users.id, row.assigneeId),
+          columns: { name: true },
+        });
+        assigneeName = assignee?.name ?? null;
+      }
       return {
         specId: row.specId,
         title: row.title,
@@ -87,6 +108,9 @@ export class DbStore implements FeatureStore {
         priority: row.priority,
         tags: row.tags,
         roadmapQuarter: row.roadmapQuarter,
+        assigneeId: row.assigneeId,
+        assigneeName,
+        customFields: toCustomFields(row.customFields),
         path: row.index?.path ?? "",
         content,
         sections: extractSections(content),

@@ -2,6 +2,7 @@ import { canTransition } from "@specboard/core";
 
 import {
   getStore,
+  type CustomFieldValue,
   type FeatureDetail,
   type FeaturePatch,
   type WorkspaceScope,
@@ -52,13 +53,52 @@ export function parseFeaturePatch(body: unknown): FeaturePatch {
     }
     patch.tags = (raw.tags as string[]).map((t) => t.trim()).filter(Boolean);
   }
+  if ("assigneeId" in raw) {
+    if (raw.assigneeId !== null && !isUuid(raw.assigneeId)) {
+      throw new InvalidPatchError("assigneeId must be a UUID or null.");
+    }
+    patch.assigneeId = raw.assigneeId as string | null;
+  }
+  if ("customFields" in raw) {
+    patch.customFields = parseCustomFields(raw.customFields);
+  }
 
   if (Object.keys(patch).length === 0) {
     throw new InvalidPatchError(
-      "Patch must set at least one of: status, priority, roadmapQuarter, tags.",
+      "Patch must set at least one of: status, priority, roadmapQuarter, tags, assigneeId, customFields.",
     );
   }
   return patch;
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isUuid(value: unknown): value is string {
+  return typeof value === "string" && UUID_RE.test(value);
+}
+
+/** Validate an untrusted custom-fields map: a flat object of scalar/string[] values. */
+function parseCustomFields(value: unknown): Record<string, CustomFieldValue> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new InvalidPatchError("customFields must be a JSON object.");
+  }
+  const out: Record<string, CustomFieldValue> = {};
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (
+      raw === null ||
+      typeof raw === "string" ||
+      typeof raw === "number" ||
+      typeof raw === "boolean" ||
+      (Array.isArray(raw) && raw.every((v) => typeof v === "string"))
+    ) {
+      out[key] = raw as CustomFieldValue;
+    } else {
+      throw new InvalidPatchError(
+        `customFields.${key} must be a string, number, boolean, string[], or null.`,
+      );
+    }
+  }
+  return out;
 }
 
 /** Apply a validated patch, enforcing the status workflow. */

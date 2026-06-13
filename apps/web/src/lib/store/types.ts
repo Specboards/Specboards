@@ -1,5 +1,8 @@
 import type { SpecSection } from "@specboard/core";
 
+/** A value stored for a team-defined custom field (see RepoConfig.fields). */
+export type CustomFieldValue = string | number | boolean | string[] | null;
+
 /** A feature as the UI consumes it: spec identity + PM metadata. */
 export interface FeatureRecord {
   /** Stable spec id (frontmatter `id`) — also the route param. */
@@ -10,18 +13,27 @@ export interface FeatureRecord {
   priority: number | null;
   tags: string[];
   roadmapQuarter: string | null;
+  /** Assigned user id, or null when unassigned. */
+  assigneeId: string | null;
+  /** Values keyed by custom-field key (see RepoConfig.fields). */
+  customFields: Record<string, CustomFieldValue>;
   /** Spec path relative to the repo root. */
   path: string;
 }
 
 export interface FeatureDetail extends FeatureRecord {
+  /** Display name of the assignee, resolved from the user record (db store). */
+  assigneeName: string | null;
   /** Spec markdown with frontmatter stripped. */
   content: string;
   sections: SpecSection[];
 }
 
 export type FeaturePatch = Partial<
-  Pick<FeatureRecord, "status" | "priority" | "tags" | "roadmapQuarter">
+  Pick<
+    FeatureRecord,
+    "status" | "priority" | "tags" | "roadmapQuarter" | "assigneeId" | "customFields"
+  >
 >;
 
 /**

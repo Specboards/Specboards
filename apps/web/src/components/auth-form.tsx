@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState, useTransition } from "react";
 
-import { signIn, signUp } from "@/lib/auth-client";
+import { sendVerificationEmail, signIn, signUp } from "@/lib/auth-client";
 import { safeRedirectPath } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -46,6 +46,9 @@ export function AuthForm({ mode }: { mode: Mode }) {
   const searchParams = useSearchParams();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  // Set once a verification email is in flight: sign-up always lands here (no
+  // session until confirmed), and an unverified sign-in falls through to it too.
+  const [pendingEmail, setPendingEmail] = useState<string | null>(null);
   const t = copy[mode];
 
   // After auth, return to wherever the user was headed (set by the redirect
@@ -62,18 +65,44 @@ export function AuthForm({ mode }: { mode: Mode }) {
 
     startTransition(async () => {
       setError(null);
-      const { error } =
-        mode === "sign-up"
-          ? await signUp.email({ email, password, name })
-          : await signIn.email({ email, password });
+      if (mode === "sign-up") {
+        const { error } = await signUp.email({ email, password, name, callbackURL: redirectTo });
+        if (error) {
+          setError(error.message ?? "Something went wrong. Please try again.");
+          return;
+        }
+        // requireEmailVerification means no session yet — wait for the link.
+        setPendingEmail(email);
+        return;
+      }
 
+      const { error } = await signIn.email({ email, password, callbackURL: redirectTo });
       if (error) {
+        // An unverified address can't sign in; Better Auth re-sends the
+        // verification email, so route the user to the "check your email" state.
+        if (error.status === 403) {
+          setPendingEmail(email);
+          return;
+        }
         setError(error.message ?? "Something went wrong. Please try again.");
         return;
       }
       router.push(redirectTo);
       router.refresh();
     });
+  }
+
+  if (pendingEmail) {
+    return (
+      <VerifyEmailNotice
+        email={pendingEmail}
+        redirectTo={redirectTo}
+        onBack={() => {
+          setPendingEmail(null);
+          setError(null);
+        }}
+      />
+    );
   }
 
   return (
@@ -113,6 +142,68 @@ export function AuthForm({ mode }: { mode: Mode }) {
           <Link href={t.altHref} className="text-foreground underline-offset-4 hover:underline">
             {t.altLabel}
           </Link>
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * Shown after sign-up (or an unverified sign-in) when there's no session yet —
+ * the user must click the link in their inbox. Offers a resend affordance.
+ */
+function VerifyEmailNotice({
+  email,
+  redirectTo,
+  onBack,
+}: {
+  email: string;
+  redirectTo: string;
+  onBack: () => void;
+}) {
+  const [pending, startTransition] = useTransition();
+  const [status, setStatus] = useState<"idle" | "sent" | "error">("idle");
+
+  function resend() {
+    startTransition(async () => {
+      setStatus("idle");
+      const { error } = await sendVerificationEmail({ email, callbackURL: redirectTo });
+      setStatus(error ? "error" : "sent");
+    });
+  }
+
+  return (
+    <Card className="mx-auto mt-16 w-full max-w-sm">
+      <CardHeader>
+        <CardTitle>Check your email</CardTitle>
+        <CardDescription>
+          We sent a verification link to <span className="text-foreground">{email}</span>. Click it
+          to finish signing in.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Button type="button" className="w-full" onClick={resend} disabled={pending}>
+          {pending ? "…" : "Resend verification email"}
+        </Button>
+        {status === "sent" ? (
+          <p className="mt-3 text-center text-xs text-muted-foreground">
+            Sent. Give it a minute, then check your spam folder.
+          </p>
+        ) : null}
+        {status === "error" ? (
+          <p className="mt-3 text-center text-xs text-destructive">
+            Couldn&apos;t resend just now. Please try again.
+          </p>
+        ) : null}
+        <p className="mt-4 text-center text-xs text-muted-foreground">
+          Wrong address?{" "}
+          <button
+            type="button"
+            onClick={onBack}
+            className="text-foreground underline-offset-4 hover:underline"
+          >
+            Go back
+          </button>
         </p>
       </CardContent>
     </Card>

@@ -1,3 +1,4 @@
+import { load } from "js-yaml";
 import { z } from "zod";
 
 /**
@@ -33,4 +34,20 @@ export type RepoConfig = z.infer<typeof repoConfigSchema>;
 
 export function parseRepoConfig(input: unknown): RepoConfig {
   return repoConfigSchema.parse(input);
+}
+
+/** Parse `.specboard/config.yml` (raw YAML) into a validated {@link RepoConfig}. */
+export function parseRepoConfigYaml(raw: string): RepoConfig {
+  return repoConfigSchema.parse(load(raw) ?? {});
+}
+
+/**
+ * Best-effort parse of a stored/loaded config value into a {@link RepoConfig},
+ * returning `null` instead of throwing when it's absent or malformed. Used when
+ * surfacing config-driven UI (e.g. custom fields) where a bad config should
+ * degrade gracefully rather than break the page.
+ */
+export function safeParseRepoConfig(input: unknown): RepoConfig | null {
+  const result = repoConfigSchema.safeParse(input);
+  return result.success ? result.data : null;
 }

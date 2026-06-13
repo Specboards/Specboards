@@ -230,6 +230,9 @@ self-host, but the SaaS must connect as a non-owner role. Add a
 | `DATABASE_URL` | Postgres; absent = local file mode, auth disabled |
 | `BETTER_AUTH_SECRET` | session/signing secret (`openssl rand -hex 32`) |
 | `BETTER_AUTH_URL` | canonical app URL (needed behind Fly's proxy) |
+| `GITHUB_APP_ID` | GitHub App id; absent = spec sync disabled |
+| `GITHUB_APP_PRIVATE_KEY` | App PEM (literal `\n` escapes are unfolded at load) |
+| `GITHUB_WEBHOOK_SECRET` | HMAC secret for `X-Hub-Signature-256` verification |
 
 `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` disappear.
 
@@ -396,22 +399,53 @@ Rough priority order; the first three unblock real multi-user usage.
    `store/index.ts` change (test auto-deploys on push to `main`; prod via the
    manual "Fly Deploy" workflow), then RLS enforces at the DB on the runtime
    path and verification item 4 above is exercised live.
-4. **Flip `requireEmailVerification`** in `lib/auth.ts` once the Postmark
-   sender domain (specboard.ai DKIM + Return-Path DNS) is verified.
-   _Security note:_ until this is on, an unverified work-domain sign-up can take
-   the **first-user `admin`** slot on a fresh deployment — verify before
-   bootstrapping production, or gate the `/setup`/first-admin path on a verified
-   email.
-5. **GitHub App sync** (`packages/git` is still stubbed): webhook endpoint
-   `/api/webhooks/github`; before going live, production already runs
-   `min_machines_running = 1` so deliveries won't hit cold starts.
-6. **Remote MCP server** — second process group in the Fly apps or its own
+4. ~~**Flip `requireEmailVerification`.**~~ **Code done 2026-06-13.**
+   `requireEmailVerification: true` + `autoSignInAfterVerification: true` in
+   `lib/auth.ts`; `auth-form.tsx` now shows a "check your email" state with a
+   resend affordance after sign-up (and after an unverified sign-in's 403)
+   rather than pushing into an app with no session. _Still blocked on owner
+   action:_ verify the specboard.ai Postmark sender domain (DKIM + Return-Path
+   CNAMEs, off the sandbox server) so the links actually deliver. _Security
+   note:_ until delivery works, an unverified work-domain sign-up can no longer
+   complete sign-in, but don't bootstrap production until mail is flowing.
+5. ~~**GitHub App sync.**~~ **Code done 2026-06-13.** `packages/git` is
+   implemented: `GitHubRepoClient` (tree/blob read, contents-API direct commit,
+   branch+PR write) in `github.ts`; HMAC signature verification, picomatch glob
+   matching, and push-event parsing in `webhook.ts`; pure-function tests in
+   `git.test.ts`. Wired into the web app: `POST /api/webhooks/github` verifies
+   the signature and reconciles a connected repo's specs into `features` +
+   `spec_index` (owner connection, `blobSha` drift-skip); `GET/POST
+   /api/v1/repositories` lists/registers repos (admin-only, runs an initial
+   import). Each sync reads `.specboard/config.yml` from the repo (via the App)
+   and stores the parsed `RepoConfig` on the `repositories` row, so spec globs
+   and custom-field definitions track git. Production already runs
+   `min_machines_running = 1` so deliveries won't hit cold starts. **Owner
+   action to go live:** follow `docs/RUNBOOK-github-sync.md` — create the GitHub
+   App, set the three `GITHUB_*` secrets, install on the repo, and register it.
+   _Still open (follow-up):_ a management UI for connecting repos (registration
+   is curl-only today), and handling spec **deletion** (a removed file currently
+   leaves its feature row to avoid nuking user comments/metadata).
+6. ~~**First-run onboarding choice.**~~ **Done 2026-06-13.** `/setup` now asks
+   the first user to either seed a starter board (sample data baked into the app
+   — `lib/sample-data.ts`, seeded into a synthetic "sample" repo) or start empty;
+   `POST /api/v1/workspaces` takes `seedSampleData` and only seeds when the
+   caller actually became admin. The board/backlog/roadmap render a shared
+   `EmptyState` (prompting a repo connection) when there are no features, and the
+   header nav is hidden from signed-out visitors.
+7. ~~**Assignee + custom-field editing.**~~ **Done 2026-06-13.** The metadata
+   form (`feature-meta-form.tsx`) now edits the assignee (from workspace members)
+   and any config-defined custom fields; `parseFeaturePatch` validates
+   `assigneeId`/`customFields`, the stores read/write them, and field definitions
+   come from the synced `RepoConfig.fields`. _Still open:_ richer roles
+   (`pm`/`ux`/`eng`) and a member-management UI — everyone past the first user is
+   still a `viewer`.
+8. **Remote MCP server** — second process group in the Fly apps or its own
    app; should consume `/api/v1` (or the shared service layer), not the DB
    directly.
-7. **Cost check-in:** two MPG basic clusters run $76/mo. If that's heavy
+9. **Cost check-in:** two MPG basic clusters run $76/mo. If that's heavy
    pre-launch, both environments can share one cluster (~$38/mo) with
    separate databases — revisit before the bill matters.
-8. SSO/SAML/SCIM (commercial tier) — Better Auth has plugins for this later.
+10. SSO/SAML/SCIM (commercial tier) — Better Auth has plugins for this later.
 
 ### Operational reference (as deployed)
 

@@ -6,9 +6,11 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { FeatureMetaForm } from "@/components/feature-meta-form";
 import { StatusDot } from "@/components/status-dot";
+import { getDb } from "@/lib/db";
 import { statusLabel } from "@/lib/feature-helpers";
+import { resolveRepoConfig } from "@/lib/repo-config";
 import { getStore } from "@/lib/store";
-import { canWrite } from "@/lib/workspace";
+import { canWrite, listWorkspaceMembers, type WorkspaceMember } from "@/lib/workspace";
 import { requireWorkspaceAccess } from "@/lib/workspace-access";
 
 export const dynamic = "force-dynamic";
@@ -27,6 +29,13 @@ export default async function FeaturePage({
   const store = await getStore();
   const feature = await store.getFeature(id, access ?? undefined);
   if (!feature) notFound();
+
+  // Assignee options + custom-field definitions for the metadata form.
+  const db = getDb();
+  const members: WorkspaceMember[] =
+    access && db ? await listWorkspaceMembers(db, access.workspaceId) : [];
+  const repoConfig = await resolveRepoConfig(access);
+  const customFields = repoConfig?.fields ?? [];
 
   return (
     <section className="grid gap-8 lg:grid-cols-[1fr_280px]">
@@ -58,6 +67,8 @@ export default async function FeaturePage({
         <Separator />
         <FeatureMetaForm
           feature={feature}
+          members={members}
+          customFields={customFields}
           canEdit={!access || canWrite(access.role)}
         />
         <Separator />
