@@ -382,13 +382,20 @@ Rough priority order; the first three unblock real multi-user usage.
    transaction (`store/db.ts`), and reads/writes are authorized by membership +
    role (`resolveReadScope` / `authorizeWrite` in `lib/auth-session.ts`;
    `viewer` is read-only via `canWrite`). This gives real isolation in the app
-   even though the connection still bypasses RLS. _Still open (needs live
-   infra):_ provision the `specboard_app` **non-owner** role, split the
-   migration connection (owner) from the runtime connection (non-owner), and
-   swap the Fly `DATABASE_URL` secret — only then does RLS enforce at the DB and
-   verification item 4 above becomes meaningful. Onboarding writes
-   (`createWorkspaceWithOwner` / `ensureMembership`, default-denied under RLS)
-   will need the privileged connection at that point.
+   even though the connection still bypasses RLS. _DB role provisioned on both
+   MPG clusters 2026-06-13:_ a non-owner `writer` user **`specboard-app`** (not
+   the SQL `create role` in a journaled migration — that role is MPG-specific
+   and self-host runs as the superuser-owner, so it lives as an ops step, see
+   the operational reference). RLS was verified on both clusters as that role
+   (`app.user_id` unset → 0 rows; member → workspace rows; non-member → 0). The
+   app reads tenant data via `DATABASE_URL_APP` (the writer) when set, falling
+   back to `DATABASE_URL` (owner) otherwise — `store/index.ts`; onboarding/auth
+   stay on the owner connection (`lib/db.ts`), since `createWorkspaceWithOwner`
+   / `ensureMembership` are default-denied under RLS. The `DATABASE_URL_APP`
+   secret is **staged** on both Fly apps. _Remaining:_ deploy the
+   `store/index.ts` change (test auto-deploys on push to `main`; prod via the
+   manual "Fly Deploy" workflow), then RLS enforces at the DB on the runtime
+   path and verification item 4 above is exercised live.
 4. **Flip `requireEmailVerification`** in `lib/auth.ts` once the Postmark
    sender domain (specboard.ai DKIM + Return-Path DNS) is verified.
    _Security note:_ until this is on, an unverified work-domain sign-up can take
@@ -412,11 +419,42 @@ Rough priority order; the first three unblock real multi-user usage.
 | --- | --- | --- |
 | URL | https://test.specboard.ai | https://app.specboard.ai |
 | Fly app (org `specboard`) | `specboard-test` | `specboard` |
-| MPG cluster (sjc, basic) | `specboard-db-test` (seeded from repo specs) | `specboard-db` (empty) |
+| MPG cluster (sjc, basic) | `specboard-db-test` = `z7y24od8vemrgqd1` (seeded from repo specs) | `specboard-db` = `1zqyxr7d791rwp8m` (empty) |
+| MPG users | `fly-user` (`schema_admin`, owner) + `specboard-app` (`writer`, non-owner) | same |
 | Deploy | auto on push to `main` | GitHub Actions → "Fly Deploy" → run workflow → `production` |
 | Email | Postmark (test server token) | Postmark (prod server token) |
 
-Secrets per app: `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`,
+Secrets per app: `DATABASE_URL` (owner: migrations, auth, onboarding),
+`DATABASE_URL_APP` (non-owner `writer`: RLS-enforced tenant reads/writes),
+`BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`,
 `SPECBOARD_BLOCK_PUBLIC_EMAIL_DOMAINS=true`, `POSTMARK_SERVER_TOKEN`,
 `EMAIL_FROM`. DB migrations are applied from a workstation via
 `fly mpg proxy <cluster-id>` + `pnpm db:migrate` (no release command yet).
+
+**Provisioning the non-owner `writer` role (per cluster).** Not a journaled
+migration — MPG creates roles at the cluster level and self-host doesn't use
+this role. After the schema migrations (incl. `0002` RLS) are applied:
+
+```bash
+# 1. Create the non-owner writer user (gets no DML on pre-existing tables).
+fly mpg users create <cluster-id> -u specboard-app -r writer
+
+# 2. Grant DML on the existing tenant tables + future ones (run as the owner).
+fly mpg proxy <cluster-id> &
+psql 'host=localhost port=16380 user=fly-user dbname=fly-db sslmode=disable' <<'SQL'
+grant select, insert, update, delete on
+  workspaces, members, repositories, features, comments, activity_log, spec_index
+  to writer;
+alter default privileges in schema public
+  grant select, insert, update, delete on tables to writer;
+SQL
+
+# 3. Wire the connection string into the app as DATABASE_URL_APP.
+fly mpg attach <cluster-id> -a <app> -u specboard-app -d fly-db \
+  --variable-name DATABASE_URL_APP
+```
+
+Verify (as `specboard-app`): `app.user_id` unset → 0 rows; set to a member's
+uuid via `select set_config('app.user_id','<uuid>',true)` in a transaction →
+only that workspace's rows; non-member → 0. Owner (`fly-user`) bypasses RLS, so
+migrations/auth/onboarding keep working.
