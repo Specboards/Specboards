@@ -11,9 +11,13 @@ import { getMembership } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
 
-/** Build an absolute URL on this deployment's origin. */
-function appUrl(req: Request, path: string): string {
-  return new URL(path, new URL(req.url).origin).toString();
+/**
+ * Redirect to a same-origin path. Uses a relative `Location` (resolved by the
+ * browser against the public URL it requested) so it works behind Fly's proxy,
+ * where `req.url` carries the internal bind address rather than the public host.
+ */
+function redirectTo(path: string): Response {
+  return new Response(null, { status: 302, headers: { Location: path } });
 }
 
 /**
@@ -32,12 +36,12 @@ export async function GET(req: Request) {
   // Not signed in (or auth disabled): send them to sign in, then back here.
   if (!db || !user) {
     const from = encodeURIComponent(`/api/v1/github/setup${url.search}`);
-    return Response.redirect(appUrl(req, `/sign-in?from=${from}`), 302);
+    return redirectTo(`/sign-in?from=${from}`);
   }
 
   const membership = await getMembership(db, user.id);
   if (!membership || membership.role !== "admin" || !installationId) {
-    return Response.redirect(appUrl(req, "/repositories?error=install"), 302);
+    return redirectTo("/repositories?error=install");
   }
 
   // Remember the installation for this admin so the picker can list its repos
@@ -51,5 +55,5 @@ export async function GET(req: Request) {
     maxAge: INSTALL_COOKIE_MAX_AGE,
   });
 
-  return Response.redirect(appUrl(req, "/repositories?connected=1"), 302);
+  return redirectTo("/repositories?connected=1");
 }
