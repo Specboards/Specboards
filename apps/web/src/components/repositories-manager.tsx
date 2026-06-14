@@ -27,12 +27,18 @@ export interface ConnectedRepo {
   githubInstallationId: string;
 }
 
+export type SetupNotice = { kind: "ok" | "error"; message: string } | null;
+
 interface RepositoriesManagerProps {
   repos: ConnectedRepo[];
-  /** Whether the viewer (admin) may connect/re-sync repositories. */
+  /** Whether the viewer (admin) may set up / connect / re-sync repositories. */
   canConnect: boolean;
-  /** GitHub App "install" URL, when NEXT_PUBLIC_GITHUB_APP_SLUG is configured. */
+  /** Whether the deployment has a GitHub App configured yet. */
+  configured: boolean;
+  /** GitHub App "install" URL once the App exists, else null. */
   installUrl: string | null;
+  /** One-time banner from the setup/callback round-trip. */
+  notice: SetupNotice;
 }
 
 type Status = { kind: "ok" | "error"; message: string } | null;
@@ -44,7 +50,13 @@ function syncMessage(sync: SyncResult | { error: string }): { kind: "ok" | "erro
   return { kind: "ok", message: parts.join(" · ") };
 }
 
-export function RepositoriesManager({ repos, canConnect, installUrl }: RepositoriesManagerProps) {
+export function RepositoriesManager({
+  repos,
+  canConnect,
+  configured,
+  installUrl,
+  notice,
+}: RepositoriesManagerProps) {
   return (
     <div className="mx-auto w-full max-w-xl space-y-6">
       <div>
@@ -55,14 +67,65 @@ export function RepositoriesManager({ repos, canConnect, installUrl }: Repositor
         </p>
       </div>
 
-      <RepoList repos={repos} canResync={canConnect} />
+      {notice ? (
+        <p
+          className={`rounded-md border px-3 py-2 text-sm ${
+            notice.kind === "ok"
+              ? "border-input text-muted-foreground"
+              : "border-destructive/40 text-destructive"
+          }`}
+        >
+          {notice.message}
+        </p>
+      ) : null}
 
-      {canConnect ? (
+      <RepoList repos={repos} canResync={canConnect && configured} />
+
+      {!canConnect ? (
+        <p className="text-sm text-muted-foreground">
+          {configured
+            ? "Only an admin can connect repositories."
+            : "GitHub isn't set up yet. Ask an admin to connect SpecBoard to GitHub."}
+        </p>
+      ) : configured ? (
         <ConnectSection installUrl={installUrl} connected={repos} />
       ) : (
-        <p className="text-sm text-muted-foreground">Only an admin can connect repositories.</p>
+        <SetupGitHubCard />
       )}
     </div>
+  );
+}
+
+/**
+ * Shown to an admin before any GitHub App exists. Kicks off the one-click
+ * manifest flow: GitHub creates the App, redirects back, and we store the
+ * credentials — no copying ids or secrets.
+ */
+function SetupGitHubCard() {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Connect SpecBoard to GitHub</CardTitle>
+        <CardDescription>
+          We&apos;ll create a GitHub App on your account or organization in one click — you just
+          confirm on GitHub. After that you can install it on repositories and sync specs.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form action="/api/v1/github/app/create" method="get" className="space-y-4">
+          <label className="block space-y-1.5">
+            <span className="text-xs font-medium text-muted-foreground">
+              GitHub organization <span className="font-normal">(optional)</span>
+            </span>
+            <Input name="org" placeholder="your-org" autoCapitalize="none" autoCorrect="off" />
+            <span className="block text-xs text-muted-foreground">
+              Leave blank to create it on your personal GitHub account.
+            </span>
+          </label>
+          <Button type="submit">Set up GitHub App</Button>
+        </form>
+      </CardContent>
+    </Card>
   );
 }
 

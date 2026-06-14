@@ -28,7 +28,18 @@ export function githubAppFromEnv(): App | null {
   const appId = process.env.GITHUB_APP_ID;
   const privateKey = process.env.GITHUB_APP_PRIVATE_KEY;
   if (!appId || !privateKey) return null;
-  return new App({ appId, privateKey: privateKey.replace(/\\n/g, "\n") });
+  return githubAppFrom({ appId, privateKey });
+}
+
+/**
+ * Build a GitHub App from explicit credentials (e.g. loaded from the DB after
+ * the in-app manifest setup). Literal `\n` escapes in the PEM are unfolded.
+ */
+export function githubAppFrom(credentials: GitHubAppCredentials): App {
+  return new App({
+    appId: credentials.appId,
+    privateKey: credentials.privateKey.replace(/\\n/g, "\n"),
+  });
 }
 
 /** A repository an installation can access, for the connect picker. */

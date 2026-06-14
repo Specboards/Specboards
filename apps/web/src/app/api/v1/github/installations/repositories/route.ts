@@ -1,9 +1,10 @@
 import { cookies } from "next/headers";
 
-import { githubAppFromEnv, listInstallationRepositories } from "@specboard/git";
+import { listInstallationRepositories } from "@specboard/git";
 
 import { getSessionUser } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
+import { getGithubApp } from "@/lib/github-app";
 import { INSTALL_COOKIE, readInstallCookie } from "@/lib/github-install";
 import { getMembership } from "@/lib/workspace";
 
@@ -34,7 +35,7 @@ export async function GET(req: Request) {
     return Response.json({ installationId: null, repositories: [] });
   }
 
-  const app = githubAppFromEnv();
+  const app = await getGithubApp(db);
   if (!app) {
     return Response.json(
       { error: "GitHub App is not configured." },

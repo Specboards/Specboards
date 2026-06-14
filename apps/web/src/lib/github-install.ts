@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 /**
  * GitHub App installation flow helpers.
@@ -18,6 +18,28 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 /** Cookie holding the signed, pending installation id after the App callback. */
 export const INSTALL_COOKIE = "sb_gh_install";
 
+/** Cookie holding the CSRF nonce for the App-creation (manifest) round-trip. */
+export const APP_SETUP_COOKIE = "sb_gh_app_setup";
+
+/** A random CSRF nonce, round-tripped as the manifest flow's `state`. */
+export function newSetupNonce(): string {
+  return randomBytes(16).toString("hex");
+}
+
+/**
+ * This deployment's public origin (e.g. `https://test.specboard.ai`). Behind
+ * Fly's proxy `req.url` is the internal bind address, so derive it from the
+ * forwarded headers (the same ones Better Auth trusts), with an `APP_URL`
+ * env override for unusual setups. Used to build absolute GitHub callback URLs.
+ */
+export function appOriginFromRequest(req: Request): string {
+  const override = process.env.APP_URL?.trim();
+  if (override) return override.replace(/\/+$/, "");
+  const proto = req.headers.get("x-forwarded-proto") ?? "https";
+  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "";
+  return `${proto}://${host}`;
+}
+
 /** How long a pending installation stays connectable before re-installing. */
 export const INSTALL_COOKIE_MAX_AGE = 60 * 15; // 15 minutes
 
@@ -26,10 +48,14 @@ export function githubAppSlug(): string | null {
   return process.env.NEXT_PUBLIC_GITHUB_APP_SLUG?.trim() || null;
 }
 
-/** Where to send a user to install the App, or null if the slug is unset. */
-export function githubAppInstallUrl(): string | null {
-  const slug = githubAppSlug();
+/** Where to send a user to install an App with the given slug, or null. */
+export function installUrlFromSlug(slug: string | null): string | null {
   return slug ? `https://github.com/apps/${slug}/installations/new` : null;
+}
+
+/** Where to send a user to install the App (env slug), or null if unset. */
+export function githubAppInstallUrl(): string | null {
+  return installUrlFromSlug(githubAppSlug());
 }
 
 function secret(): string {

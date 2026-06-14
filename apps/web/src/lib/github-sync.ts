@@ -13,10 +13,11 @@ import {
 } from "@specboard/db";
 import {
   createGitHubRepoClient,
-  githubAppFromEnv,
   reconcileSpecs,
   type GitRepoClient,
 } from "@specboard/git";
+
+import { getGithubApp } from "@/lib/github-app";
 
 export type RepoRecord = typeof repositories.$inferSelect;
 
@@ -103,11 +104,9 @@ export async function resolveRepository(
  * data ingestion, not a tenant request, so it does not go through RLS.
  */
 export async function syncRepository(db: Database, repo: RepoRecord): Promise<SyncSummary> {
-  const app = githubAppFromEnv();
+  const app = await getGithubApp(db);
   if (!app) {
-    throw new Error(
-      "GitHub App is not configured (set GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY).",
-    );
+    throw new Error("GitHub App is not configured. Set it up on the Repositories page.");
   }
 
   const client = await createGitHubRepoClient(app, {

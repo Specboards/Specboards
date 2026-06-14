@@ -1,6 +1,7 @@
 import { affectedSpecs, parsePushEvent, verifyWebhookSignature } from "@specboard/git";
 
 import { getDb } from "@/lib/db";
+import { getWebhookSecret } from "@/lib/github-app";
 import { repoGlobs, resolveRepository, syncRepository } from "@/lib/github-sync";
 
 export const dynamic = "force-dynamic";
@@ -15,8 +16,8 @@ export const dynamic = "force-dynamic";
  * branches, no matching spec changes) return 2xx so GitHub marks them handled.
  */
 export async function POST(req: Request) {
-  const secret = process.env.GITHUB_WEBHOOK_SECRET;
   const db = getDb();
+  const secret = db ? await getWebhookSecret(db) : null;
   if (!secret || !db) {
     return Response.json(
       { error: "GitHub sync is not configured on this deployment." },

@@ -45,6 +45,24 @@ export const members = pgTable(
   (t) => [unique("members_workspace_user_uq").on(t.workspaceId, t.userId)],
 );
 
+/**
+ * The deployment's GitHub App credentials, created via the in-app manifest
+ * flow. Deployment-global config (one App per deployment, not per tenant), so
+ * NO `workspaceId` and NO RLS — it's read/written only through the owner
+ * connection (`getDb`). `privateKey` and `webhookSecret` are encrypted at rest.
+ */
+export const githubApp = pgTable("github_app", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  appId: text("app_id").notNull(),
+  slug: text("slug").notNull(),
+  clientId: text("client_id"),
+  /** PEM, encrypted at rest (AES-256-GCM keyed off BETTER_AUTH_SECRET). */
+  privateKey: text("private_key").notNull(),
+  /** Webhook signing secret, encrypted at rest. */
+  webhookSecret: text("webhook_secret").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 /** A connected GitHub repository (via the GitHub App installation). */
 export const repositories = pgTable(
   "repositories",
