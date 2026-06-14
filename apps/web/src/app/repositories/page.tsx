@@ -1,17 +1,12 @@
 import { eq, repositories } from "@specboard/db";
 
 import { getDb } from "@/lib/db";
+import { githubAppInstallUrl } from "@/lib/github-install";
 import { requireWorkspaceAccess } from "@/lib/workspace-access";
 import { RepositoriesManager } from "@/components/repositories-manager";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Repositories · SpecBoard" };
-
-/** Where to install the GitHub App, if its slug is configured for this env. */
-function githubAppInstallUrl(): string | null {
-  const slug = process.env.NEXT_PUBLIC_GITHUB_APP_SLUG?.trim();
-  return slug ? `https://github.com/apps/${slug}/installations/new` : null;
-}
 
 /**
  * Connected repositories. Any member sees the list; only admins get the

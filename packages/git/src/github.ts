@@ -31,6 +31,36 @@ export function githubAppFromEnv(): App | null {
   return new App({ appId, privateKey: privateKey.replace(/\\n/g, "\n") });
 }
 
+/** A repository an installation can access, for the connect picker. */
+export interface InstallationRepo {
+  owner: string;
+  name: string;
+  defaultBranch: string;
+  private: boolean;
+}
+
+/**
+ * List every repository the given installation has been granted access to —
+ * i.e. the repos the user selected when installing the App. Powers the
+ * "select a repository" picker so no one has to copy ids by hand.
+ */
+export async function listInstallationRepositories(
+  app: App,
+  installationId: string,
+): Promise<InstallationRepo[]> {
+  const octokit = await app.getInstallationOctokit(Number(installationId));
+  const repos = await octokit.paginate(
+    octokit.rest.apps.listReposAccessibleToInstallation,
+    { per_page: 100 },
+  );
+  return repos.map((repo) => ({
+    owner: repo.owner.login,
+    name: repo.name,
+    defaultBranch: repo.default_branch,
+    private: repo.private,
+  }));
+}
+
 /**
  * Resolve an installation-authenticated {@link GitHubRepoClient} for a repo.
  * The `App` mints (and caches) a short-lived installation token under the hood.

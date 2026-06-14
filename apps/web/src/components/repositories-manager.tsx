@@ -1,9 +1,14 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useCallback, useEffect, useState, useTransition } from "react";
 
-import { connectRepository, type SyncResult } from "@/lib/api-client";
+import {
+  connectRepository,
+  listInstallationRepositories,
+  type InstallationRepo,
+  type SyncResult,
+} from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -30,10 +35,9 @@ interface RepositoriesManagerProps {
   installUrl: string | null;
 }
 
-function syncMessage(sync: SyncResult | { error: string }): {
-  kind: "ok" | "error";
-  message: string;
-} {
+type Status = { kind: "ok" | "error"; message: string } | null;
+
+function syncMessage(sync: SyncResult | { error: string }): { kind: "ok" | "error"; message: string } {
   if ("error" in sync) return { kind: "error", message: sync.error };
   const parts = [`${sync.upserted} imported`, `${sync.skipped} unchanged`];
   if (sync.idsInjected > 0) parts.push(`${sync.idsInjected} stable id(s) assigned`);
@@ -51,20 +55,18 @@ export function RepositoriesManager({ repos, canConnect, installUrl }: Repositor
         </p>
       </div>
 
-      <RepoList repos={repos} canConnect={canConnect} />
+      <RepoList repos={repos} canResync={canConnect} />
 
       {canConnect ? (
-        <ConnectForm installUrl={installUrl} />
+        <ConnectSection installUrl={installUrl} connected={repos} />
       ) : (
-        <p className="text-sm text-muted-foreground">
-          Only an admin can connect repositories.
-        </p>
+        <p className="text-sm text-muted-foreground">Only an admin can connect repositories.</p>
       )}
     </div>
   );
 }
 
-function RepoList({ repos, canConnect }: { repos: ConnectedRepo[]; canConnect: boolean }) {
+function RepoList({ repos, canResync }: { repos: ConnectedRepo[]; canResync: boolean }) {
   if (repos.length === 0) {
     return (
       <Card>
@@ -77,7 +79,7 @@ function RepoList({ repos, canConnect }: { repos: ConnectedRepo[]; canConnect: b
   return (
     <div className="space-y-3">
       {repos.map((repo) => (
-        <RepoRow key={repo.id} repo={repo} canResync={canConnect} />
+        <RepoRow key={repo.id} repo={repo} canResync={canResync} />
       ))}
     </div>
   );
@@ -86,7 +88,7 @@ function RepoList({ repos, canConnect }: { repos: ConnectedRepo[]; canConnect: b
 function RepoRow({ repo, canResync }: { repo: ConnectedRepo; canResync: boolean }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [status, setStatus] = useState<{ kind: "ok" | "error"; message: string } | null>(null);
+  const [status, setStatus] = useState<Status>(null);
 
   function resync() {
     startTransition(async () => {
@@ -101,10 +103,7 @@ function RepoRow({ repo, canResync }: { repo: ConnectedRepo; canResync: boolean 
         setStatus(syncMessage(sync));
         router.refresh();
       } catch (err) {
-        setStatus({
-          kind: "error",
-          message: err instanceof Error ? err.message : "Re-sync failed.",
-        });
+        setStatus({ kind: "error", message: err instanceof Error ? err.message : "Re-sync failed." });
       }
     });
   }
@@ -138,10 +137,190 @@ function RepoRow({ repo, canResync }: { repo: ConnectedRepo; canResync: boolean 
   );
 }
 
-function ConnectForm({ installUrl }: { installUrl: string | null }) {
+/**
+ * Admin connect controls: the GitHub-App picker (post-install) plus an advanced
+ * manual entry fallback. After installing the App, GitHub redirects back and
+ * the picker lists the granted repos to connect with one click.
+ */
+function ConnectSection({
+  installUrl,
+  connected,
+}: {
+  installUrl: string | null;
+  connected: ConnectedRepo[];
+}) {
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [installationId, setInstallationId] = useState<string | null>(null);
+  const [available, setAvailable] = useState<InstallationRepo[]>([]);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const { installationId, repositories } = await listInstallationRepositories();
+      setInstallationId(installationId);
+      setAvailable(repositories);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "Couldn't load repositories.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const connectedKeys = new Set(connected.map((r) => `${r.owner}/${r.name}`.toLowerCase()));
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Connect a repository</CardTitle>
+        <CardDescription>
+          Install the SpecBoard GitHub App on the repositories you want to sync, then connect them
+          here — no copying ids by hand.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {installUrl ? (
+          <a href={installUrl} className="inline-flex">
+            <Button type="button">
+              {installationId ? "Add or manage repositories on GitHub" : "Connect GitHub"}
+            </Button>
+          </a>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            Set <code>NEXT_PUBLIC_GITHUB_APP_SLUG</code> to enable the one-click GitHub install, or
+            use manual entry below.
+          </p>
+        )}
+
+        {loading ? (
+          <p className="text-xs text-muted-foreground">Loading available repositories…</p>
+        ) : loadError ? (
+          <p className="text-xs text-destructive">{loadError}</p>
+        ) : installationId ? (
+          <RepoPicker
+            installationId={installationId}
+            repos={available}
+            connectedKeys={connectedKeys}
+            onConnected={load}
+          />
+        ) : null}
+
+        <ManualConnectForm />
+      </CardContent>
+    </Card>
+  );
+}
+
+function RepoPicker({
+  installationId,
+  repos,
+  connectedKeys,
+  onConnected,
+}: {
+  installationId: string;
+  repos: InstallationRepo[];
+  connectedKeys: Set<string>;
+  onConnected: () => void;
+}) {
+  if (repos.length === 0) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        The App is installed, but you haven&apos;t granted it access to any repositories yet.
+      </p>
+    );
+  }
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-medium text-muted-foreground">Available repositories</p>
+      <div className="divide-y rounded-md border">
+        {repos.map((repo) => (
+          <PickerRow
+            key={`${repo.owner}/${repo.name}`}
+            installationId={installationId}
+            repo={repo}
+            alreadyConnected={connectedKeys.has(`${repo.owner}/${repo.name}`.toLowerCase())}
+            onConnected={onConnected}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PickerRow({
+  installationId,
+  repo,
+  alreadyConnected,
+  onConnected,
+}: {
+  installationId: string;
+  repo: InstallationRepo;
+  alreadyConnected: boolean;
+  onConnected: () => void;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [status, setStatus] = useState<{ kind: "ok" | "error"; message: string } | null>(null);
+  const [status, setStatus] = useState<Status>(null);
+
+  function connect() {
+    startTransition(async () => {
+      setStatus(null);
+      try {
+        const { sync } = await connectRepository({
+          installationId,
+          owner: repo.owner,
+          name: repo.name,
+          defaultBranch: repo.defaultBranch,
+        });
+        const msg = syncMessage(sync);
+        setStatus(
+          msg.kind === "ok"
+            ? { kind: "ok", message: msg.message }
+            : { kind: "error", message: `Connected, but import failed: ${msg.message}` },
+        );
+        router.refresh();
+        onConnected();
+      } catch (err) {
+        setStatus({ kind: "error", message: err instanceof Error ? err.message : "Connect failed." });
+      }
+    });
+  }
+
+  return (
+    <div className="flex items-center justify-between gap-4 px-3 py-2.5">
+      <div className="min-w-0">
+        <p className="truncate text-sm">
+          {repo.owner}/{repo.name}
+          {repo.private ? (
+            <span className="ml-2 text-xs text-muted-foreground">private</span>
+          ) : null}
+        </p>
+        {status ? (
+          <p className={`text-xs ${status.kind === "error" ? "text-destructive" : "text-muted-foreground"}`}>
+            {status.message}
+          </p>
+        ) : null}
+      </div>
+      {alreadyConnected ? (
+        <span className="text-xs text-muted-foreground">Connected</span>
+      ) : (
+        <Button size="sm" variant="outline" onClick={connect} disabled={pending}>
+          {pending ? "…" : "Connect"}
+        </Button>
+      )}
+    </div>
+  );
+}
+
+function ManualConnectForm() {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [status, setStatus] = useState<Status>(null);
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -167,7 +346,6 @@ function ConnectForm({ installUrl }: { installUrl: string | null }) {
           defaultBranch: defaultBranch || undefined,
         });
         const msg = syncMessage(sync);
-        // A connect always persists the repo; only the import may have failed.
         setStatus(
           msg.kind === "ok"
             ? { kind: "ok", message: `Connected. ${msg.message}.` }
@@ -185,64 +363,40 @@ function ConnectForm({ installUrl }: { installUrl: string | null }) {
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Connect a repository</CardTitle>
-        <CardDescription>
-          {installUrl ? (
-            <>
-              First{" "}
-              <a
-                href={installUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="text-foreground underline-offset-4 hover:underline"
-              >
-                install the SpecBoard GitHub App
-              </a>{" "}
-              on your repository, then paste the installation ID from the install URL below.
-            </>
-          ) : (
-            "Install the SpecBoard GitHub App on your repository, then enter its installation ID (from the install URL) along with the owner and name."
-          )}
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <form onSubmit={onSubmit} className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <label className="block space-y-1.5">
-              <span className="text-xs font-medium text-muted-foreground">Owner</span>
-              <Input name="owner" placeholder="StudioPalouse" required />
-            </label>
-            <label className="block space-y-1.5">
-              <span className="text-xs font-medium text-muted-foreground">Repository</span>
-              <Input name="name" placeholder="SpecBoard" required />
-            </label>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <label className="block space-y-1.5">
-              <span className="text-xs font-medium text-muted-foreground">Installation ID</span>
-              <Input name="installationId" placeholder="12345678" required />
-            </label>
-            <label className="block space-y-1.5">
-              <span className="text-xs font-medium text-muted-foreground">
-                Default branch
-              </span>
-              <Input name="defaultBranch" placeholder="main" />
-            </label>
-          </div>
-          {status ? (
-            <p
-              className={`text-xs ${status.kind === "ok" ? "text-muted-foreground" : "text-destructive"}`}
-            >
-              {status.message}
-            </p>
-          ) : null}
-          <Button type="submit" disabled={pending}>
-            {pending ? "…" : "Connect repository"}
-          </Button>
-        </form>
-      </CardContent>
-    </Card>
+    <details className="rounded-md border px-3 py-2">
+      <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+        Advanced: connect by installation ID
+      </summary>
+      <form onSubmit={onSubmit} className="mt-3 space-y-4">
+        <div className="grid grid-cols-2 gap-3">
+          <label className="block space-y-1.5">
+            <span className="text-xs font-medium text-muted-foreground">Owner</span>
+            <Input name="owner" placeholder="StudioPalouse" required />
+          </label>
+          <label className="block space-y-1.5">
+            <span className="text-xs font-medium text-muted-foreground">Repository</span>
+            <Input name="name" placeholder="SpecBoard" required />
+          </label>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <label className="block space-y-1.5">
+            <span className="text-xs font-medium text-muted-foreground">Installation ID</span>
+            <Input name="installationId" placeholder="12345678" required />
+          </label>
+          <label className="block space-y-1.5">
+            <span className="text-xs font-medium text-muted-foreground">Default branch</span>
+            <Input name="defaultBranch" placeholder="main" />
+          </label>
+        </div>
+        {status ? (
+          <p className={`text-xs ${status.kind === "ok" ? "text-muted-foreground" : "text-destructive"}`}>
+            {status.message}
+          </p>
+        ) : null}
+        <Button type="submit" disabled={pending}>
+          {pending ? "…" : "Connect repository"}
+        </Button>
+      </form>
+    </details>
   );
 }

@@ -93,6 +93,39 @@ export async function connectRepository(
   return { sync: body?.sync ?? { error: "No sync summary returned." } };
 }
 
+/** A repository the pending GitHub App installation can access. */
+export interface InstallationRepo {
+  owner: string;
+  name: string;
+  defaultBranch: string;
+  private: boolean;
+}
+
+/**
+ * The repos available to connect from the admin's pending GitHub App
+ * installation (captured by the setup callback). `installationId` is null when
+ * there's no pending installation — show the "Connect GitHub" button instead.
+ */
+export async function listInstallationRepositories(): Promise<{
+  installationId: string | null;
+  repositories: InstallationRepo[];
+}> {
+  const res = await fetch("/api/v1/github/installations/repositories");
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as {
+    installationId?: string | null;
+    repositories?: InstallationRepo[];
+    error?: string;
+  } | null;
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Failed to load repositories (${res.status}).`);
+  }
+  return {
+    installationId: body?.installationId ?? null,
+    repositories: body?.repositories ?? [],
+  };
+}
+
 /** Update the organization ("company") name. Admin-only on the server. */
 export async function updateWorkspace(name: string): Promise<void> {
   const res = await fetch("/api/v1/workspace", {
