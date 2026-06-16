@@ -3,14 +3,26 @@ import path from "node:path";
 
 import { parseSpec } from "@specboard/core";
 
-import type {
-  CustomFieldValue,
-  FeatureDetail,
-  FeaturePatch,
-  FeatureRecord,
-  FeatureStore,
-  WorkspaceScope,
+import {
+  RelationError,
+  type CustomFieldValue,
+  type FeatureDetail,
+  type FeaturePatch,
+  type FeatureRecord,
+  type FeatureRelation,
+  type FeatureStore,
+  type RelationDirection,
+  type RelationInput,
+  type WorkspaceScope,
 } from "./types";
+
+type LocalLinkType = "blocks" | "relates_to" | "duplicates";
+
+/** A relation stored canonically on the `from` spec's metadata. */
+interface LocalLink {
+  to: string;
+  type: LocalLinkType;
+}
 
 interface LocalMetadata {
   status?: string;
@@ -19,9 +31,51 @@ interface LocalMetadata {
   roadmapQuarter?: string | null;
   assigneeId?: string | null;
   customFields?: Record<string, CustomFieldValue>;
+  /** Outgoing relations from this spec (see ./types FeatureRelation). */
+  links?: LocalLink[];
 }
 
 type MetadataFile = Record<string, LocalMetadata>;
+
+/** A synthetic, stable id for a local relation (no DB rows to key on). */
+function localLinkId(fromSpec: string, link: LocalLink): string {
+  return `${fromSpec}:${link.to}:${link.type}`;
+}
+
+/** Resolve a stored edge into the direction seen from `viewerSpec`. */
+function localDirection(
+  fromSpec: string,
+  type: LocalLinkType,
+  viewerSpec: string,
+): RelationDirection {
+  const outgoing = fromSpec === viewerSpec;
+  switch (type) {
+    case "blocks":
+      return outgoing ? "blocks" : "blocked_by";
+    case "duplicates":
+      return outgoing ? "duplicates" : "duplicated_by";
+    case "relates_to":
+      return "relates_to";
+  }
+}
+
+/** Map a viewer-relative direction to a canonical stored edge (by specId). */
+function toLocalEdge(
+  selfSpec: string,
+  otherSpec: string,
+  direction: RelationInput["direction"],
+): { from: string; link: LocalLink } {
+  switch (direction) {
+    case "blocks":
+      return { from: selfSpec, link: { to: otherSpec, type: "blocks" } };
+    case "blocked_by":
+      return { from: otherSpec, link: { to: selfSpec, type: "blocks" } };
+    case "relates_to":
+      return { from: selfSpec, link: { to: otherSpec, type: "relates_to" } };
+    case "duplicates":
+      return { from: selfSpec, link: { to: otherSpec, type: "duplicates" } };
+  }
+}
 
 /**
  * Zero-setup store for local testing: specs are read straight from the
@@ -104,9 +158,43 @@ export class LocalFileStore implements FeatureStore {
         path: path.relative(this.root, file),
         content: parsed.content,
         sections: parsed.sections,
+        relations: [],
+        blocksCount: 0,
+        blockedByCount: 0,
       });
     }
+    this.attachRelations(features, meta);
     return features;
+  }
+
+  /** Resolve stored edges into per-feature relations + blocked counts. */
+  private attachRelations(features: FeatureDetail[], meta: MetadataFile): void {
+    const titleBySpec = new Map(features.map((f) => [f.specId, f.title]));
+    const bySpec = new Map(features.map((f) => [f.specId, f]));
+    for (const [fromSpec, m] of Object.entries(meta)) {
+      for (const link of m.links ?? []) {
+        const from = bySpec.get(fromSpec);
+        const to = bySpec.get(link.to);
+        if (from && titleBySpec.has(link.to)) {
+          from.relations.push({
+            id: localLinkId(fromSpec, link),
+            direction: localDirection(fromSpec, link.type, fromSpec),
+            otherSpecId: link.to,
+            otherTitle: titleBySpec.get(link.to)!,
+          });
+          if (link.type === "blocks") from.blocksCount += 1;
+        }
+        if (to && titleBySpec.has(fromSpec)) {
+          to.relations.push({
+            id: localLinkId(fromSpec, link),
+            direction: localDirection(fromSpec, link.type, link.to),
+            otherSpecId: fromSpec,
+            otherTitle: titleBySpec.get(fromSpec)!,
+          });
+          if (link.type === "blocks") to.blockedByCount += 1;
+        }
+      }
+    }
   }
 
   // The local store has a single implicit workspace, so `scope` is ignored.
@@ -129,6 +217,67 @@ export class LocalFileStore implements FeatureStore {
   ): Promise<void> {
     const meta = await this.readMetadata();
     meta[specId] = { ...meta[specId], ...patch };
+    await this.writeMetadata(meta);
+  }
+
+  async addRelation(
+    specId: string,
+    input: RelationInput,
+    _scope?: WorkspaceScope,
+  ): Promise<void> {
+    if (specId === input.toSpecId)
+      throw new RelationError("A feature cannot relate to itself.");
+    const all = await this.loadAll();
+    const known = new Set(all.map((f) => f.specId));
+    if (!known.has(specId)) throw new RelationError(`Unknown feature: ${specId}`);
+    if (!known.has(input.toSpecId))
+      throw new RelationError(`Unknown related feature: ${input.toSpecId}`);
+
+    const { from, link } = toLocalEdge(specId, input.toSpecId, input.direction);
+    const meta = await this.readMetadata();
+
+    // Reject a contradictory cycle (A blocks B while B blocks A).
+    if (link.type === "blocks") {
+      const reverse = (meta[link.to]?.links ?? []).some(
+        (l) => l.type === "blocks" && l.to === from,
+      );
+      if (reverse)
+        throw new RelationError(
+          "That would create a circular blocking dependency.",
+        );
+    }
+
+    const existing = meta[from]?.links ?? [];
+    // Symmetric relates_to: skip if the inverse edge already exists.
+    const inverseExists =
+      link.type === "relates_to" &&
+      (meta[link.to]?.links ?? []).some(
+        (l) => l.type === "relates_to" && l.to === from,
+      );
+    const duplicate = existing.some(
+      (l) => l.to === link.to && l.type === link.type,
+    );
+    if (!duplicate && !inverseExists) {
+      meta[from] = { ...meta[from], links: [...existing, link] };
+      await this.writeMetadata(meta);
+    }
+  }
+
+  async removeRelation(
+    _specId: string,
+    linkId: string,
+    _scope?: WorkspaceScope,
+  ): Promise<void> {
+    // linkId is `${fromSpec}:${toSpec}:${type}` (see localLinkId).
+    const [fromSpec, toSpec, type] = linkId.split(":");
+    if (!fromSpec || !toSpec || !type) return;
+    const meta = await this.readMetadata();
+    const links = meta[fromSpec]?.links;
+    if (!links) return;
+    meta[fromSpec] = {
+      ...meta[fromSpec],
+      links: links.filter((l) => !(l.to === toSpec && l.type === type)),
+    };
     await this.writeMetadata(meta);
   }
 }

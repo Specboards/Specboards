@@ -155,6 +155,43 @@ export const activityLog = pgTable("activity_log", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const featureLinkType = pgEnum("feature_link_type", [
+  "blocks",
+  "relates_to",
+  "duplicates",
+]);
+
+/**
+ * A directed, typed link between two features (dependencies & relations).
+ * Stored canonically in ONE direction so the inverse is never double-entered:
+ * `blocks` means `fromFeature` blocks `toFeature` (so `toFeature` is "blocked
+ * by" `fromFeature`); `relates_to` is symmetric; `duplicates` means
+ * `fromFeature` duplicates `toFeature`. The "blocked by" / "duplicated by"
+ * views are derived by querying the `to_feature_id` side.
+ */
+export const featureLinks = pgTable(
+  "feature_links",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    fromFeatureId: uuid("from_feature_id")
+      .notNull()
+      .references(() => features.id, { onDelete: "cascade" }),
+    toFeatureId: uuid("to_feature_id")
+      .notNull()
+      .references(() => features.id, { onDelete: "cascade" }),
+    type: featureLinkType("type").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("feature_links_uq").on(t.fromFeatureId, t.toFeatureId, t.type),
+    index("feature_links_from_idx").on(t.fromFeatureId),
+    index("feature_links_to_idx").on(t.toFeatureId),
+  ],
+);
+
 /**
  * Auth tables (Better Auth). Postgres mints UUID ids (Better Auth runs with
  * `generateId: false`) so they line up with the existing uuid user references

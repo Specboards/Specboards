@@ -69,6 +69,15 @@ export default async function BoardPage() {
                         >
                           {priorityLabel(f.priority)}
                         </Badge>
+                        {f.blockedByCount > 0 && (
+                          <Badge
+                            variant="destructive"
+                            className="text-[10px]"
+                            title={`Blocked by ${f.blockedByCount} feature(s)`}
+                          >
+                            Blocked
+                          </Badge>
+                        )}
                         {f.tags.map((tag) => (
                           <Badge
                             key={tag}

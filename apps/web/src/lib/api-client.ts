@@ -1,6 +1,10 @@
 "use client";
 
-import type { FeaturePatch } from "@/lib/store/types";
+import type {
+  CreatableRelationDirection,
+  FeaturePatch,
+  FeatureRelation,
+} from "@/lib/store/types";
 
 /**
  * Browser-side client for the public API layer. All mutations from the UI go
@@ -30,6 +34,48 @@ export async function patchFeature(
     const body = (await res.json().catch(() => null)) as { error?: string } | null;
     throw new Error(body?.error ?? `PATCH failed with ${res.status}`);
   }
+}
+
+/** Create a typed relation from a feature; returns its refreshed relations. */
+export async function addRelation(
+  specId: string,
+  input: { toSpecId: string; direction: CreatableRelationDirection },
+): Promise<FeatureRelation[]> {
+  const res = await fetch(
+    `/api/v1/features/${encodeURIComponent(specId)}/relations`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  );
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as
+    | { relations?: FeatureRelation[]; error?: string }
+    | null;
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Add relation failed with ${res.status}`);
+  }
+  return body?.relations ?? [];
+}
+
+/** Remove a relation by id; returns the feature's refreshed relations. */
+export async function removeRelation(
+  specId: string,
+  linkId: string,
+): Promise<FeatureRelation[]> {
+  const res = await fetch(
+    `/api/v1/features/${encodeURIComponent(specId)}/relations/${encodeURIComponent(linkId)}`,
+    { method: "DELETE" },
+  );
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as
+    | { relations?: FeatureRelation[]; error?: string }
+    | null;
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Remove relation failed with ${res.status}`);
+  }
+  return body?.relations ?? [];
 }
 
 /**

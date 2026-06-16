@@ -60,12 +60,23 @@ export default async function BacklogPage() {
                   {priorityLabel(f.priority)}
                 </TableCell>
                 <TableCell>
-                  <Link
-                    href={`/feature/${f.specId}`}
-                    className="font-medium hover:underline"
-                  >
-                    {f.title}
-                  </Link>
+                  <span className="flex items-center gap-2">
+                    <Link
+                      href={`/feature/${f.specId}`}
+                      className="font-medium hover:underline"
+                    >
+                      {f.title}
+                    </Link>
+                    {f.blockedByCount > 0 && (
+                      <Badge
+                        variant="destructive"
+                        className="text-[10px]"
+                        title={`Blocked by ${f.blockedByCount} feature(s)`}
+                      >
+                        Blocked
+                      </Badge>
+                    )}
+                  </span>
                   <div className="text-xs text-muted-foreground">{f.path}</div>
                 </TableCell>
                 <TableCell>

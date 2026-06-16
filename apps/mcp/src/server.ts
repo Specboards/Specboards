@@ -1,11 +1,17 @@
 #!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray, or } from "drizzle-orm";
 import { z } from "zod";
 
 import { canTransition } from "@specboard/core";
-import { createDb, features, workspaces, type Database } from "@specboard/db";
+import {
+  createDb,
+  featureLinks,
+  features,
+  workspaces,
+  type Database,
+} from "@specboard/db";
 
 /**
  * SpecBoard MCP server. Gives coding agents a prioritized, status-aware view of
@@ -71,6 +77,35 @@ server.tool(
         ),
         with: { index: true },
       });
+      // Resolve `blocks` edges so agents can respect sequencing.
+      const specById = new Map(rows.map((r) => [r.id, r.specId]));
+      const blockLinks = await db()
+        .select({
+          fromFeatureId: featureLinks.fromFeatureId,
+          toFeatureId: featureLinks.toFeatureId,
+        })
+        .from(featureLinks)
+        .where(
+          and(
+            eq(featureLinks.workspaceId, ws.id),
+            eq(featureLinks.type, "blocks"),
+          ),
+        );
+      const blocks = new Map<string, string[]>();
+      const blockedBy = new Map<string, string[]>();
+      const push = (m: Map<string, string[]>, key: string, val: string) => {
+        const list = m.get(key) ?? [];
+        list.push(val);
+        m.set(key, list);
+      };
+      for (const l of blockLinks) {
+        const fromSpec = specById.get(l.fromFeatureId);
+        const toSpec = specById.get(l.toFeatureId);
+        if (fromSpec && toSpec) {
+          push(blocks, l.fromFeatureId, toSpec);
+          push(blockedBy, l.toFeatureId, fromSpec);
+        }
+      }
       return text(
         rows
           .sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99))
@@ -82,6 +117,8 @@ server.tool(
             tags: f.tags,
             roadmapQuarter: f.roadmapQuarter,
             path: f.index?.path,
+            blocks: blocks.get(f.id) ?? [],
+            blockedBy: blockedBy.get(f.id) ?? [],
           })),
       );
     } catch (err) {
@@ -112,6 +149,68 @@ server.tool(
         path: row.index?.path,
         content: row.index?.content ?? "",
       });
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+server.tool(
+  "get_relations",
+  "List a feature's typed relations (blocks / blocked-by / relates-to / duplicates).",
+  { specId: z.string().uuid() },
+  async ({ specId }) => {
+    try {
+      const row = await db().query.features.findFirst({
+        where: eq(features.specId, specId),
+      });
+      if (!row)
+        return errorResult(new Error(`No feature with spec id ${specId}`));
+      const links = await db()
+        .select({
+          fromFeatureId: featureLinks.fromFeatureId,
+          toFeatureId: featureLinks.toFeatureId,
+          type: featureLinks.type,
+        })
+        .from(featureLinks)
+        .where(
+          and(
+            eq(featureLinks.workspaceId, row.workspaceId),
+            or(
+              eq(featureLinks.fromFeatureId, row.id),
+              eq(featureLinks.toFeatureId, row.id),
+            ),
+          ),
+        );
+      const otherIds = links.map((l) =>
+        l.fromFeatureId === row.id ? l.toFeatureId : l.fromFeatureId,
+      );
+      const others = otherIds.length
+        ? await db()
+            .select({ id: features.id, specId: features.specId, title: features.title })
+            .from(features)
+            .where(inArray(features.id, otherIds))
+        : [];
+      const byId = new Map(others.map((o) => [o.id, o]));
+      const relations = links
+        .map((l) => {
+          const outgoing = l.fromFeatureId === row.id;
+          const other = byId.get(outgoing ? l.toFeatureId : l.fromFeatureId);
+          if (!other) return null;
+          const direction =
+            l.type === "blocks"
+              ? outgoing
+                ? "blocks"
+                : "blocked_by"
+              : l.type === "duplicates"
+                ? outgoing
+                  ? "duplicates"
+                  : "duplicated_by"
+                : "relates_to";
+          return { direction, specId: other.specId, title: other.title };
+        })
+        .filter(Boolean);
+      return text({ specId: row.specId, title: row.title, relations });
     } catch (err) {
       return errorResult(err);
     }

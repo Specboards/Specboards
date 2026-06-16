@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { FeatureMetaForm } from "@/components/feature-meta-form";
+import { FeatureRelations } from "@/components/feature-relations";
 import { StatusDot } from "@/components/status-dot";
 import { getDb } from "@/lib/db";
 import { statusLabel } from "@/lib/feature-helpers";
@@ -36,6 +37,11 @@ export default async function FeaturePage({
     access && db ? await listWorkspaceMembers(db, access.workspaceId) : [];
   const repoConfig = await resolveRepoConfig(access);
   const customFields = repoConfig?.fields ?? [];
+
+  // Other features the relation editor can point at (excluding this one).
+  const candidates = (await store.listFeatures(access ?? undefined))
+    .filter((f) => f.specId !== feature.specId)
+    .map((f) => ({ specId: f.specId, title: f.title }));
 
   return (
     <section className="grid gap-8 lg:grid-cols-[1fr_280px]">
@@ -69,6 +75,13 @@ export default async function FeaturePage({
           feature={feature}
           members={members}
           customFields={customFields}
+          canEdit={!access || canWrite(access.role)}
+        />
+        <Separator />
+        <FeatureRelations
+          specId={feature.specId}
+          relations={feature.relations}
+          candidates={candidates}
           canEdit={!access || canWrite(access.role)}
         />
         <Separator />

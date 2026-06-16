@@ -19,6 +19,45 @@ export interface FeatureRecord {
   customFields: Record<string, CustomFieldValue>;
   /** Spec path relative to the repo root. */
   path: string;
+  /** Number of features that block this one (drives the "blocked" badge). */
+  blockedByCount: number;
+  /** Number of features this one blocks. */
+  blocksCount: number;
+}
+
+/**
+ * A typed relation as seen from one feature's perspective. `direction` already
+ * resolves the stored edge into the viewer's point of view (e.g. a stored
+ * `blocks` edge pointing *at* this feature surfaces as `blocked_by`).
+ */
+export type RelationDirection =
+  | "blocks"
+  | "blocked_by"
+  | "relates_to"
+  | "duplicates"
+  | "duplicated_by";
+
+/** The directions a user can create (the inverse "_by" forms are derived). */
+export const RELATION_DIRECTIONS = [
+  "blocks",
+  "blocked_by",
+  "relates_to",
+  "duplicates",
+] as const;
+export type CreatableRelationDirection = (typeof RELATION_DIRECTIONS)[number];
+
+export interface FeatureRelation {
+  /** Opaque link id used to delete the relation (uuid in db mode). */
+  id: string;
+  direction: RelationDirection;
+  /** The feature on the other end of the relation. */
+  otherSpecId: string;
+  otherTitle: string;
+}
+
+export interface RelationInput {
+  toSpecId: string;
+  direction: CreatableRelationDirection;
 }
 
 export interface FeatureDetail extends FeatureRecord {
@@ -27,6 +66,8 @@ export interface FeatureDetail extends FeatureRecord {
   /** Spec markdown with frontmatter stripped. */
   content: string;
   sections: SpecSection[];
+  /** Typed relations to other features, from this feature's perspective. */
+  relations: FeatureRelation[];
 }
 
 export type FeaturePatch = Partial<
@@ -62,4 +103,19 @@ export interface FeatureStore {
     patch: FeaturePatch,
     scope?: WorkspaceScope,
   ): Promise<void>;
+  /** Create a typed relation from `specId` to another feature. */
+  addRelation(
+    specId: string,
+    input: RelationInput,
+    scope?: WorkspaceScope,
+  ): Promise<void>;
+  /** Remove a relation by its opaque id (as returned in FeatureRelation.id). */
+  removeRelation(
+    specId: string,
+    linkId: string,
+    scope?: WorkspaceScope,
+  ): Promise<void>;
 }
+
+/** Raised when a relation can't be created (self-link, cycle, unknown target). */
+export class RelationError extends Error {}
