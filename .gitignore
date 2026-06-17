@@ -29,3 +29,6 @@ out/
 # Supabase
 infra/supabase/.branches/
 infra/supabase/.temp/
+
+# Personal saved backlog views (local file mode) — not sample data
+.specboard/local-views.json

@@ -1,27 +1,92 @@
+import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import { parseSpec } from "@specboard/core";
+import { parseSpec, rollUpEstimates } from "@specboard/core";
 
-import type {
-  CustomFieldValue,
-  FeatureDetail,
-  FeaturePatch,
-  FeatureRecord,
-  FeatureStore,
-  WorkspaceScope,
+import {
+  RelationError,
+  type CustomFieldValue,
+  type FeatureDetail,
+  type FeaturePatch,
+  type FeatureRecord,
+  type FeatureRelation,
+  type FeatureStore,
+  type RelationDirection,
+  type RelationInput,
+  type SavedView,
+  type SavedViewInput,
+  type WorkspaceScope,
 } from "./types";
+
+type LocalLinkType = "blocks" | "relates_to" | "duplicates";
+
+/** A relation stored canonically on the `from` spec's metadata. */
+interface LocalLink {
+  to: string;
+  type: LocalLinkType;
+}
 
 interface LocalMetadata {
   status?: string;
   priority?: number | null;
+  estimate?: number | null;
   tags?: string[];
   roadmapQuarter?: string | null;
   assigneeId?: string | null;
   customFields?: Record<string, CustomFieldValue>;
+  /** Outgoing relations from this spec (see ./types FeatureRelation). */
+  links?: LocalLink[];
+  /** Parent feature (epic) spec id, or null when top-level. */
+  parentSpecId?: string | null;
+}
+
+/** The terminal status used for hierarchy roll-up progress. */
+function isDone(status: string): boolean {
+  return status === "done";
 }
 
 type MetadataFile = Record<string, LocalMetadata>;
+
+/** A synthetic, stable id for a local relation (no DB rows to key on). */
+function localLinkId(fromSpec: string, link: LocalLink): string {
+  return `${fromSpec}:${link.to}:${link.type}`;
+}
+
+/** Resolve a stored edge into the direction seen from `viewerSpec`. */
+function localDirection(
+  fromSpec: string,
+  type: LocalLinkType,
+  viewerSpec: string,
+): RelationDirection {
+  const outgoing = fromSpec === viewerSpec;
+  switch (type) {
+    case "blocks":
+      return outgoing ? "blocks" : "blocked_by";
+    case "duplicates":
+      return outgoing ? "duplicates" : "duplicated_by";
+    case "relates_to":
+      return "relates_to";
+  }
+}
+
+/** Map a viewer-relative direction to a canonical stored edge (by specId). */
+function toLocalEdge(
+  selfSpec: string,
+  otherSpec: string,
+  direction: RelationInput["direction"],
+): { from: string; link: LocalLink } {
+  switch (direction) {
+    case "blocks":
+      return { from: selfSpec, link: { to: otherSpec, type: "blocks" } };
+    case "blocked_by":
+      return { from: otherSpec, link: { to: selfSpec, type: "blocks" } };
+    case "relates_to":
+      return { from: selfSpec, link: { to: otherSpec, type: "relates_to" } };
+    case "duplicates":
+      return { from: selfSpec, link: { to: otherSpec, type: "duplicates" } };
+  }
+}
 
 /**
  * Zero-setup store for local testing: specs are read straight from the
@@ -38,6 +103,10 @@ export class LocalFileStore implements FeatureStore {
 
   private get metadataPath() {
     return path.join(this.root, ".specboard", "local-metadata.json");
+  }
+
+  private get viewsPath() {
+    return path.join(this.root, ".specboard", "local-views.json");
   }
 
   private async readMetadata(): Promise<MetadataFile> {
@@ -96,6 +165,8 @@ export class LocalFileStore implements FeatureStore {
         kind: parsed.frontmatter.kind,
         status: m.status ?? "backlog",
         priority: m.priority ?? null,
+        estimate: m.estimate ?? null,
+        rolledEstimate: null, // filled in by attachHierarchy
         tags: m.tags ?? [],
         roadmapQuarter: m.roadmapQuarter ?? null,
         assigneeId: m.assigneeId ?? null,
@@ -104,9 +175,75 @@ export class LocalFileStore implements FeatureStore {
         path: path.relative(this.root, file),
         content: parsed.content,
         sections: parsed.sections,
+        relations: [],
+        blocksCount: 0,
+        blockedByCount: 0,
+        parentSpecId: m.parentSpecId ?? null,
+        parentTitle: null,
+        children: [],
+        childCount: 0,
+        childDoneCount: 0,
       });
     }
+    this.attachRelations(features, meta);
+    this.attachHierarchy(features);
     return features;
+  }
+
+  /** Resolve parent titles + direct children + roll-up counts/estimates. */
+  private attachHierarchy(features: FeatureDetail[]): void {
+    const bySpec = new Map(features.map((f) => [f.specId, f]));
+    for (const f of features) {
+      // Drop a parent pointer to a spec that no longer exists.
+      const parent = f.parentSpecId ? bySpec.get(f.parentSpecId) : undefined;
+      if (!parent) {
+        f.parentSpecId = null;
+        continue;
+      }
+      f.parentTitle = parent.title;
+      parent.children.push({ specId: f.specId, title: f.title, status: f.status });
+      parent.childCount += 1;
+      if (isDone(f.status)) parent.childDoneCount += 1;
+    }
+    // Roll estimates up each subtree (parent pointers are now sanitized).
+    const rolled = rollUpEstimates(
+      features.map((f) => ({
+        key: f.specId,
+        parentKey: f.parentSpecId,
+        estimate: f.estimate,
+      })),
+    );
+    for (const f of features) f.rolledEstimate = rolled.get(f.specId) ?? null;
+  }
+
+  /** Resolve stored edges into per-feature relations + blocked counts. */
+  private attachRelations(features: FeatureDetail[], meta: MetadataFile): void {
+    const titleBySpec = new Map(features.map((f) => [f.specId, f.title]));
+    const bySpec = new Map(features.map((f) => [f.specId, f]));
+    for (const [fromSpec, m] of Object.entries(meta)) {
+      for (const link of m.links ?? []) {
+        const from = bySpec.get(fromSpec);
+        const to = bySpec.get(link.to);
+        if (from && titleBySpec.has(link.to)) {
+          from.relations.push({
+            id: localLinkId(fromSpec, link),
+            direction: localDirection(fromSpec, link.type, fromSpec),
+            otherSpecId: link.to,
+            otherTitle: titleBySpec.get(link.to)!,
+          });
+          if (link.type === "blocks") from.blocksCount += 1;
+        }
+        if (to && titleBySpec.has(fromSpec)) {
+          to.relations.push({
+            id: localLinkId(fromSpec, link),
+            direction: localDirection(fromSpec, link.type, link.to),
+            otherSpecId: fromSpec,
+            otherTitle: titleBySpec.get(fromSpec)!,
+          });
+          if (link.type === "blocks") to.blockedByCount += 1;
+        }
+      }
+    }
   }
 
   // The local store has a single implicit workspace, so `scope` is ignored.
@@ -130,6 +267,110 @@ export class LocalFileStore implements FeatureStore {
     const meta = await this.readMetadata();
     meta[specId] = { ...meta[specId], ...patch };
     await this.writeMetadata(meta);
+  }
+
+  async addRelation(
+    specId: string,
+    input: RelationInput,
+    _scope?: WorkspaceScope,
+  ): Promise<void> {
+    if (specId === input.toSpecId)
+      throw new RelationError("A feature cannot relate to itself.");
+    const all = await this.loadAll();
+    const known = new Set(all.map((f) => f.specId));
+    if (!known.has(specId)) throw new RelationError(`Unknown feature: ${specId}`);
+    if (!known.has(input.toSpecId))
+      throw new RelationError(`Unknown related feature: ${input.toSpecId}`);
+
+    const { from, link } = toLocalEdge(specId, input.toSpecId, input.direction);
+    const meta = await this.readMetadata();
+
+    // Reject a contradictory cycle (A blocks B while B blocks A).
+    if (link.type === "blocks") {
+      const reverse = (meta[link.to]?.links ?? []).some(
+        (l) => l.type === "blocks" && l.to === from,
+      );
+      if (reverse)
+        throw new RelationError(
+          "That would create a circular blocking dependency.",
+        );
+    }
+
+    const existing = meta[from]?.links ?? [];
+    // Symmetric relates_to: skip if the inverse edge already exists.
+    const inverseExists =
+      link.type === "relates_to" &&
+      (meta[link.to]?.links ?? []).some(
+        (l) => l.type === "relates_to" && l.to === from,
+      );
+    const duplicate = existing.some(
+      (l) => l.to === link.to && l.type === link.type,
+    );
+    if (!duplicate && !inverseExists) {
+      meta[from] = { ...meta[from], links: [...existing, link] };
+      await this.writeMetadata(meta);
+    }
+  }
+
+  async removeRelation(
+    _specId: string,
+    linkId: string,
+    _scope?: WorkspaceScope,
+  ): Promise<void> {
+    // linkId is `${fromSpec}:${toSpec}:${type}` (see localLinkId).
+    const [fromSpec, toSpec, type] = linkId.split(":");
+    if (!fromSpec || !toSpec || !type) return;
+    const meta = await this.readMetadata();
+    const links = meta[fromSpec]?.links;
+    if (!links) return;
+    meta[fromSpec] = {
+      ...meta[fromSpec],
+      links: links.filter((l) => !(l.to === toSpec && l.type === type)),
+    };
+    await this.writeMetadata(meta);
+  }
+
+  // Saved views persist to `.specboard/local-views.json`. There's a single
+  // implicit user in local mode, so no per-user scoping.
+  private async readViews(): Promise<SavedView[]> {
+    try {
+      return JSON.parse(await fs.readFile(this.viewsPath, "utf8")) as SavedView[];
+    } catch {
+      return [];
+    }
+  }
+
+  private async writeViews(views: SavedView[]): Promise<void> {
+    await fs.mkdir(path.dirname(this.viewsPath), { recursive: true });
+    await fs.writeFile(
+      this.viewsPath,
+      JSON.stringify(views, null, 2) + "\n",
+      "utf8",
+    );
+  }
+
+  async listSavedViews(_scope?: WorkspaceScope): Promise<SavedView[]> {
+    return this.readViews();
+  }
+
+  async createSavedView(
+    input: SavedViewInput,
+    _scope?: WorkspaceScope,
+  ): Promise<SavedView> {
+    const views = await this.readViews();
+    const view: SavedView = {
+      id: randomUUID(),
+      name: input.name,
+      view: input.view,
+      filters: input.filters,
+    };
+    await this.writeViews([view, ...views]); // newest first, matching db order
+    return view;
+  }
+
+  async deleteSavedView(id: string, _scope?: WorkspaceScope): Promise<void> {
+    const views = await this.readViews();
+    await this.writeViews(views.filter((v) => v.id !== id));
   }
 }
 

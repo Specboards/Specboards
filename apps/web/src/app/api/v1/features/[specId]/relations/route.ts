@@ -2,10 +2,10 @@ import { revalidatePath } from "next/cache";
 
 import { authorizeWrite, resolveReadScope } from "@/lib/auth-session";
 import {
+  addFeatureRelation,
   FeatureNotFoundError,
   InvalidPatchError,
-  parseFeaturePatch,
-  patchFeature,
+  parseRelationInput,
 } from "@/lib/features-service";
 import { getStore } from "@/lib/store";
 import { RelationError } from "@/lib/store/types";
@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
 
 type Params = { params: Promise<{ specId: string }> };
 
-/** GET /api/v1/features/:specId — full feature detail (metadata + spec content). */
+/** GET /api/v1/features/:specId/relations — typed relations for a feature. */
 export async function GET(req: Request, { params }: Params) {
   const authz = await resolveReadScope(req);
   if (!authz.ok) return authz.response;
@@ -25,15 +25,14 @@ export async function GET(req: Request, { params }: Params) {
   if (!feature) {
     return Response.json({ error: `Unknown feature: ${specId}` }, { status: 404 });
   }
-  return Response.json({ feature });
+  return Response.json({ relations: feature.relations });
 }
 
 /**
- * PATCH /api/v1/features/:specId — update PM metadata (status / priority /
- * roadmapQuarter / tags / assigneeId / customFields). Status changes are
- * validated against the workflow state machine.
+ * POST /api/v1/features/:specId/relations — create a typed relation
+ * ({ toSpecId, direction }). Returns the feature's refreshed relation list.
  */
-export async function PATCH(req: Request, { params }: Params) {
+export async function POST(req: Request, { params }: Params) {
   const authz = await authorizeWrite(req);
   if (!authz.ok) return authz.response;
 
@@ -47,14 +46,14 @@ export async function PATCH(req: Request, { params }: Params) {
   }
 
   try {
-    const feature = await patchFeature(
+    const relations = await addFeatureRelation(
       specId,
-      parseFeaturePatch(body),
+      parseRelationInput(body),
       authz.scope ?? undefined,
     );
     for (const path of ["/backlog", "/board", "/roadmap"]) revalidatePath(path);
     revalidatePath("/feature/[id]", "page");
-    return Response.json({ feature });
+    return Response.json({ relations });
   } catch (err) {
     if (err instanceof FeatureNotFoundError) {
       return Response.json({ error: err.message }, { status: 404 });

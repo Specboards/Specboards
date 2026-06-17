@@ -1,4 +1,4 @@
-import { statusDotClass } from "@/lib/feature-helpers";
+import { statusDotClassFor } from "@/lib/feature-helpers";
 import { cn } from "@/lib/utils";
 
 export function StatusDot({
@@ -12,7 +12,7 @@ export function StatusDot({
     <span
       className={cn(
         "inline-block size-2 shrink-0 rounded-full",
-        statusDotClass[status] ?? "bg-zinc-400",
+        statusDotClassFor(status),
         className,
       )}
     />

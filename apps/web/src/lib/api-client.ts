@@ -1,6 +1,12 @@
 "use client";
 
-import type { FeaturePatch } from "@/lib/store/types";
+import type {
+  CreatableRelationDirection,
+  FeaturePatch,
+  FeatureRelation,
+  SavedView,
+  SavedViewInput,
+} from "@/lib/store/types";
 
 /**
  * Browser-side client for the public API layer. All mutations from the UI go
@@ -29,6 +35,77 @@ export async function patchFeature(
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as { error?: string } | null;
     throw new Error(body?.error ?? `PATCH failed with ${res.status}`);
+  }
+}
+
+/** Create a typed relation from a feature; returns its refreshed relations. */
+export async function addRelation(
+  specId: string,
+  input: { toSpecId: string; direction: CreatableRelationDirection },
+): Promise<FeatureRelation[]> {
+  const res = await fetch(
+    `/api/v1/features/${encodeURIComponent(specId)}/relations`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  );
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as
+    | { relations?: FeatureRelation[]; error?: string }
+    | null;
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Add relation failed with ${res.status}`);
+  }
+  return body?.relations ?? [];
+}
+
+/** Remove a relation by id; returns the feature's refreshed relations. */
+export async function removeRelation(
+  specId: string,
+  linkId: string,
+): Promise<FeatureRelation[]> {
+  const res = await fetch(
+    `/api/v1/features/${encodeURIComponent(specId)}/relations/${encodeURIComponent(linkId)}`,
+    { method: "DELETE" },
+  );
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as
+    | { relations?: FeatureRelation[]; error?: string }
+    | null;
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Remove relation failed with ${res.status}`);
+  }
+  return body?.relations ?? [];
+}
+
+/** Save the current backlog filters as a named view. */
+export async function saveView(input: SavedViewInput): Promise<SavedView> {
+  const res = await fetch("/api/v1/views", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as
+    | { view?: SavedView; error?: string }
+    | null;
+  if (!res.ok || !body?.view) {
+    throw new Error(body?.error ?? `Save view failed with ${res.status}`);
+  }
+  return body.view;
+}
+
+/** Delete a saved view by id. */
+export async function deleteView(id: string): Promise<void> {
+  const res = await fetch(`/api/v1/views/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (res.status === 401) throw new AuthRequiredError();
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(body?.error ?? `Delete view failed with ${res.status}`);
   }
 }
 

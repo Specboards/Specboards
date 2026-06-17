@@ -10,6 +10,7 @@ import {
   timestamp,
   unique,
   uuid,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
 /**
@@ -101,7 +102,17 @@ export const features = pgTable(
     title: text("title").notNull(),
     status: text("status").notNull().default("backlog"),
     assigneeId: uuid("assignee_id"),
+    /**
+     * Optional parent feature (an "epic" is just a feature with children).
+     * `set null` on delete so removing a parent orphans children rather than
+     * cascade-deleting their metadata.
+     */
+    parentId: uuid("parent_id").references((): AnyPgColumn => features.id, {
+      onDelete: "set null",
+    }),
     priority: integer("priority"),
+    /** Effort estimate in points (validated against RepoConfig.estimate.scale). */
+    estimate: integer("estimate"),
     /** Fractional/lexical rank for manual backlog ordering. */
     rank: text("rank"),
     tags: text("tags").array().notNull().default([]),
@@ -114,6 +125,7 @@ export const features = pgTable(
   (t) => [
     unique("features_repo_spec_uq").on(t.repoId, t.specId),
     index("features_workspace_status_idx").on(t.workspaceId, t.status),
+    index("features_parent_idx").on(t.parentId),
   ],
 );
 
@@ -143,6 +155,29 @@ export const comments = pgTable("comments", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/**
+ * A user's saved backlog filter ("custom view"): a named bundle of filter
+ * params they can re-apply. Personal — scoped to the creating user within their
+ * workspace, so each member curates their own list.
+ */
+export const savedViews = pgTable(
+  "saved_views",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").notNull(),
+    name: text("name").notNull(),
+    /** Which list the view applies to (currently always "backlog"). */
+    view: text("view").notNull().default("backlog"),
+    /** Serialized FeatureFilters (see apps/web feature-filters). */
+    filters: jsonb("filters").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("saved_views_ws_user_idx").on(t.workspaceId, t.userId)],
+);
+
 export const activityLog = pgTable("activity_log", {
   id: uuid("id").primaryKey().defaultRandom(),
   workspaceId: uuid("workspace_id")
@@ -154,6 +189,43 @@ export const activityLog = pgTable("activity_log", {
   detail: jsonb("detail"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+export const featureLinkType = pgEnum("feature_link_type", [
+  "blocks",
+  "relates_to",
+  "duplicates",
+]);
+
+/**
+ * A directed, typed link between two features (dependencies & relations).
+ * Stored canonically in ONE direction so the inverse is never double-entered:
+ * `blocks` means `fromFeature` blocks `toFeature` (so `toFeature` is "blocked
+ * by" `fromFeature`); `relates_to` is symmetric; `duplicates` means
+ * `fromFeature` duplicates `toFeature`. The "blocked by" / "duplicated by"
+ * views are derived by querying the `to_feature_id` side.
+ */
+export const featureLinks = pgTable(
+  "feature_links",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    fromFeatureId: uuid("from_feature_id")
+      .notNull()
+      .references(() => features.id, { onDelete: "cascade" }),
+    toFeatureId: uuid("to_feature_id")
+      .notNull()
+      .references(() => features.id, { onDelete: "cascade" }),
+    type: featureLinkType("type").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("feature_links_uq").on(t.fromFeatureId, t.toFeatureId, t.type),
+    index("feature_links_from_idx").on(t.fromFeatureId),
+    index("feature_links_to_idx").on(t.toFeatureId),
+  ],
+);
 
 /**
  * Auth tables (Better Auth). Postgres mints UUID ids (Better Auth runs with

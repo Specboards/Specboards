@@ -1,23 +1,71 @@
-import { extractSections } from "@specboard/core";
+import { extractSections, rollUpEstimates } from "@specboard/core";
 import {
   and,
   createDb,
+  desc,
   eq,
+  featureLinks,
   features,
+  inArray,
+  or,
+  savedViews,
   sql,
   specIndex,
   users,
   type Database,
 } from "@specboard/db";
 
-import type {
-  CustomFieldValue,
-  FeatureDetail,
-  FeaturePatch,
-  FeatureRecord,
-  FeatureStore,
-  WorkspaceScope,
+import {
+  RelationError,
+  type CustomFieldValue,
+  type FeatureDetail,
+  type FeaturePatch,
+  type FeatureRecord,
+  type FeatureRelation,
+  type FeatureStore,
+  type RelationDirection,
+  type RelationInput,
+  type SavedView,
+  type SavedViewFilters,
+  type SavedViewInput,
+  type WorkspaceScope,
 } from "./types";
+
+/** Normalize the jsonb filters column into the typed filter bundle. */
+function toSavedViewFilters(value: unknown): SavedViewFilters {
+  const out: SavedViewFilters = {};
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (typeof v === "string" || typeof v === "number") out[k] = v;
+    }
+  }
+  return out;
+}
+
+type LinkRow = {
+  id: string;
+  fromFeatureId: string;
+  toFeatureId: string;
+  type: "blocks" | "relates_to" | "duplicates";
+};
+
+/** Resolve a stored link into the direction seen from `featureId`'s side. */
+function directionFor(link: LinkRow, featureId: string): RelationDirection {
+  const outgoing = link.fromFeatureId === featureId;
+  switch (link.type) {
+    case "blocks":
+      return outgoing ? "blocks" : "blocked_by";
+    case "duplicates":
+      return outgoing ? "duplicates" : "duplicated_by";
+    case "relates_to":
+      return "relates_to";
+  }
+}
+
+/** The terminal status used for hierarchy roll-up progress. */
+function isDone(status: string): boolean {
+  return status === "done";
+}
 
 /** Normalize the jsonb custom-fields column into the UI's value map. */
 function toCustomFields(value: unknown): Record<string, CustomFieldValue> {
@@ -63,16 +111,59 @@ export class DbStore implements FeatureStore {
         where: eq(features.workspaceId, scope!.workspaceId),
         with: { index: true },
       });
+      // One pass over the workspace's `blocks` edges to tally counts per row.
+      const links = await tx
+        .select({
+          fromFeatureId: featureLinks.fromFeatureId,
+          toFeatureId: featureLinks.toFeatureId,
+        })
+        .from(featureLinks)
+        .where(
+          and(
+            eq(featureLinks.workspaceId, scope!.workspaceId),
+            eq(featureLinks.type, "blocks"),
+          ),
+        );
+      const blocks = new Map<string, number>();
+      const blockedBy = new Map<string, number>();
+      for (const l of links) {
+        blocks.set(l.fromFeatureId, (blocks.get(l.fromFeatureId) ?? 0) + 1);
+        blockedBy.set(l.toFeatureId, (blockedBy.get(l.toFeatureId) ?? 0) + 1);
+      }
+      // Hierarchy roll-up from the full workspace set (no extra query).
+      const specById = new Map(rows.map((r) => [r.id, r.specId]));
+      const childCount = new Map<string, number>();
+      const childDone = new Map<string, number>();
+      for (const r of rows) {
+        if (!r.parentId) continue;
+        childCount.set(r.parentId, (childCount.get(r.parentId) ?? 0) + 1);
+        if (isDone(r.status))
+          childDone.set(r.parentId, (childDone.get(r.parentId) ?? 0) + 1);
+      }
+      const rolled = rollUpEstimates(
+        rows.map((r) => ({
+          key: r.id,
+          parentKey: r.parentId,
+          estimate: r.estimate,
+        })),
+      );
       return rows.map((row) => ({
         specId: row.specId,
         title: row.title,
         status: row.status,
         priority: row.priority,
+        estimate: row.estimate,
+        rolledEstimate: rolled.get(row.id) ?? null,
         tags: row.tags,
         roadmapQuarter: row.roadmapQuarter,
         assigneeId: row.assigneeId,
         customFields: toCustomFields(row.customFields),
         path: row.index?.path ?? "",
+        blocksCount: blocks.get(row.id) ?? 0,
+        blockedByCount: blockedBy.get(row.id) ?? 0,
+        parentSpecId: row.parentId ? (specById.get(row.parentId) ?? null) : null,
+        childCount: childCount.get(row.id) ?? 0,
+        childDoneCount: childDone.get(row.id) ?? 0,
       }));
     });
   }
@@ -101,11 +192,99 @@ export class DbStore implements FeatureStore {
         });
         assigneeName = assignee?.name ?? null;
       }
+
+      // Relations touching this feature (either end), resolved to its POV.
+      const links = (await tx
+        .select({
+          id: featureLinks.id,
+          fromFeatureId: featureLinks.fromFeatureId,
+          toFeatureId: featureLinks.toFeatureId,
+          type: featureLinks.type,
+        })
+        .from(featureLinks)
+        .where(
+          and(
+            eq(featureLinks.workspaceId, scope!.workspaceId),
+            or(
+              eq(featureLinks.fromFeatureId, row.id),
+              eq(featureLinks.toFeatureId, row.id),
+            ),
+          ),
+        )) as LinkRow[];
+      const otherIds = links.map((l) =>
+        l.fromFeatureId === row.id ? l.toFeatureId : l.fromFeatureId,
+      );
+      const others = otherIds.length
+        ? await tx
+            .select({
+              id: features.id,
+              specId: features.specId,
+              title: features.title,
+            })
+            .from(features)
+            .where(inArray(features.id, otherIds))
+        : [];
+      const byId = new Map(others.map((o) => [o.id, o]));
+      const relations: FeatureRelation[] = links
+        .map((l) => {
+          const otherId =
+            l.fromFeatureId === row.id ? l.toFeatureId : l.fromFeatureId;
+          const other = byId.get(otherId);
+          if (!other) return null;
+          return {
+            id: l.id,
+            direction: directionFor(l, row.id),
+            otherSpecId: other.specId,
+            otherTitle: other.title,
+          } satisfies FeatureRelation;
+        })
+        .filter((r): r is FeatureRelation => r !== null);
+
+      // Parent (one lookup) + direct children for the hierarchy view.
+      let parentSpecId: string | null = null;
+      let parentTitle: string | null = null;
+      if (row.parentId) {
+        const parent = await tx.query.features.findFirst({
+          where: eq(features.id, row.parentId),
+          columns: { specId: true, title: true },
+        });
+        parentSpecId = parent?.specId ?? null;
+        parentTitle = parent?.title ?? null;
+      }
+      const childRows = await tx
+        .select({
+          specId: features.specId,
+          title: features.title,
+          status: features.status,
+        })
+        .from(features)
+        .where(eq(features.parentId, row.id));
+
+      // Roll the estimate up over this feature's subtree. Needs the whole
+      // workspace tree, so pull just the three columns the roll-up uses.
+      const estimateRows = await tx
+        .select({
+          id: features.id,
+          parentId: features.parentId,
+          estimate: features.estimate,
+        })
+        .from(features)
+        .where(eq(features.workspaceId, scope!.workspaceId));
+      const rolled = rollUpEstimates(
+        estimateRows.map((r) => ({
+          key: r.id,
+          parentKey: r.parentId,
+          estimate: r.estimate,
+        })),
+      );
+
       return {
         specId: row.specId,
         title: row.title,
         status: row.status,
         priority: row.priority,
+        estimate: row.estimate,
+        rolledEstimate: rolled.get(row.id) ?? null,
         tags: row.tags,
         roadmapQuarter: row.roadmapQuarter,
         assigneeId: row.assigneeId,
@@ -114,6 +293,15 @@ export class DbStore implements FeatureStore {
         path: row.index?.path ?? "",
         content,
         sections: extractSections(content),
+        relations,
+        blocksCount: relations.filter((r) => r.direction === "blocks").length,
+        blockedByCount: relations.filter((r) => r.direction === "blocked_by")
+          .length,
+        parentSpecId,
+        parentTitle,
+        children: childRows,
+        childCount: childRows.length,
+        childDoneCount: childRows.filter((c) => isDone(c.status)).length,
       };
     });
   }
@@ -123,10 +311,31 @@ export class DbStore implements FeatureStore {
     patch: FeaturePatch,
     scope?: WorkspaceScope,
   ): Promise<void> {
+    // `parentSpecId` isn't a column — translate it to the parent row's `parentId`.
+    const { parentSpecId, ...rest } = patch;
     await this.scoped(scope, async (tx) => {
+      const set: Record<string, unknown> = { ...rest, updatedAt: new Date() };
+      if (parentSpecId !== undefined) {
+        if (parentSpecId === null) {
+          set.parentId = null;
+        } else {
+          const parent = await tx
+            .select({ id: features.id })
+            .from(features)
+            .where(
+              and(
+                eq(features.specId, parentSpecId),
+                eq(features.workspaceId, scope!.workspaceId),
+              ),
+            );
+          if (!parent[0])
+            throw new RelationError(`Unknown parent feature: ${parentSpecId}`);
+          set.parentId = parent[0].id;
+        }
+      }
       await tx
         .update(features)
-        .set({ ...patch, updatedAt: new Date() })
+        .set(set)
         .where(
           and(
             eq(features.specId, specId),
@@ -134,6 +343,180 @@ export class DbStore implements FeatureStore {
           ),
         );
     });
+  }
+
+  async addRelation(
+    specId: string,
+    input: RelationInput,
+    scope?: WorkspaceScope,
+  ): Promise<void> {
+    await this.scoped(scope, async (tx) => {
+      const ws = scope!.workspaceId;
+      const ids = await tx
+        .select({ id: features.id, specId: features.specId })
+        .from(features)
+        .where(
+          and(
+            eq(features.workspaceId, ws),
+            inArray(features.specId, [specId, input.toSpecId]),
+          ),
+        );
+      const self = ids.find((f) => f.specId === specId);
+      const other = ids.find((f) => f.specId === input.toSpecId);
+      if (!self) throw new RelationError(`Unknown feature: ${specId}`);
+      if (!other)
+        throw new RelationError(`Unknown related feature: ${input.toSpecId}`);
+      if (self.id === other.id)
+        throw new RelationError("A feature cannot relate to itself.");
+
+      // Resolve the requested direction into a canonical stored edge.
+      const edge = toEdge(self.id, other.id, input.direction);
+
+      // Reject a contradictory cycle (A blocks B while B blocks A).
+      if (edge.type === "blocks") {
+        const reverse = await tx
+          .select({ id: featureLinks.id })
+          .from(featureLinks)
+          .where(
+            and(
+              eq(featureLinks.workspaceId, ws),
+              eq(featureLinks.type, "blocks"),
+              eq(featureLinks.fromFeatureId, edge.toFeatureId),
+              eq(featureLinks.toFeatureId, edge.fromFeatureId),
+            ),
+          );
+        if (reverse.length)
+          throw new RelationError(
+            "That would create a circular blocking dependency.",
+          );
+      }
+
+      // Treat `relates_to` as symmetric: skip if the inverse edge exists.
+      if (edge.type === "relates_to") {
+        const existing = await tx
+          .select({ id: featureLinks.id })
+          .from(featureLinks)
+          .where(
+            and(
+              eq(featureLinks.workspaceId, ws),
+              eq(featureLinks.type, "relates_to"),
+              eq(featureLinks.fromFeatureId, edge.toFeatureId),
+              eq(featureLinks.toFeatureId, edge.fromFeatureId),
+            ),
+          );
+        if (existing.length) return;
+      }
+
+      await tx
+        .insert(featureLinks)
+        .values({ workspaceId: ws, ...edge })
+        .onConflictDoNothing();
+    });
+  }
+
+  async removeRelation(
+    _specId: string,
+    linkId: string,
+    scope?: WorkspaceScope,
+  ): Promise<void> {
+    await this.scoped(scope, async (tx) => {
+      await tx
+        .delete(featureLinks)
+        .where(
+          and(
+            eq(featureLinks.id, linkId),
+            eq(featureLinks.workspaceId, scope!.workspaceId),
+          ),
+        );
+    });
+  }
+
+  async listSavedViews(scope?: WorkspaceScope): Promise<SavedView[]> {
+    return this.scoped(scope, async (tx) => {
+      const rows = await tx
+        .select({
+          id: savedViews.id,
+          name: savedViews.name,
+          view: savedViews.view,
+          filters: savedViews.filters,
+        })
+        .from(savedViews)
+        .where(
+          and(
+            eq(savedViews.workspaceId, scope!.workspaceId),
+            eq(savedViews.userId, scope!.userId),
+          ),
+        )
+        .orderBy(desc(savedViews.createdAt));
+      return rows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        view: r.view,
+        filters: toSavedViewFilters(r.filters),
+      }));
+    });
+  }
+
+  async createSavedView(
+    input: SavedViewInput,
+    scope?: WorkspaceScope,
+  ): Promise<SavedView> {
+    return this.scoped(scope, async (tx) => {
+      const [row] = await tx
+        .insert(savedViews)
+        .values({
+          workspaceId: scope!.workspaceId,
+          userId: scope!.userId,
+          name: input.name,
+          view: input.view,
+          filters: input.filters,
+        })
+        .returning({
+          id: savedViews.id,
+          name: savedViews.name,
+          view: savedViews.view,
+          filters: savedViews.filters,
+        });
+      if (!row) throw new Error("Failed to create saved view.");
+      return {
+        id: row.id,
+        name: row.name,
+        view: row.view,
+        filters: toSavedViewFilters(row.filters),
+      };
+    });
+  }
+
+  async deleteSavedView(id: string, scope?: WorkspaceScope): Promise<void> {
+    await this.scoped(scope, async (tx) => {
+      await tx
+        .delete(savedViews)
+        .where(
+          and(
+            eq(savedViews.id, id),
+            eq(savedViews.workspaceId, scope!.workspaceId),
+            eq(savedViews.userId, scope!.userId),
+          ),
+        );
+    });
+  }
+}
+
+/** Map a viewer-relative direction to a canonical stored edge. */
+function toEdge(
+  selfId: string,
+  otherId: string,
+  direction: RelationInput["direction"],
+): { fromFeatureId: string; toFeatureId: string; type: LinkRow["type"] } {
+  switch (direction) {
+    case "blocks":
+      return { fromFeatureId: selfId, toFeatureId: otherId, type: "blocks" };
+    case "blocked_by":
+      return { fromFeatureId: otherId, toFeatureId: selfId, type: "blocks" };
+    case "relates_to":
+      return { fromFeatureId: selfId, toFeatureId: otherId, type: "relates_to" };
+    case "duplicates":
+      return { fromFeatureId: selfId, toFeatureId: otherId, type: "duplicates" };
   }
 }
 

@@ -51,14 +51,17 @@ Postgres  ── packages/db               │
    │                                   │
 Next.js web app  ── apps/web           MCP server ── apps/mcp
    Backlog · Board · Roadmap ·         list_features · read_spec ·
-   Feature detail (spec + metadata)    update_status  (to coding agents)
+   Feature detail (spec + metadata     update_status · get_relations
+   + dependencies/relations)           (to coding agents)
 ```
 
 - **`packages/core`** — framework-agnostic domain logic: spec frontmatter + markdown
   parser (`parseSpec`), status state machine (`canTransition`), `.specboard/config.yml`
   schema (`parseRepoConfig`). Unit-tested.
 - **`packages/db`** — Drizzle schema (`workspaces`, `members`, `repositories`,
-  `features`, `spec_index`, `comments`, `activity_log`, the deployment-global
+  `features` (with a self-referential `parent_id` for epic/sub-feature
+  hierarchy), `feature_links` (typed dependencies/relations between features),
+  `spec_index`, `comments`, `activity_log`, the deployment-global
   `github_app` credential row, plus the Better Auth
   `users`/`sessions`/`accounts`/`verifications` tables) + Postgres client. RLS
   policies in `infra/migrations`.
@@ -82,8 +85,9 @@ Next.js web app  ── apps/web           MCP server ── apps/mcp
 3. **Edit spec in UI** — save → `packages/git` writes a commit or opens a PR
    (`writeMode`) → webhook confirms → index updates.
 4. **Edit metadata in UI** — writes straight to DB (no git churn), real-time to boards.
-5. **Agent via MCP** — `list_features` / `read_spec` / `update_status`: agents act on
-   prioritized, assigned, status-aware specs.
+5. **Agent via MCP** — `list_features` / `read_spec` / `update_status` /
+   `get_relations`: agents act on prioritized, assigned, status-aware specs, and
+   respect dependency sequencing (a feature's `blocks` / `blockedBy`).
 
 ## Multi-tenancy
 

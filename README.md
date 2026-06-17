@@ -4,8 +4,9 @@ A lightweight, spec-based product-management layer for **spec-driven development
 
 Your specs stay canonical in git (versioned with code, read by AI coding agents).
 SpecBoard layers the product metadata — status, assignment, priority, backlog
-order, roadmap — **on top** of them, so PM, UX, and engineering collaborate
-without editing files in a terminal and without duplicating work into JIRA/Aha.
+order, roadmap, dependencies, epic/sub-feature hierarchy — **on top** of them,
+so PM, UX, and engineering collaborate without editing files in a terminal and
+without duplicating work into JIRA/Aha.
 
 Open-core: self-host the core for free, or use the hosted SaaS.
 
@@ -13,10 +14,10 @@ Open-core: self-host the core for free, or use the hosted SaaS.
 - **Build plan:** [`docs/PLAN.md`](./docs/PLAN.md)
 
 > Status: **active build**. Working: the web UI (Backlog · Board · Roadmap ·
-> Feature detail), spec parsing, status workflow, DB schema/seed, MCP tools,
-> auth (sign-up/in, email verification, password reset, account/settings), and
-> GitHub sync (one-click App setup, repo connect/picker, push reconcile).
-> Still stubbed: editing spec content from the UI.
+> Feature detail with dependencies/relations), spec parsing, status workflow,
+> DB schema/seed, MCP tools, auth (sign-up/in, email verification, password
+> reset, account/settings), and GitHub sync (one-click App setup, repo
+> connect/picker, push reconcile). Still stubbed: editing spec content from the UI.
 
 ## Layout
 
@@ -86,8 +87,9 @@ pnpm --filter @specboard/mcp build
 DATABASE_URL=postgres://... node apps/mcp/dist/server.js
 ```
 
-Exposes `list_features` / `read_spec` / `update_status` (workflow-validated)
-over stdio. Requires the seeded Postgres above.
+Exposes `list_features` (with each feature's `blocks` / `blockedBy`) /
+`read_spec` / `update_status` (workflow-validated) / `get_relations` over stdio.
+Requires the seeded Postgres above.
 
 ## Develop
 

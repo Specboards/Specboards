@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
-import type { RepoConfig } from "@specboard/core";
+import type { EstimateConfig, RepoConfig, StatusWorkflow } from "@specboard/core";
 
 import { AuthRequiredError, patchFeature } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
@@ -20,11 +20,20 @@ export function FeatureMetaForm({
   feature,
   members = [],
   customFields = [],
+  candidates = [],
+  estimate,
+  workflow,
   canEdit = true,
 }: {
   feature: FeatureDetail;
   members?: WorkspaceMember[];
   customFields?: FieldDef[];
+  /** Other features that can be picked as this one's parent (excludes self). */
+  candidates?: { specId: string; title: string }[];
+  /** Effort scale + label for the estimate select. */
+  estimate: EstimateConfig;
+  /** Workspace status workflow (custom statuses/transitions); default if omitted. */
+  workflow?: StatusWorkflow;
   canEdit?: boolean;
 }) {
   const router = useRouter();
@@ -35,12 +44,14 @@ export function FeatureMetaForm({
     e.preventDefault();
     const data = new FormData(e.currentTarget);
     const rawPriority = String(data.get("priority") ?? "");
+    const rawEstimate = String(data.get("estimate") ?? "");
     startTransition(async () => {
       setError(null);
       try {
         await patchFeature(feature.specId, {
           status: String(data.get("status") ?? feature.status),
           priority: rawPriority === "" ? null : Number(rawPriority),
+          estimate: rawEstimate === "" ? null : Number(rawEstimate),
           roadmapQuarter: String(data.get("roadmapQuarter") ?? "").trim() || null,
           tags: String(data.get("tags") ?? "")
             .split(",")
@@ -48,6 +59,9 @@ export function FeatureMetaForm({
             .filter(Boolean),
           ...(members.length > 0
             ? { assigneeId: String(data.get("assigneeId") ?? "") || null }
+            : {}),
+          ...(candidates.length > 0
+            ? { parentSpecId: String(data.get("parentSpecId") ?? "") || null }
             : {}),
           ...(customFields.length > 0
             ? { customFields: collectCustomFields(customFields, data) }
@@ -82,7 +96,7 @@ export function FeatureMetaForm({
           Status
         </span>
         <Select name="status" defaultValue={feature.status} className="h-8">
-          {statusOptions(feature.status).map((s) => (
+          {statusOptions(feature.status, workflow).map((s) => (
             <option key={s} value={s}>
               {statusLabel(s)}
             </option>
@@ -108,6 +122,25 @@ export function FeatureMetaForm({
           </Select>
         </label>
       ) : null}
+      {candidates.length > 0 ? (
+        <label className="block space-y-1.5">
+          <span className="text-xs font-medium text-muted-foreground">
+            Parent (epic)
+          </span>
+          <Select
+            name="parentSpecId"
+            defaultValue={feature.parentSpecId ?? ""}
+            className="h-8"
+          >
+            <option value="">None</option>
+            {candidates.map((c) => (
+              <option key={c.specId} value={c.specId}>
+                {c.title}
+              </option>
+            ))}
+          </Select>
+        </label>
+      ) : null}
       <label className="block space-y-1.5">
         <span className="text-xs font-medium text-muted-foreground">
           Priority (0 = highest)
@@ -120,6 +153,28 @@ export function FeatureMetaForm({
           defaultValue={feature.priority ?? ""}
           className="h-8"
         />
+      </label>
+      <label className="block space-y-1.5">
+        <span className="text-xs font-medium text-muted-foreground">
+          {estimate.label}
+        </span>
+        <Select
+          name="estimate"
+          defaultValue={feature.estimate ?? ""}
+          className="h-8"
+        >
+          <option value="">—</option>
+          {estimate.scale.map((points) => (
+            <option key={points} value={points}>
+              {points}
+            </option>
+          ))}
+        </Select>
+        {feature.childCount > 0 && feature.rolledEstimate !== null ? (
+          <span className="text-[11px] text-muted-foreground">
+            Subtree total: {feature.rolledEstimate}
+          </span>
+        ) : null}
       </label>
       <label className="block space-y-1.5">
         <span className="text-xs font-medium text-muted-foreground">

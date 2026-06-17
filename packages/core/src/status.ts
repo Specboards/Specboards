@@ -46,3 +46,27 @@ export function canTransition(
   if (from === to) return true;
   return workflow.transitions[from]?.includes(to) ?? false;
 }
+
+/**
+ * Resolve the active {@link StatusWorkflow} from a repo config. A team
+ * customizes its statuses/transitions in `.specboard/config.yml`; when that's
+ * absent (or under-specified) the {@link defaultWorkflow} applies, so existing
+ * data keeps working unchanged. When `statuses` are given but `transitions`
+ * are omitted, any status may move to any other (the config's documented
+ * "omit to allow any transition" rule).
+ */
+export function resolveWorkflow(
+  config?: {
+    statuses?: readonly string[];
+    transitions?: Record<string, string[]>;
+  } | null,
+): StatusWorkflow {
+  const statuses = config?.statuses;
+  if (!statuses || statuses.length < 2) return defaultWorkflow;
+  const transitions =
+    config?.transitions ??
+    Object.fromEntries(
+      statuses.map((s) => [s, statuses.filter((other) => other !== s)]),
+    );
+  return { statuses: [...statuses], transitions };
+}
