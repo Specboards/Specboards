@@ -39,9 +39,17 @@ export default async function FeaturePage({
   const customFields = repoConfig?.fields ?? [];
 
   // Other features the relation editor can point at (excluding this one).
-  const candidates = (await store.listFeatures(access ?? undefined))
+  const allFeatures = await store.listFeatures(access ?? undefined);
+  const candidates = allFeatures
     .filter((f) => f.specId !== feature.specId)
     .map((f) => ({ specId: f.specId, title: f.title }));
+
+  // Valid parents exclude this feature *and its descendants* — picking one
+  // would form a cycle (the server rejects these, but don't offer them).
+  const descendants = descendantSpecIds(feature.specId, allFeatures);
+  const parentCandidates = candidates.filter(
+    (c) => !descendants.has(c.specId),
+  );
 
   return (
     <section className="grid gap-8 lg:grid-cols-[1fr_280px]">
@@ -75,7 +83,7 @@ export default async function FeaturePage({
           feature={feature}
           members={members}
           customFields={customFields}
-          candidates={candidates}
+          candidates={parentCandidates}
           canEdit={!access || canWrite(access.role)}
         />
         <Separator />
@@ -141,4 +149,29 @@ export default async function FeaturePage({
       </aside>
     </section>
   );
+}
+
+/** Spec ids of all features below `rootSpecId` in the parent/child tree. */
+function descendantSpecIds(
+  rootSpecId: string,
+  features: { specId: string; parentSpecId: string | null }[],
+): Set<string> {
+  const childrenOf = new Map<string, string[]>();
+  for (const f of features) {
+    if (!f.parentSpecId) continue;
+    const arr = childrenOf.get(f.parentSpecId) ?? [];
+    arr.push(f.specId);
+    childrenOf.set(f.parentSpecId, arr);
+  }
+  const out = new Set<string>();
+  const queue = [rootSpecId];
+  while (queue.length > 0) {
+    const current = queue.shift() as string;
+    for (const child of childrenOf.get(current) ?? []) {
+      if (out.has(child)) continue; // guard against malformed cycles
+      out.add(child);
+      queue.push(child);
+    }
+  }
+  return out;
 }

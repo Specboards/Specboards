@@ -1,21 +1,9 @@
-import Link from "next/link";
-
-import { Badge } from "@/components/ui/badge";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { EmptyState } from "@/components/empty-state";
-import { StatusDot } from "@/components/status-dot";
-import { StatusSelect } from "@/components/status-select";
-import { priorityLabel, sortFeatures } from "@/lib/feature-helpers";
+import { sortFeatures } from "@/lib/feature-helpers";
 import { getStore } from "@/lib/store";
 import { canWrite } from "@/lib/workspace";
 import { canConnectRepos, requireWorkspaceAccess } from "@/lib/workspace-access";
+import { BacklogTable, type BacklogRow } from "./backlog-table";
 
 export const dynamic = "force-dynamic";
 
@@ -45,10 +33,11 @@ export default async function BacklogPage() {
       topLevel.push(f);
     }
   }
-  const rows: { f: (typeof features)[number]; depth: number }[] = [];
+  const rows: BacklogRow[] = [];
   for (const f of topLevel) {
-    rows.push({ f, depth: 0 });
-    for (const c of childrenOf.get(f.specId) ?? []) rows.push({ f: c, depth: 1 });
+    rows.push({ feature: f, depth: 0 });
+    for (const c of childrenOf.get(f.specId) ?? [])
+      rows.push({ feature: c, depth: 1 });
   }
 
   return (
@@ -63,84 +52,7 @@ export default async function BacklogPage() {
       {features.length === 0 ? (
         <EmptyState canConnect={canConnectRepos(access)} />
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-14">Pri</TableHead>
-              <TableHead>Feature</TableHead>
-              <TableHead className="w-44">Status</TableHead>
-              <TableHead>Tags</TableHead>
-              <TableHead className="w-24">Quarter</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map(({ f, depth }) => (
-              <TableRow key={f.specId}>
-                <TableCell className="font-mono text-xs text-muted-foreground">
-                  {priorityLabel(f.priority)}
-                </TableCell>
-                <TableCell>
-                  <span
-                    className="flex items-center gap-2"
-                    style={depth > 0 ? { paddingLeft: depth * 16 } : undefined}
-                  >
-                    {depth > 0 ? (
-                      <span className="text-muted-foreground">↳</span>
-                    ) : null}
-                    <Link
-                      href={`/feature/${f.specId}`}
-                      className="font-medium hover:underline"
-                    >
-                      {f.title}
-                    </Link>
-                    {f.childCount > 0 && (
-                      <Badge
-                        variant="outline"
-                        className="text-[10px]"
-                        title={`${f.childDoneCount} of ${f.childCount} children done`}
-                      >
-                        epic {f.childDoneCount}/{f.childCount}
-                      </Badge>
-                    )}
-                    {f.blockedByCount > 0 && (
-                      <Badge
-                        variant="destructive"
-                        className="text-[10px]"
-                        title={`Blocked by ${f.blockedByCount} feature(s)`}
-                      >
-                        Blocked
-                      </Badge>
-                    )}
-                  </span>
-                  <div className="text-xs text-muted-foreground">{f.path}</div>
-                </TableCell>
-                <TableCell>
-                  <div className="flex items-center gap-2">
-                    <StatusDot status={f.status} />
-                    <StatusSelect
-                      specId={f.specId}
-                      status={f.status}
-                      className="h-8 w-36"
-                      canEdit={canEdit}
-                    />
-                  </div>
-                </TableCell>
-                <TableCell>
-                  <div className="flex flex-wrap gap-1">
-                    {f.tags.map((tag) => (
-                      <Badge key={tag} variant="secondary">
-                        {tag}
-                      </Badge>
-                    ))}
-                  </div>
-                </TableCell>
-                <TableCell className="text-sm text-muted-foreground">
-                  {f.roadmapQuarter ?? "—"}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        <BacklogTable rows={rows} canEdit={canEdit} />
       )}
     </section>
   );
