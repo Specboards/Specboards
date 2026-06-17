@@ -69,6 +69,20 @@ export default async function BoardPage() {
                         >
                           {priorityLabel(f.priority)}
                         </Badge>
+                        {f.rolledEstimate !== null && (
+                          <Badge
+                            variant="outline"
+                            className="font-mono text-[10px]"
+                            title={
+                              f.childCount > 0
+                                ? "Estimate (rolled up from children)"
+                                : "Estimate"
+                            }
+                          >
+                            {f.childCount > 0 ? "Σ" : ""}
+                            {f.rolledEstimate}
+                          </Badge>
+                        )}
                         {f.blockedByCount > 0 && (
                           <Badge
                             variant="destructive"

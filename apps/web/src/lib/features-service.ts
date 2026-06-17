@@ -47,6 +47,19 @@ export function parseFeaturePatch(body: unknown): FeaturePatch {
     }
     patch.priority = raw.priority as number | null;
   }
+  if ("estimate" in raw) {
+    if (
+      raw.estimate !== null &&
+      (typeof raw.estimate !== "number" ||
+        !Number.isInteger(raw.estimate) ||
+        raw.estimate < 0)
+    ) {
+      throw new InvalidPatchError(
+        "estimate must be a non-negative integer or null.",
+      );
+    }
+    patch.estimate = raw.estimate as number | null;
+  }
   if ("roadmapQuarter" in raw) {
     if (raw.roadmapQuarter !== null && typeof raw.roadmapQuarter !== "string") {
       throw new InvalidPatchError("roadmapQuarter must be a string or null.");
@@ -77,7 +90,7 @@ export function parseFeaturePatch(body: unknown): FeaturePatch {
 
   if (Object.keys(patch).length === 0) {
     throw new InvalidPatchError(
-      "Patch must set at least one of: status, priority, roadmapQuarter, tags, assigneeId, customFields, parentSpecId.",
+      "Patch must set at least one of: status, priority, estimate, roadmapQuarter, tags, assigneeId, customFields, parentSpecId.",
     );
   }
   return patch;

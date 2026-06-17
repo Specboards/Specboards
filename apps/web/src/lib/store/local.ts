@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import { parseSpec } from "@specboard/core";
+import { parseSpec, rollUpEstimates } from "@specboard/core";
 
 import {
   RelationError,
@@ -27,6 +27,7 @@ interface LocalLink {
 interface LocalMetadata {
   status?: string;
   priority?: number | null;
+  estimate?: number | null;
   tags?: string[];
   roadmapQuarter?: string | null;
   assigneeId?: string | null;
@@ -157,6 +158,8 @@ export class LocalFileStore implements FeatureStore {
         kind: parsed.frontmatter.kind,
         status: m.status ?? "backlog",
         priority: m.priority ?? null,
+        estimate: m.estimate ?? null,
+        rolledEstimate: null, // filled in by attachHierarchy
         tags: m.tags ?? [],
         roadmapQuarter: m.roadmapQuarter ?? null,
         assigneeId: m.assigneeId ?? null,
@@ -180,7 +183,7 @@ export class LocalFileStore implements FeatureStore {
     return features;
   }
 
-  /** Resolve parent titles + direct children + roll-up counts. */
+  /** Resolve parent titles + direct children + roll-up counts/estimates. */
   private attachHierarchy(features: FeatureDetail[]): void {
     const bySpec = new Map(features.map((f) => [f.specId, f]));
     for (const f of features) {
@@ -195,6 +198,15 @@ export class LocalFileStore implements FeatureStore {
       parent.childCount += 1;
       if (isDone(f.status)) parent.childDoneCount += 1;
     }
+    // Roll estimates up each subtree (parent pointers are now sanitized).
+    const rolled = rollUpEstimates(
+      features.map((f) => ({
+        key: f.specId,
+        parentKey: f.parentSpecId,
+        estimate: f.estimate,
+      })),
+    );
+    for (const f of features) f.rolledEstimate = rolled.get(f.specId) ?? null;
   }
 
   /** Resolve stored edges into per-feature relations + blocked counts. */

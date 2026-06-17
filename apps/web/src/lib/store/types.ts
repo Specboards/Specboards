@@ -11,6 +11,13 @@ export interface FeatureRecord {
   kind?: string;
   status: string;
   priority: number | null;
+  /** Effort estimate in points (against RepoConfig.estimate.scale), or null. */
+  estimate: number | null;
+  /**
+   * Estimate rolled up over this feature's subtree (itself + all descendants).
+   * Equals `estimate` for a leaf; null when nothing in the subtree is estimated.
+   */
+  rolledEstimate: number | null;
   tags: string[];
   roadmapQuarter: string | null;
   /** Assigned user id, or null when unassigned. */
@@ -92,6 +99,7 @@ export type FeaturePatch = Partial<
     FeatureRecord,
     | "status"
     | "priority"
+    | "estimate"
     | "tags"
     | "roadmapQuarter"
     | "assigneeId"

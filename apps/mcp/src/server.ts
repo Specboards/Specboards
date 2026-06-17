@@ -4,7 +4,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { and, eq, inArray, or } from "drizzle-orm";
 import { z } from "zod";
 
-import { canTransition } from "@specboard/core";
+import { canTransition, rollUpEstimates } from "@specboard/core";
 import {
   createDb,
   featureLinks,
@@ -115,6 +115,13 @@ server.tool(
         if (r.status === "done")
           childDone.set(r.parentId, (childDone.get(r.parentId) ?? 0) + 1);
       }
+      const rolled = rollUpEstimates(
+        rows.map((r) => ({
+          key: r.id,
+          parentKey: r.parentId,
+          estimate: r.estimate,
+        })),
+      );
       return text(
         rows
           .sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99))
@@ -123,6 +130,8 @@ server.tool(
             title: f.title,
             status: f.status,
             priority: f.priority,
+            estimate: f.estimate,
+            rolledEstimate: rolled.get(f.id) ?? null,
             tags: f.tags,
             roadmapQuarter: f.roadmapQuarter,
             path: f.index?.path,
@@ -163,11 +172,29 @@ server.tool(
         .select({ specId: features.specId, title: features.title, status: features.status })
         .from(features)
         .where(eq(features.parentId, row.id));
+      // Roll the estimate up over this feature's subtree.
+      const estimateRows = await db()
+        .select({
+          id: features.id,
+          parentId: features.parentId,
+          estimate: features.estimate,
+        })
+        .from(features)
+        .where(eq(features.workspaceId, row.workspaceId));
+      const rolled = rollUpEstimates(
+        estimateRows.map((r) => ({
+          key: r.id,
+          parentKey: r.parentId,
+          estimate: r.estimate,
+        })),
+      );
       return text({
         specId: row.specId,
         title: row.title,
         status: row.status,
         priority: row.priority,
+        estimate: row.estimate,
+        rolledEstimate: rolled.get(row.id) ?? null,
         tags: row.tags,
         roadmapQuarter: row.roadmapQuarter,
         path: row.index?.path,

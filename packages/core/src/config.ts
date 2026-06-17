@@ -1,6 +1,9 @@
 import { load } from "js-yaml";
 import { z } from "zod";
 
+/** Default story-point scale (Fibonacci) when a repo configures no `estimate`. */
+export const DEFAULT_ESTIMATE_SCALE = [1, 2, 3, 5, 8, 13, 21] as const;
+
 /**
  * Schema for `.specboard/config.yml`, the per-repo file that tells SpecBoard
  * where specs live and how this team's workflow/fields are shaped. Kept in the
@@ -26,6 +29,20 @@ export const repoConfigSchema = z.object({
       }),
     )
     .default([]),
+  /**
+   * Effort/estimate scale. Numeric points so an epic can roll up the total of
+   * its subtree. Omit to fall back to the Fibonacci default (see
+   * {@link DEFAULT_ESTIMATE_SCALE}); use {@link resolveEstimateConfig} to read it.
+   */
+  estimate: z
+    .object({
+      label: z.string().default("Estimate"),
+      scale: z
+        .array(z.number().int().nonnegative())
+        .min(1)
+        .default([...DEFAULT_ESTIMATE_SCALE]),
+    })
+    .optional(),
   /** How UI spec edits are written back to git. */
   writeMode: z.enum(["pr", "direct"]).default("pr"),
 });

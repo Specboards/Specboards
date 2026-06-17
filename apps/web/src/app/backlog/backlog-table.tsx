@@ -75,6 +75,7 @@ export function BacklogTable({
           <TableHead className="w-14">Pri</TableHead>
           <TableHead>Feature</TableHead>
           <TableHead className="w-44">Status</TableHead>
+          <TableHead className="w-14">Est</TableHead>
           <TableHead>Tags</TableHead>
           <TableHead className="w-24">Quarter</TableHead>
         </TableRow>
@@ -143,6 +144,22 @@ export function BacklogTable({
                     canEdit={canEdit}
                   />
                 </div>
+              </TableCell>
+              <TableCell className="font-mono text-xs text-muted-foreground">
+                {f.rolledEstimate === null ? (
+                  "—"
+                ) : (
+                  <span
+                    title={
+                      isEpic
+                        ? "Subtree total (rolled up from children)"
+                        : undefined
+                    }
+                  >
+                    {isEpic ? "Σ" : ""}
+                    {f.rolledEstimate}
+                  </span>
+                )}
               </TableCell>
               <TableCell>
                 <div className="flex flex-wrap gap-1">

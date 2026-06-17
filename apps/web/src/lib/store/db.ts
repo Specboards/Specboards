@@ -1,4 +1,4 @@
-import { extractSections } from "@specboard/core";
+import { extractSections, rollUpEstimates } from "@specboard/core";
 import {
   and,
   createDb,
@@ -124,11 +124,20 @@ export class DbStore implements FeatureStore {
         if (isDone(r.status))
           childDone.set(r.parentId, (childDone.get(r.parentId) ?? 0) + 1);
       }
+      const rolled = rollUpEstimates(
+        rows.map((r) => ({
+          key: r.id,
+          parentKey: r.parentId,
+          estimate: r.estimate,
+        })),
+      );
       return rows.map((row) => ({
         specId: row.specId,
         title: row.title,
         status: row.status,
         priority: row.priority,
+        estimate: row.estimate,
+        rolledEstimate: rolled.get(row.id) ?? null,
         tags: row.tags,
         roadmapQuarter: row.roadmapQuarter,
         assigneeId: row.assigneeId,
@@ -235,11 +244,31 @@ export class DbStore implements FeatureStore {
         .from(features)
         .where(eq(features.parentId, row.id));
 
+      // Roll the estimate up over this feature's subtree. Needs the whole
+      // workspace tree, so pull just the three columns the roll-up uses.
+      const estimateRows = await tx
+        .select({
+          id: features.id,
+          parentId: features.parentId,
+          estimate: features.estimate,
+        })
+        .from(features)
+        .where(eq(features.workspaceId, scope!.workspaceId));
+      const rolled = rollUpEstimates(
+        estimateRows.map((r) => ({
+          key: r.id,
+          parentKey: r.parentId,
+          estimate: r.estimate,
+        })),
+      );
+
       return {
         specId: row.specId,
         title: row.title,
         status: row.status,
         priority: row.priority,
+        estimate: row.estimate,
+        rolledEstimate: rolled.get(row.id) ?? null,
         tags: row.tags,
         roadmapQuarter: row.roadmapQuarter,
         assigneeId: row.assigneeId,

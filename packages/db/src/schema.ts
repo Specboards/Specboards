@@ -111,6 +111,8 @@ export const features = pgTable(
       onDelete: "set null",
     }),
     priority: integer("priority"),
+    /** Effort estimate in points (validated against RepoConfig.estimate.scale). */
+    estimate: integer("estimate"),
     /** Fractional/lexical rank for manual backlog ordering. */
     rank: text("rank"),
     tags: text("tags").array().notNull().default([]),
