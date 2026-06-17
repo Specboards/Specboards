@@ -36,7 +36,7 @@ The backlog below is the **gap** between that and what the four reference tools 
   `rollUpEstimates` summing each subtree; estimate select on the feature detail +
   "Est" column on backlog and badge on board, both showing the Σ roll-up for
   epics; `estimate`/`rolledEstimate` in MCP `list_features`/`read_spec`).
-  Migration `0006` **pending** apply to test + prod.
+  Migration `0006` applied to **test** and **prod**.
 - Rows below are marked ✅ when done.
 
 ## Next steps
@@ -60,20 +60,25 @@ before starting each item.
 
 - **#15** — none outstanding (collapse/expand toggle + cycle-safe Parent picker shipped).
 - **#16** — none outstanding.
-- **#20** — none outstanding; migration `0006` still needs applying to test + prod.
+- **#20** — none outstanding; migration `0006` applied to test + prod.
 
-**Build pattern to follow** (used for #15 and #16; keeps changes green and reviewable):
+**Build pattern to follow** (used for #15/#16/#20; keeps changes green and reviewable):
 `packages/db` schema + generated migration (add RLS for any new tenant table) →
 `apps/web/src/lib/store` types + **both** the `db` and `local` stores →
 `features-service` validation → `/api/v1` route(s) → `api-client` →
 feature-detail/board/backlog UI → `apps/mcp` enrichment → `pnpm typecheck && pnpm test
-&& pnpm build` → smoke-test in local file mode → apply the migration to test + prod.
+&& pnpm build` → smoke-test in local file mode → **apply the migration to test + prod**.
 
-Migrations are **not** auto-applied on deploy. Apply manually per environment:
-`fly mpg proxy <cluster-id> -p <port>` (test cluster `z7y24od8vemrgqd1`, prod
-`1zqyxr7d791rwp8m`), then run `pnpm --filter @specboard/db migrate` with
-`DATABASE_URL` pointed at `127.0.0.1:<port>/fly-db` (creds from the app's
-`DATABASE_URL` secret).
+Applying the migration is part of shipping the feature, **not** a deferred step —
+a branch isn't done until its migration is live on both databases (there's no
+release_command, so an unapplied migration breaks the next deploy). Migrations are
+not auto-applied on deploy, so per cluster (test `z7y24od8vemrgqd1`, prod
+`1zqyxr7d791rwp8m`):
+
+1. `fly mpg status <cluster-id> --json` → `.credentials` (user `fly-user`, password, db `fly-db`).
+2. `fly mpg proxy <cluster-id> -p 16380` (background; one cluster at a time).
+3. `DATABASE_URL='postgres://fly-user:<pass>@127.0.0.1:16380/fly-db?sslmode=disable' pnpm --filter @specboard/db migrate`.
+4. Verify the change via `psql` over the proxy, then stop the proxy. Test first, then prod.
 
 **Repo hygiene before merge**
 
