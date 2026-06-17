@@ -95,12 +95,12 @@ not auto-applied on deploy, so per cluster (test `z7y24od8vemrgqd1`, prod
 3. `DATABASE_URL='postgres://fly-user:<pass>@127.0.0.1:16380/fly-db?sslmode=disable' pnpm --filter @specboard/db migrate`.
 4. Verify the change via `psql` over the proxy, then stop the proxy. Test first, then prod.
 
-**Repo hygiene before merge**
+**Repo hygiene**
 
-- The #15/#16/#20 work now lives on the dedicated `feat/pm-table-stakes` branch
-  (the old `feat/email-verification-github-sync` branch is redundant — its auth/
-  GitHub-sync namesake is already on `main` — and can be deleted on the remote).
-  **Close issues #15, #16, #17, #18, and #20 on merge.**
+- ✅ #15/#16/#17/#18/#20 merged to `main` via **PR #33**
+  (`feat/pm-table-stakes`, now deleted); issues #15, #16, #17, #18, #20 closed.
+- The old `feat/email-verification-github-sync` remote branch is redundant (its
+  auth/GitHub-sync namesake is already on `main`) and can be deleted on the remote.
 - `pnpm lint` is broken environment-wide (`eslint` not installed) — run `pnpm install`
   to restore it; build/typecheck/test are the working gates today.
 
