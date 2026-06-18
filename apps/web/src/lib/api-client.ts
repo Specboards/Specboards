@@ -10,8 +10,10 @@ import type {
   FeatureRelation,
   GithubLink,
   GithubLinkInput,
+  LevelUpdate,
   SavedView,
   SavedViewInput,
+  WorkspaceLevel,
 } from "@/lib/store/types";
 
 /**
@@ -86,6 +88,25 @@ export async function deleteWorkItem(specId: string): Promise<void> {
     const body = (await res.json().catch(() => null)) as { error?: string } | null;
     throw new Error(body?.error ?? `DELETE failed with ${res.status}`);
   }
+}
+
+/** Replace the workspace's hierarchy levels (admin-only); returns the new set. */
+export async function updateLevels(
+  levels: LevelUpdate[],
+): Promise<WorkspaceLevel[]> {
+  const res = await fetch("/api/v1/levels", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ levels }),
+  });
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as
+    | { levels?: WorkspaceLevel[]; error?: string }
+    | null;
+  if (!res.ok || !body?.levels) {
+    throw new Error(body?.error ?? `Update failed with ${res.status}`);
+  }
+  return body.levels;
 }
 
 /** Create a typed relation from a feature; returns its refreshed relations. */

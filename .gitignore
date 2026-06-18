@@ -32,6 +32,7 @@ infra/supabase/.temp/
 
 # Personal saved backlog views (local file mode) — not sample data
 .specboard/local-views.json
-# Per-user board prefs + DB-native work items (local file mode)
+# Per-user board prefs + DB-native work items + hierarchy config (local file mode)
 .specboard/local-board-prefs.json
 .specboard/local-items.json
+.specboard/local-levels.json

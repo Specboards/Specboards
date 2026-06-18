@@ -105,3 +105,83 @@ export function isValidParentLevel(
   if (parentKey == null) return true;
   return parentLevelKey(childKey, levels) === parentKey;
 }
+
+/** One requested level in a config update; `key` names an existing level to keep. */
+export interface LevelUpdateEntry {
+  key?: string;
+  label: string;
+}
+
+/** The outcome of validating a level-config update against the current levels. */
+export interface ResolvedLevelUpdate {
+  /** The new, ordered levels (positions assigned, exactly one leaf). */
+  levels: WorkspaceLevel[];
+  /** Keys present before but absent after — rows to delete (must be unused). */
+  removedKeys: string[];
+}
+
+/** Derive a stable level key from a label, unique against `taken`. */
+function levelKeyFromLabel(label: string, taken: Set<string>): string {
+  const base =
+    label
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "") || "level";
+  let key = base;
+  let n = 2;
+  while (taken.has(key)) key = `${base}_${n++}`;
+  return key;
+}
+
+/**
+ * Validate a requested hierarchy update against the current levels, returning
+ * the resolved levels + the keys being removed. Throws on any invalid request.
+ * Rules: at least one level; unique keys and (case-insensitive) labels; an
+ * entry's `key`, when given, must name a current level; and the deepest entry
+ * must be the current leaf — the spec-backed bottom level can't move or be
+ * removed (existing leaf rows would dangle).
+ */
+export function resolveLevelUpdate(
+  current: readonly WorkspaceLevel[] | null | undefined,
+  updates: readonly LevelUpdateEntry[],
+): ResolvedLevelUpdate {
+  if (updates.length === 0) {
+    throw new Error("At least one level is required.");
+  }
+  const currentLevels = resolveLevels(current);
+  const currentKeys = new Set(currentLevels.map((l) => l.key));
+  const currentLeaf = leafLevel(currentLevels).key;
+
+  const seenKeys = new Set<string>();
+  const seenLabels = new Set<string>();
+  const levels: WorkspaceLevel[] = updates.map((u, i) => {
+    const label = u.label.trim();
+    if (!label) throw new Error("Each level needs a label.");
+    const labelLc = label.toLowerCase();
+    if (seenLabels.has(labelLc)) throw new Error(`Duplicate level label: ${label}`);
+    seenLabels.add(labelLc);
+
+    let key = u.key;
+    if (key) {
+      if (!currentKeys.has(key)) throw new Error(`Unknown level: ${key}`);
+      if (seenKeys.has(key)) throw new Error(`Duplicate level key: ${key}`);
+    } else {
+      key = levelKeyFromLabel(label, new Set([...seenKeys, ...currentKeys]));
+    }
+    seenKeys.add(key);
+    return { key, label, position: i, isLeaf: false };
+  });
+
+  const leaf = levels[levels.length - 1]!;
+  if (leaf.key !== currentLeaf) {
+    throw new Error(
+      "The bottom level holds your specs and can't be removed or moved.",
+    );
+  }
+  leaf.isLeaf = true;
+
+  const removedKeys = currentLevels
+    .map((l) => l.key)
+    .filter((k) => !seenKeys.has(k));
+  return { levels, removedKeys };
+}

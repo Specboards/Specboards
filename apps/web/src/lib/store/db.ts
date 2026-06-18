@@ -5,6 +5,7 @@ import {
   isLeafLevel,
   isValidParentLevel,
   resolveLevels,
+  resolveLevelUpdate,
   rollUpEstimates,
   type WorkspaceLevel,
 } from "@specboard/core";
@@ -30,9 +31,11 @@ import {
 
 import {
   FeatureError,
+  LevelError,
   RelationError,
   type BoardPreferences,
   type CreateFeatureInput,
+  type LevelUpdate,
   type CustomFieldValue,
   type FeatureDetail,
   type FeaturePatch,
@@ -451,6 +454,72 @@ export class DbStore implements FeatureStore {
 
   async listLevels(scope?: WorkspaceScope): Promise<WorkspaceLevel[]> {
     return this.scoped(scope, (tx) => this.levelsIn(tx, scope!.workspaceId));
+  }
+
+  async updateLevels(
+    updates: LevelUpdate[],
+    scope?: WorkspaceScope,
+  ): Promise<WorkspaceLevel[]> {
+    return this.scoped(scope, async (tx) => {
+      const ws = scope!.workspaceId;
+      const current = await this.levelsIn(tx, ws);
+
+      let resolved;
+      try {
+        resolved = resolveLevelUpdate(current, updates);
+      } catch (err) {
+        throw new LevelError(err instanceof Error ? err.message : "Invalid levels.");
+      }
+
+      // A level can only be removed once nothing references it (FK aside, the
+      // items would otherwise be stranded at an unknown level).
+      if (resolved.removedKeys.length > 0) {
+        const used = await tx
+          .select({ level: features.level })
+          .from(features)
+          .where(
+            and(
+              eq(features.workspaceId, ws),
+              inArray(features.level, resolved.removedKeys),
+            ),
+          )
+          .limit(1);
+        if (used[0]) {
+          throw new LevelError(
+            `Can't remove the "${used[0].level}" level while items still use it.`,
+          );
+        }
+        await tx
+          .delete(workspaceLevels)
+          .where(
+            and(
+              eq(workspaceLevels.workspaceId, ws),
+              inArray(workspaceLevels.key, resolved.removedKeys),
+            ),
+          );
+      }
+
+      for (const level of resolved.levels) {
+        await tx
+          .insert(workspaceLevels)
+          .values({
+            workspaceId: ws,
+            key: level.key,
+            label: level.label,
+            position: level.position,
+            isLeaf: level.isLeaf,
+          })
+          .onConflictDoUpdate({
+            target: [workspaceLevels.workspaceId, workspaceLevels.key],
+            set: {
+              label: level.label,
+              position: level.position,
+              isLeaf: level.isLeaf,
+            },
+          });
+      }
+      return resolved.levels;
+    });
   }
 
   async createFeature(

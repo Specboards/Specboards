@@ -56,14 +56,13 @@ The backlog below is the **gap** between that and what the four reference tools 
 
 ## Next steps
 
-**Phase 3 — configurable work-tracking hierarchy (planned, from user research).**
-Let teams choose their depth: **Initiative → Epic → Feature → Spec**, *or* just Spec.
-Higher levels are **DB-native, workspace-scoped, repo-agnostic** records (make
-`features.repo_id` nullable; add a `level` column + a workspace-level levels-config
-table edited via an in-app Settings UI); **Spec stays the git-backed leaf**. Reuses the
-existing `parent_id` chain, estimate roll-up, and the Phase 2 GitHub-link roll-up (already
-level-agnostic). Bigger structural change — to be **planned in detail and reviewed before
-building**.
+**Phase 3 — configurable work-tracking hierarchy (✅ shipped, from user research).**
+Teams choose their depth: **Initiative → Epic → Feature**, renamed/trimmed per
+workspace. Higher levels are **DB-native, workspace-scoped, repo-agnostic** records
+(`features.repo_id` nullable; a `level` column + a `workspace_levels` config table);
+the leaf stays the git-backed spec. Reuses the existing `parent_id` chain, estimate
+roll-up, and the Phase 2 GitHub-link roll-up (already level-agnostic). See the
+"post-research" section below for the as-built breakdown across PRs.
 
 **Table-stakes order** (next up first). #15, #16, #17, #18, and #20
 are done, so the remaining Tier 1 work:
@@ -112,6 +111,25 @@ Driven by user testing rather than the table-stakes milestone; shipped to **test
   Operational follow-up: existing GitHub App installations must update their event
   subscriptions (in GitHub App settings) to receive `pull_request`/`issues` deliveries — new
   installs get them automatically. Manual linking + cached-state-on-create work regardless.
+- **Phase 3a — left sidebar nav + Settings restructure + theme/profile** (PR #38) —
+  replaced the top bar with a left sidebar (Strategy/Research "soon", Work → Ideas/Board/
+  Roadmap, Settings); consolidated Backlog + Board under one "Board" nav entry with a view
+  toggle; moved repo/company/work-card/branding into `/settings/*`; added light/dark theme
+  (`next-themes`) and profile name/avatar/**timezone** (Better Auth `additionalFields`).
+  Migration `0010` (users `timezone`) applied to **test** and **prod**.
+- **Phase 3b — configurable hierarchy model, backend** (PR #39) — `workspace_levels`
+  table (RLS, seeded per workspace), `features.level` as a composite FK to it,
+  `repo_id` nullable for DB-native items; `@specboard/core` levels module (depth,
+  leaf, parent/child rules) + create/delete/list-levels on both stores and `/api/v1`.
+  Migration `0011` applied to **test** and **prod**.
+- **Phase 3c — level UX** (this PR) — **level switcher** (Initiative/Epic/Feature) on
+  Board + Roadmap (`?level=`, default leaf); **create/rename/delete** of DB-native
+  initiatives/epics from the board/roadmap header + feature detail (level-aware parent
+  pickers; spec-backed titles stay read-only); feature detail renders DB-native items
+  without spec content; **Settings → Hierarchy** editor to rename levels, add intermediate
+  levels, and trim depth (leaf pinned; a level can't be removed while items use it).
+  `resolveLevelUpdate` in core enforces the rules; `updateLevels` on both stores +
+  admin-gated `PUT /api/v1/levels`. **No migration** (UI/validation only over 3a/3b).
 
 **Build pattern to follow** (used for #15/#16/#20; keeps changes green and reviewable):
 `packages/db` schema + generated migration (add RLS for any new tenant table) →
