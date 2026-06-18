@@ -59,9 +59,12 @@ Next.js web app  ── apps/web           MCP server ── apps/mcp
   parser (`parseSpec`), status state machine (`canTransition`), `.specboard/config.yml`
   schema (`parseRepoConfig`). Unit-tested.
 - **`packages/db`** — Drizzle schema (`workspaces`, `members`, `repositories`,
-  `features` (with a self-referential `parent_id` for epic/sub-feature
-  hierarchy), `feature_links` (typed dependencies/relations between features),
-  `spec_index`, `comments`, `activity_log`, the deployment-global
+  `features` (with a self-referential `parent_id` for epic/sub-feature hierarchy
+  and a fractional `rank` for manual board ordering), `feature_links` (typed
+  dependencies/relations between features), `feature_github_links` (links a
+  feature to a GitHub PR/issue/branch with cached state), `spec_index`,
+  `comments`, `activity_log`, `saved_views` (per-user backlog filters),
+  `board_preferences` (per-user board card-field choices), the deployment-global
   `github_app` credential row, plus the Better Auth
   `users`/`sessions`/`accounts`/`verifications` tables) + Postgres client. RLS
   policies in `infra/migrations`.
@@ -80,8 +83,9 @@ Next.js web app  ── apps/web           MCP server ── apps/mcp
    (GitHub App *manifest* flow; credentials stored encrypted in `github_app`),
    installs it and picks repos, then connects one → scan `specs/**` per
    `.specboard/config.yml` → create `features` + `spec_index`, injecting missing `id`s.
-2. **Reconcile on push** — webhook → re-parse changed specs → update `spec_index`;
-   `blob_sha` detects drift/conflicts.
+2. **Reconcile on push** — `push` webhook → re-parse changed specs → update `spec_index`;
+   `blob_sha` detects drift/conflicts. The same webhook handles `pull_request`/`issues`
+   events to refresh the cached state of any `feature_github_links` (open → merged/closed).
 3. **Edit spec in UI** — save → `packages/git` writes a commit or opens a PR
    (`writeMode`) → webhook confirms → index updates.
 4. **Edit metadata in UI** — writes straight to DB (no git churn), real-time to boards.
@@ -138,6 +142,10 @@ file mode; full auth (Better Auth: email/password sign-up/in, email
 verification, password reset, account/company settings, optional consumer-domain
 blocking, session-gated writes); GitHub App sync (`packages/git`) — one-click
 in-app App setup (manifest flow), repo install + connect picker, push reconcile
-into `features`/`spec_index`, stable-id injection. Still stubbed: editing spec
-content from the UI (PR write-back), spec **deletion** handling. See
-`docs/PLAN.md` for the build plan and `docs/RUNBOOK-github-sync.md` for setup.
+into `features`/`spec_index`, stable-id injection. Interactive board:
+drag-and-drop status change + manual reorder, click-to-edit drawer, per-user
+customizable card fields. GitHub feature linking: attach a PR/issue/branch to a
+feature, rolled up to parents, with live state refresh via the webhook. Still
+stubbed: editing spec content from the UI (PR write-back), spec **deletion**
+handling. See `docs/PLAN.md` for the build plan, `docs/BACKLOG.md` for shipped
+work + the planned configurable hierarchy, and `docs/RUNBOOK-github-sync.md` for setup.

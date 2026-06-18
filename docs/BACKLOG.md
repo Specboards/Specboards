@@ -14,7 +14,9 @@ and tagged with a `tier-*` and `area:*` label.
 
 Backlog / Board / Roadmap (by quarter) views · 5-stage status workflow · assignee ·
 priority · manual rank · tags · custom fields · per-feature comments · activity log ·
-GitHub sync · MCP server for agents.
+drag-and-drop board (status + reorder) · in-context card editing · per-user
+customizable card fields · GitHub sync · GitHub PR/issue/branch links on features ·
+MCP server for agents.
 
 The backlog below is the **gap** between that and what the four reference tools treat as baseline.
 
@@ -54,7 +56,16 @@ The backlog below is the **gap** between that and what the four reference tools 
 
 ## Next steps
 
-**Recommended implementation order** (next up first). #15, #16, #17, #18, and #20
+**Phase 3 — configurable work-tracking hierarchy (planned, from user research).**
+Let teams choose their depth: **Initiative → Epic → Feature → Spec**, *or* just Spec.
+Higher levels are **DB-native, workspace-scoped, repo-agnostic** records (make
+`features.repo_id` nullable; add a `level` column + a workspace-level levels-config
+table edited via an in-app Settings UI); **Spec stays the git-backed leaf**. Reuses the
+existing `parent_id` chain, estimate roll-up, and the Phase 2 GitHub-link roll-up (already
+level-agnostic). Bigger structural change — to be **planned in detail and reviewed before
+building**.
+
+**Table-stakes order** (next up first). #15, #16, #17, #18, and #20
 are done, so the remaining Tier 1 work:
 
 1. **#19 @mentions + notification inbox** — last Tier 1 item; collaboration glue.
@@ -76,6 +87,31 @@ before starting each item.
 - **#18** — none outstanding. Possible follow-ups (not blocking): a Settings UI
   to edit statuses without hand-editing `config.yml`; make the roll-up "done"
   status configurable (it currently keys on the literal `done`).
+
+### Post-research UX & integration work (2026-06-18)
+
+Driven by user testing rather than the table-stakes milestone; shipped to **test + prod**.
+
+- **Phase 1 — Board UX overhaul** (PR #35) — drag-and-drop board via `@dnd-kit`:
+  cross-column drops change status (validated by the existing workflow state machine),
+  within-column drops persist a fractional `rank` (the previously-unused `features.rank`,
+  ordered with `fractional-indexing`). In-context editing: clicking a card opens a
+  Radix **Sheet** drawer reusing `FeatureMetaForm`; `sonner` toasts added. Per-user
+  **customizable card fields** + a "featured" custom field, stored in a new
+  `board_preferences` table (workspace+user, RLS); defaults reproduce the old board.
+  Migration `0008` applied to **test** and **prod**.
+- **Phase 2 — GitHub feature linking** (PR #36) — link a feature to a GitHub
+  **PR / issue / branch** (`feature_github_links` table, RLS; cached title/state/url).
+  Links are stored on the work-item (spec) and **rolled up to the feature/epic above**
+  for display (descendants shown as "inherited"); linkable at any level. `GitHubRepoClient`
+  gains `getPullRequest`/`getIssue`/`getBranch`; the webhook now handles `pull_request`/`issues`
+  events to refresh cached state (open → merged/closed), and the App manifest subscribes to
+  them (+`issues:read`). Editor in the detail sidebar + board drawer; optional "GitHub" card
+  field. The link row references an item id, so it's **hierarchy-ready for the planned levels
+  work** with no schema change. Migration `0009` applied to **test** and **prod**.
+  Operational follow-up: existing GitHub App installations must update their event
+  subscriptions (in GitHub App settings) to receive `pull_request`/`issues` deliveries — new
+  installs get them automatically. Manual linking + cached-state-on-create work regardless.
 
 **Build pattern to follow** (used for #15/#16/#20; keeps changes green and reviewable):
 `packages/db` schema + generated migration (add RLS for any new tenant table) →

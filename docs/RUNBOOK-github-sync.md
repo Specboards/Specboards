@@ -28,10 +28,18 @@ SpecBoard to GitHub" optionally enter your **GitHub organization** (e.g.
 `StudioPalouse`; leave blank for a personal account), then **Set up GitHub App**.
 
 SpecBoard sends you to GitHub with the App pre-defined (name, permissions —
-Contents R/W, Pull requests R/W, Metadata RO — webhook, Push event, and the
-post-install Setup URL). Review and **Create GitHub App**. GitHub redirects you
-back and SpecBoard stores the App's id, slug, private key, and webhook secret —
-**encrypted in the database**. No `.pem` download, no secrets to paste.
+Contents R/W, Pull requests R/W, Issues RO, Metadata RO — webhook, the **Push**,
+**Pull request**, and **Issues** events, and the post-install Setup URL). Review
+and **Create GitHub App**. GitHub redirects you back and SpecBoard stores the
+App's id, slug, private key, and webhook secret — **encrypted in the database**.
+No `.pem` download, no secrets to paste.
+
+> **Upgrading an App created before GitHub feature linking (migration `0009`):**
+> existing Apps were created subscribing to **Push only**. To get live PR/issue
+> state on linked features, open the App's settings on GitHub → **Permissions &
+> events**, add **Issues: Read-only**, and subscribe to the **Pull request** and
+> **Issues** events. Manual linking and cached state-on-create work without this;
+> only the automatic open→merged/closed refresh needs it.
 
 ## 2. Install it + connect repositories (one click)
 
@@ -71,8 +79,9 @@ credentials via env. Create the App by hand (GitHub → Settings → Developer
 settings → **New GitHub App**) with: Homepage = app host; **Setup URL** =
 `<host>/api/v1/github/setup` (tick *Redirect on update*); Webhook URL =
 `<host>/api/webhooks/github` + a generated secret; permissions Contents R/W,
-Pull requests R/W, Metadata RO; subscribe to **Push**. Generate a private key
-and note the App ID and slug. Then set the secrets:
+Pull requests R/W, Issues RO, Metadata RO; subscribe to **Push**, **Pull
+request**, and **Issues**. Generate a private key and note the App ID and slug.
+Then set the secrets:
 
 ```sh
 fly secrets set -a specboard-test \
