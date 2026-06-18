@@ -129,7 +129,7 @@ export function FeatureMetaForm({
       {candidates.length > 0 ? (
         <label className="block space-y-1.5">
           <span className="text-xs font-medium text-muted-foreground">
-            Parent (epic)
+            Parent
           </span>
           <Select
             name="parentSpecId"

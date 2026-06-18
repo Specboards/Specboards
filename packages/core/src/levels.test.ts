@@ -8,6 +8,7 @@ import {
   leafLevel,
   parentLevelKey,
   resolveLevels,
+  resolveLevelUpdate,
   type WorkspaceLevel,
 } from "./levels.js";
 
@@ -84,5 +85,64 @@ describe("DEFAULT_LEVELS", () => {
   it("has a single leaf", () => {
     expect(DEFAULT_LEVELS.filter((l) => l.isLeaf)).toHaveLength(1);
     expect(DEFAULT_LEVELS.at(-1)?.isLeaf).toBe(true);
+  });
+});
+
+describe("resolveLevelUpdate", () => {
+  it("renames labels while keeping keys and marking the leaf", () => {
+    const { levels, removedKeys } = resolveLevelUpdate(DEFAULT_LEVELS, [
+      { key: "initiative", label: "Bet" },
+      { key: "epic", label: "Epic" },
+      { key: "feature", label: "Story" },
+    ]);
+    expect(levels.map((l) => [l.key, l.label, l.position])).toEqual([
+      ["initiative", "Bet", 0],
+      ["epic", "Epic", 1],
+      ["feature", "Story", 2],
+    ]);
+    expect(levels.filter((l) => l.isLeaf).map((l) => l.key)).toEqual(["feature"]);
+    expect(removedKeys).toEqual([]);
+  });
+
+  it("removes a dropped non-leaf level", () => {
+    const { levels, removedKeys } = resolveLevelUpdate(DEFAULT_LEVELS, [
+      { key: "epic", label: "Epic" },
+      { key: "feature", label: "Feature" },
+    ]);
+    expect(levels.map((l) => l.key)).toEqual(["epic", "feature"]);
+    expect(removedKeys).toEqual(["initiative"]);
+  });
+
+  it("generates a stable key for an added level", () => {
+    const { levels } = resolveLevelUpdate(DEFAULT_LEVELS, [
+      { label: "Big Bet" },
+      { key: "initiative", label: "Initiative" },
+      { key: "epic", label: "Epic" },
+      { key: "feature", label: "Feature" },
+    ]);
+    expect(levels[0]).toMatchObject({ key: "big_bet", label: "Big Bet", position: 0 });
+  });
+
+  it("rejects moving or removing the spec-backed leaf", () => {
+    expect(() =>
+      resolveLevelUpdate(DEFAULT_LEVELS, [
+        { key: "initiative", label: "Initiative" },
+        { key: "feature", label: "Feature" },
+        { key: "epic", label: "Epic" },
+      ]),
+    ).toThrow(/bottom level/i);
+    expect(() =>
+      resolveLevelUpdate(DEFAULT_LEVELS, [{ key: "initiative", label: "Initiative" }]),
+    ).toThrow(/bottom level/i);
+  });
+
+  it("rejects duplicate labels and an empty list", () => {
+    expect(() =>
+      resolveLevelUpdate(DEFAULT_LEVELS, [
+        { key: "epic", label: "Same" },
+        { key: "feature", label: "same" },
+      ]),
+    ).toThrow(/duplicate/i);
+    expect(() => resolveLevelUpdate(DEFAULT_LEVELS, [])).toThrow(/at least one/i);
   });
 });

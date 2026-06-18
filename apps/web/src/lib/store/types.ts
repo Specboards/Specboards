@@ -161,6 +161,7 @@ export interface FeatureDetail extends FeatureRecord {
 export type FeaturePatch = Partial<
   Pick<
     FeatureRecord,
+    | "title"
     | "status"
     | "priority"
     | "estimate"
@@ -190,8 +191,21 @@ export interface CreateFeatureInput {
   tags?: string[];
 }
 
+/**
+ * One level in a hierarchy-config update, ordered top → leaf in the array.
+ * `key` names an existing level to keep (label may change); omit it for a
+ * newly-added level (the store generates a stable key from the label).
+ */
+export interface LevelUpdate {
+  key?: string;
+  label: string;
+}
+
 /** Raised when a work item can't be created/deleted (bad level, has a spec, …). */
 export class FeatureError extends Error {}
+
+/** Raised when a hierarchy-level config update is invalid or unsafe. */
+export class LevelError extends Error {}
 
 /**
  * Per-request tenant context. Carries the acting user and their workspace so
@@ -246,6 +260,15 @@ export interface FeatureStore {
   getFeature(specId: string, scope?: WorkspaceScope): Promise<FeatureDetail | null>;
   /** The workspace's hierarchy levels, ordered top → leaf. */
   listLevels(scope?: WorkspaceScope): Promise<WorkspaceLevel[]>;
+  /**
+   * Replace the workspace's hierarchy level configuration. The leaf (deepest)
+   * level key is fixed (spec-backed); a removed level must have no items.
+   * Returns the resolved, ordered levels after the update.
+   */
+  updateLevels(
+    levels: LevelUpdate[],
+    scope?: WorkspaceScope,
+  ): Promise<WorkspaceLevel[]>;
   /** Create a DB-native work item (initiative/epic). Returns the new record. */
   createFeature(
     input: CreateFeatureInput,

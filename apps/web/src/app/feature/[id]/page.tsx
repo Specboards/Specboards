@@ -8,7 +8,13 @@ import { FeatureGithubLinks } from "@/components/feature-github-links";
 import { FeatureMetaForm } from "@/components/feature-meta-form";
 import { FeatureRelations } from "@/components/feature-relations";
 import { StatusDot } from "@/components/status-dot";
-import { resolveEstimateConfig, resolveWorkflow } from "@specboard/core";
+import { WorkItemControls } from "@/components/work-item-controls";
+import {
+  childLevelKey,
+  parentLevelKey,
+  resolveEstimateConfig,
+  resolveWorkflow,
+} from "@specboard/core";
 
 import { getDb } from "@/lib/db";
 import { statusLabel } from "@/lib/feature-helpers";
@@ -49,12 +55,22 @@ export default async function FeaturePage({
     .filter((f) => f.specId !== feature.specId)
     .map((f) => ({ specId: f.specId, title: f.title }));
 
-  // Valid parents exclude this feature *and its descendants* — picking one
-  // would form a cycle (the server rejects these, but don't offer them).
+  // Hierarchy levels: label this item's level + scope the parent picker to the
+  // one level above (and exclude descendants, which would form a cycle).
+  const levels = await store.listLevels(access ?? undefined);
+  const levelLabel =
+    levels.find((l) => l.key === feature.level)?.label ?? feature.level;
+  const parentKey = parentLevelKey(feature.level, levels);
+  const childKey = childLevelKey(feature.level, levels);
+  const childLabel = levels.find((l) => l.key === childKey)?.label ?? null;
   const descendants = descendantSpecIds(feature.specId, allFeatures);
-  const parentCandidates = candidates.filter(
-    (c) => !descendants.has(c.specId),
-  );
+  const parentCandidates = parentKey
+    ? allFeatures
+        .filter(
+          (f) => f.level === parentKey && !descendants.has(f.specId),
+        )
+        .map((f) => ({ specId: f.specId, title: f.title }))
+    : [];
 
   return (
     <section className="grid gap-8 lg:grid-cols-[1fr_280px]">
@@ -66,16 +82,32 @@ export default async function FeaturePage({
           >
             ← Backlog
           </Link>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {feature.title}
-          </h1>
-          <p className="font-mono text-xs text-muted-foreground">
-            {feature.path}
-          </p>
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" className="text-[10px] uppercase tracking-wide">
+              {levelLabel}
+            </Badge>
+            <h1 className="text-2xl font-semibold tracking-tight">
+              {feature.title}
+            </h1>
+          </div>
+          {feature.path ? (
+            <p className="font-mono text-xs text-muted-foreground">
+              {feature.path}
+            </p>
+          ) : null}
         </div>
-        <div className="prose prose-sm prose-neutral max-w-none dark:prose-invert">
-          <ReactMarkdown>{feature.content}</ReactMarkdown>
-        </div>
+        {feature.isDbNative ? (
+          <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
+            {`This ${levelLabel.toLowerCase()} groups work — it has no spec of its own.`}
+            {childLabel
+              ? ` Add ${childLabel.toLowerCase()} items beneath it to build it out.`
+              : ""}
+          </div>
+        ) : (
+          <div className="prose prose-sm prose-neutral max-w-none dark:prose-invert">
+            <ReactMarkdown>{feature.content}</ReactMarkdown>
+          </div>
+        )}
       </article>
 
       <aside className="space-y-4 lg:border-l lg:pl-6">
@@ -156,9 +188,19 @@ export default async function FeaturePage({
             ))}
           </div>
           <p className="font-mono text-[10px] text-muted-foreground">
-            spec id: {feature.specId}
+            {feature.isDbNative ? "id" : "spec id"}: {feature.specId}
           </p>
         </div>
+        {feature.isDbNative && (!access || canWrite(access.role)) ? (
+          <>
+            <Separator />
+            <WorkItemControls
+              specId={feature.specId}
+              title={feature.title}
+              levelLabel={levelLabel}
+            />
+          </>
+        ) : null}
       </aside>
     </section>
   );

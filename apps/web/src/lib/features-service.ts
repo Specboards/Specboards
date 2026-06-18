@@ -1,4 +1,4 @@
-import { canTransition } from "@specboard/core";
+import { canTransition, isValidParentLevel } from "@specboard/core";
 
 import { resolveWorkflowFor } from "@/lib/repo-config";
 import {
@@ -15,6 +15,7 @@ import {
   type CreatableRelationDirection,
   type CreateFeatureInput,
   type FeatureRelation,
+  type LevelUpdate,
   type RelationInput,
 } from "@/lib/store/types";
 
@@ -39,6 +40,12 @@ export function parseFeaturePatch(body: unknown): FeaturePatch {
   const raw = body as Record<string, unknown>;
   const patch: FeaturePatch = {};
 
+  if ("title" in raw) {
+    if (typeof raw.title !== "string" || raw.title.trim() === "") {
+      throw new InvalidPatchError("title must be a non-empty string.");
+    }
+    patch.title = raw.title.trim();
+  }
   if ("status" in raw) {
     if (typeof raw.status !== "string" || raw.status === "") {
       throw new InvalidPatchError("status must be a non-empty string.");
@@ -100,7 +107,7 @@ export function parseFeaturePatch(body: unknown): FeaturePatch {
 
   if (Object.keys(patch).length === 0) {
     throw new InvalidPatchError(
-      "Patch must set at least one of: status, priority, estimate, rank, roadmapQuarter, tags, assigneeId, customFields, parentSpecId.",
+      "Patch must set at least one of: title, status, priority, estimate, rank, roadmapQuarter, tags, assigneeId, customFields, parentSpecId.",
     );
   }
   return patch;
@@ -146,6 +153,12 @@ export async function patchFeature(
   const feature = await store.getFeature(specId, scope);
   if (!feature) throw new FeatureNotFoundError(specId);
 
+  if (patch.title !== undefined && !feature.isDbNative) {
+    throw new InvalidPatchError(
+      "Spec-backed item titles come from the spec — edit the title in git.",
+    );
+  }
+
   if (patch.status !== undefined) {
     const workflow = await resolveWorkflowFor(scope ?? null);
     if (!canTransition(feature.status, patch.status, workflow)) {
@@ -157,6 +170,17 @@ export async function patchFeature(
 
   if (patch.parentSpecId) {
     await assertNoParentCycle(specId, patch.parentSpecId, scope);
+    // The parent must sit exactly one level above this item.
+    const parent = await store.getFeature(patch.parentSpecId, scope);
+    if (!parent) {
+      throw new InvalidPatchError(`Unknown parent feature: ${patch.parentSpecId}`);
+    }
+    const levels = await store.listLevels(scope);
+    if (!isValidParentLevel(feature.level, parent.level, levels)) {
+      throw new InvalidPatchError(
+        `A ${feature.level} can't sit under a ${parent.level}.`,
+      );
+    }
   }
 
   await store.updateFeature(specId, patch, scope);
@@ -269,6 +293,43 @@ export async function listLevels(
 ): Promise<WorkspaceLevel[]> {
   const store = await getStore();
   return store.listLevels(scope);
+}
+
+/** Parse and validate an untrusted hierarchy-config update body. */
+export function parseLevelsUpdate(body: unknown): LevelUpdate[] {
+  if (typeof body !== "object" || body === null) {
+    throw new InvalidPatchError("Request body must be a JSON object.");
+  }
+  const raw = (body as { levels?: unknown }).levels;
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new InvalidPatchError("levels must be a non-empty array.");
+  }
+  return raw.map((entry) => {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      throw new InvalidPatchError("Each level must be a JSON object.");
+    }
+    const e = entry as Record<string, unknown>;
+    if (typeof e.label !== "string" || e.label.trim() === "") {
+      throw new InvalidPatchError("Each level needs a non-empty label.");
+    }
+    const out: LevelUpdate = { label: e.label.trim() };
+    if (e.key !== undefined && e.key !== null && e.key !== "") {
+      if (typeof e.key !== "string") {
+        throw new InvalidPatchError("level.key must be a string.");
+      }
+      out.key = e.key;
+    }
+    return out;
+  });
+}
+
+/** Replace the workspace's hierarchy levels; returns the resolved levels. */
+export async function updateLevels(
+  levels: LevelUpdate[],
+  scope?: WorkspaceScope,
+): Promise<WorkspaceLevel[]> {
+  const store = await getStore();
+  return store.updateLevels(levels, scope);
 }
 
 /** Create a DB-native work item (initiative/epic). Validation lives in the store. */

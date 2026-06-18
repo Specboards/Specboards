@@ -1,9 +1,12 @@
-import { resolveEstimateConfig, resolveWorkflow } from "@specboard/core";
+import { parentLevelKey, resolveEstimateConfig, resolveWorkflow } from "@specboard/core";
 
 import { BoardClient } from "@/app/board/board-client";
 import { CardFieldsMenu } from "@/components/card-fields-menu";
 import { EmptyState } from "@/components/empty-state";
+import { LevelSwitcher } from "@/components/level-switcher";
+import { WorkItemCreate } from "@/components/work-item-create";
 import { WorkViewTabs } from "@/components/work-view-tabs";
+import { resolveActiveLevel } from "@/lib/active-level";
 import { getBoardPreferences } from "@/lib/board-preferences-service";
 import { cardFieldCatalog, resolveCardFields } from "@/lib/card-fields";
 import { getDb } from "@/lib/db";
@@ -15,7 +18,11 @@ import { canConnectRepos, requireWorkspaceAccess } from "@/lib/workspace-access"
 export const dynamic = "force-dynamic";
 
 /** Kanban board: drag cards to reorder / change status, click to edit inline. */
-export default async function BoardPage() {
+export default async function BoardPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const access = await requireWorkspaceAccess();
   const canEdit = !access || canWrite(access.role);
 
@@ -26,7 +33,20 @@ export default async function BoardPage() {
   const columns = workflow.statuses.filter((s) => s !== "archived");
 
   const store = await getStore();
-  const features = await store.listFeatures(access ?? undefined);
+  const allFeatures = await store.listFeatures(access ?? undefined);
+
+  // The board shows one hierarchy level at a time (default: the leaf/specs).
+  const levels = await store.listLevels(access ?? undefined);
+  const activeLevel = resolveActiveLevel(levels, (await searchParams).level);
+  const features = allFeatures.filter((f) => f.level === activeLevel.key);
+  const parentKey = parentLevelKey(activeLevel.key, levels);
+  const parents = parentKey
+    ? allFeatures
+        .filter((f) => f.level === parentKey)
+        .map((f) => ({ specId: f.specId, title: f.title }))
+    : [];
+  const parentLabel =
+    levels.find((l) => l.key === parentKey)?.label ?? null;
 
   const db = getDb();
   const members: WorkspaceMember[] =
@@ -42,22 +62,43 @@ export default async function BoardPage() {
 
   return (
     <section className="space-y-4">
-      <div className="flex items-center justify-between">
-        <WorkViewTabs />
-        {features.length > 0 && canEdit ? (
-          <CardFieldsMenu
-            catalog={catalog}
-            customFields={customFields.map((f) => ({ key: f.key, label: f.label }))}
-            selected={cardFields}
-            featured={featured}
-          />
-        ) : null}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <WorkViewTabs />
+          <LevelSwitcher levels={levels} active={activeLevel.key} />
+        </div>
+        <div className="flex items-center gap-2">
+          {canEdit && !activeLevel.isLeaf ? (
+            <WorkItemCreate
+              levelKey={activeLevel.key}
+              levelLabel={activeLevel.label}
+              parentLabel={parentLabel}
+              parents={parents}
+            />
+          ) : null}
+          {features.length > 0 && canEdit ? (
+            <CardFieldsMenu
+              catalog={catalog}
+              customFields={customFields.map((f) => ({ key: f.key, label: f.label }))}
+              selected={cardFields}
+              featured={featured}
+            />
+          ) : null}
+        </div>
       </div>
       {features.length === 0 ? (
-        <EmptyState canConnect={canConnectRepos(access)} />
+        activeLevel.isLeaf ? (
+          <EmptyState canConnect={canConnectRepos(access)} />
+        ) : (
+          <p className="py-8 text-center text-sm text-muted-foreground">
+            No {activeLevel.label.toLowerCase()} items yet.
+            {canEdit ? ` Use “New ${activeLevel.label.toLowerCase()}” to add one.` : ""}
+          </p>
+        )
       ) : (
         <BoardClient
           features={features}
+          parentCandidates={parents}
           columns={columns}
           workflow={workflow}
           canEdit={canEdit}

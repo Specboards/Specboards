@@ -8,15 +8,18 @@ import {
   leafLevel,
   parseSpec,
   resolveLevels,
+  resolveLevelUpdate,
   rollUpEstimates,
   type WorkspaceLevel,
 } from "@specboard/core";
 
 import {
   FeatureError,
+  LevelError,
   RelationError,
   type BoardPreferences,
   type CreateFeatureInput,
+  type LevelUpdate,
   type CustomFieldValue,
   type FeatureDetail,
   type FeaturePatch,
@@ -151,6 +154,30 @@ export class LocalFileStore implements FeatureStore {
     return path.join(this.root, ".specboard", "local-items.json");
   }
 
+  private get levelsPath() {
+    return path.join(this.root, ".specboard", "local-levels.json");
+  }
+
+  /** The configured hierarchy levels, or null when none are persisted. */
+  private async readLevels(): Promise<WorkspaceLevel[] | null> {
+    try {
+      return JSON.parse(
+        await fs.readFile(this.levelsPath, "utf8"),
+      ) as WorkspaceLevel[];
+    } catch {
+      return null;
+    }
+  }
+
+  private async writeLevels(levels: WorkspaceLevel[]): Promise<void> {
+    await fs.mkdir(path.dirname(this.levelsPath), { recursive: true });
+    await fs.writeFile(
+      this.levelsPath,
+      JSON.stringify(levels, null, 2) + "\n",
+      "utf8",
+    );
+  }
+
   /** DB-native work items (initiatives/epics) persisted alongside metadata. */
   private async readItems(): Promise<LocalItem[]> {
     try {
@@ -205,12 +232,13 @@ export class LocalFileStore implements FeatureStore {
   }
 
   private async loadAll(): Promise<FeatureDetail[]> {
-    const [files, meta, items] = await Promise.all([
+    const [files, meta, items, levels] = await Promise.all([
       this.walkSpecFiles(this.specsDir),
       this.readMetadata(),
       this.readItems(),
+      this.readLevels(),
     ]);
-    const leafKey = leafLevel().key;
+    const leafKey = leafLevel(levels).key;
     const features: FeatureDetail[] = [];
     for (const file of files) {
       const raw = await fs.readFile(file, "utf8");
@@ -369,6 +397,7 @@ export class LocalFileStore implements FeatureStore {
     const idx = items.findIndex((i) => i.id === specId);
     if (idx >= 0) {
       const it = items[idx]!;
+      if (patch.title !== undefined) it.title = patch.title;
       if (patch.status !== undefined) it.status = patch.status;
       if (patch.priority !== undefined) it.priority = patch.priority;
       if (patch.estimate !== undefined) it.estimate = patch.estimate;
@@ -385,8 +414,32 @@ export class LocalFileStore implements FeatureStore {
   }
 
   async listLevels(_scope?: WorkspaceScope): Promise<WorkspaceLevel[]> {
-    // Local file mode uses the default hierarchy (no per-workspace config).
-    return resolveLevels();
+    // Persisted config if present, else the default hierarchy.
+    return resolveLevels(await this.readLevels());
+  }
+
+  async updateLevels(
+    updates: LevelUpdate[],
+    _scope?: WorkspaceScope,
+  ): Promise<WorkspaceLevel[]> {
+    const current = resolveLevels(await this.readLevels());
+    let resolved;
+    try {
+      resolved = resolveLevelUpdate(current, updates);
+    } catch (err) {
+      throw new LevelError(err instanceof Error ? err.message : "Invalid levels.");
+    }
+    if (resolved.removedKeys.length > 0) {
+      const items = await this.readItems();
+      const used = items.find((i) => resolved.removedKeys.includes(i.level));
+      if (used) {
+        throw new LevelError(
+          `Can't remove the "${used.level}" level while items still use it.`,
+        );
+      }
+    }
+    await this.writeLevels(resolved.levels);
+    return resolved.levels;
   }
 
   async createFeature(

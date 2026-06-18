@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -48,6 +48,7 @@ const COL_PREFIX = "col:";
  */
 export function BoardClient({
   features,
+  parentCandidates,
   columns,
   workflow,
   canEdit,
@@ -60,6 +61,8 @@ export function BoardClient({
   estimate,
 }: {
   features: FeatureRecord[];
+  /** Items one level up — valid parents for the cards on this board. */
+  parentCandidates: { specId: string; title: string }[];
   columns: string[];
   workflow: StatusWorkflow;
   canEdit: boolean;
@@ -83,13 +86,6 @@ export function BoardClient({
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-  );
-
-  // Parent options for the edit drawer (specId + title), from current state.
-  const candidates = useMemo(
-    () =>
-      Object.values(records).map((r) => ({ specId: r.specId, title: r.title })),
-    [records],
   );
 
   function columnOf(id: string): string | undefined {
@@ -220,7 +216,7 @@ export function BoardClient({
         onClose={() => setEditingSpecId(null)}
         members={members}
         customFields={customFields}
-        candidates={candidates}
+        candidates={parentCandidates}
         estimate={estimate}
         workflow={workflow}
         canEdit={canEdit}

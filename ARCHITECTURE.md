@@ -57,24 +57,30 @@ Next.js web app  ── apps/web           MCP server ── apps/mcp
 
 - **`packages/core`** — framework-agnostic domain logic: spec frontmatter + markdown
   parser (`parseSpec`), status state machine (`canTransition`), `.specboard/config.yml`
-  schema (`parseRepoConfig`). Unit-tested.
+  schema (`parseRepoConfig`), and the configurable work-tracking **levels** model
+  (`resolveLevels`/`leafLevel`/`parentLevelKey`/`resolveLevelUpdate` — depth, the
+  spec-backed leaf, and parent/child level rules). Unit-tested.
 - **`packages/db`** — Drizzle schema (`workspaces`, `members`, `repositories`,
-  `features` (with a self-referential `parent_id` for epic/sub-feature hierarchy
-  and a fractional `rank` for manual board ordering), `feature_links` (typed
-  dependencies/relations between features), `feature_github_links` (links a
-  feature to a GitHub PR/issue/branch with cached state), `spec_index`,
-  `comments`, `activity_log`, `saved_views` (per-user backlog filters),
-  `board_preferences` (per-user board card-field choices), the deployment-global
-  `github_app` credential row, plus the Better Auth
+  `workspace_levels` (per-workspace hierarchy config — e.g. Initiative → Epic →
+  Feature), `features` (with a self-referential `parent_id` for the work hierarchy,
+  a `level` column composite-FK'd to `workspace_levels`, a nullable `repo_id` for
+  DB-native items above the leaf, and a fractional `rank` for manual board ordering),
+  `feature_links` (typed dependencies/relations between features),
+  `feature_github_links` (links a feature to a GitHub PR/issue/branch with cached
+  state), `spec_index`, `comments`, `activity_log`, `saved_views` (per-user backlog
+  filters), `board_preferences` (per-user board card-field choices), the
+  deployment-global `github_app` credential row, plus the Better Auth
   `users`/`sessions`/`accounts`/`verifications` tables) + Postgres client. RLS
   policies in `infra/migrations`.
 - **`packages/git`** — GitHub App client + reconciler (`reconcileSpecs`), webhook
   verification/affected-spec resolution, installation-repo listing (via `octokit`).
 - **`packages/ui`** — shared design tokens / components.
-- **`apps/web`** — Next.js App Router UI; in-app auth via Better Auth
-  (`/api/auth/*`: sign-up/in, email verification, password reset, account
-  settings); routes for Backlog, Board, Roadmap, Feature detail, and
-  Repositories (GitHub App setup + repo connect).
+- **`apps/web`** — Next.js App Router UI; left sidebar nav with light/dark theme;
+  in-app auth via Better Auth (`/api/auth/*`: sign-up/in, email verification,
+  password reset); routes for Board + Backlog (two views of one nav entry, with a
+  per-hierarchy-level switcher), Roadmap, Feature detail (renders DB-native items
+  without spec content), and `/settings/*` (Profile, Repositories, Company,
+  Hierarchy levels editor, …).
 - **`apps/mcp`** — MCP server exposing prioritized, status-aware specs to agents.
 
 ## Key flows
@@ -148,4 +154,4 @@ customizable card fields. GitHub feature linking: attach a PR/issue/branch to a
 feature, rolled up to parents, with live state refresh via the webhook. Still
 stubbed: editing spec content from the UI (PR write-back), spec **deletion**
 handling. See `docs/PLAN.md` for the build plan, `docs/BACKLOG.md` for shipped
-work + the planned configurable hierarchy, and `docs/RUNBOOK-github-sync.md` for setup.
+work (including the configurable hierarchy), and `docs/RUNBOOK-github-sync.md` for setup.
