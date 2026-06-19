@@ -11,11 +11,12 @@ export const dynamic = "force-dynamic";
 /**
  * Root redirect into the caller's active org. The bare `/` carries no org slug,
  * so we resolve the active workspace here and send the user to the all-products
- * board, `/{org}/all/board` (ADR 0001, D3/D5). File mode uses the local slug.
+ * backlog, `/{org}/all/backlog` (ADR 0001, D3/D5/D6). File mode uses the local
+ * slug.
  */
 export default async function HomePage() {
   const db = getDb();
-  if (!db) redirect(orgProductPath(LOCAL_ORG_SLUG, ALL_PRODUCTS, "/board"));
+  if (!db) redirect(orgProductPath(LOCAL_ORG_SLUG, ALL_PRODUCTS, "/backlog"));
 
   const user = await getServerSessionUser();
   if (!user) redirect("/sign-in");
@@ -24,5 +25,5 @@ export default async function HomePage() {
   if (!membership) redirect("/setup");
 
   const workspace = await getWorkspaceById(db, membership.workspaceId);
-  redirect(orgProductPath(workspace?.slug ?? LOCAL_ORG_SLUG, ALL_PRODUCTS, "/board"));
+  redirect(orgProductPath(workspace?.slug ?? LOCAL_ORG_SLUG, ALL_PRODUCTS, "/backlog"));
 }

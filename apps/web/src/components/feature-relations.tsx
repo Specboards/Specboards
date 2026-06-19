@@ -11,7 +11,7 @@ import {
 } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
-import { useOrgPath } from "@/lib/use-org";
+import { useOrgProductPath } from "@/lib/use-org";
 import {
   RELATION_DIRECTIONS,
   type CreatableRelationDirection,
@@ -52,7 +52,7 @@ export function FeatureRelations({
   canEdit?: boolean;
 }) {
   const router = useRouter();
-  const orgHref = useOrgPath();
+  const orgHref = useOrgProductPath();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -124,7 +124,7 @@ export function FeatureRelations({
                   className="flex items-center gap-1 text-sm"
                 >
                   <Link
-                    href={orgHref(`/feature/${r.otherSpecId}`)}
+                    href={orgHref(`/backlog/${r.otherSpecId}`)}
                     className="flex-1 truncate hover:underline"
                     title={r.otherTitle}
                   >

@@ -18,10 +18,12 @@ import { getStore } from "@/lib/store";
 import { canWrite, listWorkspaceMembers, type WorkspaceMember } from "@/lib/workspace";
 import { canConnectRepos, requireWorkspaceAccess } from "@/lib/workspace-access";
 
-export const dynamic = "force-dynamic";
-
-/** Kanban board: drag cards to reorder / change status, click to edit inline. */
-export default async function BoardPage({
+/**
+ * Board view of the backlog: a kanban where you drag cards to reorder / change
+ * status and click to edit inline. One of the two views under `/backlog`
+ * (`?view=board`, the default); the table is the `list` view. See ADR 0001 (D6).
+ */
+export async function BoardView({
   params,
   searchParams,
 }: {

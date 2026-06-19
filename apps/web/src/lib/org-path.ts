@@ -27,4 +27,4 @@ export const LOCAL_ORG_SLUG = "local";
  * literal segments (which take priority over `[product]`); the client product
  * hook uses the same set to know when there's no product in context.
  */
-export const ORG_SCOPED_SEGMENTS = new Set(["settings", "feature", "repositories"]);
+export const ORG_SCOPED_SEGMENTS = new Set(["settings", "repositories"]);

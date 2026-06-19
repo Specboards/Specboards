@@ -30,7 +30,7 @@ export function SetupForm() {
       setError(null);
       try {
         await createWorkspace(name, seedSampleData);
-        // Root resolves the just-created org and forwards to /{org}/board.
+        // Root resolves the just-created org and forwards to /{org}/all/backlog.
         router.push("/");
         router.refresh();
       } catch (err) {

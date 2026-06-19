@@ -54,7 +54,7 @@ export async function PUT(req: Request) {
 
   try {
     const levels = await updateLevels(parseLevelsUpdate(body), scope);
-    for (const path of ["/[org]/[product]/backlog", "/[org]/[product]/board", "/[org]/[product]/roadmap", "/[org]/settings/hierarchy"])
+    for (const path of ["/[org]/[product]/backlog", "/[org]/[product]/roadmap", "/[org]/settings/hierarchy"])
       revalidatePath(path, "page");
     return Response.json({ levels });
   } catch (err) {

@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/sheet";
 import { AuthRequiredError, getFeature } from "@/lib/api-client";
 import type { FeatureDetail } from "@/lib/store/types";
-import { useOrgPath } from "@/lib/use-org";
+import { useOrgProductPath } from "@/lib/use-org";
 import type { WorkspaceMember } from "@/lib/workspace";
 
 type FieldDef = RepoConfig["fields"][number];
@@ -50,7 +50,7 @@ export function FeatureEditSheet({
 }) {
   const [feature, setFeature] = useState<FeatureDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const orgHref = useOrgPath();
+  const orgHref = useOrgProductPath();
 
   useEffect(() => {
     if (!specId) {
@@ -85,7 +85,7 @@ export function FeatureEditSheet({
           <SheetTitle>{feature?.title ?? "Loading…"}</SheetTitle>
           {feature ? (
             <SheetDescription>
-              <Link href={orgHref(`/feature/${feature.specId}`)} className="hover:underline">
+              <Link href={orgHref(`/backlog/${feature.specId}`)} className="hover:underline">
                 Open full spec →
               </Link>
             </SheetDescription>

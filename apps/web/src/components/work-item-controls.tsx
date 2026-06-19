@@ -67,7 +67,7 @@ export function WorkItemControls({
       try {
         await deleteWorkItem(specId);
         toast.success(`${levelLabel} deleted`);
-        router.push(orgHref("/board"));
+        router.push(orgHref("/backlog"));
         router.refresh();
       } catch (err) {
         if (err instanceof AuthRequiredError) {

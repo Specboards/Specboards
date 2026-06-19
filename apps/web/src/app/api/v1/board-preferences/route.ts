@@ -35,7 +35,7 @@ export async function PUT(req: Request) {
       parseBoardPreferences(body),
       authz.scope ?? undefined,
     );
-    revalidatePath("/[org]/[product]/board", "page");
+    revalidatePath("/[org]/[product]/backlog", "page");
     return Response.json({ ok: true });
   } catch (err) {
     if (err instanceof InvalidBoardPreferencesError) {

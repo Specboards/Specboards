@@ -3,14 +3,15 @@
 import { useRouter } from "next/navigation";
 
 import { Select } from "@/components/ui/select";
-import { orgPath } from "@/lib/org-path";
+import { ALL_PRODUCTS } from "@/lib/active-product";
+import { orgProductPath } from "@/lib/org-path";
 import { useOrgSlug } from "@/lib/use-org";
 
 /**
  * Org switcher at the top of the sidebar. Hidden unless the user belongs to ≥2
  * orgs (the single-tenant / one-org case has nothing to switch). Selecting an
- * org navigates to its board; the product context resets with the org. See
- * ADR 0001 (D3).
+ * org navigates to its backlog; the product context resets to all products
+ * with the org. See ADR 0001 (D3).
  */
 export function OrgSwitcher({
   orgs,
@@ -26,7 +27,9 @@ export function OrgSwitcher({
     <Select
       aria-label="Switch organization"
       value={active}
-      onChange={(e) => router.push(orgPath(e.target.value, "/board"))}
+      onChange={(e) =>
+        router.push(orgProductPath(e.target.value, ALL_PRODUCTS, "/backlog"))
+      }
       className="h-8 text-sm"
     >
       {orgs.map((org) => (

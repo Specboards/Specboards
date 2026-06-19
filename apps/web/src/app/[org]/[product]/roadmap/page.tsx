@@ -16,7 +16,7 @@ import { StatusDot } from "@/components/status-dot";
 import { WorkItemCreate } from "@/components/work-item-create";
 import { resolveActiveLevel } from "@/lib/active-level";
 import { ALL_PRODUCTS, resolveActiveProduct } from "@/lib/active-product";
-import { LOCAL_ORG_SLUG, orgPath } from "@/lib/org-path";
+import { LOCAL_ORG_SLUG, orgProductPath } from "@/lib/org-path";
 import {
   priorityLabel,
   sortFeatures,
@@ -116,7 +116,7 @@ export default async function RoadmapPage({
                   <CardHeader className="space-y-1 p-3">
                     <CardTitle className="text-sm">
                       <Link
-                        href={orgPath(org, `/feature/${f.specId}`)}
+                        href={orgProductPath(org, productSlug, `/backlog/${f.specId}`)}
                         className="hover:underline"
                       >
                         {f.title}

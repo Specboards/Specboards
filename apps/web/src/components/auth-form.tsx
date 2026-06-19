@@ -53,7 +53,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
 
   // After auth, return to wherever the user was headed (set by the redirect
   // that bounced them here), defaulting to "/" — the root resolves the user's
-  // active org and forwards to /{org}/board. Sanitized so a crafted `?from=`
+  // active org and forwards to /{org}/all/backlog. Sanitized so a crafted `?from=`
   // can't turn the sign-in link into an open redirect.
   const redirectTo = safeRedirectPath(searchParams.get("from"));
 

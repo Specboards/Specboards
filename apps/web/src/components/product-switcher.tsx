@@ -11,7 +11,7 @@ import { useOrgSlug, useProductSlug } from "@/lib/use-org";
 /**
  * Product switcher in the sidebar. Drives the `/{org}/{product}/…` segment
  * (ADR 0001 D5): "All products" plus one option per product. Selecting one
- * keeps the current area (board / backlog / roadmap), defaulting to board.
+ * keeps the current area (backlog / roadmap), defaulting to backlog.
  * Hidden until there are ≥2 products (nothing to switch between).
  */
 export function ProductSwitcher({ products }: { products: ProductRecord[] }) {
@@ -22,9 +22,10 @@ export function ProductSwitcher({ products }: { products: ProductRecord[] }) {
 
   if (products.length < 2) return null;
 
-  // Preserve the area we're on when already inside a product; else land on board.
+  // Preserve the area we're on when already inside a product; else land on
+  // backlog.
   const segs = pathname.split("/");
-  const area = active !== ALL_PRODUCTS && segs[3] ? segs[3] : "board";
+  const area = active !== ALL_PRODUCTS && segs[3] ? segs[3] : "backlog";
 
   return (
     <Select

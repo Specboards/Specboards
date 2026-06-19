@@ -21,7 +21,7 @@ export default async function SetupPage() {
   if (!user) redirect("/sign-in?from=/setup");
 
   // If an org already exists, this user isn't the first — join it and leave.
-  // Root resolves their active org and forwards to /{org}/board.
+  // Root resolves their active org and forwards to /{org}/all/backlog.
   if (await getActiveWorkspace(db)) {
     await ensureMembership(db, user.id);
     redirect("/");

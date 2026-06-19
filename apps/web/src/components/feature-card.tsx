@@ -10,7 +10,7 @@ import { StatusSelect } from "@/components/status-select";
 import { CUSTOM_FIELD_PREFIX } from "@/lib/card-fields";
 import { priorityLabel } from "@/lib/feature-helpers";
 import type { CustomFieldValue, FeatureRecord } from "@/lib/store/types";
-import { useOrgPath } from "@/lib/use-org";
+import { useOrgProductPath } from "@/lib/use-org";
 
 /** Stop a pointer/click on an interactive control from starting a card drag. */
 function stop(e: React.PointerEvent | React.MouseEvent) {
@@ -48,7 +48,7 @@ export function FeatureCard({
   canEdit: boolean;
   onOpen: () => void;
 }) {
-  const orgHref = useOrgPath();
+  const orgHref = useOrgProductPath();
   const show = new Set(fields);
   const featuredKey = featured ? `${CUSTOM_FIELD_PREFIX}${featured}` : null;
 
@@ -77,7 +77,7 @@ export function FeatureCard({
         ) : null}
         <CardTitle className="text-sm">
           <Link
-            href={orgHref(`/feature/${feature.specId}`)}
+            href={orgHref(`/backlog/${feature.specId}`)}
             className="hover:underline"
             onPointerDown={stop}
             onClick={stop}

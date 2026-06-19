@@ -18,7 +18,7 @@ import { StatusDot } from "@/components/status-dot";
 import { StatusSelect } from "@/components/status-select";
 import { priorityLabel } from "@/lib/feature-helpers";
 import type { FeatureRecord } from "@/lib/store/types";
-import { useOrgPath } from "@/lib/use-org";
+import { useOrgProductPath } from "@/lib/use-org";
 
 export interface BacklogRow {
   feature: FeatureRecord;
@@ -43,7 +43,7 @@ export function BacklogTable({
   workflow?: StatusWorkflow;
 }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const orgHref = useOrgPath();
+  const orgHref = useOrgProductPath();
 
   // Hydrate persisted collapsed set after mount (avoids SSR/client mismatch).
   useEffect(() => {
@@ -114,7 +114,7 @@ export function BacklogTable({
                     <span className="text-muted-foreground">↳</span>
                   ) : null}
                   <Link
-                    href={orgHref(`/feature/${f.specId}`)}
+                    href={orgHref(`/backlog/${f.specId}`)}
                     className="font-medium hover:underline"
                   >
                     {f.title}

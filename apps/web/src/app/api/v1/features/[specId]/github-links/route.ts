@@ -53,8 +53,8 @@ export async function POST(req: Request, { params }: Params) {
       parseGithubLinkInput(body),
       authz.scope ?? undefined,
     );
-    for (const path of ["/[org]/[product]/backlog", "/[org]/[product]/board", "/[org]/[product]/roadmap"]) revalidatePath(path, "page");
-    revalidatePath("/[org]/feature/[id]", "page");
+    for (const path of ["/[org]/[product]/backlog", "/[org]/[product]/roadmap"]) revalidatePath(path, "page");
+    revalidatePath("/[org]/[product]/backlog/[specId]", "page");
     return Response.json({ githubLinks });
   } catch (err) {
     if (err instanceof FeatureNotFoundError) {

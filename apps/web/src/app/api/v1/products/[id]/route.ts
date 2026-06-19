@@ -40,7 +40,7 @@ export async function PATCH(req: Request, { params }: Params) {
       parseProductPatch(body),
       authz.scope ?? undefined,
     );
-    for (const path of ["/[org]/[product]/board", "/[org]/[product]/roadmap", "/[org]/settings/products"])
+    for (const path of ["/[org]/[product]/backlog", "/[org]/[product]/roadmap", "/[org]/settings/products"])
       revalidatePath(path, "page");
     return Response.json({ product });
   } catch (err) {
@@ -61,7 +61,7 @@ export async function DELETE(req: Request, { params }: Params) {
 
   try {
     await deleteProduct(id, authz.scope ?? undefined);
-    for (const path of ["/[org]/[product]/board", "/[org]/[product]/roadmap", "/[org]/settings/products"])
+    for (const path of ["/[org]/[product]/backlog", "/[org]/[product]/roadmap", "/[org]/settings/products"])
       revalidatePath(path, "page");
     return new Response(null, { status: 204 });
   } catch (err) {

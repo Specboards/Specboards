@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 
 import { Badge } from "@/components/ui/badge";
@@ -19,7 +19,7 @@ import {
 import { ALL_PRODUCTS } from "@/lib/active-product";
 import { getDb } from "@/lib/db";
 import { statusLabel } from "@/lib/feature-helpers";
-import { LOCAL_ORG_SLUG, orgPath, orgProductPath } from "@/lib/org-path";
+import { LOCAL_ORG_SLUG, orgProductPath } from "@/lib/org-path";
 import { resolveRepoConfig } from "@/lib/repo-config";
 import { getStore } from "@/lib/store";
 import { canWrite, listWorkspaceMembers, type WorkspaceMember } from "@/lib/workspace";
@@ -30,24 +30,35 @@ export const dynamic = "force-dynamic";
 /**
  * Feature detail: the spec markdown (canonical in git) beside the metadata
  * sidebar (status/priority/quarter/tags, persisted to the metadata store).
+ *
+ * The permalink is `/{org}/{product}/backlog/{specId}` — but the spec id is the
+ * canonical identity (ADR 0001 D4), so the product segment is just context. If
+ * it's stale (the feature has since moved products, or the link used a
+ * different product), we redirect to the feature's current product rather than
+ * 404 (ADR 0001 D5, "redirect-on-move"). A temporary redirect, not 301 — a
+ * feature can move products again, so the mapping must not be cached.
  */
 export default async function FeaturePage({
   params,
 }: {
-  params: Promise<{ id: string }>;
+  params: Promise<{ org: string; product: string; specId: string }>;
 }) {
   const access = await requireWorkspaceAccess();
   const org = access?.orgSlug ?? LOCAL_ORG_SLUG;
-  const { id } = await params;
+  const { product, specId } = await params;
   const store = await getStore();
-  const feature = await store.getFeature(id, access ?? undefined);
+  const feature = await store.getFeature(specId, access ?? undefined);
   if (!feature) notFound();
 
-  // The feature's product backs the "← Backlog" link (its product context).
+  // The feature's current product is its canonical context; redirect if the URL
+  // segment is stale. `all` is accepted as-is so the cross-product view's links
+  // don't bounce on every click.
   const products = await store.listProducts(access ?? undefined);
   const productSlug =
     products.find((p) => p.id === feature.productId)?.key ?? ALL_PRODUCTS;
-  const backlogHref = orgProductPath(org, productSlug, "/backlog");
+  if (product !== productSlug && product !== ALL_PRODUCTS)
+    redirect(orgProductPath(org, productSlug, `/backlog/${specId}`));
+  const backlogHref = orgProductPath(org, product, "/backlog");
 
   // Assignee options + custom-field definitions for the metadata form.
   const db = getDb();
@@ -145,7 +156,11 @@ export default async function FeaturePage({
                 <p className="text-sm">
                   <span className="text-muted-foreground">Parent: </span>
                   <Link
-                    href={orgPath(org, `/feature/${feature.parentSpecId}`)}
+                    href={orgProductPath(
+                      org,
+                      product,
+                      `/backlog/${feature.parentSpecId}`,
+                    )}
                     className="hover:underline"
                   >
                     {feature.parentTitle ?? feature.parentSpecId}
@@ -161,7 +176,7 @@ export default async function FeaturePage({
                     <div key={c.specId} className="flex items-center gap-2 text-sm">
                       <StatusDot status={c.status} />
                       <Link
-                        href={orgPath(org, `/feature/${c.specId}`)}
+                        href={orgProductPath(org, product, `/backlog/${c.specId}`)}
                         className="flex-1 truncate hover:underline"
                         title={c.title}
                       >
