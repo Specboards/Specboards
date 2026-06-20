@@ -1,7 +1,9 @@
 # Cloud deploy pipeline:
-#   - every push to main deploys to test (https://test.specboard.ai)
-#   - production (https://app.specboard.ai) deploys via manual dispatch
-#     once a build has been verified on test
+#   - every push to main deploys the app to test (https://test.specboard.ai)
+#   - a push to main that touches apps/marketing/** also deploys the marketing
+#     site (https://www.specboard.ai)
+#   - production (https://app.specboard.ai) deploys via manual dispatch, once a
+#     build has been verified on test
 name: Fly Deploy
 
 on:
@@ -15,16 +17,15 @@ on:
       environment:
         description: "Environment to deploy"
         type: choice
-        options: [test, production]
+        options: [test, production, marketing]
         required: true
-
-concurrency:
-  group: fly-deploy-${{ github.event.inputs.environment || 'test' }}
 
 jobs:
   deploy-test:
     if: github.event_name == 'push' || github.event.inputs.environment == 'test'
     runs-on: ubuntu-latest
+    concurrency:
+      group: fly-deploy-test
     steps:
       - uses: actions/checkout@v4
       - uses: superfly/flyctl-actions/setup-flyctl@master
@@ -35,9 +36,40 @@ jobs:
   deploy-production:
     if: github.event.inputs.environment == 'production'
     runs-on: ubuntu-latest
+    concurrency:
+      group: fly-deploy-production
     steps:
       - uses: actions/checkout@v4
       - uses: superfly/flyctl-actions/setup-flyctl@master
       - run: flyctl deploy --remote-only
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN_PROD }}
+
+  deploy-marketing:
+    # Manual dispatch (environment=marketing), or a push to main that changed
+    # the marketing app / its infra.
+    if: github.event_name == 'push' || github.event.inputs.environment == 'marketing'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: fly-deploy-marketing
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Detect marketing changes
+        id: filter
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" \
+            | grep -qE '^(apps/marketing/|infra/marketing\.Dockerfile|fly\.marketing\.toml)'; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+        if: steps.filter.outputs.changed == 'true'
+      - run: flyctl deploy -c fly.marketing.toml --remote-only
+        if: steps.filter.outputs.changed == 'true'
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN_MARKETING }}

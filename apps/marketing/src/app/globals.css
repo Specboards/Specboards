@@ -1,0 +1,23 @@
+@import "tailwindcss";
+
+/* Marketing site theme. Light, clean, Linear-inspired. Uses Tailwind v4's
+ * stock palette plus a single brand accent so the look stays easy to retune. */
+@theme {
+  --color-brand: #4f46e5; /* indigo-600 */
+  --color-brand-dark: #4338ca; /* indigo-700 */
+  --font-sans:
+    var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Roboto, Helvetica, Arial, sans-serif;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    /* Offset in-page anchor jumps so the sticky nav doesn't cover headings. */
+    scroll-padding-top: 5rem;
+  }
+  body {
+    @apply bg-white text-gray-900 antialiased;
+    font-family: var(--font-sans);
+  }
+}
