@@ -2,16 +2,23 @@ import { redirect } from "next/navigation";
 
 import { getServerSessionUser } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
+import { isMultiTenant } from "@/lib/tenancy";
 import { SetupForm } from "@/components/setup-form";
-import { ensureMembership, getActiveWorkspace } from "@/lib/workspace";
+import { ensureMembership, getActiveWorkspace, getMembership } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Set up · SpecBoard" };
 
 /**
- * Org onboarding. Only the first signed-in user (no workspace yet) sees the
- * form; anyone who already has — or can be auto-joined to — a workspace is
- * bounced to the board.
+ * Org onboarding.
+ *
+ * - **Multi-tenant:** anyone without an org sees the form to create their own;
+ *   a user who already belongs to one is bounced to it. (No auto-join — joining
+ *   another org is explicit.)
+ * - **Single-tenant:** only the very first user sets up; everyone after is
+ *   auto-joined to the one workspace and bounced out.
+ *
+ * Root (`/`) resolves the user's active org and forwards to /{org}/all/backlog.
  */
 export default async function SetupPage() {
   const db = getDb();
@@ -20,9 +27,9 @@ export default async function SetupPage() {
   const user = await getServerSessionUser();
   if (!user) redirect("/sign-in?from=/setup");
 
-  // If an org already exists, this user isn't the first — join it and leave.
-  // Root resolves their active org and forwards to /{org}/all/backlog.
-  if (await getActiveWorkspace(db)) {
+  if (isMultiTenant()) {
+    if (await getMembership(db, user.id)) redirect("/");
+  } else if (await getActiveWorkspace(db)) {
     await ensureMembership(db, user.id);
     redirect("/");
   }

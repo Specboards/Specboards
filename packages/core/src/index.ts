@@ -6,3 +6,4 @@ export * from "./levels.js";
 export * from "./products.js";
 export * from "./permissions.js";
 export * from "./email-domains.js";
+export * from "./org-slug.js";

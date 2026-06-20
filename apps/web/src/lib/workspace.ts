@@ -11,7 +11,12 @@ import {
 } from "@specboard/db";
 import { DEFAULT_LEVELS, DEFAULT_PRODUCT_KEY } from "@specboard/core";
 
-import { LOCAL_ORG_SLUG } from "@/lib/org-path";
+import {
+  isReservedOrgSlug,
+  LOCAL_ORG_SLUG,
+  ORG_SLUG_MAX,
+  slugifyOrg,
+} from "@/lib/org-path";
 import { isMultiTenant } from "@/lib/tenancy";
 
 export type Workspace = typeof workspaces.$inferSelect;
@@ -222,6 +227,10 @@ export async function ensureMembership(
   const existing = await getMembership(db, userId);
   if (existing) return existing;
 
+  // Multi-tenant: joining an org is explicit (create your own via /setup, or be
+  // invited) — never silently drop a new user into another tenant's workspace.
+  if (isMultiTenant()) return null;
+
   const workspace = await getActiveWorkspace(db);
   if (!workspace) return null;
 
@@ -243,6 +252,8 @@ export async function ensureMembership(
  *   `null` when the org is unknown or the caller isn't a member, so the caller
  *   can 404/redirect. This is the IDOR-safe path: the URL is only a hint, and
  *   authority comes from a validated membership.
+ * - **Multi-tenant, no slug** (the bare `/` root): resolve the caller's own
+ *   membership without auto-join — none means "send them to /setup".
  * - **Single-tenant (or no slug yet)**: the one workspace, auto-joined as
  *   viewer via {@link ensureMembership} — byte-for-byte the current behavior.
  */
@@ -251,10 +262,15 @@ export async function resolveActiveWorkspace(
   userId: string,
   opts: { orgSlug?: string | null } = {},
 ): Promise<Member | null> {
-  if (isMultiTenant() && opts.orgSlug) {
-    const workspace = await getWorkspaceBySlug(db, opts.orgSlug);
-    if (!workspace) return null;
-    return getMembershipFor(db, userId, workspace.id);
+  if (isMultiTenant()) {
+    if (opts.orgSlug) {
+      const workspace = await getWorkspaceBySlug(db, opts.orgSlug);
+      if (!workspace) return null;
+      return getMembershipFor(db, userId, workspace.id);
+    }
+    // Root with no org in the URL: the caller's existing membership, if any.
+    // (Multi-org switching is a later concern; today a user has one org.)
+    return getMembership(db, userId);
   }
   // Single-tenant: the one workspace, auto-joined. If the URL carries a slug it
   // must match — otherwise the URL is lying about which org you're in.
@@ -266,37 +282,59 @@ export async function resolveActiveWorkspace(
   return membership;
 }
 
-const SLUG_MAX = 48;
+/** Postgres unique-violation SQLSTATE — a slug lost an insert race. */
+const PG_UNIQUE_VIOLATION = "23505";
 
-function slugify(name: string): string {
-  const slug = name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, SLUG_MAX);
-  return slug || "workspace";
+function isUniqueViolation(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "code" in err &&
+    (err as { code?: unknown }).code === PG_UNIQUE_VIOLATION
+  );
 }
 
+/** Why a chosen org slug can't be used, so the setup form can react precisely. */
+export type WorkspaceSlugErrorCode = "slug_taken" | "slug_invalid";
+
 /**
- * First-user path: create the workspace and make `userId` its `admin`. If a
- * workspace already exists (e.g. a concurrent setup submit), no second org is
- * created — the user is joined to the existing one instead.
+ * A requested org slug is unavailable (already taken, reserved, or empty).
+ * Carries a free `suggestion` (when one exists) so the UI can offer it.
  */
-export async function createWorkspaceWithOwner(
+export class WorkspaceSlugError extends Error {
+  constructor(
+    readonly code: WorkspaceSlugErrorCode,
+    message: string,
+    readonly suggestion?: string,
+  ) {
+    super(message);
+    this.name = "WorkspaceSlugError";
+  }
+}
+
+/** True when `slug` is free to use (not reserved and not already a workspace). */
+async function isSlugAvailable(db: Database, slug: string): Promise<boolean> {
+  if (isReservedOrgSlug(slug)) return false;
+  return (await getWorkspaceBySlug(db, slug)) === null;
+}
+
+/** First free `${base}-N` (N≥2), or null if none found in a sane range. */
+async function suggestFreeSlug(db: Database, base: string): Promise<string | undefined> {
+  for (let n = 2; n <= 99; n++) {
+    const candidate = `${base}-${n}`.slice(0, ORG_SLUG_MAX).replace(/-+$/g, "");
+    if (await isSlugAvailable(db, candidate)) return candidate;
+  }
+  return undefined;
+}
+
+/** Insert the workspace + owner membership + default levels/product. */
+async function provisionWorkspace(
   db: Database,
   name: string,
+  slug: string,
   userId: string,
 ): Promise<Workspace> {
-  const existing = await getActiveWorkspace(db);
-  if (existing) {
-    await ensureMembership(db, userId);
-    return existing;
-  }
-
-  const [workspace] = await db
-    .insert(workspaces)
-    .values({ name, slug: slugify(name) })
-    .returning();
+  const [workspace] = await db.insert(workspaces).values({ name, slug }).returning();
   if (!workspace) throw new Error("Failed to create workspace.");
 
   await db
@@ -324,4 +362,67 @@ export async function createWorkspaceWithOwner(
   await ensureDefaultProduct(db, workspace.id);
 
   return workspace;
+}
+
+/**
+ * Create an organization and make `userId` its `admin`.
+ *
+ * - **Multi-tenant:** always creates a *new* org. The slug is derived from
+ *   `name` (or an explicit `opts.slug`); if it's empty, reserved, or already
+ *   taken we throw {@link WorkspaceSlugError} (with a free suggestion) rather
+ *   than silently appending a suffix, so the user can choose a different name.
+ * - **Single-tenant:** the N=1 path — if a workspace already exists (e.g. a
+ *   concurrent setup submit) no second org is created; the caller is joined to
+ *   the existing one instead. Byte-for-byte the historical behavior.
+ */
+export async function createWorkspaceWithOwner(
+  db: Database,
+  name: string,
+  userId: string,
+  opts: { slug?: string } = {},
+): Promise<Workspace> {
+  if (!isMultiTenant()) {
+    const existing = await getActiveWorkspace(db);
+    if (existing) {
+      await ensureMembership(db, userId);
+      return existing;
+    }
+    return provisionWorkspace(db, name, slugifyOrg(name) || "workspace", userId);
+  }
+
+  const slug = slugifyOrg(opts.slug ?? name);
+  if (!slug) {
+    throw new WorkspaceSlugError(
+      "slug_invalid",
+      "That name has no usable letters or numbers for a URL — try another.",
+    );
+  }
+  if (isReservedOrgSlug(slug)) {
+    throw new WorkspaceSlugError(
+      "slug_invalid",
+      `"${slug}" is reserved — pick a different name.`,
+      await suggestFreeSlug(db, slug),
+    );
+  }
+  if (!(await isSlugAvailable(db, slug))) {
+    throw new WorkspaceSlugError(
+      "slug_taken",
+      `The URL "${slug}" is already taken — pick a different name.`,
+      await suggestFreeSlug(db, slug),
+    );
+  }
+
+  try {
+    return await provisionWorkspace(db, name, slug, userId);
+  } catch (err) {
+    // Lost the race to a concurrent create with the same slug.
+    if (isUniqueViolation(err)) {
+      throw new WorkspaceSlugError(
+        "slug_taken",
+        `The URL "${slug}" was just taken — pick a different name.`,
+        await suggestFreeSlug(db, slug),
+      );
+    }
+    throw err;
+  }
 }

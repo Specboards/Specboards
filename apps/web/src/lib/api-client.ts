@@ -35,6 +35,22 @@ export class AuthRequiredError extends Error {
   }
 }
 
+/**
+ * Thrown when org creation is rejected because the chosen slug is taken or
+ * reserved. Carries the server's `code` and a free `suggestion` so the setup
+ * form can warn and offer an alternative slug.
+ */
+export class WorkspaceSlugTakenError extends Error {
+  constructor(
+    message: string,
+    readonly code: "slug_taken" | "slug_invalid",
+    readonly suggestion?: string,
+  ) {
+    super(message);
+    this.name = "WorkspaceSlugTakenError";
+  }
+}
+
 /** Load a feature's full detail (metadata + spec content) for in-context edit. */
 export async function getFeature(specId: string): Promise<FeatureDetail> {
   const res = await fetch(`/api/v1/features/${encodeURIComponent(specId)}`);
@@ -250,17 +266,30 @@ export async function deleteView(id: string): Promise<void> {
 export async function createWorkspace(
   name: string,
   seedSampleData: boolean,
+  slug?: string,
 ): Promise<{ slug: string }> {
   const res = await fetch("/api/v1/workspaces", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name, seedSampleData }),
+    body: JSON.stringify({ name, seedSampleData, slug }),
   });
   if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as
-    | { workspace?: { slug: string }; error?: string }
+    | {
+        workspace?: { slug: string };
+        error?: string;
+        code?: "slug_taken" | "slug_invalid";
+        suggestion?: string;
+      }
     | null;
   if (!res.ok || !body?.workspace) {
+    if (body?.code === "slug_taken" || body?.code === "slug_invalid") {
+      throw new WorkspaceSlugTakenError(
+        body.error ?? "That organization URL isn't available.",
+        body.code,
+        body.suggestion,
+      );
+    }
     throw new Error(body?.error ?? `Workspace creation failed with ${res.status}`);
   }
   return body.workspace;

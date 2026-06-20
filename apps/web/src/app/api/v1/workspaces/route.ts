@@ -1,7 +1,11 @@
 import { getSessionUser } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
 import { seedSampleData } from "@/lib/sample-data";
-import { createWorkspaceWithOwner, getMembership } from "@/lib/workspace";
+import {
+  createWorkspaceWithOwner,
+  getMembership,
+  WorkspaceSlugError,
+} from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
 
@@ -35,7 +39,11 @@ export async function POST(req: Request) {
     return Response.json({ error: "Request body must be JSON." }, { status: 400 });
   }
 
-  const rawBody = (body ?? {}) as { name?: unknown; seedSampleData?: unknown };
+  const rawBody = (body ?? {}) as {
+    name?: unknown;
+    slug?: unknown;
+    seedSampleData?: unknown;
+  };
   const name = typeof rawBody.name === "string" ? rawBody.name.trim() : "";
   if (!name || name.length > NAME_MAX) {
     return Response.json(
@@ -43,9 +51,23 @@ export async function POST(req: Request) {
       { status: 422 },
     );
   }
+  // An explicit slug is optional — the user only sets one to override the slug
+  // auto-derived from the name (e.g. after a collision warning).
+  const slug = typeof rawBody.slug === "string" ? rawBody.slug.trim() : undefined;
   const wantsSampleData = rawBody.seedSampleData === true;
 
-  const workspace = await createWorkspaceWithOwner(db, name, user.id);
+  let workspace;
+  try {
+    workspace = await createWorkspaceWithOwner(db, name, user.id, { slug });
+  } catch (err) {
+    if (err instanceof WorkspaceSlugError) {
+      return Response.json(
+        { error: err.message, code: err.code, suggestion: err.suggestion },
+        { status: err.code === "slug_taken" ? 409 : 422 },
+      );
+    }
+    throw err;
+  }
 
   // Only seed when this user actually created the org (became admin) — a
   // concurrent setup could have joined them to an existing one as a viewer.

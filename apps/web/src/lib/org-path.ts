@@ -32,6 +32,16 @@ export function itemPath(
   return orgProductPath(org, product, `/backlog/${item.level}/${item.specId}`);
 }
 
+// Org-slug helpers (slugifyOrg / RESERVED_ORG_SLUGS / isReservedOrgSlug /
+// ORG_SLUG_MAX) live in @specboard/core so they're unit-tested and shareable;
+// re-exported here since callers already import slug concerns from org-path.
+export {
+  ORG_SLUG_MAX,
+  RESERVED_ORG_SLUGS,
+  isReservedOrgSlug,
+  slugifyOrg,
+} from "@specboard/core";
+
 /** Slug used for the single, local org in auth-disabled file mode. */
 export const LOCAL_ORG_SLUG = "local";
 
