@@ -460,7 +460,7 @@ function ManualConnectForm() {
         <div className="grid grid-cols-2 gap-3">
           <label className="block space-y-1.5">
             <span className="text-xs font-medium text-muted-foreground">Owner</span>
-            <Input name="owner" placeholder="StudioPalouse" required />
+            <Input name="owner" placeholder="Specboards" required />
           </label>
           <label className="block space-y-1.5">
             <span className="text-xs font-medium text-muted-foreground">Repository</span>

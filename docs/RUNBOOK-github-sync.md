@@ -37,11 +37,13 @@ The rest of this runbook (steps 1–3) is the **self-host** one-click path.
 
 ## Hosted: one shared App
 
-For the hosted deployments (test, prod) you register **one** GitHub App that
-SpecBoard owns and provide its credentials via env. Tenants never create an App;
-they only install this one. Do this once per environment.
+For the hosted deployments (test, prod) you register **one** GitHub App per
+environment, owned by the `Specboards` org, and provide its credentials via env.
+Tenants never create an App; they only install this one. Each environment needs
+its own App because a GitHub App binds to a single host's webhook/callback URLs
+(test → `test.specboard.ai`, prod → `app.specboard.ai`).
 
-1. **Register the App** under the `@specboard` org: GitHub → org **Settings** →
+1. **Register the App** under the `Specboards` org: GitHub → org **Settings** →
    Developer settings → **New GitHub App**. Set Homepage = app host; Webhook URL
    = `<host>/api/webhooks/github` + a generated secret; **Setup URL** =
    `<host>/api/v1/github/setup` (tick *Redirect on update*); Callback URL =
@@ -72,13 +74,21 @@ they only install this one. Do this once per environment.
 > tenant's "create App" overwrite another's stored credentials. Always set the
 > flag on hosted.
 
+> **Stored creds override env.** `getStoredCredentials` (a row in the `github_app`
+> table) takes precedence over these env vars. If a deployment was ever set up
+> via the in-app create flow, that stored row keeps winning and your new env
+> secrets are ignored until you delete it:
+> `DELETE FROM github_app;` (singleton table). Any repos connected under the old
+> App also carry stale `github_installation_id`s and must be re-installed +
+> reconnected against the new App.
+
 ---
 
 ## 1. Create the GitHub App (one click) — self-host
 
 Sign in as a workspace **admin**, open **Repositories**, and under "Connect
 SpecBoard to GitHub" optionally enter your **GitHub organization** (e.g.
-`StudioPalouse`; leave blank for a personal account), then **Set up GitHub App**.
+`Specboards`; leave blank for a personal account), then **Set up GitHub App**.
 
 SpecBoard sends you to GitHub with the App pre-defined (name, permissions —
 Contents R/W, Pull requests R/W, Issues RO, Metadata RO — webhook, the **Push**,
@@ -158,7 +168,7 @@ Repositories can also be registered via the API instead of the picker:
 curl -X POST https://test.specboard.ai/api/v1/repositories \
   -H 'content-type: application/json' \
   -H 'cookie: better-auth.session_token=<your-session-token>' \
-  -d '{ "installationId": "<INSTALLATION_ID>", "owner": "StudioPalouse", "name": "SpecBoard" }'
+  -d '{ "installationId": "<INSTALLATION_ID>", "owner": "Specboards", "name": "SpecBoard" }'
 ```
 
 (or the **Advanced: connect by installation ID** form on the Repositories page).

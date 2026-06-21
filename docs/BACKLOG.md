@@ -7,7 +7,7 @@ Jira, Aha!, and Productboard** (2025–2026), filtered to what is genuinely *tab
 for SpecBoard rather than each tool's differentiators.
 
 Each item below is tracked as a GitHub issue under the
-[**PM table stakes** milestone](https://github.com/StudioPalouse/SpecBoard/milestone/1)
+[**PM table stakes** milestone](https://github.com/Specboards/SpecBoard/milestone/1)
 and tagged with a `tier-*` and `area:*` label.
 
 ## What SpecBoard already has
@@ -173,34 +173,34 @@ not auto-applied on deploy, so per cluster (test `z7y24od8vemrgqd1`, prod
 
 | # | Feature | Why it's core | Seen in |
 |---|---------|---------------|---------|
-| [#15](https://github.com/StudioPalouse/SpecBoard/issues/15) ✅ | **Spec hierarchy** — group features under epics/initiatives with roll-up progress | Flat lists don't scale; organizing specs is foundational | Linear sub-issues, Jira epics, Aha! master features, PB components |
-| [#16](https://github.com/StudioPalouse/SpecBoard/issues/16) ✅ | **Dependencies & relations** (blocks / blocked-by / relates-to) | Encodes the *sequence* agents must follow — the most use-case-critical gap | All four |
-| [#17](https://github.com/StudioPalouse/SpecBoard/issues/17) ✅ | **Filtering & saved custom views** | Navigating a growing backlog is impossible without it | All four (Jira JQL, Linear views) |
-| [#18](https://github.com/StudioPalouse/SpecBoard/issues/18) ✅ | **Customizable workflow statuses** per workspace | Fixed 5 statuses don't fit real definition/review processes | All four |
-| [#19](https://github.com/StudioPalouse/SpecBoard/issues/19) | **@mentions + notification inbox** | PM/UX/Eng collaboration breaks down without it | All four |
-| [#20](https://github.com/StudioPalouse/SpecBoard/issues/20) ✅ | **First-class estimate/effort field** with roll-up | Underpins capacity reasoning and prioritization | Linear/Jira points, Aha!/PB effort |
+| [#15](https://github.com/Specboards/SpecBoard/issues/15) ✅ | **Spec hierarchy** — group features under epics/initiatives with roll-up progress | Flat lists don't scale; organizing specs is foundational | Linear sub-issues, Jira epics, Aha! master features, PB components |
+| [#16](https://github.com/Specboards/SpecBoard/issues/16) ✅ | **Dependencies & relations** (blocks / blocked-by / relates-to) | Encodes the *sequence* agents must follow — the most use-case-critical gap | All four |
+| [#17](https://github.com/Specboards/SpecBoard/issues/17) ✅ | **Filtering & saved custom views** | Navigating a growing backlog is impossible without it | All four (Jira JQL, Linear views) |
+| [#18](https://github.com/Specboards/SpecBoard/issues/18) ✅ | **Customizable workflow statuses** per workspace | Fixed 5 statuses don't fit real definition/review processes | All four |
+| [#19](https://github.com/Specboards/SpecBoard/issues/19) | **@mentions + notification inbox** | PM/UX/Eng collaboration breaks down without it | All four |
+| [#20](https://github.com/Specboards/SpecBoard/issues/20) ✅ | **First-class estimate/effort field** with roll-up | Underpins capacity reasoning and prioritization | Linear/Jira points, Aha!/PB effort |
 
 ## Tier 2 — Strongly expected
 
 | # | Feature | Why | Seen in |
 |---|---------|-----|---------|
-| [#21](https://github.com/StudioPalouse/SpecBoard/issues/21) | **Prioritization scoring** (RICE / value-vs-effort) | Turns prioritization from opinion into a defensible ranking — the core PM job | Aha! scorecard, PB drivers |
-| [#22](https://github.com/StudioPalouse/SpecBoard/issues/22) | **Command palette (Cmd-K) + keyboard shortcuts** | Expected baseline UX for a daily-driver tool | Linear (signature) |
-| [#23](https://github.com/StudioPalouse/SpecBoard/issues/23) | **Milestones / releases** with target dates | Plan/communicate delivery beyond coarse quarters | Jira versions, Aha! releases, Linear milestones, PB now/next/later |
-| [#24](https://github.com/StudioPalouse/SpecBoard/issues/24) | **Bulk operations** | Backlog grooming is too slow one-at-a-time | Linear, Jira |
-| [#25](https://github.com/StudioPalouse/SpecBoard/issues/25) | **Due/target dates** on features | Baseline field; feeds the timeline view | All four |
-| [#26](https://github.com/StudioPalouse/SpecBoard/issues/26) | **Roadmap timeline / Gantt view** | Visualize sequencing over time | Linear timeline, Jira, Aha! Gantt |
+| [#21](https://github.com/Specboards/SpecBoard/issues/21) | **Prioritization scoring** (RICE / value-vs-effort) | Turns prioritization from opinion into a defensible ranking — the core PM job | Aha! scorecard, PB drivers |
+| [#22](https://github.com/Specboards/SpecBoard/issues/22) | **Command palette (Cmd-K) + keyboard shortcuts** | Expected baseline UX for a daily-driver tool | Linear (signature) |
+| [#23](https://github.com/Specboards/SpecBoard/issues/23) | **Milestones / releases** with target dates | Plan/communicate delivery beyond coarse quarters | Jira versions, Aha! releases, Linear milestones, PB now/next/later |
+| [#24](https://github.com/Specboards/SpecBoard/issues/24) | **Bulk operations** | Backlog grooming is too slow one-at-a-time | Linear, Jira |
+| [#25](https://github.com/Specboards/SpecBoard/issues/25) | **Due/target dates** on features | Baseline field; feeds the timeline view | All four |
+| [#26](https://github.com/Specboards/SpecBoard/issues/26) | **Roadmap timeline / Gantt view** | Visualize sequencing over time | Linear timeline, Jira, Aha! Gantt |
 
 ## Tier 3 — Differentiators / later
 
 | # | Feature | Why | Seen in |
 |---|---------|-----|---------|
-| [#27](https://github.com/StudioPalouse/SpecBoard/issues/27) | **Goals / initiatives / OKR linkage** | Strategy-to-execution traceability | Aha! (core), PB objectives, Linear initiatives |
-| [#28](https://github.com/StudioPalouse/SpecBoard/issues/28) | **Cycles / sprints / iterations** | Execution cadence + velocity tracking | Linear cycles, Jira sprints, Aha! Develop |
-| [#29](https://github.com/StudioPalouse/SpecBoard/issues/29) | **Idea & feedback capture + voting**, linked to specs | Demand evidence drives spec prioritization | PB insights, Aha! ideas (both signature) |
-| [#30](https://github.com/StudioPalouse/SpecBoard/issues/30) | **Reporting & analytics** (velocity, burndown, cycle time) | Understand delivery health | All four |
-| [#31](https://github.com/StudioPalouse/SpecBoard/issues/31) | **Slack integration** | Meet teams where they work | Linear, Jira, PB |
-| [#32](https://github.com/StudioPalouse/SpecBoard/issues/32) | **Public read-only roadmap / portal** | Share plans with customers/stakeholders | Aha!, PB, Linear |
+| [#27](https://github.com/Specboards/SpecBoard/issues/27) | **Goals / initiatives / OKR linkage** | Strategy-to-execution traceability | Aha! (core), PB objectives, Linear initiatives |
+| [#28](https://github.com/Specboards/SpecBoard/issues/28) | **Cycles / sprints / iterations** | Execution cadence + velocity tracking | Linear cycles, Jira sprints, Aha! Develop |
+| [#29](https://github.com/Specboards/SpecBoard/issues/29) | **Idea & feedback capture + voting**, linked to specs | Demand evidence drives spec prioritization | PB insights, Aha! ideas (both signature) |
+| [#30](https://github.com/Specboards/SpecBoard/issues/30) | **Reporting & analytics** (velocity, burndown, cycle time) | Understand delivery health | All four |
+| [#31](https://github.com/Specboards/SpecBoard/issues/31) | **Slack integration** | Meet teams where they work | Linear, Jira, PB |
+| [#32](https://github.com/Specboards/SpecBoard/issues/32) | **Public read-only roadmap / portal** | Share plans with customers/stakeholders | Aha!, PB, Linear |
 
 ---
 

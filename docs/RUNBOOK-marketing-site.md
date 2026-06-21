@@ -52,7 +52,7 @@ CTAs and links are baked at build time from env, with production defaults in
 `apps/marketing/src/lib/site.ts`:
 
 - `NEXT_PUBLIC_APP_URL` (default `https://app.specboard.ai`) — sign-in / sign-up.
-- `NEXT_PUBLIC_GITHUB_URL` (default `https://github.com/StudioPalouse/SpecBoard`).
+- `NEXT_PUBLIC_GITHUB_URL` (default `https://github.com/Specboards/SpecBoard`).
 
 To point a deploy elsewhere, pass them as build args / Fly build env.
 

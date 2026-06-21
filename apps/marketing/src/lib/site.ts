@@ -7,7 +7,7 @@
  */
 export const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://app.specboard.ai";
 export const GITHUB_URL =
-  process.env.NEXT_PUBLIC_GITHUB_URL ?? "https://github.com/StudioPalouse/SpecBoard";
+  process.env.NEXT_PUBLIC_GITHUB_URL ?? "https://github.com/Specboards/SpecBoard";
 
 export const SIGN_IN_URL = `${APP_URL}/sign-in`;
 export const SIGN_UP_URL = `${APP_URL}/sign-up`;

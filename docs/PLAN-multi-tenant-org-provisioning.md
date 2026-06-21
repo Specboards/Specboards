@@ -94,17 +94,29 @@ conveniences still force one org per deployment:
 1. Merge this + `feat/github-app-hosting-model` → auto-deploys test.
 2. Flip `SPECBOARD_MULTI_TENANT=true` on **test**; verify a second account
    creates its own org and `palouse` still resolves.
-3. In GitHub, set the test App `specboard-studiopalouse` to **Any account** so
-   other orgs can install it; verify the second org connects a repo.
-4. Prod: register the shared `SpecBoard` App as `@specboard` ("Any account"),
-   set its env secrets + `SPECBOARD_MULTI_TENANT=true` on `specboard`.
+3. In GitHub, register the hosted Apps under the `Specboards` org ("Any
+   account") — one per env, since an App binds to a single host's URLs.
+4. Set each App's env secrets (`GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY` /
+   `GITHUB_WEBHOOK_SECRET` / `NEXT_PUBLIC_GITHUB_APP_SLUG`) +
+   `SPECBOARD_MULTI_TENANT=true` on `specboard-test` and `specboard`.
 
-## Environment facts (captured 2026-06-20)
+## Environment facts (updated 2026-06-20)
 
-- test (`specboard-test`, db `z7y24od8vemrgqd1`): 1 workspace `palouse`, 1 member,
-  1 repo. Stored App `specboard-studiopalouse` (app_id 4052836, StudioPalouse,
-  `public:false`). Flag unset.
+The repo was transferred from the `StudioPalouse` org (id 80005306) to
+`Specboards` (id 295463913) — a different org, so the old App could not carry
+over. New hosted Apps were registered under `Specboards`:
+
+- **test** → App `specboards-test` (app_id 4105658), env on `specboard-test`.
+- **prod** → App `specboards` (app_id 4105632), env on `specboard`.
+
+- test (`specboard-test`, db `z7y24od8vemrgqd1`): 1 workspace `palouse`, 1 member.
+  The old stored App `specboard-studiopalouse` (app_id 4052836, StudioPalouse)
+  was deleted from `github_app` so env creds take over. The pre-existing repo row
+  (`StudioPalouse/SpecBoard`, installation 140279350) is stale — must be
+  re-installed/reconnected against `specboards-test` (and re-pointed at the new
+  `Specboards/SpecBoard` path). `SPECBOARD_MULTI_TENANT=true`.
 - prod (`specboard`, db `1zqyxr7d791rwp8m`): 1 workspace `nintex`, 1 member, 0
-  repos. No GitHub App, no GitHub env. Flag unset.
+  repos. No stored App row → uses env creds (`specboards` App) directly.
+  `SPECBOARD_MULTI_TENANT=true`.
 </content>
 </invoke>

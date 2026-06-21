@@ -19,7 +19,7 @@ export function SiteFooter() {
             className="mt-4 inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900"
           >
             <GithubIcon className="h-4 w-4" />
-            StudioPalouse/SpecBoard
+            Specboards/SpecBoard
           </a>
         </div>
 
