@@ -1,0 +1,20 @@
+{
+  "name": "@specboard/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Command-line interface for SpecBoard (manage specs, status, and GitHub links from the terminal).",
+  "bin": {
+    "specboard": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "dev": "tsc -b --watch",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2"
+  }
+}

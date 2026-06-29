@@ -1,11 +1,32 @@
 import { headers } from "next/headers";
 
+import { extractApiKey, verifyApiKeyUser } from "@/lib/api-keys";
 import { getAuth } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import type { WorkspaceScope } from "@/lib/store/types";
 import { canWrite, getMembership } from "@/lib/workspace";
 
 export type SessionUser = { id: string; email: string; name: string };
+
+/**
+ * Resolve the user behind an API request from either a CLI API key
+ * (`x-api-key` / `Authorization: Bearer sb_…`, checked first) or the browser
+ * session cookie. Returns `null` when neither identifies a user. Assumes auth
+ * is enabled (DB present); callers handle local file mode separately.
+ */
+async function resolveRequestUser(req: Request): Promise<SessionUser | null> {
+  const auth = getAuth();
+  const db = getDb();
+  if (!auth || !db) return null;
+
+  const rawKey = extractApiKey(req);
+  if (rawKey) return verifyApiKeyUser(db, rawKey);
+
+  const session = await auth.api.getSession({ headers: req.headers });
+  if (!session) return null;
+  const { id, email, name } = session.user;
+  return { id, email, name };
+}
 
 /**
  * Outcome of resolving the tenant scope for an API request. `scope` is `null`
@@ -34,10 +55,7 @@ export async function getServerSessionUser(): Promise<SessionUser | null> {
 export async function getSessionUser(req: Request): Promise<SessionUser | null> {
   const auth = getAuth();
   if (!auth) return null;
-  const session = await auth.api.getSession({ headers: req.headers });
-  if (!session) return null;
-  const { id, email, name } = session.user;
-  return { id, email, name };
+  return resolveRequestUser(req);
 }
 
 /**
@@ -55,15 +73,15 @@ async function resolveScope(
   const db = getDb();
   if (!auth || !db) return { ok: true, scope: null };
 
-  const session = await auth.api.getSession({ headers: req.headers });
-  if (!session) {
+  const user = await resolveRequestUser(req);
+  if (!user) {
     return {
       ok: false,
       response: Response.json({ error: "Authentication required." }, { status: 401 }),
     };
   }
 
-  const membership = await getMembership(db, session.user.id);
+  const membership = await getMembership(db, user.id);
   if (!membership) {
     return {
       ok: false,
@@ -85,7 +103,7 @@ async function resolveScope(
 
   return {
     ok: true,
-    scope: { userId: session.user.id, workspaceId: membership.workspaceId },
+    scope: { userId: user.id, workspaceId: membership.workspaceId },
   };
 }
 
@@ -108,14 +126,14 @@ export async function authorizeOrgAdmin(req: Request): Promise<ScopeResult> {
   const db = getDb();
   if (!auth || !db) return { ok: true, scope: null };
 
-  const session = await auth.api.getSession({ headers: req.headers });
-  if (!session) {
+  const user = await resolveRequestUser(req);
+  if (!user) {
     return {
       ok: false,
       response: Response.json({ error: "Authentication required." }, { status: 401 }),
     };
   }
-  const membership = await getMembership(db, session.user.id);
+  const membership = await getMembership(db, user.id);
   if (!membership) {
     return {
       ok: false,
@@ -136,6 +154,6 @@ export async function authorizeOrgAdmin(req: Request): Promise<ScopeResult> {
   }
   return {
     ok: true,
-    scope: { userId: session.user.id, workspaceId: membership.workspaceId },
+    scope: { userId: user.id, workspaceId: membership.workspaceId },
   };
 }

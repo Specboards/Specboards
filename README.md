@@ -25,6 +25,7 @@ Open-core: self-host the core for free, or use the hosted SaaS.
 apps/
   web/        Next.js App Router UI (Backlog · Board · Roadmap · Feature detail)
   mcp/        MCP server exposing specs + metadata to coding agents
+  cli/        `specboard` CLI over the /api/v1 surface (API-key auth)
 packages/
   core/       Spec parsing, status state machine, .specboard/config.yml schema
   db/         Drizzle schema + Postgres client (metadata + spec index)

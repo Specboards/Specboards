@@ -492,6 +492,31 @@ export const verifications = pgTable("verifications", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/**
+ * Personal API keys for programmatic access (the CLI). We only ever store the
+ * SHA-256 `keyHash`; the plaintext key is shown once at creation. `prefix` is
+ * the leading, non-secret slice kept for display ("sb_live_a1b2c3…"). Scoped to
+ * a user (the key acts as that user, inheriting their workspace membership and
+ * role), so no workspaceId and no RLS, mirroring the other auth tables.
+ */
+export const apiKeys = pgTable(
+  "api_keys",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    prefix: text("prefix").notNull(),
+    keyHash: text("key_hash").notNull().unique(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("api_keys_user_idx").on(table.userId)],
+);
+
 export const workspaceRelations = relations(workspaces, ({ many }) => ({
   members: many(members),
   repositories: many(repositories),
