@@ -9,7 +9,7 @@ This document explains where the line is.
 Everything in this repository is licensed under [Apache-2.0](./LICENSE) unless a
 file or directory carries a different, explicit notice. That includes:
 
-- The web app (`apps/web`) and marketing site (`apps/marketing`).
+- The web app (`apps/web`).
 - The shared packages (`packages/**`): core domain logic, the database layer,
   and the MCP server.
 - Self-hosting via `infra/docker-compose.yml`, with a single organization
@@ -46,11 +46,29 @@ Contributions are accepted under the Apache-2.0 license, per section 5 of the
 distributed under those terms. If a contribution touches a commercially licensed
 area, note that in your pull request so we can route it correctly.
 
-## Trademarks
+## Brand and trademarks: all rights reserved
 
-"SpecBoard" and the SpecBoard logo are trademarks of Studio Palouse. The
-Apache-2.0 license does not grant trademark rights; see section 6 of the
-[LICENSE](./LICENSE).
+The SpecBoard **software** is open source. The SpecBoard **brand** is not.
+
+"SpecBoard", the SpecBoard logos, the visual identity (colors, typography,
+look and feel), and the marketing content are proprietary to Studio Palouse and
+are **not** covered by the Apache-2.0 grant. The Apache-2.0 license explicitly
+does not grant trademark rights; see section 6 of the [LICENSE](./LICENSE).
+
+The public marketing site (`www.specboard.ai`) and the brand assets live in a
+separate repository ([Specboards/Website](https://github.com/Specboards/Website))
+under a proprietary license, not in this repository.
+
+What this means in practice:
+
+- You may run, modify, and self-host the open core, including commercially.
+- You may make nominative, factual references to SpecBoard (for example,
+  "integrates with SpecBoard") without implying endorsement or affiliation.
+- You may **not** use the SpecBoard name or logos to brand your own
+  distribution, fork, or service, or in a way that suggests it is the official
+  SpecBoard product, without written permission.
+
+To use the SpecBoard name or brand assets, email **contact@palouse.io**.
 
 ## Questions
 
