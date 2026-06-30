@@ -1,6 +1,6 @@
 {
   "name": "specboard",
-  "version": "0.1.0",
+  "version": "0.1.3",
   "private": true,
   "description": "Lightweight, spec-based product management layer over git-native specs. Open-core self-host + hosted SaaS.",
   "license": "Apache-2.0",

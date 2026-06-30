@@ -1,9 +1,17 @@
 #!/usr/bin/env node
+import { createRequire } from "node:module";
 import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
 
 import { ApiError, SpecboardClient, type Feature, type FeaturePatch } from "./client.js";
 import { clearFileConfig, loadFileConfig, resolveConfig, saveFileConfig } from "./config.js";
+
+// Read the version from package.json at runtime (bin lives at dist/index.js, so
+// the manifest is one level up) rather than hardcoding it, so `specboard
+// --version` always matches the released package without a second bump site.
+const { version: VERSION } = createRequire(import.meta.url)("../package.json") as {
+  version: string;
+};
 
 const HELP = `SpecBoard CLI
 
@@ -24,6 +32,9 @@ Work
   link <specId> (--pr <n> | --issue <n> | --branch <name>)
                                            Link a GitHub PR / issue / branch
   products                                 List products
+
+Other
+  version                                  Print the CLI version
 
 Statuses: backlog, defining, ready, in_progress, in_review, done, archived
 
@@ -248,6 +259,11 @@ async function main(): Promise<void> {
     case "--help":
     case "-h":
       process.stdout.write(HELP + "\n");
+      return;
+    case "version":
+    case "--version":
+    case "-v":
+      process.stdout.write(`specboard ${VERSION}\n`);
       return;
     case "auth": {
       const sub = rest[0];
