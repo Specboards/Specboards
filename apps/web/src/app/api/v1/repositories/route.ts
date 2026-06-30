@@ -29,6 +29,8 @@ interface RegisterBody {
   name: string;
   defaultBranch?: string;
   specGlobs?: string[];
+  /** Run the initial spec import after connecting. Defaults to true. */
+  sync: boolean;
 }
 
 /** Validate the untrusted registration body. */
@@ -51,7 +53,12 @@ function parseRegisterBody(body: unknown): RegisterBody | null {
     specGlobs = (raw.specGlobs as string[]).map((g) => g.trim()).filter(Boolean);
   }
 
-  return { installationId, owner, name, defaultBranch, specGlobs };
+  // Connecting defaults to importing immediately (re-sync, manual connect). The
+  // onboarding flow passes `sync: false` to register the repo and defer the
+  // import behind an explicit "create cards" confirmation.
+  const sync = raw.sync === false ? false : true;
+
+  return { installationId, owner, name, defaultBranch, specGlobs, sync };
 }
 
 /**
@@ -107,14 +114,17 @@ export async function POST(req: Request) {
     .returning();
   if (!repo) return Response.json({ error: "Failed to connect repository." }, { status: 500 });
 
-  // Kick an initial import. Don't fail the connection if it errors (e.g. the
-  // App isn't installed on the repo yet) — surface it so the UI can retry.
-  let sync: SyncSummary | { error: string };
-  try {
-    sync = await syncRepository(db, repo);
-  } catch (err) {
-    console.error(`[repositories] initial sync failed for ${repo.owner}/${repo.name}:`, err);
-    sync = { error: err instanceof Error ? err.message : "Initial sync failed." };
+  // Kick an initial import unless the caller deferred it (onboarding scan flow).
+  // Don't fail the connection if it errors (e.g. the App isn't installed on the
+  // repo yet) — surface it so the UI can retry.
+  let sync: SyncSummary | { error: string } | null = null;
+  if (parsed.sync) {
+    try {
+      sync = await syncRepository(db, repo);
+    } catch (err) {
+      console.error(`[repositories] initial sync failed for ${repo.owner}/${repo.name}:`, err);
+      sync = { error: err instanceof Error ? err.message : "Initial sync failed." };
+    }
   }
 
   return Response.json({ repository: repo, sync }, { status: 201 });

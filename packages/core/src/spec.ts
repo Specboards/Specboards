@@ -96,3 +96,45 @@ export function hasSpecId(raw: string): boolean {
   const { data } = matter(raw);
   return typeof data.id === "string" && data.id.length > 0;
 }
+
+/** A best-effort, non-throwing read of a spec file for previews. */
+export interface SpecPreview {
+  /** Frontmatter `title`, else the first markdown heading, else null. */
+  title: string | null;
+  /** Whether the file already has a stable `id` (false means import injects one). */
+  hasId: boolean;
+}
+
+/**
+ * Read a spec file for a preview (e.g. the onboarding import scan) without
+ * mutating it. Unlike {@link parseSpec} this never throws on missing or invalid
+ * frontmatter, so it can describe specs that have not been imported yet (and so
+ * carry no `id`/`title`). Returns the best title we can find and whether the
+ * file already has a stable id.
+ */
+export function previewSpec(raw: string): SpecPreview {
+  let data: Record<string, unknown> = {};
+  let body = raw;
+  try {
+    const parsed = matter(raw);
+    data = parsed.data as Record<string, unknown>;
+    body = parsed.content;
+  } catch {
+    // Malformed frontmatter: fall back to scanning the whole file for a heading.
+  }
+  const fmTitle =
+    typeof data.title === "string" && data.title.trim() ? data.title.trim() : null;
+  return {
+    title: fmTitle ?? firstHeading(body),
+    hasId: typeof data.id === "string" && data.id.length > 0,
+  };
+}
+
+/** The text of the first markdown heading (`#`..`######`) in `markdown`, or null. */
+function firstHeading(markdown: string): string | null {
+  for (const line of markdown.split("\n")) {
+    const match = /^#{1,6}\s+(.*)$/.exec(line.trim());
+    if (match && match[1]!.trim()) return match[1]!.trim();
+  }
+  return null;
+}

@@ -4,6 +4,7 @@ import {
   leafLevel,
   parentLevelKey,
   parseRepoConfigYaml,
+  previewSpec,
   safeParseRepoConfig,
   type RepoConfig,
 } from "@specboard/core";
@@ -109,6 +110,97 @@ export async function getWorkspaceRepoConfig(
     if (config) return config;
   }
   return null;
+}
+
+/** A spec file found in a repo during a read-only scan (no import performed). */
+export interface SpecScanItem {
+  /** Path to the spec file within the repo. */
+  path: string;
+  /** Best-effort display title (frontmatter title, first heading, or folder name). */
+  title: string;
+  /** Whether the spec already carries a stable id (false means import injects one). */
+  hasId: boolean;
+}
+
+/** The scan result for one connected repository. */
+export interface RepoScan {
+  repoId: string;
+  owner: string;
+  name: string;
+  specs: SpecScanItem[];
+  /** Set when the repo could not be scanned (e.g. the App lost access). */
+  error?: string;
+}
+
+/** A title for a spec when neither frontmatter nor a heading gives one: its folder name. */
+function titleFromPath(path: string): string {
+  const segments = path.split("/").filter(Boolean);
+  // Prefer the containing folder (specs/<feature>/spec.md -> "<feature>"), else the file name.
+  const raw = segments.length >= 2 ? segments[segments.length - 2]! : segments[segments.length - 1] ?? path;
+  const cleaned = raw.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " ").trim();
+  if (!cleaned) return path;
+  return cleaned.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/**
+ * Scan one connected repo for spec files WITHOUT importing them: list the files
+ * matching the repo's globs and read a best-effort title from each. Read-only,
+ * so it never injects ids or writes to git/DB. Powers the onboarding "found N
+ * specs, import them?" prompt before any cards are created.
+ */
+export async function scanRepositorySpecs(db: Database, repo: RepoRecord): Promise<SpecScanItem[]> {
+  const app = await getGithubApp(db);
+  if (!app) {
+    throw new Error("GitHub App is not configured. Set it up on the Repositories page.");
+  }
+  const client = await createGitHubRepoClient(app, {
+    installationId: repo.githubInstallationId,
+    owner: repo.owner,
+    name: repo.name,
+    ref: repo.defaultBranch,
+  });
+  // Read globs from git config when present, but do not persist anything here.
+  const config = await readRepoConfigFromGit(client);
+  const globs = config?.specGlobs ?? repoGlobs(repo);
+
+  const files = await client.listSpecFiles(globs);
+  return files.map((file) => {
+    const preview = previewSpec(file.raw);
+    return {
+      path: file.path,
+      title: preview.title ?? titleFromPath(file.path),
+      hasId: preview.hasId,
+    };
+  });
+}
+
+/**
+ * Scan every connected repo in a workspace for spec files (read-only). Per-repo
+ * failures are captured as `error` so one inaccessible repo doesn't sink the
+ * whole scan.
+ */
+export async function scanWorkspaceSpecs(db: Database, workspaceId: string): Promise<RepoScan[]> {
+  const repos = await db
+    .select()
+    .from(repositories)
+    .where(eq(repositories.workspaceId, workspaceId));
+
+  const scans: RepoScan[] = [];
+  for (const repo of repos) {
+    try {
+      const specs = await scanRepositorySpecs(db, repo);
+      scans.push({ repoId: repo.id, owner: repo.owner, name: repo.name, specs });
+    } catch (err) {
+      scans.push({
+        repoId: repo.id,
+        owner: repo.owner,
+        name: repo.name,
+        specs: [],
+        error: err instanceof Error ? err.message : "Scan failed.",
+      });
+    }
+  }
+  return scans;
 }
 
 /** Find a connected repository by owner + name (case-sensitive, as GitHub stores them). */
