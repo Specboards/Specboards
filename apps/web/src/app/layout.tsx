@@ -7,7 +7,13 @@ import { listSidebarOrgs, listSidebarProducts } from "@/lib/workspace-access";
 
 import "./globals.css";
 
+// Public origin of this deployment, so file-convention metadata (the OG image)
+// resolves to absolute URLs. BETTER_AUTH_URL is set wherever the app runs
+// hosted; unset (local file mode) Next falls back to localhost.
+const appOrigin = (process.env.APP_URL ?? process.env.BETTER_AUTH_URL)?.trim();
+
 export const metadata = {
+  metadataBase: appOrigin ? new URL(appOrigin) : undefined,
   title: "SpecBoard",
   description: "Spec-based product management over git-native specs.",
 };

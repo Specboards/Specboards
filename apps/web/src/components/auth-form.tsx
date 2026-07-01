@@ -114,6 +114,11 @@ export function AuthForm({ mode }: { mode: Mode }) {
   return (
     <Card className="mx-auto mt-16 w-full max-w-sm">
       <CardHeader>
+        <img
+          src="/brand/specboard-mark.png"
+          alt="SpecBoard"
+          className="mb-2 h-8 w-8"
+        />
         <CardTitle>{t.title}</CardTitle>
         <CardDescription>{t.description}</CardDescription>
       </CardHeader>

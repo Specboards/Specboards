@@ -91,8 +91,13 @@ export function AppSidebar({
       <div className="space-y-3 px-4 py-4">
         <Link
           href={orgHref("/")}
-          className="block text-sm font-semibold tracking-tight"
+          className="flex items-center gap-2 text-sm font-semibold tracking-tight"
         >
+          <img
+            src="/brand/specboard-mark.png"
+            alt=""
+            className="h-5 w-5"
+          />
           SpecBoard
         </Link>
         <OrgSwitcher orgs={orgs} />
