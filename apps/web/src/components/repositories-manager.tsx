@@ -14,10 +14,12 @@ import {
   scanWorkspaceSpecs,
   type CreatedSpecRepo,
   type ImportResult,
+  type InstallationConnectState,
   type InstallationRepo,
   type RepoScan,
   type StarterSpecResult,
   type SyncResult,
+  type WorkspaceInstallation,
 } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import {
@@ -41,13 +43,6 @@ export interface ConnectedRepo {
 
 export type SetupNotice = { kind: "ok" | "error"; message: string } | null;
 
-/** The admin's pending App installation, prefetched server-side by the page. */
-export interface PendingInstallationState {
-  installationId: string | null;
-  repositories: InstallationRepo[];
-  error: string | null;
-}
-
 interface RepositoriesManagerProps {
   repos: ConnectedRepo[];
   /** Whether the viewer (admin) may set up / connect / re-sync repositories. */
@@ -62,7 +57,12 @@ interface RepositoriesManagerProps {
   /** One-time banner from the setup/callback round-trip. */
   notice: SetupNotice;
   /** Server-prefetched connect-picker state, so it renders without a pop-in. */
-  pendingInstallation: PendingInstallationState;
+  installations: InstallationConnectState;
+}
+
+/** The workspace's organization installation to target for repo creation. */
+function orgInstallationOf(installations: WorkspaceInstallation[]): string | null {
+  return installations.find((i) => i.accountType === "Organization")?.installationId ?? null;
 }
 
 type Status = { kind: "ok" | "error"; message: string } | null;
@@ -82,7 +82,7 @@ export function RepositoriesManager({
   selfHosted,
   installUrl,
   notice,
-  pendingInstallation,
+  installations,
 }: RepositoriesManagerProps) {
   // Bumped after a repo is connected so the import panel re-scans for new specs.
   const [scanNonce, setScanNonce] = useState(0);
@@ -117,7 +117,7 @@ export function RepositoriesManager({
           scanNonce={scanNonce}
           repos={repos}
           installUrl={installUrl}
-          installationId={pendingInstallation.installationId}
+          orgInstallationId={orgInstallationOf(installations.installations)}
           onRepoCreated={bumpScan}
         />
       ) : null}
@@ -133,7 +133,7 @@ export function RepositoriesManager({
           installUrl={installUrl}
           connected={repos}
           onConnected={bumpScan}
-          initial={pendingInstallation}
+          initial={installations}
         />
       ) : selfHosted ? (
         <SetupGitHubCard />
@@ -155,14 +155,14 @@ function SpecImportPanel({
   scanNonce,
   repos,
   installUrl,
-  installationId,
+  orgInstallationId,
   onRepoCreated,
 }: {
   scanNonce: number;
   repos: ConnectedRepo[];
   installUrl: string | null;
-  /** Pending installation id, enabling the one-click spec-repo creation. */
-  installationId: string | null;
+  /** Organization installation id, enabling one-click spec-repo creation. */
+  orgInstallationId: string | null;
   /** Called when the nudge creates a repo, so the panel re-scans. */
   onRepoCreated: () => void;
 }) {
@@ -242,7 +242,7 @@ function SpecImportPanel({
             onRescan={() => void rescan()}
             loading={loading}
             installUrl={installUrl}
-            installationId={installationId}
+            orgInstallationId={orgInstallationId}
             onRepoCreated={onRepoCreated}
           />
         ) : (
@@ -367,7 +367,7 @@ function EmptySpecsState({
   onRescan,
   loading,
   installUrl,
-  installationId,
+  orgInstallationId,
   onRepoCreated,
 }: {
   repos: ConnectedRepo[];
@@ -375,7 +375,7 @@ function EmptySpecsState({
   onRescan: () => void;
   loading: boolean;
   installUrl: string | null;
-  installationId: string | null;
+  orgInstallationId: string | null;
   onRepoCreated: () => void;
 }) {
   const router = useRouter();
@@ -480,7 +480,7 @@ function EmptySpecsState({
       </form>
       <CreateSpecRepoNudge
         installUrl={installUrl}
-        installationId={installationId}
+        orgInstallationId={orgInstallationId}
         onCreated={onRepoCreated}
       />
     </div>
@@ -498,12 +498,12 @@ function EmptySpecsState({
  */
 function CreateSpecRepoNudge({
   installUrl,
-  installationId,
+  orgInstallationId,
   onCreated,
 }: {
   installUrl: string | null;
-  /** Pending installation id; null hides the one-click create form. */
-  installationId: string | null;
+  /** Organization installation to create in; null hides the one-click form. */
+  orgInstallationId: string | null;
   /** Called after a repo is created + connected, so parent panels refresh. */
   onCreated: () => void;
 }) {
@@ -517,8 +517,10 @@ function CreateSpecRepoNudge({
       </summary>
       <div className="mt-3 space-y-3 text-xs text-muted-foreground">
         <p>Keep your specs in their own repository, separate from application code.</p>
-        {installationId ? <CreateSpecRepoForm onCreated={onCreated} /> : null}
-        {installationId ? <p className="font-medium">Or do it yourself:</p> : null}
+        {orgInstallationId ? (
+          <CreateSpecRepoForm installationId={orgInstallationId} onCreated={onCreated} />
+        ) : null}
+        {orgInstallationId ? <p className="font-medium">Or do it yourself:</p> : null}
         <ol className="list-decimal space-y-1 pl-4">
           <li>
             <a href={newRepoUrl} target="_blank" rel="noreferrer" className="underline">
@@ -550,7 +552,13 @@ function CreateSpecRepoNudge({
  * (personal-account installation, missing Administration permission) surface
  * inline and the manual steps below stay available.
  */
-function CreateSpecRepoForm({ onCreated }: { onCreated: () => void }) {
+function CreateSpecRepoForm({
+  installationId,
+  onCreated,
+}: {
+  installationId: string;
+  onCreated: () => void;
+}) {
   const router = useRouter();
   const [name, setName] = useState("specs");
   const [pending, startTransition] = useTransition();
@@ -567,7 +575,7 @@ function CreateSpecRepoForm({ onCreated }: { onCreated: () => void }) {
     startTransition(async () => {
       setError(null);
       try {
-        const result = await createSpecRepository({ name: repoName });
+        const result = await createSpecRepository({ name: repoName, installationId });
         setCreated(result);
         router.refresh();
         onCreated();
@@ -817,20 +825,23 @@ function ConnectSection({
   /** Called after a repo is connected, so the import panel re-scans. */
   onConnected: () => void;
   /** Server-prefetched picker state, rendered with the initial HTML. */
-  initial: PendingInstallationState;
+  initial: InstallationConnectState;
 }) {
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(initial.error);
-  const [installationId, setInstallationId] = useState<string | null>(initial.installationId);
+  const [installations, setInstallations] = useState<WorkspaceInstallation[]>(
+    initial.installations,
+  );
   const [available, setAvailable] = useState<InstallationRepo[]>(initial.repositories);
 
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     try {
-      const { installationId, repositories } = await listInstallationRepositories();
-      setInstallationId(installationId);
-      setAvailable(repositories);
+      const state = await listInstallationRepositories();
+      setInstallations(state.installations);
+      setAvailable(state.repositories);
+      setLoadError(state.error);
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : "Couldn't load repositories.");
     } finally {
@@ -838,6 +849,7 @@ function ConnectSection({
     }
   }, []);
 
+  const hasInstallation = installations.length > 0;
   const connectedKeys = new Set(connected.map((r) => `${r.owner}/${r.name}`.toLowerCase()));
 
   return (
@@ -853,7 +865,7 @@ function ConnectSection({
         {installUrl ? (
           <a href={installUrl} className="inline-flex">
             <Button type="button">
-              {installationId ? "Add or manage repositories on GitHub" : "Connect GitHub"}
+              {hasInstallation ? "Add or manage repositories on GitHub" : "Connect GitHub"}
             </Button>
           </a>
         ) : (
@@ -868,26 +880,28 @@ function ConnectSection({
             <Skeleton className="h-9 w-full" />
             <Skeleton className="h-9 w-3/4" />
           </div>
-        ) : loadError ? (
-          <p className="text-xs text-destructive">{loadError}</p>
-        ) : installationId ? (
-          <RepoPicker
-            installationId={installationId}
-            repos={available}
-            connectedKeys={connectedKeys}
-            onConnected={() => {
-              void load();
-              onConnected();
-            }}
-          />
-        ) : null}
+        ) : (
+          <>
+            {loadError ? <p className="text-xs text-destructive">{loadError}</p> : null}
+            {hasInstallation ? (
+              <RepoPicker
+                repos={available}
+                connectedKeys={connectedKeys}
+                onConnected={() => {
+                  void load();
+                  onConnected();
+                }}
+              />
+            ) : null}
+          </>
+        )}
 
         <ManualConnectForm />
 
         {connected.length === 0 ? (
           <CreateSpecRepoNudge
             installUrl={installUrl}
-            installationId={installationId}
+            orgInstallationId={orgInstallationOf(installations)}
             onCreated={() => {
               void load();
               onConnected();
@@ -900,12 +914,10 @@ function ConnectSection({
 }
 
 function RepoPicker({
-  installationId,
   repos,
   connectedKeys,
   onConnected,
 }: {
-  installationId: string;
   repos: InstallationRepo[];
   connectedKeys: Set<string>;
   onConnected: () => void;
@@ -924,7 +936,6 @@ function RepoPicker({
         {repos.map((repo) => (
           <PickerRow
             key={`${repo.owner}/${repo.name}`}
-            installationId={installationId}
             repo={repo}
             alreadyConnected={connectedKeys.has(`${repo.owner}/${repo.name}`.toLowerCase())}
             onConnected={onConnected}
@@ -936,12 +947,10 @@ function RepoPicker({
 }
 
 function PickerRow({
-  installationId,
   repo,
   alreadyConnected,
   onConnected,
 }: {
-  installationId: string;
   repo: InstallationRepo;
   alreadyConnected: boolean;
   onConnected: () => void;
@@ -957,7 +966,7 @@ function PickerRow({
         // Register the repo but defer importing specs; the "Import your specs"
         // panel scans and asks for confirmation before creating cards.
         await connectRepository({
-          installationId,
+          installationId: repo.installationId,
           owner: repo.owner,
           name: repo.name,
           defaultBranch: repo.defaultBranch,

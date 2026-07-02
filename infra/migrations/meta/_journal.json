@@ -134,6 +134,13 @@
       "when": 1782751298753,
       "tag": "0018_brief_meltdown",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1783009260383,
+      "tag": "0019_material_mandroid",
+      "breakpoints": true
     }
   ]
 }

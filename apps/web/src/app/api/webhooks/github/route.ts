@@ -6,7 +6,7 @@ import {
   verifyWebhookSignature,
   type GithubEntityEvent,
 } from "@specboard/git";
-import { and, eq, featureGithubLinks, type Database } from "@specboard/db";
+import { and, eq, featureGithubLinks, githubInstallations, type Database } from "@specboard/db";
 
 import { getDb } from "@/lib/db";
 import { getWebhookSecret } from "@/lib/github-app";
@@ -72,7 +72,12 @@ export async function POST(req: Request) {
 
   const event = req.headers.get("x-github-event");
   if (event === "ping") return Response.json({ ok: true });
-  if (event !== "push" && event !== "pull_request" && event !== "issues") {
+  if (
+    event !== "push" &&
+    event !== "pull_request" &&
+    event !== "issues" &&
+    event !== "installation"
+  ) {
     return Response.json({ ignored: event ?? "unknown" }, { status: 202 });
   }
 
@@ -81,6 +86,23 @@ export async function POST(req: Request) {
     payload = JSON.parse(raw);
   } catch {
     return Response.json({ error: "Malformed JSON body." }, { status: 400 });
+  }
+
+  // installation: drop workspace bindings when the App is uninstalled, so the
+  // connect picker stops offering an installation that can no longer mint
+  // tokens. (GitHub always delivers installation events to Apps, independent
+  // of the subscribed events.)
+  if (event === "installation") {
+    const evt = payload as { action?: string; installation?: { id?: number } } | null;
+    const installationId = evt?.installation?.id;
+    if (evt?.action === "deleted" && typeof installationId === "number") {
+      const removed = await db
+        .delete(githubInstallations)
+        .where(eq(githubInstallations.installationId, String(installationId)))
+        .returning({ id: githubInstallations.id });
+      return Response.json({ ok: true, removed: removed.length });
+    }
+    return Response.json({ ignored: `installation ${evt?.action ?? "unknown"}` }, { status: 202 });
   }
 
   // pull_request / issues: refresh cached link state (open → merged/closed).

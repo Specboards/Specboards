@@ -436,36 +436,48 @@ export async function disconnectRepository(id: string): Promise<void> {
   }
 }
 
-/** A repository the pending GitHub App installation can access. */
+/** A repo a workspace installation can access, tagged with its installation. */
 export interface InstallationRepo {
   owner: string;
   name: string;
   defaultBranch: string;
   private: boolean;
+  installationId: string;
+}
+
+/** A GitHub App installation bound to the workspace. */
+export interface WorkspaceInstallation {
+  installationId: string;
+  accountLogin: string;
+  accountType: string;
+}
+
+/** The workspace's installations and every repo they can access. */
+export interface InstallationConnectState {
+  installations: WorkspaceInstallation[];
+  repositories: InstallationRepo[];
+  /** Set when some repo lists couldn't be loaded (partial data is possible). */
+  error: string | null;
 }
 
 /**
- * The repos available to connect from the admin's pending GitHub App
- * installation (captured by the setup callback). `installationId` is null when
- * there's no pending installation — show the "Connect GitHub" button instead.
+ * The workspace's GitHub App installations (persisted by the setup callback)
+ * and the repos available to connect from each. Empty `installations` means
+ * GitHub hasn't been connected yet: show the "Connect GitHub" button.
  */
-export async function listInstallationRepositories(): Promise<{
-  installationId: string | null;
-  repositories: InstallationRepo[];
-}> {
+export async function listInstallationRepositories(): Promise<InstallationConnectState> {
   const res = await fetch("/api/v1/github/installations/repositories");
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as {
-    installationId?: string | null;
-    repositories?: InstallationRepo[];
+  const body = (await res.json().catch(() => null)) as Partial<InstallationConnectState> & {
     error?: string;
   } | null;
   if (!res.ok) {
     throw new Error(body?.error ?? `Failed to load repositories (${res.status}).`);
   }
   return {
-    installationId: body?.installationId ?? null,
+    installations: body?.installations ?? [],
     repositories: body?.repositories ?? [],
+    error: body?.error ?? null,
   };
 }
 
@@ -479,11 +491,14 @@ export interface CreatedSpecRepo {
 }
 
 /**
- * Create a private repo in the pending installation's GitHub organization and
- * connect it to the workspace, for the "dedicated spec repo" onboarding path.
- * Admin-only; requires a pending installation (the signed install cookie).
+ * Create a private repo in a workspace organization installation and connect
+ * it, for the "dedicated spec repo" onboarding path. Admin-only; the target
+ * installation must be bound to the workspace (see `github_installations`).
  */
-export async function createSpecRepository(input: { name: string }): Promise<CreatedSpecRepo> {
+export async function createSpecRepository(input: {
+  name: string;
+  installationId: string;
+}): Promise<CreatedSpecRepo> {
   const res = await fetch("/api/v1/github/installations/repositories", {
     method: "POST",
     headers: { "content-type": "application/json" },

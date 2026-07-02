@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes } from "node:crypto";
 
 /**
  * GitHub App installation flow helpers.
@@ -9,14 +9,11 @@ import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
  * copy ids by hand.
  *
  * Because the callback only carries the `installation_id` (which is guessable),
- * the callback issues a short-lived signed cookie binding that installation to
- * the signed-in admin. The "list repos for this installation" endpoint trusts
- * the cookie, not a client-supplied id — so one workspace's admin can't probe
- * another installation's repositories.
+ * the callback verifies it against GitHub and persists the binding in
+ * `github_installations`, keyed to the admin's workspace. The repo-listing and
+ * connect endpoints trust that table, never a client-supplied id, so one
+ * workspace's admin can't probe another installation's repositories.
  */
-
-/** Cookie holding the signed, pending installation id after the App callback. */
-export const INSTALL_COOKIE = "sb_gh_install";
 
 /** Cookie holding the CSRF nonce for the App-creation (manifest) round-trip. */
 export const APP_SETUP_COOKIE = "sb_gh_app_setup";
@@ -57,9 +54,6 @@ export function appOriginFromRequest(req: Request): string {
   return `${proto}://${host}`;
 }
 
-/** How long a pending installation stays connectable before re-installing. */
-export const INSTALL_COOKIE_MAX_AGE = 60 * 15; // 15 minutes
-
 /** The App slug, e.g. `specboard-test`, used to build the install URL. */
 export function githubAppSlug(): string | null {
   return process.env.NEXT_PUBLIC_GITHUB_APP_SLUG?.trim() || null;
@@ -75,42 +69,3 @@ export function githubAppInstallUrl(): string | null {
   return installUrlFromSlug(githubAppSlug());
 }
 
-function secret(): string {
-  const value = process.env.BETTER_AUTH_SECRET;
-  if (!value) throw new Error("BETTER_AUTH_SECRET is not set.");
-  // Keep in step with crypto.ts: the same secret keys this HMAC and the at-rest
-  // encryption, so reject a weak one here too.
-  if (value.length < 32) {
-    throw new Error("BETTER_AUTH_SECRET must be at least 32 characters.");
-  }
-  return value;
-}
-
-/** HMAC binding an installation id to a specific user. */
-function sign(userId: string, installationId: string): string {
-  return createHmac("sha256", secret())
-    .update(`${userId}.${installationId}`)
-    .digest("hex");
-}
-
-/** Cookie value for a freshly captured installation. */
-export function makeInstallCookieValue(userId: string, installationId: string): string {
-  return `${installationId}.${sign(userId, installationId)}`;
-}
-
-/**
- * Recover the installation id from the cookie, verifying it was signed for this
- * user. Returns null when missing, malformed, or signed for someone else.
- */
-export function readInstallCookie(userId: string, cookieValue: string | undefined): string | null {
-  if (!cookieValue) return null;
-  const dot = cookieValue.lastIndexOf(".");
-  if (dot <= 0) return null;
-  const installationId = cookieValue.slice(0, dot);
-  const provided = cookieValue.slice(dot + 1);
-  const expected = sign(userId, installationId);
-  const a = Buffer.from(provided);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
-  return installationId;
-}

@@ -1,11 +1,10 @@
 import { and, eq, repositories } from "@specboard/db";
 import { listInstallationRepositories } from "@specboard/git";
-import { cookies } from "next/headers";
 
 import { getDb } from "@/lib/db";
 import { getSessionUser, resolveReadScope } from "@/lib/auth-session";
 import { getGithubApp } from "@/lib/github-app";
-import { INSTALL_COOKIE, readInstallCookie } from "@/lib/github-install";
+import { resolveWorkspaceInstallation } from "@/lib/github-connect";
 import { syncRepository, type SyncSummary } from "@/lib/github-sync";
 import { getMembership } from "@/lib/workspace";
 
@@ -121,12 +120,14 @@ export async function POST(req: Request) {
     !connectedRepo ||
     connectedRepo.githubInstallationId !== parsed.installationId
   ) {
-    const jar = await cookies();
-    const pendingInstallationId = readInstallCookie(
-      auth.id,
-      jar.get(INSTALL_COOKIE)?.value,
+    // The installation must be one bound to this workspace by the install
+    // setup callback, so a client-supplied (guessable) id is never trusted.
+    const installation = await resolveWorkspaceInstallation(
+      db,
+      membership.workspaceId,
+      parsed.installationId,
     );
-    if (pendingInstallationId !== parsed.installationId) {
+    if (!installation) {
       return Response.json(
         { error: "Install the GitHub App before connecting this repository." },
         { status: 403 },

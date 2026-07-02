@@ -161,6 +161,34 @@ export const githubApp = pgTable("github_app", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/**
+ * A GitHub App installation bound to a workspace, captured by the install
+ * setup callback (CSRF-checked and verified against GitHub before insert).
+ * Replaces the short-lived install cookie so the connect picker and repo
+ * creation work whenever an admin visits, not just right after installing.
+ * Removed when GitHub sends an `installation deleted` webhook.
+ */
+export const githubInstallations = pgTable(
+  "github_installations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    installationId: text("installation_id").notNull(),
+    /** The org/user login the App is installed on, for display + repo creation. */
+    accountLogin: text("account_login").notNull(),
+    /** "Organization" or "User"; repo creation is org-only. */
+    accountType: text("account_type").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("github_installations_ws_install_uq").on(t.workspaceId, t.installationId),
+    index("github_installations_install_idx").on(t.installationId),
+  ],
+);
+
 /** A connected GitHub repository (via the GitHub App installation). */
 export const repositories = pgTable(
   "repositories",

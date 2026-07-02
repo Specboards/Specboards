@@ -1,4 +1,13 @@
-import { createDb, eq, features, repositories, schema, sql, workspaces } from "@specboard/db";
+import {
+  createDb,
+  eq,
+  features,
+  githubInstallations,
+  repositories,
+  schema,
+  sql,
+  workspaces,
+} from "@specboard/db";
 
 /**
  * Direct database access for E2E setup/teardown. The Playwright test process and
@@ -37,6 +46,24 @@ export async function resetBoard(workspaceId: string): Promise<void> {
   // Deleting features cascades their spec_index rows; then drop the repos.
   await db().delete(features).where(eq(features.workspaceId, workspaceId));
   await db().delete(repositories).where(eq(repositories.workspaceId, workspaceId));
+  await db()
+    .delete(githubInstallations)
+    .where(eq(githubInstallations.workspaceId, workspaceId));
+}
+
+/** Bind a GitHub App installation to the workspace (mirrors the setup callback). */
+export async function seedInstallation(input: {
+  workspaceId: string;
+  installationId?: string;
+  accountLogin?: string;
+  accountType?: "Organization" | "User";
+}): Promise<void> {
+  await db().insert(githubInstallations).values({
+    workspaceId: input.workspaceId,
+    installationId: input.installationId ?? "e2e-installation",
+    accountLogin: input.accountLogin ?? "acme",
+    accountType: input.accountType ?? "Organization",
+  });
 }
 
 /** Insert a connected repository row, returning its id. Mirrors a real connect. */

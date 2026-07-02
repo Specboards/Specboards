@@ -1,13 +1,12 @@
 import { cookies } from "next/headers";
 
+import { githubInstallations, sql } from "@specboard/db";
+import { getInstallationAccount } from "@specboard/git";
+
 import { getSessionUser } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
-import {
-  INSTALL_COOKIE,
-  INSTALL_COOKIE_MAX_AGE,
-  INSTALL_STATE_COOKIE,
-  makeInstallCookieValue,
-} from "@/lib/github-install";
+import { getGithubApp } from "@/lib/github-app";
+import { INSTALL_STATE_COOKIE } from "@/lib/github-install";
 import { orgPath } from "@/lib/org-path";
 import { getMembership, workspaceSlug } from "@/lib/workspace";
 
@@ -26,8 +25,16 @@ function redirectTo(path: string): Response {
  * GET /api/v1/github/setup — the GitHub App's post-install "Setup URL". GitHub
  * redirects the admin's browser here with `?installation_id=…&setup_action=…`
  * after they install (or reconfigure) the App. We bind that installation to the
- * signed-in admin via a short-lived cookie, then bounce to the Repositories
- * page where they pick which granted repo to connect.
+ * admin's workspace in `github_installations`, so the connect picker and repo
+ * creation keep working on later visits (no short-lived session to re-run).
+ *
+ * The id is validated against GitHub before it's stored: only installations of
+ * THIS deployment's App resolve, so a made-up id never persists. Note the
+ * residual trust gap: a hostile workspace admin who starts the flow could
+ * substitute another real installation id of the shared App before returning
+ * here. Binding it would let them list that installation's repo names and sync
+ * contents. Closing this needs proof the caller controls the GitHub account
+ * (e.g. GitHub OAuth identity), tracked for the pen-test follow-up.
  */
 export async function GET(req: Request) {
   const url = new URL(req.url);
@@ -64,15 +71,35 @@ export async function GET(req: Request) {
     return redirectTo(repos("?error=install"));
   }
 
-  // Remember the installation for this admin so the picker can list its repos
-  // without trusting a client-supplied (guessable) id.
-  jar.set(INSTALL_COOKIE, makeInstallCookieValue(user.id, installationId), {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: true,
-    path: "/",
-    maxAge: INSTALL_COOKIE_MAX_AGE,
-  });
+  const app = await getGithubApp(db);
+  if (!app) return redirectTo(repos("?error=install"));
+
+  // Look the installation up on GitHub: validates the id belongs to this App
+  // and captures the account (org/user) for display and repo creation.
+  let account;
+  try {
+    account = await getInstallationAccount(app, installationId);
+  } catch (err) {
+    console.error(`[github] setup callback couldn't resolve installation ${installationId}:`, err);
+    return redirectTo(repos("?error=install"));
+  }
+
+  await db
+    .insert(githubInstallations)
+    .values({
+      workspaceId: membership.workspaceId,
+      installationId,
+      accountLogin: account.login,
+      accountType: account.type,
+    })
+    .onConflictDoUpdate({
+      target: [githubInstallations.workspaceId, githubInstallations.installationId],
+      set: {
+        accountLogin: account.login,
+        accountType: account.type,
+        updatedAt: sql`now()`,
+      },
+    });
 
   return redirectTo(repos("?connected=1"));
 }

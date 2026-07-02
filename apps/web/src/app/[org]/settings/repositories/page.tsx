@@ -2,7 +2,7 @@ import { eq, repositories } from "@specboard/db";
 
 import { getDb } from "@/lib/db";
 import { getGithubAppSlug, isGithubConfigured } from "@/lib/github-app";
-import { loadPendingInstallation, NO_PENDING_INSTALLATION } from "@/lib/github-connect";
+import { loadWorkspaceInstallations, NO_INSTALLATIONS } from "@/lib/github-connect";
 import { isSingleTenant } from "@/lib/tenancy";
 import { requireWorkspaceAccess } from "@/lib/workspace-access";
 import { RepositoriesManager, type SetupNotice } from "@/components/repositories-manager";
@@ -67,12 +67,12 @@ export default async function RepositoriesSettingsPage({
   ]);
 
   // Prefetch the connect picker's repo list so it renders with the initial
-  // HTML instead of popping in after a client fetch. Without a pending install
-  // cookie this is a no-op (no GitHub round-trip).
-  const pendingInstallation =
+  // HTML instead of popping in after a client fetch. Costs one GitHub call per
+  // workspace installation; a workspace with none skips GitHub entirely.
+  const installations =
     access.role === "admin" && configured
-      ? await loadPendingInstallation(db, access.userId)
-      : NO_PENDING_INSTALLATION;
+      ? await loadWorkspaceInstallations(db, access.workspaceId)
+      : NO_INSTALLATIONS;
 
   return (
     <RepositoriesManager
@@ -82,7 +82,7 @@ export default async function RepositoriesSettingsPage({
       selfHosted={isSingleTenant()}
       installUrl={slug ? "/api/v1/github/install-start" : null}
       notice={noticeFor(await searchParams)}
-      pendingInstallation={pendingInstallation}
+      installations={installations}
     />
   );
 }

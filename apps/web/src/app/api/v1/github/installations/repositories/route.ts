@@ -1,25 +1,25 @@
-import { cookies } from "next/headers";
-
 import { repositories } from "@specboard/db";
 import {
   createInstallationOrgRepository,
   getInstallationAccount,
+  type CreatedRepo,
 } from "@specboard/git";
 
 import { getSessionUser } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
+import { isE2E } from "@/lib/e2e";
 import { getGithubApp } from "@/lib/github-app";
-import { loadPendingInstallation } from "@/lib/github-connect";
-import { INSTALL_COOKIE, readInstallCookie } from "@/lib/github-install";
+import { loadWorkspaceInstallations, resolveWorkspaceInstallation } from "@/lib/github-connect";
 import { getMembership } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/v1/github/installations/repositories — the repos the admin's pending
- * installation can access, for the connect picker. The installation id comes
- * from the signed cookie set by the setup callback (not the client), so this
- * can only list installations the caller actually performed.
+ * GET /api/v1/github/installations/repositories: the workspace's GitHub App
+ * installations and the repos each can access, for the connect picker. The
+ * installations come from `github_installations` (bound by the setup callback,
+ * not client-supplied), so this only ever lists installations the workspace's
+ * admins actually performed.
  */
 export async function GET(req: Request) {
   const db = getDb();
@@ -33,19 +33,8 @@ export async function GET(req: Request) {
     return Response.json({ error: "Only an admin can connect repositories." }, { status: 403 });
   }
 
-  const pending = await loadPendingInstallation(db, user.id);
-  if (pending.error) {
-    // A pending id with a failed list is a GitHub-side failure (502); an error
-    // without one means the App isn't configured at all (501).
-    return Response.json(
-      { error: pending.error },
-      { status: pending.installationId ? 502 : 501 },
-    );
-  }
-  return Response.json({
-    installationId: pending.installationId,
-    repositories: pending.repositories,
-  });
+  const state = await loadWorkspaceInstallations(db, membership.workspaceId);
+  return Response.json(state);
 }
 
 /** GitHub repository names: word characters, dots, and hyphens. */
@@ -71,10 +60,12 @@ function createRepoErrorMessage(err: unknown, name: string, org: string): string
 
 /**
  * POST /api/v1/github/installations/repositories: create a private spec repo
- * in the pending installation's organization and connect it to the workspace.
- * One-click alternative to the "create a repo on GitHub, install the App,
- * connect it here" instructions. Admin-only; the installation id comes from
- * the signed cookie, same trust model as GET. Body: { name }.
+ * in one of the workspace's organization installations and connect it. The
+ * one-click alternative to the "create a repo on GitHub, install the App,
+ * connect it here" instructions. Admin-only; the target installation must be
+ * bound to the workspace in `github_installations`.
+ * Body: { name, installationId? } (installationId may be omitted when the
+ * workspace has exactly one organization installation).
  *
  * Only works for organization installations: GitHub has no installation-token
  * endpoint that creates repos under a personal account, so those users keep
@@ -94,6 +85,10 @@ export async function POST(req: Request) {
 
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
   const name = typeof body?.name === "string" ? body.name.trim() : "";
+  const requestedInstallation =
+    typeof body?.installationId === "string" && body.installationId.trim() !== ""
+      ? body.installationId.trim()
+      : null;
   if (!REPO_NAME_RE.test(name) || name === "." || name === "..") {
     return Response.json(
       { error: "Repository names can use letters, numbers, dots, hyphens, and underscores." },
@@ -101,31 +96,18 @@ export async function POST(req: Request) {
     );
   }
 
-  const jar = await cookies();
-  const installationId = readInstallCookie(user.id, jar.get(INSTALL_COOKIE)?.value);
-  if (!installationId) {
+  const installation = await resolveWorkspaceInstallation(
+    db,
+    membership.workspaceId,
+    requestedInstallation,
+  );
+  if (!installation) {
     return Response.json(
       { error: "Connect GitHub first, then come back here to create the repo." },
       { status: 403 },
     );
   }
-
-  const app = await getGithubApp(db);
-  if (!app) {
-    return Response.json({ error: "GitHub App is not configured." }, { status: 501 });
-  }
-
-  let account;
-  try {
-    account = await getInstallationAccount(app, installationId);
-  } catch (err) {
-    console.error("[github] failed to resolve installation account:", err);
-    return Response.json(
-      { error: "Couldn't look up the GitHub installation. Please try again." },
-      { status: 502 },
-    );
-  }
-  if (account.type !== "Organization") {
+  if (installation.accountType !== "Organization") {
     return Response.json(
       {
         error:
@@ -136,19 +118,55 @@ export async function POST(req: Request) {
     );
   }
 
-  let created;
-  try {
-    created = await createInstallationOrgRepository(app, installationId, {
-      org: account.login,
+  let created: CreatedRepo;
+  if (isE2E()) {
+    // Hermetic E2E: no GitHub. The "created" repo simply doesn't exist in the
+    // fixture yet, which is exactly what a fresh empty repo scans as.
+    created = {
+      owner: installation.accountLogin,
       name,
-      description: "Product specs synced to Specboard",
-    });
-  } catch (err) {
-    console.error(`[github] failed to create repository ${account.login}/${name}:`, err);
-    return Response.json(
-      { error: createRepoErrorMessage(err, name, account.login) },
-      { status: 502 },
-    );
+      defaultBranch: "main",
+      private: true,
+      htmlUrl: `https://github.com/${installation.accountLogin}/${name}`,
+    };
+  } else {
+    const app = await getGithubApp(db);
+    if (!app) {
+      return Response.json({ error: "GitHub App is not configured." }, { status: 501 });
+    }
+
+    // Live lookup rather than the stored login: survives org renames, and
+    // re-validates the installation still exists on GitHub.
+    let account;
+    try {
+      account = await getInstallationAccount(app, installation.installationId);
+    } catch (err) {
+      console.error("[github] failed to resolve installation account:", err);
+      return Response.json(
+        { error: "Couldn't look up the GitHub installation. Please try again." },
+        { status: 502 },
+      );
+    }
+    if (account.type !== "Organization") {
+      return Response.json(
+        { error: "GitHub only lets the App create repositories in an organization." },
+        { status: 400 },
+      );
+    }
+
+    try {
+      created = await createInstallationOrgRepository(app, installation.installationId, {
+        org: account.login,
+        name,
+        description: "Product specs synced to Specboard",
+      });
+    } catch (err) {
+      console.error(`[github] failed to create repository ${account.login}/${name}:`, err);
+      return Response.json(
+        { error: createRepoErrorMessage(err, name, account.login) },
+        { status: 502 },
+      );
+    }
   }
 
   // Register it as a connected repo, same shape as the connect flow. Upsert so
@@ -157,7 +175,7 @@ export async function POST(req: Request) {
     .insert(repositories)
     .values({
       workspaceId: membership.workspaceId,
-      githubInstallationId: installationId,
+      githubInstallationId: installation.installationId,
       owner: created.owner,
       name: created.name,
       defaultBranch: created.defaultBranch,
@@ -165,7 +183,7 @@ export async function POST(req: Request) {
     .onConflictDoUpdate({
       target: [repositories.workspaceId, repositories.owner, repositories.name],
       set: {
-        githubInstallationId: installationId,
+        githubInstallationId: installation.installationId,
         defaultBranch: created.defaultBranch,
       },
     })
