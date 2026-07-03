@@ -1,40 +1,19 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import ReactMarkdown from "react-markdown";
 
-import { Badge } from "@/components/ui/badge";
-import { DetailSection } from "@/components/detail-section";
-import { FeatureDetailsEditor } from "@/components/feature-details-editor";
-import { FeatureGithubLinks } from "@/components/feature-github-links";
-import { FeatureMetaForm } from "@/components/feature-meta-form";
-import { FeatureParentSelect } from "@/components/feature-parent-select";
-import { FeatureRelations } from "@/components/feature-relations";
-import { StatusDot } from "@/components/status-dot";
-import { WorkItemControls } from "@/components/work-item-controls";
-import {
-  childLevelKey,
-  parentLevelKey,
-  propertyAppliesToLevel,
-  resolveWorkflow,
-} from "@specboard/core";
+import { ItemDetailView } from "@/components/item-detail-view";
 
 import { ALL_PRODUCTS } from "@/lib/active-product";
-import { getDb } from "@/lib/db";
-import { statusLabel } from "@/lib/feature-helpers";
+import { getItemDetailData } from "@/lib/item-detail";
 import { LOCAL_ORG_SLUG, orgProductPath } from "@/lib/org-path";
-import { resolveRepoConfig } from "@/lib/repo-config";
-import { getStore } from "@/lib/store";
-import { canWrite, listWorkspaceMembers, type WorkspaceMember } from "@/lib/workspace";
 import { requireWorkspaceAccess } from "@/lib/workspace-access";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Item detail: the spec markdown (canonical in git, leaf items only) beside the
- * metadata sidebar (status/assignee/tags/custom properties, persisted to the
- * metadata store). Grouping levels (initiative/epic/feature) have no spec of
- * their own. Parent/child hierarchy and typed links live in the Relationships
- * section.
+ * Item detail (full page). Renders the shared {@link ItemDetailView} — the same
+ * layout the flyout uses — beneath the backlog breadcrumb. All the data it needs
+ * is resolved once by {@link getItemDetailData}.
  *
  * The canonical permalink is `/{org}/{product}/backlog/{level}/{specId}` (ADR
  * 0002): the level key makes the item's type legible, and the specId is the
@@ -68,255 +47,33 @@ export default async function ItemPage({
     notFound();
   }
 
-  const store = await getStore();
-  const feature = await store.getFeature(specId, access ?? undefined);
-  if (!feature) notFound();
+  const data = await getItemDetailData(specId, access);
+  if (!data) notFound();
+  const { feature } = data;
 
   // Canonicalize: the feature's current product is its context, and its level
   // key is the type segment. Redirect when either is stale/missing. `all` is
   // kept as-is so the cross-product view's links don't bounce on every click.
-  const products = await store.listProducts(access ?? undefined);
-  const productSlug =
-    products.find((p) => p.id === feature.productId)?.key ?? ALL_PRODUCTS;
-  const productStale = product !== productSlug && product !== ALL_PRODUCTS;
+  const productStale = product !== data.productSlug && product !== ALL_PRODUCTS;
   if (productStale || levelSeg !== feature.level) {
-    const targetProduct = product === ALL_PRODUCTS ? ALL_PRODUCTS : productSlug;
+    const targetProduct = product === ALL_PRODUCTS ? ALL_PRODUCTS : data.productSlug;
     redirect(
       orgProductPath(org, targetProduct, `/backlog/${feature.level}/${specId}`),
     );
   }
   const backlogHref = orgProductPath(org, product, "/backlog");
 
-  // Assignee options + custom properties + releases for the metadata form.
-  const db = getDb();
-  const members: WorkspaceMember[] =
-    access && db ? await listWorkspaceMembers(db, access.workspaceId) : [];
-  const repoConfig = await resolveRepoConfig(access);
-  const workflow = resolveWorkflow(repoConfig);
-  const [allProperties, releases] = await Promise.all([
-    store.listProperties(access ?? undefined),
-    store.listReleases(access ?? undefined),
-  ]);
-  const properties = allProperties.filter((p) =>
-    propertyAppliesToLevel(p, feature.level),
-  );
-
-  // Other features the relation editor can point at (excluding this one).
-  const allFeatures = await store.listFeatures(access ?? undefined);
-  const candidates = allFeatures
-    .filter((f) => f.specId !== feature.specId)
-    .map((f) => ({ specId: f.specId, title: f.title }));
-
-  // Hierarchy levels: label this item's level + scope the parent picker to the
-  // one level above (and exclude descendants, which would form a cycle).
-  const levels = await store.listLevels(access ?? undefined);
-  const levelLabel =
-    levels.find((l) => l.key === feature.level)?.label ?? feature.level;
-  const parentKey = parentLevelKey(feature.level, levels);
-  const parentLevelLabel =
-    levels.find((l) => l.key === parentKey)?.label ?? null;
-  const childKey = childLevelKey(feature.level, levels);
-  const childLabel = levels.find((l) => l.key === childKey)?.label ?? null;
-  const descendants = descendantSpecIds(feature.specId, allFeatures);
-  const parentCandidates = parentKey
-    ? allFeatures
-        .filter(
-          (f) => f.level === parentKey && !descendants.has(f.specId),
-        )
-        .map((f) => ({ specId: f.specId, title: f.title }))
-    : [];
-
-  const canEdit = !access || canWrite(access.role);
-  const availableFields =
-    levels.find((l) => l.key === feature.level)?.fields ?? null;
-
   return (
-    <section className="mx-auto max-w-3xl space-y-4">
-      <div className="space-y-1">
-        <Link
-          href={backlogHref}
-          className="text-xs text-muted-foreground hover:underline"
-        >
-          ← Backlog
-        </Link>
-        <div className="flex items-center gap-2">
-          <Badge variant="outline" className="text-[10px] uppercase tracking-wide">
-            {levelLabel}
-          </Badge>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {feature.title}
-          </h1>
-        </div>
-        {feature.path ? (
-          <p className="font-mono text-xs text-muted-foreground">
-            {feature.path}
-          </p>
-        ) : null}
+    <section className="mx-auto max-w-3xl">
+      <Link
+        href={backlogHref}
+        className="text-xs text-muted-foreground hover:underline"
+      >
+        ← Backlog
+      </Link>
+      <div className="mt-3">
+        <ItemDetailView data={data} variant="page" />
       </div>
-
-      <DetailSection id="metadata" title="Metadata">
-        <div className="grid gap-6 lg:grid-cols-2">
-          <div className="space-y-4">
-            <div className="flex items-center gap-2 text-sm font-medium">
-              <StatusDot status={feature.status} />
-              {statusLabel(feature.status)}
-            </div>
-            <FeatureMetaForm
-              feature={feature}
-              members={members}
-              properties={properties}
-              releases={releases}
-              workflow={workflow}
-              canEdit={canEdit}
-              availableFields={availableFields}
-            />
-          </div>
-          <div className="space-y-2">
-            <div className="flex flex-wrap gap-1">
-              {feature.tags.map((tag) => (
-                <Badge key={tag} variant="secondary">
-                  {tag}
-                </Badge>
-              ))}
-            </div>
-            <p className="font-mono text-[10px] text-muted-foreground">
-              {feature.isDbNative ? "id" : "spec id"}: {feature.specId}
-            </p>
-          </div>
-        </div>
-      </DetailSection>
-
-      <DetailSection id="relationships" title="Relationships">
-        <div className="grid gap-6 lg:grid-cols-2">
-          <div className="space-y-4">
-            {parentKey && parentLevelLabel ? (
-              <div className="space-y-2">
-                <FeatureParentSelect
-                  specId={feature.specId}
-                  parentSpecId={feature.parentSpecId}
-                  parentLabel={parentLevelLabel}
-                  candidates={parentCandidates}
-                  canEdit={canEdit}
-                />
-                {feature.parentSpecId ? (
-                  <p className="text-sm">
-                    <span className="text-muted-foreground">Parent: </span>
-                    <Link
-                      href={orgProductPath(
-                        org,
-                        product,
-                        `/backlog/${parentKey}/${feature.parentSpecId}`,
-                      )}
-                      className="hover:underline"
-                    >
-                      {feature.parentTitle ?? feature.parentSpecId}
-                    </Link>
-                  </p>
-                ) : null}
-              </div>
-            ) : null}
-            {childKey && childLabel ? (
-              <div className="space-y-1">
-                <p className="text-xs font-medium text-muted-foreground">
-                  {feature.children.length > 0
-                    ? `Children · ${feature.childDoneCount}/${feature.childCount} done`
-                    : `No ${childLabel.toLowerCase()} items yet.`}
-                </p>
-                {feature.children.map((c) => (
-                  <div key={c.specId} className="flex items-center gap-2 text-sm">
-                    <StatusDot status={c.status} />
-                    <Link
-                      href={orgProductPath(
-                        org,
-                        product,
-                        `/backlog/${childKey}/${c.specId}`,
-                      )}
-                      className="flex-1 truncate hover:underline"
-                      title={c.title}
-                    >
-                      {c.title}
-                    </Link>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-          </div>
-          <FeatureRelations
-            specId={feature.specId}
-            relations={feature.relations}
-            candidates={candidates}
-            canEdit={canEdit}
-          />
-        </div>
-      </DetailSection>
-
-      <DetailSection id="details" title="Details">
-        {feature.isDbNative ? (
-          canEdit ? (
-            // DB-native items have an inline Markdown body editable here.
-            <FeatureDetailsEditor
-              specId={feature.specId}
-              initial={feature.content}
-            />
-          ) : feature.content.trim() === "" ? (
-            <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-              {`This ${levelLabel.toLowerCase()} groups work and has no spec of its own.`}
-              {childLabel
-                ? ` Add ${childLabel.toLowerCase()} items beneath it to build it out.`
-                : ""}
-            </div>
-          ) : (
-            <div className="prose prose-sm prose-neutral max-w-none dark:prose-invert">
-              <ReactMarkdown>{feature.content}</ReactMarkdown>
-            </div>
-          )
-        ) : (
-          <div className="prose prose-sm prose-neutral max-w-none dark:prose-invert">
-            <ReactMarkdown>{feature.content}</ReactMarkdown>
-          </div>
-        )}
-      </DetailSection>
-
-      <DetailSection id="integrations" title="Integrations">
-        <FeatureGithubLinks
-          specId={feature.specId}
-          links={feature.githubLinks}
-          canEdit={canEdit}
-        />
-      </DetailSection>
-
-      {feature.isDbNative && canEdit ? (
-        <WorkItemControls
-          specId={feature.specId}
-          title={feature.title}
-          levelLabel={levelLabel}
-        />
-      ) : null}
     </section>
   );
-}
-
-/** Spec ids of all features below `rootSpecId` in the parent/child tree. */
-function descendantSpecIds(
-  rootSpecId: string,
-  features: { specId: string; parentSpecId: string | null }[],
-): Set<string> {
-  const childrenOf = new Map<string, string[]>();
-  for (const f of features) {
-    if (!f.parentSpecId) continue;
-    const arr = childrenOf.get(f.parentSpecId) ?? [];
-    arr.push(f.specId);
-    childrenOf.set(f.parentSpecId, arr);
-  }
-  const out = new Set<string>();
-  const queue = [rootSpecId];
-  while (queue.length > 0) {
-    const current = queue.shift() as string;
-    for (const child of childrenOf.get(current) ?? []) {
-      if (out.has(child)) continue; // guard against malformed cycles
-      out.add(child);
-      queue.push(child);
-    }
-  }
-  return out;
 }

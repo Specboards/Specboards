@@ -1,73 +1,48 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useTransition } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import {
-  AuthRequiredError,
-  deleteWorkItem,
-  patchFeature,
-} from "@/lib/api-client";
+import { AuthRequiredError, deleteWorkItem } from "@/lib/api-client";
 import { useOrgProductPath } from "@/lib/use-org";
 
 /**
- * Manage controls for a DB-native work item (initiative/epic): rename it
- * (its title lives in the DB, not a spec) and delete it. Deleting orphans any
- * children rather than cascading. Rendered only for DB-native items the user
- * can edit.
+ * Delete control for a DB-native work item (initiative/epic/…). Deleting
+ * orphans any children rather than cascading. Renaming is done inline on the
+ * item's title (see {@link ItemTitle}), so this is delete-only.
+ *
+ * `redirectOnDelete` sends the user back to the backlog after deletion (used on
+ * the full page); the flyout leaves navigation to its own close handling.
  */
-export function WorkItemControls({
+export function WorkItemDelete({
   specId,
-  title,
   levelLabel,
+  redirectOnDelete = true,
 }: {
   specId: string;
-  title: string;
   levelLabel: string;
+  redirectOnDelete?: boolean;
 }) {
   const router = useRouter();
   const orgHref = useOrgProductPath();
-  const [value, setValue] = useState(title);
-  const [error, setError] = useState<string | null>(null);
-  const [saving, startSave] = useTransition();
   const [deleting, startDelete] = useTransition();
 
   const level = levelLabel.toLowerCase();
-  const trimmed = value.trim();
-  const dirty = trimmed !== title && trimmed !== "";
-
-  function onRename() {
-    if (!dirty) return;
-    startSave(async () => {
-      setError(null);
-      try {
-        await patchFeature(specId, { title: trimmed });
-        toast.success("Renamed");
-        router.refresh();
-      } catch (err) {
-        if (err instanceof AuthRequiredError) {
-          router.push(
-            `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
-          );
-          return;
-        }
-        setError(err instanceof Error ? err.message : "Rename failed.");
-      }
-    });
-  }
 
   function onDelete() {
-    if (!window.confirm(`Delete this ${level}? Any child items are kept (orphaned).`))
+    if (
+      !window.confirm(
+        `Delete this ${level}? Any child items are kept (orphaned).`,
+      )
+    )
       return;
     startDelete(async () => {
-      setError(null);
       try {
         await deleteWorkItem(specId);
         toast.success(`${levelLabel} deleted`);
-        router.push(orgHref("/backlog"));
+        if (redirectOnDelete) router.push(orgHref("/backlog"));
         router.refresh();
       } catch (err) {
         if (err instanceof AuthRequiredError) {
@@ -76,38 +51,19 @@ export function WorkItemControls({
           );
           return;
         }
-        setError(err instanceof Error ? err.message : "Delete failed.");
+        toast.error(err instanceof Error ? err.message : "Delete failed.");
       }
     });
   }
 
   return (
-    <div className="space-y-2">
-      <span className="text-xs font-medium text-muted-foreground">
-        Manage {level}
-      </span>
-      <div className="flex gap-2">
-        <Input
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          className="h-8"
-          aria-label="Title"
-        />
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={onRename}
-          disabled={!dirty || saving}
-        >
-          {saving ? "Saving…" : "Rename"}
-        </Button>
-      </div>
-      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+    <div className="pt-2">
       <Button
         size="sm"
-        variant="destructive"
+        variant="ghost"
         onClick={onDelete}
         disabled={deleting}
+        className="text-destructive hover:bg-destructive/10 hover:text-destructive"
       >
         {deleting ? "Deleting…" : `Delete ${level}`}
       </Button>

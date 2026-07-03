@@ -4,7 +4,7 @@ import { extractApiKey, verifyApiKeyUser } from "@/lib/api-keys";
 import { getAuth } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import type { WorkspaceScope } from "@/lib/store/types";
-import { canWrite, getMembership } from "@/lib/workspace";
+import { canWrite, getMembership, type MemberRole } from "@/lib/workspace";
 
 export type SessionUser = { id: string; email: string; name: string };
 
@@ -110,6 +110,47 @@ async function resolveScope(
 /** Scope for a read request: requires a workspace member (any role). */
 export function resolveReadScope(req: Request): Promise<ScopeResult> {
   return resolveScope(req, { write: false });
+}
+
+/**
+ * Read access for an API request, including the caller's role (which
+ * `resolveReadScope` drops). Used where the response depends on edit rights,
+ * e.g. the item-detail context the flyout renders. `null` access is file mode.
+ */
+export type ReadAccessResult =
+  | { ok: true; access: (WorkspaceScope & { role: MemberRole }) | null }
+  | { ok: false; response: Response };
+
+export async function resolveReadAccess(req: Request): Promise<ReadAccessResult> {
+  const auth = getAuth();
+  const db = getDb();
+  if (!auth || !db) return { ok: true, access: null };
+
+  const user = await resolveRequestUser(req);
+  if (!user) {
+    return {
+      ok: false,
+      response: Response.json({ error: "Authentication required." }, { status: 401 }),
+    };
+  }
+  const membership = await getMembership(db, user.id);
+  if (!membership) {
+    return {
+      ok: false,
+      response: Response.json(
+        { error: "You do not belong to a workspace." },
+        { status: 403 },
+      ),
+    };
+  }
+  return {
+    ok: true,
+    access: {
+      userId: user.id,
+      workspaceId: membership.workspaceId,
+      role: membership.role,
+    },
+  };
 }
 
 /** Scope for a write request: requires a member with a non-`viewer` role. */

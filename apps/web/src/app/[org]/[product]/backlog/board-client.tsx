@@ -224,11 +224,6 @@ export function BoardClient({
       <FeatureEditSheet
         specId={editingSpecId}
         onClose={() => setEditingSpecId(null)}
-        members={members}
-        properties={properties}
-        releases={releases}
-        workflow={workflow}
-        canEdit={canEdit}
       />
     </>
   );

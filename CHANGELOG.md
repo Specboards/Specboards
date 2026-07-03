@@ -5,6 +5,39 @@ All notable changes to Specboard are recorded here. The format is based on
 [Semantic Versioning](https://semver.org/). See [VERSIONING.md](./VERSIONING.md)
 for how and when the version is bumped.
 
+## [0.6.0] - 2026-07-03
+
+### Added
+
+- **Notion-style item detail.** Initiatives, epics, features, and work items now
+  share one detail layout: the level, an inline-editable title, then a block of
+  property rows (each with a type icon) for Status, Assignee, Release, Tags, and
+  every custom property, followed by the rich-text body and the Relationships /
+  Integrations sections.
+- **Generate child items.** Each item has a "Generate {child level}" action that
+  creates items one level down (Initiative → Epic, Epic → Feature, Feature →
+  Work item) with the parent pre-selected; the drawer stays open to add several
+  in a row. Manual today; an AI-assisted generator can slot in behind it later.
+- The board **flyout is now resizable** (drag its left edge; the width is
+  remembered) and renders the exact same layout as the full item page, backed by
+  a new `GET /api/v1/features/:specId/context` endpoint.
+
+### Changed
+
+- Item bodies (and titles, for DB-native items) **auto-save** as you type; the
+  manual "Save details" button is gone. Undo/redo use the editor's native
+  history. Spec-backed bodies stay read-only (their source of truth is git).
+- The flyout's "Open full spec" link is now an **Open fullscreen** expand
+  control.
+- On the Roadmap, the **Unscheduled column is hidden** when every item is
+  assigned to a release.
+
+### Fixed
+
+- Newly entered item details no longer disappear after saving until a page
+  reload. The editor previously remounted and reseeded from a stale value while
+  `router.refresh()` was in flight; it now holds its content.
+
 ## [0.5.0] - 2026-07-03
 
 ### Added

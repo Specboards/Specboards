@@ -1,15 +1,30 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
-import type { PropertyDef, StatusWorkflow } from "@specboard/core";
+import {
+  AlignLeft,
+  Calendar,
+  ChevronDownCircle,
+  Hash,
+  List,
+  Loader,
+  Rocket,
+  Tags,
+  Users,
+  type LucideIcon,
+} from "lucide-react";
+
+import type { PropertyDef, PropertyType, StatusWorkflow } from "@specboard/core";
 
 import { AuthRequiredError, patchFeature } from "@/lib/api-client";
-import { isFieldAvailable } from "@/lib/card-fields";
+import { StatusDot } from "@/components/status-dot";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { isFieldAvailable } from "@/lib/card-fields";
 import { statusLabel, statusOptions } from "@/lib/feature-helpers";
+import { cn } from "@/lib/utils";
 import type {
   CustomFieldValue,
   FeatureDetail,
@@ -17,13 +32,27 @@ import type {
 } from "@/lib/store/types";
 import type { WorkspaceMember } from "@/lib/workspace";
 
+/** Lucide icon for each custom-property type (mirrors the Notion type menu). */
+const PROPERTY_TYPE_ICON: Record<PropertyType, LucideIcon> = {
+  text: AlignLeft,
+  number: Hash,
+  select: ChevronDownCircle,
+  multiselect: List,
+  date: Calendar,
+  user: Users,
+};
+
 /**
- * Metadata form; saves through the public /api/v1 surface. Saves are
- * automatic: selects commit on change, text inputs debounce and commit on
- * blur. There is no manual save button. Parent/child hierarchy is edited in
- * the Relationships section, not here.
+ * Notion-style property block shown at the top of an item's detail: one row per
+ * property (icon + label on the left, an inline value control on the right).
+ * Covers the built-ins (status / assignee / release / tags) and every custom
+ * property that applies at this item's level.
+ *
+ * Saves are automatic — selects commit on change, text inputs debounce and
+ * commit on blur. There is no manual save button. Shared by the full item page
+ * and the flyout so both render an identical block.
  */
-export function FeatureMetaForm({
+export function ItemProperties({
   feature,
   members = [],
   properties = [],
@@ -36,9 +65,7 @@ export function FeatureMetaForm({
   members?: WorkspaceMember[];
   /** Custom properties that apply at this item's level. */
   properties?: PropertyDef[];
-  /** The workspace's releases, for the release picker. */
   releases?: ReleaseRecord[];
-  /** Workspace status workflow (custom statuses/transitions); default if omitted. */
   workflow?: StatusWorkflow;
   canEdit?: boolean;
   /** Built-in metadata field keys available at this item's level; null = all. */
@@ -64,7 +91,6 @@ export function FeatureMetaForm({
     const form = formRef.current;
     if (!form) return;
     if (inFlightRef.current) {
-      // A save is running; remember to run once more with the latest values.
       dirtyRef.current = true;
       return;
     }
@@ -127,12 +153,7 @@ export function FeatureMetaForm({
   }
 
   if (!canEdit) {
-    return (
-      <p className="text-xs text-muted-foreground">
-        You have view-only access. Ask an admin for an editor role to change
-        metadata.
-      </p>
-    );
+    return <ReadOnlyProperties feature={feature} members={members} properties={properties} releases={releases} show={show} />;
   }
 
   return (
@@ -144,29 +165,27 @@ export function FeatureMetaForm({
       }}
       onChange={() => queueSave(600)}
       onBlur={() => queueSave(0)}
-      className="space-y-3"
+      className="space-y-0.5"
     >
-      <label className="block space-y-1.5">
-        <span className="text-xs font-medium text-muted-foreground">
-          Status
-        </span>
-        <Select name="status" defaultValue={feature.status} className="h-8">
-          {statusOptions(feature.status, workflow).map((s) => (
-            <option key={s} value={s}>
-              {statusLabel(s)}
-            </option>
-          ))}
-        </Select>
-      </label>
+      <PropertyRow icon={Loader} label="Status">
+        <div className="flex items-center gap-2">
+          <StatusDot status={feature.status} />
+          <Select name="status" defaultValue={feature.status} className={INLINE_SELECT}>
+            {statusOptions(feature.status, workflow).map((s) => (
+              <option key={s} value={s}>
+                {statusLabel(s)}
+              </option>
+            ))}
+          </Select>
+        </div>
+      </PropertyRow>
+
       {members.length > 0 && show("assignee") ? (
-        <label className="block space-y-1.5">
-          <span className="text-xs font-medium text-muted-foreground">
-            Assignee
-          </span>
+        <PropertyRow icon={Users} label="Assignee">
           <Select
             name="assigneeId"
             defaultValue={feature.assigneeId ?? ""}
-            className="h-8"
+            className={INLINE_SELECT}
           >
             <option value="">Unassigned</option>
             {members.map((m) => (
@@ -175,17 +194,15 @@ export function FeatureMetaForm({
               </option>
             ))}
           </Select>
-        </label>
+        </PropertyRow>
       ) : null}
+
       {releases.length > 0 ? (
-        <label className="block space-y-1.5">
-          <span className="text-xs font-medium text-muted-foreground">
-            Release
-          </span>
+        <PropertyRow icon={Rocket} label="Release">
           <Select
             name="releaseId"
             defaultValue={feature.releaseId ?? ""}
-            className="h-8"
+            className={INLINE_SELECT}
           >
             <option value="">None</option>
             {releases.map((r) => (
@@ -194,41 +211,70 @@ export function FeatureMetaForm({
               </option>
             ))}
           </Select>
-        </label>
+        </PropertyRow>
       ) : null}
+
       {show("tags") ? (
-        <label className="block space-y-1.5">
-          <span className="text-xs font-medium text-muted-foreground">
-            Tags (comma-separated)
-          </span>
+        <PropertyRow icon={Tags} label="Tags">
           <Input
             name="tags"
             defaultValue={feature.tags.join(", ")}
-            className="h-8"
+            placeholder="Comma-separated"
+            className={INLINE_INPUT}
           />
-        </label>
+        </PropertyRow>
       ) : null}
+
       {properties.map((property) => (
-        <label key={property.key} className="block space-y-1.5">
-          <span className="text-xs font-medium text-muted-foreground">
-            {property.label}
-          </span>
+        <PropertyRow
+          key={property.key}
+          icon={PROPERTY_TYPE_ICON[property.type]}
+          label={property.label}
+        >
           <CustomFieldInput
             property={property}
             value={feature.customFields[property.key] ?? null}
             members={members}
           />
-        </label>
+        </PropertyRow>
       ))}
-      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+
+      {error ? <p className="pt-1 text-xs text-destructive">{error}</p> : null}
       <p
-        className="h-4 text-[11px] text-muted-foreground"
+        className="h-4 pl-[9.5rem] text-[11px] text-muted-foreground"
         role="status"
         aria-live="polite"
       >
         {status === "saving" ? "Saving…" : status === "saved" ? "Saved" : ""}
       </p>
     </form>
+  );
+}
+
+/** Inline (borderless-until-hover) control styling, Notion-like. */
+const INLINE_SELECT =
+  "h-7 w-full max-w-[16rem] border-transparent bg-transparent px-2 shadow-none hover:bg-muted focus-visible:bg-muted";
+const INLINE_INPUT =
+  "h-7 w-full max-w-[16rem] border-transparent bg-transparent px-2 shadow-none hover:bg-muted focus-visible:bg-muted";
+
+/** A single label/value row: fixed-width icon+label gutter, value on the right. */
+function PropertyRow({
+  icon: Icon,
+  label,
+  children,
+}: {
+  icon: LucideIcon;
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex items-start gap-2 py-0.5">
+      <div className="flex w-36 shrink-0 items-center gap-2 pt-1.5 text-sm text-muted-foreground">
+        <Icon className="size-4 shrink-0" />
+        <span className="truncate">{label}</span>
+      </div>
+      <div className="min-w-0 flex-1 py-0.5">{children}</div>
+    </div>
   );
 }
 
@@ -250,7 +296,7 @@ function CustomFieldInput({
         ? members.map((m) => ({ value: m.userId, label: m.name }))
         : property.options.map((o) => ({ value: o, label: o }));
     return (
-      <Select name={name} defaultValue={asString(value)} className="h-8">
+      <Select name={name} defaultValue={asString(value)} className={INLINE_SELECT}>
         <option value="">—</option>
         {options.map((o) => (
           <option key={o.value} value={o.value}>
@@ -267,27 +313,100 @@ function CustomFieldInput({
         name={name}
         type="number"
         defaultValue={typeof value === "number" ? value : ""}
-        className="h-8"
+        className={INLINE_INPUT}
+        placeholder="Empty"
       />
     );
   }
 
   if (property.type === "date") {
-    return <Input name={name} type="date" defaultValue={asString(value)} className="h-8" />;
+    return (
+      <Input
+        name={name}
+        type="date"
+        defaultValue={asString(value)}
+        className={INLINE_INPUT}
+      />
+    );
   }
 
   if (property.type === "multiselect") {
     return (
       <Input
         name={name}
-        placeholder="comma-separated"
+        placeholder="Comma-separated"
         defaultValue={Array.isArray(value) ? value.join(", ") : ""}
-        className="h-8"
+        className={INLINE_INPUT}
       />
     );
   }
 
-  return <Input name={name} defaultValue={asString(value)} className="h-8" />;
+  return (
+    <Input
+      name={name}
+      defaultValue={asString(value)}
+      className={INLINE_INPUT}
+      placeholder="Empty"
+    />
+  );
+}
+
+/** Read-only rendering for viewers without edit access. */
+function ReadOnlyProperties({
+  feature,
+  members,
+  properties,
+  releases,
+  show,
+}: {
+  feature: FeatureDetail;
+  members: WorkspaceMember[];
+  properties: PropertyDef[];
+  releases: ReleaseRecord[];
+  show: (key: string) => boolean;
+}) {
+  const assignee = members.find((m) => m.userId === feature.assigneeId)?.name;
+  const release = releases.find((r) => r.id === feature.releaseId)?.name;
+  return (
+    <div className="space-y-0.5">
+      <PropertyRow icon={Loader} label="Status">
+        <div className="flex items-center gap-2 px-2 py-1 text-sm">
+          <StatusDot status={feature.status} />
+          {statusLabel(feature.status)}
+        </div>
+      </PropertyRow>
+      {show("assignee") && assignee ? (
+        <PropertyRow icon={Users} label="Assignee">
+          <span className="px-2 py-1 text-sm">{assignee}</span>
+        </PropertyRow>
+      ) : null}
+      {release ? (
+        <PropertyRow icon={Rocket} label="Release">
+          <span className="px-2 py-1 text-sm">{release}</span>
+        </PropertyRow>
+      ) : null}
+      {show("tags") && feature.tags.length > 0 ? (
+        <PropertyRow icon={Tags} label="Tags">
+          <span className="px-2 py-1 text-sm">{feature.tags.join(", ")}</span>
+        </PropertyRow>
+      ) : null}
+      {properties.map((property) => {
+        const raw = feature.customFields[property.key] ?? null;
+        const text = Array.isArray(raw) ? raw.join(", ") : raw == null ? "" : String(raw);
+        return (
+          <PropertyRow
+            key={property.key}
+            icon={PROPERTY_TYPE_ICON[property.type]}
+            label={property.label}
+          >
+            <span className={cn("px-2 py-1 text-sm", !text && "text-muted-foreground")}>
+              {text || "—"}
+            </span>
+          </PropertyRow>
+        );
+      })}
+    </div>
+  );
 }
 
 function asString(value: CustomFieldValue): string {

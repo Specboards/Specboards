@@ -1,5 +1,6 @@
 "use client";
 
+import type { ItemDetailData } from "@/lib/item-detail";
 import type {
   BoardPreferences,
   CreatableRelationDirection,
@@ -58,6 +59,25 @@ export class WorkspaceSlugTakenError extends Error {
     super(message);
     this.name = "WorkspaceSlugTakenError";
   }
+}
+
+/**
+ * Load the full item-detail bundle (metadata + properties + hierarchy +
+ * candidates + edit rights) the flyout renders. Mirrors what the full item page
+ * assembles server-side, so both views show the same content.
+ */
+export async function getItemDetail(specId: string): Promise<ItemDetailData> {
+  const res = await fetch(
+    `/api/v1/features/${encodeURIComponent(specId)}/context`,
+  );
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as
+    | { data?: ItemDetailData; error?: string }
+    | null;
+  if (!res.ok || !body?.data) {
+    throw new Error(body?.error ?? `Failed to load item (${res.status}).`);
+  }
+  return body.data;
 }
 
 /** Load a feature's full detail (metadata + spec content) for in-context edit. */
