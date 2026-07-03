@@ -26,26 +26,28 @@
   --radius: 0.625rem;
 }
 
+/* Dark mode carries a deep blue brand tint (hue 262): keep surfaces on that
+ * hue with low chroma, and keep the stock lightness values so contrast holds. */
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
+  --background: oklch(0.145 0.03 262);
+  --foreground: oklch(0.985 0.005 262);
+  --card: oklch(0.205 0.032 262);
+  --card-foreground: oklch(0.985 0.005 262);
+  --popover: oklch(0.205 0.032 262);
+  --popover-foreground: oklch(0.985 0.005 262);
+  --primary: oklch(0.922 0.015 262);
+  --primary-foreground: oklch(0.205 0.032 262);
+  --secondary: oklch(0.269 0.035 262);
+  --secondary-foreground: oklch(0.985 0.005 262);
+  --muted: oklch(0.269 0.035 262);
+  --muted-foreground: oklch(0.708 0.025 262);
+  --accent: oklch(0.269 0.035 262);
+  --accent-foreground: oklch(0.985 0.005 262);
   --destructive: oklch(0.704 0.191 22.216);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  --destructive-foreground: oklch(0.985 0.005 262);
+  --border: oklch(0.92 0.04 262 / 14%);
+  --input: oklch(0.92 0.04 262 / 18%);
+  --ring: oklch(0.556 0.06 262);
 }
 
 @theme inline {

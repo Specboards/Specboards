@@ -5,6 +5,14 @@ All notable changes to Specboard are recorded here. The format is based on
 [Semantic Versioning](https://semver.org/). See [VERSIONING.md](./VERSIONING.md)
 for how and when the version is bumped.
 
+## [0.2.1] - 2026-07-03
+
+### Changed
+
+- Dark mode now carries a deep blue tint instead of neutral gray, aligning
+  the theme with the Specboard brand. Surface lightness is unchanged, so
+  contrast is unaffected.
+
 ## [0.2.0] - 2026-07-03
 
 ### Added
