@@ -120,8 +120,11 @@ specboard/
 ### Data model (DB: metadata + index), defined in `packages/db`
 - `workspaces` (tenant root) → `members` (role: pm/ux/eng/admin) → `repositories` (GitHub install + repo).
 - `features`, the metadata record: `id`, `workspace_id`, `repo_id`, `spec_id` (matches git
-  frontmatter), `status`, `assignee_id`, `priority`, `rank` (backlog ordering), `tags[]`,
-  `roadmap_quarter`, custom fields (jsonb), timestamps.
+  frontmatter), `level`, `parent_id`, `status`, `assignee_id`, `rank` (backlog ordering),
+  `tags[]`, `release_id`, `custom_fields` (jsonb of admin-defined property values),
+  `details` (Markdown body for DB-native items), timestamps.
+- `workspace_properties` (admin-defined custom card properties), `releases` (ship
+  vehicles), `detail_templates` (Markdown skeletons seeding a card's details).
 - `spec_index`, cache of spec content: `feature_id`, `path`, `blob_sha`, `content`,
   `parsed` (jsonb: title, sections), `last_synced_at`.
 - `comments`, `activity_log`.

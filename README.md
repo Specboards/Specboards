@@ -4,9 +4,10 @@ A lightweight, spec-based product-management layer for **spec-driven development
 
 Your specs stay canonical in git (versioned with code, read by AI coding agents).
 Specboard layers the product metadata **on top** of them: status, assignment,
-priority, backlog order, roadmap, dependencies, and epic/sub-feature hierarchy.
-PM, UX, and engineering collaborate without editing files in a terminal and
-without duplicating work into JIRA/Aha.
+backlog order, releases, custom properties, a rich-text details body,
+dependencies, and epic/sub-feature hierarchy. PM, UX, and engineering
+collaborate without editing files in a terminal and without duplicating work
+into JIRA/Aha.
 
 Open-core: self-host the core for free, or use the hosted SaaS.
 
@@ -55,8 +56,9 @@ On import each spec is homed under a **Feature** grouping, by its `feature:` val
 when set, otherwise by its folder (specs in the same directory share a Feature). The
 hierarchy above the leaf (Feature → Epic → Initiative) is managed in the app, not git.
 
-Per-repo config (which globs are specs, workflow, custom fields, write mode)
-lives in [`.specboard/config.yml`](./.specboard/config.yml).
+Per-repo config (which globs are specs, status workflow, write mode) lives in
+[`.specboard/config.yml`](./.specboard/config.yml). Custom card properties are
+admin-defined in the app (Settings → Cards), not in the repo config.
 
 ## Local testing: quick start
 
@@ -70,9 +72,10 @@ pnpm --filter @specboard/web dev   # http://localhost:3000
 
 Without `DATABASE_URL`, the app runs in **local file mode**: it reads
 `specs/**/spec.md` straight from this repo and persists PM metadata (status,
-priority, tags, quarter) to `.specboard/local-metadata.json`. The committed
-file pre-populates the boards with this repo's own specs; edit freely and
-`git checkout .specboard/local-metadata.json` to reset.
+assignee, tags, release, details) to `.specboard/local-metadata.json` (plus
+sibling `local-*.json` files for items, releases, properties, and templates).
+The committed file pre-populates the boards with this repo's own specs; edit
+freely and `git checkout .specboard/local-metadata.json` to reset.
 
 ### With Postgres (the real deployment shape)
 

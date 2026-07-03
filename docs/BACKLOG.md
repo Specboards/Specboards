@@ -12,13 +12,14 @@ and tagged with a `tier-*` and `area:*` label.
 
 ## What Specboard already has
 
-Backlog / Board / Roadmap (by quarter) views · 5-stage status workflow · assignee ·
-priority · manual rank · tags · custom fields · per-feature comments · activity log ·
-drag-and-drop board (status + reorder) · in-context card editing · per-user
-customizable card fields · configurable multi-level hierarchy (Initiative → Epic →
-Feature → Work Item) · multi-product backlogs under `/{org}/{product}/` · GitHub sync
-(specs auto-homed under Feature groupings) · GitHub PR/issue/branch links on features ·
-MCP server for agents.
+Backlog / Board / Roadmap (grouped by release) views · 5-stage status workflow ·
+assignee · manual rank · tags · admin-defined custom properties · releases ·
+rich-text details (Markdown) with per-level templates · per-feature comments ·
+activity log · drag-and-drop board (status + reorder) · in-context card editing ·
+per-user customizable card fields · configurable multi-level hierarchy (Initiative
+→ Epic → Feature → Work Item) · multi-product backlogs under `/{org}/{product}/` ·
+GitHub sync (specs auto-homed under Feature groupings) · GitHub PR/issue/branch
+links on features · MCP server for agents.
 
 The backlog below is the **gap** between that and what the four reference tools treat as baseline.
 
@@ -35,14 +36,23 @@ The backlog below is the **gap** between that and what the four reference tools 
   Follow-ups now shipped: per-epic collapse/expand toggle on the nested backlog
   (persisted in localStorage); Parent picker excludes the feature's own
   descendants so the UI can't offer a cycle.
-- ✅ **#20 Estimate/effort field**: shipped (workspace-configurable numeric
-  `estimate.scale` on RepoConfig, Fibonacci default; nullable `estimate` column;
-  `rollUpEstimates` summing each subtree; estimate select on the feature detail +
-  "Est" column on backlog and badge on board, both showing the Σ roll-up for
-  epics; `estimate`/`rolledEstimate` in MCP `list_features`/`read_spec`).
-  Migration `0006` applied to **test** and **prod**.
+- ⛔️ **#20 Estimate/effort field**: shipped in `0006`, then **removed in v0.4.0**
+  along with `priority` and `roadmap_quarter` (the "lean cards" change, migration
+  `0021` DROPPED the columns). Cards are now name/status/assignee/tags plus
+  admin-defined custom properties; effort can be modeled as a `number` custom
+  property. Prioritization scoring (#21) will need a new effort input.
+- ✅ **Cards, properties, releases, details (v0.4.0–v0.5.0)**: shipped.
+  v0.4.0 trimmed cards to the essentials and moved custom fields to admin-defined
+  **custom properties** (`workspace_properties`, per-level), added **releases**
+  (`releases` + `features.release_id`, the Roadmap grouping axis + a Backlog
+  filter), and a Relationships section on item detail (migration `0021`). v0.5.0
+  added a rich-text **Details** body for DB-native items (`features.details`,
+  TipTap editor storing Markdown with a Raw toggle, editable on the item page),
+  **detail templates** (`detail_templates`, assignable per level, seeded into new
+  cards), status + assignee on the create form, and inline **release editing** on
+  the Roadmap (migration `0022`). Both migrations applied to **test** and **prod**.
 - ✅ **#17 Filtering & saved custom views**: shipped (URL-backed filter bar on
-  the backlog: status/assignee/priority/tag/parent, filtering flattens the
+  the backlog: status/assignee/tag/parent/release, filtering flattens the
   hierarchy; per-user **saved views** via a `saved_views` table with workspace RLS,
   store methods on db + local, `/api/v1/views` GET/POST/DELETE, SavedViews chip
   bar; local mode persists to gitignored `.specboard/local-views.json`).
@@ -66,13 +76,14 @@ the leaf stays the git-backed spec. Reuses the existing `parent_id` chain, estim
 roll-up, and the Phase 2 GitHub-link roll-up (already level-agnostic). See the
 "post-research" section below for the as-built breakdown across PRs.
 
-**Table-stakes order** (next up first). #15, #16, #17, #18, and #20
-are done, so the remaining Tier 1 work:
+**Table-stakes order** (next up first). #15, #16, #17, and #18 are done (#20 was
+shipped then removed in v0.4.0 — see Progress), so the remaining Tier 1 work:
 
 1. **#19 @mentions + notification inbox**: last Tier 1 item; collaboration glue.
    New `notifications` table + mention parsing on comments + an inbox UI.
 2. **#24 Bulk operations**: leans on #15 (bulk reparent) and #17 (select-all-in-filter).
-3. **#21 Prioritization scoring**: best after #20 (uses estimate as the effort term).
+3. **#21 Prioritization scoring**: needs a new effort input (an "effort" number
+   custom property is the natural substitute now that the `estimate` column is gone).
 
 Then proceed down Tiers 2–3 in the tables below. Re-confirm priority with the team
 before starting each item.
@@ -188,7 +199,7 @@ not auto-applied on deploy. The DBs are legacy Fly Postgres apps as of 2026-06-2
 |---|---------|-----|---------|
 | [#21](https://github.com/Specboards/SpecBoard/issues/21) | **Prioritization scoring** (RICE / value-vs-effort) | Turns prioritization from opinion into a defensible ranking, the core PM job | Aha! scorecard, PB drivers |
 | [#22](https://github.com/Specboards/SpecBoard/issues/22) | **Command palette (Cmd-K) + keyboard shortcuts** | Expected baseline UX for a daily-driver tool | Linear (signature) |
-| [#23](https://github.com/Specboards/SpecBoard/issues/23) | **Milestones / releases** with target dates | Plan/communicate delivery beyond coarse quarters | Jira versions, Aha! releases, Linear milestones, PB now/next/later |
+| [#23](https://github.com/Specboards/SpecBoard/issues/23) ✅ | **Milestones / releases** with target dates | Plan/communicate delivery beyond coarse quarters | Jira versions, Aha! releases, Linear milestones, PB now/next/later | (shipped v0.4.0: `releases` + Roadmap grouping + Backlog filter; edit UI v0.5.0) |
 | [#24](https://github.com/Specboards/SpecBoard/issues/24) | **Bulk operations** | Backlog grooming is too slow one-at-a-time | Linear, Jira |
 | [#25](https://github.com/Specboards/SpecBoard/issues/25) | **Due/target dates** on features | Baseline field; feeds the timeline view | All four |
 | [#26](https://github.com/Specboards/SpecBoard/issues/26) | **Roadmap timeline / Gantt view** | Visualize sequencing over time | Linear timeline, Jira, Aha! Gantt |

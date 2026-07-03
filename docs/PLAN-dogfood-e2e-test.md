@@ -13,13 +13,14 @@ The API + CLI + loop are built, deployed, and verified at the plumbing level:
   `apps/web/src/lib/api-keys.ts`, table `api_keys`, migration `0018`). Settings
   -> API keys UI. `GET /api/v1/me` for identity.
 - **CLI**: `apps/cli` (`specboard`): `auth`, `whoami`, `features`, `show`,
-  `status`, `assign`, `priority`, `link`, `products`.
+  `status`, `assign`, `link`, `products`. (The `priority` command was removed in
+  v0.4.0 along with the priority field.)
 - **Loop**: `.github/workflows/specboard-sync.yml` (PR opened/updated ->
   `in_progress` + link PR; merged -> `done`), `scripts/specboard/*.sh`, local
   `.githooks/pre-push`, runbook `docs/RUNBOOK-specboard-dogfood.md`.
 - **Deployed + verified**: migration `0018` applied to test and prod DBs; CLI
   verified live against both `test.specboard.ai` and `app.specboard.ai` (mint a
-  temp key via DB proxy -> whoami/features/products/priority all work -> delete
+  temp key via DB proxy -> whoami/features/products all work -> delete
   key -> 401).
 
 What has NOT been proven: a real PR actually moving a real work item via the CI

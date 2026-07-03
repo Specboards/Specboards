@@ -1,8 +1,8 @@
 # Specboard CLI
 
-`specboard` manages your Specboard work items (status, assignment, priority, and
-GitHub links) from the terminal. It talks to the same `/api/v1` surface the web
-app uses, authenticating with a personal API key.
+`specboard` manages your Specboard work items (status, assignment, and GitHub
+links) from the terminal. It talks to the same `/api/v1` surface the web app
+uses, authenticating with a personal API key.
 
 ## Install (from the monorepo)
 
@@ -41,7 +41,6 @@ features [--mine] [--status <s>]         List work items
 show <specId>                            Show one feature
 status <specId> <status>                 Set a feature's status
 assign <specId> <me|none|userId>         Set or clear the assignee
-priority <specId> <number|none>          Set or clear the priority
 link <specId> (--pr <n> | --issue <n> | --branch <name>)
 products                                 List products
 ```
