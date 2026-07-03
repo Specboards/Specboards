@@ -36,6 +36,32 @@ function createAuth(url: string) {
       // first-user admin slot could be claimed without mailbox control.
       // Relaxed only under SPECBOARD_E2E so tests can sign in without a mailbox.
       requireEmailVerification: !isE2E(),
+      // With requireEmailVerification on, Better Auth answers sign-up attempts
+      // for an existing email with a generic success (enumeration protection),
+      // so the attempter learns nothing and no verification email goes out.
+      // Notify the account's real owner instead: without this the legitimate
+      // user who forgot they have an account just waits on an email that never
+      // comes. Signing in resolves both cases (an unverified address gets the
+      // verification email re-sent on the failed sign-in).
+      onExistingUserSignUp: async ({ user }) => {
+        const origin =
+          (process.env.APP_URL ?? process.env.BETTER_AUTH_URL)?.trim() ?? "";
+        const { textBody, htmlBody } = renderActionEmail({
+          name: user.name,
+          intro:
+            "Someone (probably you) just tried to sign up for Specboard with this email address, but it already has an account. Sign in instead; if you have forgotten your password, use \"Forgot password?\" on the sign-in page.",
+          action: "Sign in",
+          url: `${origin}/sign-in`,
+          footer:
+            "If this wasn't you, you can safely ignore this email. Your account is unchanged.",
+        });
+        await sendEmail({
+          to: user.email,
+          subject: "You already have a Specboard account",
+          textBody,
+          htmlBody,
+        });
+      },
       sendResetPassword: async ({ user, url }) => {
         const { textBody, htmlBody } = renderActionEmail({
           name: user.name,
@@ -143,6 +169,11 @@ function createAuth(url: string) {
       // Postgres mints UUID ids (see schema) instead of Better Auth's
       // default text ids.
       database: { generateId: false },
+      // Behind Fly's proxy the socket peer is the edge, not the client, so
+      // without this the rate limiter can't key on IP and collapses to ONE
+      // shared bucket per path for all visitors (observed on prod). Fly
+      // overwrites Fly-Client-IP at its edge, so it is trustworthy here.
+      ipAddress: { ipAddressHeaders: ["fly-client-ip", "x-forwarded-for"] },
     },
   });
 }

@@ -204,8 +204,8 @@ function VerifyEmailNotice({
       <CardHeader>
         <CardTitle>Check your email</CardTitle>
         <CardDescription>
-          We sent a verification link to <span className="text-foreground">{email}</span>. Click it
-          to finish signing in.
+          We sent an email to <span className="text-foreground">{email}</span>. Follow the link in
+          it to continue.
         </CardDescription>
       </CardHeader>
       <CardContent>

@@ -5,6 +5,22 @@ All notable changes to Specboard are recorded here. The format is based on
 [Semantic Versioning](https://semver.org/). See [VERSIONING.md](./VERSIONING.md)
 for how and when the version is bumped.
 
+## [0.2.2] - 2026-07-03
+
+### Fixed
+
+- Signing up with an email that already has an account now sends that address
+  a "you already have an account" email pointing at sign-in and password
+  reset. Previously the attempt was answered with a generic success (correct,
+  it prevents account enumeration) but nothing was delivered, so the
+  legitimate owner waited for a verification email that never came. The
+  "Check your email" notice copy no longer promises a verification link
+  specifically.
+- Auth rate limiting now resolves the real client IP from Fly's
+  `Fly-Client-IP` header. Behind Fly's proxy it previously fell back to a
+  single shared per-path bucket for all visitors, so a handful of sign-in
+  attempts from anyone could rate-limit everyone.
+
 ## [0.2.1] - 2026-07-03
 
 ### Changed
