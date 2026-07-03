@@ -5,6 +5,44 @@ All notable changes to Specboard are recorded here. The format is based on
 [Semantic Versioning](https://semver.org/). See [VERSIONING.md](./VERSIONING.md)
 for how and when the version is bumped.
 
+## [0.2.0] - 2026-07-03
+
+### Added
+
+- One-click dedicated spec repo creation during onboarding: for organization
+  installations, Specboard creates a private repo, connects it, and hands off
+  to the first-spec walkthrough to seed it. Requires the GitHub App's
+  repository Administration (write) permission; the self-host manifest now
+  requests it, and hosted Apps need it added in GitHub. Personal-account
+  installations keep the manual deep-link steps.
+- The connect picker's repository list is prefetched server-side, so it
+  renders with the initial HTML instead of popping in after a client fetch;
+  loading states now use skeletons.
+
+### Changed
+
+- GitHub App installations are persisted in a workspace-scoped
+  `github_installations` table (migration 0019) instead of a 15-minute signed
+  cookie, so the connect picker, repo creation, and repo connect work on any
+  later visit. Multiple installations per workspace are supported, uninstall
+  webhooks drop the binding, and stale rows self-heal on read.
+
+### Security
+
+- Hardened the app surface ahead of an external pen test: security headers
+  (CSP, HSTS, X-Frame-Options, nosniff, Referrer-Policy, Permissions-Policy),
+  Better Auth rate limiting with stricter credential-path rules, a non-root
+  runtime container, and a CSRF nonce on the GitHub App install round-trip.
+- Closed cross-tenant defense-in-depth gaps: webhooks reconcile every
+  workspace that connected a repo, assignee and product-member targets are
+  validated as workspace members, and changing a product's visibility is
+  restricted to org admins.
+- Sturdier input handling: malformed percent-escapes no longer 500 the site,
+  an unparseable spec is skipped instead of aborting the repo sync, and the
+  untrusted repo config's globs and statuses are bounded to limit ReDoS.
+- Provisioned (not yet activated) a non-owner `specboard_app` database role
+  for the row-level-security cutover.
+
 ## [0.1.6] - 2026-07-01
 
 ### Fixed
