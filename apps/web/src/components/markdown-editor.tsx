@@ -29,6 +29,7 @@ export function MarkdownEditor({
   defaultValue = "",
   placeholder,
   disabled = false,
+  onChange,
 }: {
   /** Hidden form field name carrying the current Markdown value. */
   name: string;
@@ -36,9 +37,17 @@ export function MarkdownEditor({
   defaultValue?: string;
   placeholder?: string;
   disabled?: boolean;
+  /** Called with the current Markdown on every edit (for autosave). */
+  onChange?: (markdown: string) => void;
 }) {
   const [markdown, setMarkdown] = useState(defaultValue);
   const [raw, setRaw] = useState(false);
+
+  /** Update local state and notify the parent (autosave) in one place. */
+  function emit(next: string) {
+    setMarkdown(next);
+    onChange?.(next);
+  }
 
   const editor = useEditor({
     extensions: [StarterKit, Markdown],
@@ -56,7 +65,7 @@ export function MarkdownEditor({
       },
     },
     onUpdate: ({ editor }) => {
-      setMarkdown(getMarkdown(editor));
+      emit(getMarkdown(editor));
     },
   });
 
@@ -144,7 +153,7 @@ export function MarkdownEditor({
           value={markdown}
           disabled={disabled}
           placeholder={placeholder}
-          onChange={(e) => setMarkdown(e.target.value)}
+          onChange={(e) => emit(e.target.value)}
           className="min-h-32 rounded-t-none font-mono text-xs"
         />
       ) : (

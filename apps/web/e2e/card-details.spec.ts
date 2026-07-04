@@ -49,24 +49,24 @@ test.describe("roadmap: create card with details", () => {
       page.getByText("Problem statement for the login flow."),
     ).toBeVisible();
 
-    // Edit the details after creation, save, and confirm it persists.
+    // Edit the details after creation. Saves are automatic (debounced), with no
+    // Save button: typing into the editor triggers a PATCH on its own.
     const itemEditor = page.locator(".tiptap");
     await itemEditor.click();
     await page.keyboard.press("End");
-    await page.keyboard.type(" — updated.");
     const [patchResp] = await Promise.all([
       page.waitForResponse(
         (r) =>
           r.url().includes("/api/v1/features/") &&
           r.request().method() === "PATCH",
       ),
-      page.getByRole("button", { name: "Save details" }).click(),
+      page.keyboard.type(" (updated)."),
     ]);
     expect(patchResp.ok()).toBeTruthy();
 
     await page.reload();
     await expect(
-      page.getByText("Problem statement for the login flow. — updated."),
+      page.getByText("Problem statement for the login flow. (updated)."),
     ).toBeVisible();
   });
 });

@@ -105,7 +105,9 @@ export default async function RoadmapPage({
 
   // One column per release (already ordered: dated first), unscheduled last.
   // `release` carries the full record so admins can edit it inline; it is null
-  // for the trailing "Unscheduled" bucket.
+  // for the trailing "Unscheduled" bucket. The Unscheduled column is only shown
+  // when something is actually unscheduled, so a fully-planned board stays tidy.
+  const hasUnscheduled = features.some((f) => f.releaseId === null);
   const groups: Array<{
     releaseId: string | null;
     name: string;
@@ -120,13 +122,17 @@ export default async function RoadmapPage({
       status: r.status as string | null,
       release: r,
     })),
-    {
-      releaseId: null,
-      name: "Unscheduled",
-      targetDate: null,
-      status: null,
-      release: null,
-    },
+    ...(hasUnscheduled
+      ? [
+          {
+            releaseId: null,
+            name: "Unscheduled",
+            targetDate: null,
+            status: null,
+            release: null,
+          },
+        ]
+      : []),
   ];
 
   return (
