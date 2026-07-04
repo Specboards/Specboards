@@ -107,7 +107,7 @@ export function WorkflowEditor({
               disabled={!canEdit || saving}
               placeholder="Stage name"
               className="h-8"
-              aria-label={`Stage ${i + 1} name`}
+              aria-label={`Stage ${i + 1}`}
             />
             {canEdit ? (
               <div className="flex shrink-0 items-center gap-0.5">

@@ -20,7 +20,9 @@ test.describe("settings: detail templates", () => {
 
     // Create a template. With none yet, the only Name field and rich-text
     // editor on the page belong to the create form.
-    await page.getByRole("textbox", { name: "Name" }).fill("Feature spec");
+    await page
+      .getByRole("textbox", { name: "Name", exact: true })
+      .fill("Feature spec");
     await page.locator(".tiptap").click();
     await page.keyboard.type("Problem to solve");
     const [createResp] = await Promise.all([
