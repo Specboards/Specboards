@@ -83,6 +83,7 @@ interface LocalRelease {
   id: string;
   name: string;
   status: "planned" | "in_progress" | "shipped";
+  startDate: string | null;
   targetDate: string | null;
 }
 
@@ -1015,6 +1016,7 @@ export class LocalFileStore implements FeatureStore {
       id: randomUUID(),
       name,
       status,
+      startDate: input.startDate ?? null,
       targetDate: input.targetDate ?? null,
     };
     await this.writeReleases([...rows, release]);
@@ -1040,6 +1042,7 @@ export class LocalFileStore implements FeatureStore {
       }
       release.status = patch.status;
     }
+    if (patch.startDate !== undefined) release.startDate = patch.startDate;
     if (patch.targetDate !== undefined) release.targetDate = patch.targetDate;
     await this.writeReleases(rows);
     const all = await this.loadAll();

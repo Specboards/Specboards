@@ -88,22 +88,29 @@ export function ItemDetailView({
 
       <hr className="border-border/60" />
 
-      {/* Body */}
-      {editableBody ? (
-        <FeatureDetailsEditor specId={feature.specId} initial={feature.content} />
-      ) : feature.content.trim() === "" ? (
-        <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-          {childLabel
-            ? `This ${levelLabel.toLowerCase()} groups work and has no body of its own. Add ${childLabel.toLowerCase()} items beneath it to build it out.`
-            : "No details yet."}
-        </div>
-      ) : (
-        <div className="prose prose-sm prose-neutral max-w-none dark:prose-invert">
-          <ReactMarkdown>{feature.content}</ReactMarkdown>
-        </div>
-      )}
+      {/* Description / body */}
+      <div className="space-y-2">
+        <h2 className="text-sm font-medium text-muted-foreground">Description</h2>
+        {editableBody ? (
+          <FeatureDetailsEditor
+            specId={feature.specId}
+            initial={feature.content}
+            minHeightClass="min-h-[15rem]"
+          />
+        ) : feature.content.trim() === "" ? (
+          <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
+            {childLabel
+              ? `This ${levelLabel.toLowerCase()} groups work and has no body of its own. Add ${childLabel.toLowerCase()} items beneath it to build it out.`
+              : "No details yet."}
+          </div>
+        ) : (
+          <div className="prose prose-sm prose-neutral max-w-none dark:prose-invert">
+            <ReactMarkdown>{feature.content}</ReactMarkdown>
+          </div>
+        )}
+      </div>
 
-      <DetailSection id="relationships" title="Relationships">
+      <DetailSection id="relationships" title="Relationships" defaultCollapsed>
         <div className="space-y-5">
           {parentKey && parentLevelLabel ? (
             <div className="space-y-2">
@@ -174,7 +181,7 @@ export function ItemDetailView({
         </div>
       </DetailSection>
 
-      <DetailSection id="integrations" title="Integrations">
+      <DetailSection id="integrations" title="Integrations" defaultCollapsed>
         <FeatureGithubLinks
           specId={feature.specId}
           links={feature.githubLinks}

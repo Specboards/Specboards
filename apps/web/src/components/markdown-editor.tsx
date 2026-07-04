@@ -30,6 +30,7 @@ export function MarkdownEditor({
   placeholder,
   disabled = false,
   onChange,
+  minHeightClass = "min-h-32",
 }: {
   /** Hidden form field name carrying the current Markdown value. */
   name: string;
@@ -39,6 +40,8 @@ export function MarkdownEditor({
   disabled?: boolean;
   /** Called with the current Markdown on every edit (for autosave). */
   onChange?: (markdown: string) => void;
+  /** Min-height utility for both editor surfaces (default ~4 rows). */
+  minHeightClass?: string;
 }) {
   const [markdown, setMarkdown] = useState(defaultValue);
   const [raw, setRaw] = useState(false);
@@ -59,7 +62,8 @@ export function MarkdownEditor({
     editorProps: {
       attributes: {
         class: cn(
-          "tiptap min-h-32 rounded-b-md border border-t-0 border-input bg-transparent px-3 py-2 text-sm focus:outline-none",
+          "tiptap rounded-b-md border border-t-0 border-input bg-transparent px-3 py-2 text-sm focus:outline-none",
+          minHeightClass,
           disabled && "cursor-not-allowed opacity-50",
         ),
       },
@@ -154,7 +158,7 @@ export function MarkdownEditor({
           disabled={disabled}
           placeholder={placeholder}
           onChange={(e) => emit(e.target.value)}
-          className="min-h-32 rounded-t-none font-mono text-xs"
+          className={cn("rounded-t-none font-mono text-xs", minHeightClass)}
         />
       ) : (
         <EditorContent editor={editor} />

@@ -21,9 +21,21 @@ for how and when the version is bumped.
 - The board **flyout is now resizable** (drag its left edge; the width is
   remembered) and renders the exact same layout as the full item page, backed by
   a new `GET /api/v1/features/:specId/context` endpoint.
+- **Release lifecycle** on the Roadmap (migration 0023 adds `releases.start_date`):
+  releases now carry a **start date** and a **ship date**, both editable after
+  creation. A **Release** action marks a release shipped, which drops it and its
+  items from the active roadmap (the assignment is kept for history) and moves it
+  under a new **Shipped releases** view; shipped releases can be reopened from
+  there.
 
 ### Changed
 
+- The item detail is retitled: the body sits under a **Description** heading with
+  a roomier (~10-row) editor, and the **Relationships** and **Integrations**
+  sections start collapsed until you expand them.
+- The product attribution badge is now hidden when the workspace has only one
+  product (it carried no information there), in addition to the single-product
+  board view.
 - Item bodies (and titles, for DB-native items) **auto-save** as you type; the
   manual "Save details" button is gone. Undo/redo use the editor's native
   history. Spec-backed bodies stay read-only (their source of truth is git).

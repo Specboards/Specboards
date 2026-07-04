@@ -16,12 +16,14 @@ import {
   ReleaseCreate,
   ReleaseDelete,
   ReleaseEdit,
+  ReleaseReopen,
+  ReleaseShip,
 } from "@/components/release-controls";
 import { StatusDot } from "@/components/status-dot";
 import { WorkItemCreate } from "@/components/work-item-create";
 import { resolveActiveLevel } from "@/lib/active-level";
 import { ALL_PRODUCTS, resolveActiveProduct } from "@/lib/active-product";
-import { itemPath, LOCAL_ORG_SLUG } from "@/lib/org-path";
+import { itemPath, LOCAL_ORG_SLUG, orgProductPath } from "@/lib/org-path";
 import { sortFeatures, statusLabel } from "@/lib/feature-helpers";
 import { productColorClasses } from "@/lib/product-color";
 import { getDb } from "@/lib/db";
@@ -81,12 +83,18 @@ export default async function RoadmapPage({
     ? allFeatures.filter((f) => f.productId === activeProduct.id)
     : allFeatures;
 
-  // Cross-product view: tag each card with its owning product.
-  const productsById = activeProduct
-    ? undefined
-    : Object.fromEntries(
-        products.map((p) => [p.id, { name: p.name, key: p.key, color: p.color }]),
-      );
+  // Cross-product view: tag each card with its owning product. Skipped when a
+  // single product is in context or the workspace only has one product (the tag
+  // carries no information then).
+  const productsById =
+    activeProduct || products.length <= 1
+      ? undefined
+      : Object.fromEntries(
+          products.map((p) => [
+            p.id,
+            { name: p.name, key: p.key, color: p.color },
+          ]),
+        );
 
   const levels = await store.listLevels(access ?? undefined);
   const activeLevel = resolveActiveLevel(levels, sp.level);
@@ -103,21 +111,32 @@ export default async function RoadmapPage({
     detailTemplates.find((t) => t.id === activeLevel.detailTemplateId)?.body ??
     "";
 
+  // Shipped releases (and their items) leave the active roadmap and live under a
+  // separate "Shipped releases" view (?view=shipped). Split the set so each view
+  // only builds its own columns.
+  const showShipped = sp.view === "shipped";
+  const activeReleases = releases.filter((r) => r.status !== "shipped");
+  const shippedReleases = releases.filter((r) => r.status === "shipped");
+  const visibleReleases = showShipped ? shippedReleases : activeReleases;
+
   // One column per release (already ordered: dated first), unscheduled last.
   // `release` carries the full record so admins can edit it inline; it is null
   // for the trailing "Unscheduled" bucket. The Unscheduled column is only shown
-  // when something is actually unscheduled, so a fully-planned board stays tidy.
-  const hasUnscheduled = features.some((f) => f.releaseId === null);
+  // (active view) when something is actually unscheduled, so a fully-planned
+  // board stays tidy.
+  const hasUnscheduled = !showShipped && features.some((f) => f.releaseId === null);
   const groups: Array<{
     releaseId: string | null;
     name: string;
+    startDate: string | null;
     targetDate: string | null;
     status: string | null;
     release: (typeof releases)[number] | null;
   }> = [
-    ...releases.map((r) => ({
+    ...visibleReleases.map((r) => ({
       releaseId: r.id as string | null,
       name: r.name,
+      startDate: r.startDate,
       targetDate: r.targetDate,
       status: r.status as string | null,
       release: r,
@@ -127,6 +146,7 @@ export default async function RoadmapPage({
           {
             releaseId: null,
             name: "Unscheduled",
+            startDate: null,
             targetDate: null,
             status: null,
             release: null,
@@ -139,11 +159,28 @@ export default async function RoadmapPage({
     <section className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-lg font-semibold tracking-tight">Roadmap</h1>
+          <h1 className="text-lg font-semibold tracking-tight">
+            {showShipped ? "Shipped releases" : "Roadmap"}
+          </h1>
           <LevelSwitcher levels={levels} active={activeLevel.key} />
+          {showShipped ? (
+            <Link
+              href={roadmapViewHref(org, productSlug, sp.level, false)}
+              className="text-xs text-muted-foreground hover:text-foreground hover:underline"
+            >
+              ← Active roadmap
+            </Link>
+          ) : shippedReleases.length > 0 ? (
+            <Link
+              href={roadmapViewHref(org, productSlug, sp.level, true)}
+              className="text-xs text-muted-foreground hover:text-foreground hover:underline"
+            >
+              Shipped releases ({shippedReleases.length}) →
+            </Link>
+          ) : null}
         </div>
         <div className="flex items-center gap-2">
-          {isAdmin ? <ReleaseCreate /> : null}
+          {isAdmin && !showShipped ? <ReleaseCreate /> : null}
           {canEdit && !activeLevel.isLeaf ? (
             <WorkItemCreate
               levelKey={activeLevel.key}
@@ -178,8 +215,10 @@ export default async function RoadmapPage({
               <div className="flex items-baseline justify-between gap-2">
                 <h2 className="text-sm font-medium text-muted-foreground">
                   {group.name}
-                  {group.targetDate ? (
-                    <span className="ml-2 font-normal">{group.targetDate}</span>
+                  {formatReleaseDates(group.startDate, group.targetDate) ? (
+                    <span className="ml-2 font-normal">
+                      {formatReleaseDates(group.startDate, group.targetDate)}
+                    </span>
                   ) : null}
                   {group.status && group.status !== "planned" ? (
                     <span className="ml-2 font-normal">
@@ -189,10 +228,22 @@ export default async function RoadmapPage({
                 </h2>
                 {isAdmin && group.release ? (
                   <span className="flex shrink-0 items-center gap-2">
+                    {showShipped ? (
+                      <ReleaseReopen
+                        id={group.release.id}
+                        name={group.release.name}
+                      />
+                    ) : (
+                      <ReleaseShip
+                        id={group.release.id}
+                        name={group.release.name}
+                      />
+                    )}
                     <ReleaseEdit
                       id={group.release.id}
                       name={group.release.name}
                       status={group.release.status}
+                      startDate={group.release.startDate}
                       targetDate={group.release.targetDate}
                     />
                     <ReleaseDelete
@@ -242,4 +293,30 @@ export default async function RoadmapPage({
       )}
     </section>
   );
+}
+
+/** Build a roadmap link that toggles the shipped view while keeping the level. */
+function roadmapViewHref(
+  org: string,
+  product: string,
+  level: string | string[] | undefined,
+  shipped: boolean,
+): string {
+  const params = new URLSearchParams();
+  const levelKey = Array.isArray(level) ? level[0] : level;
+  if (levelKey) params.set("level", levelKey);
+  if (shipped) params.set("view", "shipped");
+  const qs = params.toString();
+  return orgProductPath(org, product, `/roadmap${qs ? `?${qs}` : ""}`);
+}
+
+/** Render a release's date range as "start → ship", omitting missing ends. */
+function formatReleaseDates(
+  startDate: string | null,
+  targetDate: string | null,
+): string | null {
+  if (startDate && targetDate) return `${startDate} → ${targetDate}`;
+  if (targetDate) return `→ ${targetDate}`;
+  if (startDate) return `${startDate} →`;
+  return null;
 }

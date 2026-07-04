@@ -46,11 +46,12 @@ export function ReleaseCreate() {
       setError("Name is required.");
       return;
     }
+    const startDate = String(data.get("startDate") ?? "") || null;
     const targetDate = String(data.get("targetDate") ?? "") || null;
     startTransition(async () => {
       setError(null);
       try {
-        await createRelease({ name, targetDate });
+        await createRelease({ name, startDate, targetDate });
         toast.success("Release created");
         setOpen(false);
         router.refresh();
@@ -83,12 +84,20 @@ export function ReleaseCreate() {
               </span>
               <Input name="name" autoFocus placeholder="e.g. v0.4" className="h-8" />
             </label>
-            <label className="block space-y-1.5">
-              <span className="text-xs font-medium text-muted-foreground">
-                Target date (optional)
-              </span>
-              <Input name="targetDate" type="date" className="h-8" />
-            </label>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="block space-y-1.5">
+                <span className="text-xs font-medium text-muted-foreground">
+                  Start date
+                </span>
+                <Input name="startDate" type="date" className="h-8" />
+              </label>
+              <label className="block space-y-1.5">
+                <span className="text-xs font-medium text-muted-foreground">
+                  Ship date
+                </span>
+                <Input name="targetDate" type="date" className="h-8" />
+              </label>
+            </div>
             {error ? <p className="text-xs text-destructive">{error}</p> : null}
             <Button type="submit" size="sm" disabled={pending}>
               {pending ? "Creating…" : "Create release"}
@@ -108,11 +117,13 @@ export function ReleaseEdit({
   id,
   name,
   status,
+  startDate,
   targetDate,
 }: {
   id: string;
   name: string;
   status: ReleaseStatus;
+  startDate: string | null;
   targetDate: string | null;
 }) {
   const router = useRouter();
@@ -129,6 +140,7 @@ export function ReleaseEdit({
       return;
     }
     const nextStatus = String(data.get("status") ?? "planned") as ReleaseStatus;
+    const nextStartDate = String(data.get("startDate") ?? "") || null;
     const nextTargetDate = String(data.get("targetDate") ?? "") || null;
     startTransition(async () => {
       setError(null);
@@ -136,6 +148,7 @@ export function ReleaseEdit({
         await updateRelease(id, {
           name: nextName,
           status: nextStatus,
+          startDate: nextStartDate,
           targetDate: nextTargetDate,
         });
         toast.success("Release saved");
@@ -192,17 +205,30 @@ export function ReleaseEdit({
                 ))}
               </Select>
             </label>
-            <label className="block space-y-1.5">
-              <span className="text-xs font-medium text-muted-foreground">
-                Target date (optional)
-              </span>
-              <Input
-                name="targetDate"
-                type="date"
-                defaultValue={targetDate ?? ""}
-                className="h-8"
-              />
-            </label>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="block space-y-1.5">
+                <span className="text-xs font-medium text-muted-foreground">
+                  Start date
+                </span>
+                <Input
+                  name="startDate"
+                  type="date"
+                  defaultValue={startDate ?? ""}
+                  className="h-8"
+                />
+              </label>
+              <label className="block space-y-1.5">
+                <span className="text-xs font-medium text-muted-foreground">
+                  Ship date
+                </span>
+                <Input
+                  name="targetDate"
+                  type="date"
+                  defaultValue={targetDate ?? ""}
+                  className="h-8"
+                />
+              </label>
+            </div>
             {error ? <p className="text-xs text-destructive">{error}</p> : null}
             <Button type="submit" size="sm" disabled={pending}>
               {pending ? "Saving…" : "Save changes"}
@@ -253,6 +279,83 @@ export function ReleaseDelete({ id, name }: { id: string; name: string }) {
       aria-label={`Delete release ${name}`}
     >
       Delete
+    </button>
+  );
+}
+
+/**
+ * Mark a release shipped ("Release" action). Shipped releases (and their items)
+ * drop off the active roadmap and move to the Shipped releases view; the items
+ * keep their release assignment for history.
+ */
+export function ReleaseShip({ id, name }: { id: string; name: string }) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+
+  function onShip() {
+    if (
+      !window.confirm(
+        `Mark "${name}" as released? It moves to Shipped releases and leaves the active roadmap.`,
+      )
+    ) {
+      return;
+    }
+    startTransition(async () => {
+      try {
+        await updateRelease(id, { status: "shipped" });
+        toast.success(`${name} released`);
+        router.refresh();
+      } catch (err) {
+        if (err instanceof AuthRequiredError) {
+          router.push(
+            `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
+          );
+          return;
+        }
+        toast.error(err instanceof Error ? err.message : "Release failed.");
+      }
+    });
+  }
+
+  return (
+    <Button size="sm" variant="outline" onClick={onShip} disabled={pending}>
+      {pending ? "Releasing…" : "Release"}
+    </Button>
+  );
+}
+
+/** Reopen a shipped release back to Planned, returning it to the active roadmap. */
+export function ReleaseReopen({ id, name }: { id: string; name: string }) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+
+  function onReopen() {
+    startTransition(async () => {
+      try {
+        await updateRelease(id, { status: "planned" });
+        toast.success(`${name} reopened`);
+        router.refresh();
+      } catch (err) {
+        if (err instanceof AuthRequiredError) {
+          router.push(
+            `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
+          );
+          return;
+        }
+        toast.error(err instanceof Error ? err.message : "Reopen failed.");
+      }
+    });
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onReopen}
+      disabled={pending}
+      className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+      aria-label={`Reopen release ${name}`}
+    >
+      Reopen
     </button>
   );
 }

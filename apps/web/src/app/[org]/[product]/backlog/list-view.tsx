@@ -50,12 +50,17 @@ export async function ListView({
   const releases = await store.listReleases(access ?? undefined);
   const releaseNames = Object.fromEntries(releases.map((r) => [r.id, r.name]));
 
-  // Cross-product view: show a Product column tagging each row's owner.
-  const productsById = activeProduct
-    ? undefined
-    : Object.fromEntries(
-        products.map((p) => [p.id, { name: p.name, key: p.key, color: p.color }]),
-      );
+  // Cross-product view: show a Product column tagging each row's owner. Omitted
+  // when a single product is in context or the workspace only has one product.
+  const productsById =
+    activeProduct || products.length <= 1
+      ? undefined
+      : Object.fromEntries(
+          products.map((p) => [
+            p.id,
+            { name: p.name, key: p.key, color: p.color },
+          ]),
+        );
 
   // Assignee options come from the workspace roster (DB mode only).
   const db = getDb();

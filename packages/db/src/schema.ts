@@ -390,6 +390,8 @@ export const releases = pgTable(
     name: text("name").notNull(),
     /** planned / in_progress / shipped. */
     status: text("status").notNull().default("planned"),
+    /** Planned start date (date-only), or null when unset. */
+    startDate: text("start_date"),
     /** Target ship date (date-only), or null when undated. */
     targetDate: text("target_date"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

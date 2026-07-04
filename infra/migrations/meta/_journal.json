@@ -162,6 +162,13 @@
       "when": 1783103516871,
       "tag": "0022_fine_demogoblin",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1783174202083,
+      "tag": "0023_happy_cable",
+      "breakpoints": true
     }
   ]
 }

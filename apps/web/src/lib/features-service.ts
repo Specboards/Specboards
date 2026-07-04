@@ -637,7 +637,8 @@ export function parseReleaseInput(body: unknown): ReleaseInput {
   }
   const input: ReleaseInput = { name: raw.name.trim() };
   if ("status" in raw) input.status = parseReleaseStatus(raw.status);
-  if ("targetDate" in raw) input.targetDate = parseTargetDate(raw.targetDate);
+  if ("startDate" in raw) input.startDate = parseDate(raw.startDate, "startDate");
+  if ("targetDate" in raw) input.targetDate = parseDate(raw.targetDate, "targetDate");
   return input;
 }
 
@@ -655,10 +656,11 @@ export function parseReleasePatch(body: unknown): ReleasePatch {
     patch.name = raw.name.trim();
   }
   if ("status" in raw) patch.status = parseReleaseStatus(raw.status);
-  if ("targetDate" in raw) patch.targetDate = parseTargetDate(raw.targetDate);
+  if ("startDate" in raw) patch.startDate = parseDate(raw.startDate, "startDate");
+  if ("targetDate" in raw) patch.targetDate = parseDate(raw.targetDate, "targetDate");
   if (Object.keys(patch).length === 0) {
     throw new InvalidPatchError(
-      "Patch must set at least one of: name, status, targetDate.",
+      "Patch must set at least one of: name, status, startDate, targetDate.",
     );
   }
   return patch;
@@ -678,10 +680,10 @@ function parseReleaseStatus(value: unknown): ReleaseStatus {
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-function parseTargetDate(value: unknown): string | null {
+function parseDate(value: unknown, field: string): string | null {
   if (value === null || value === "") return null;
   if (typeof value !== "string" || !DATE_RE.test(value)) {
-    throw new InvalidPatchError("targetDate must be YYYY-MM-DD or null.");
+    throw new InvalidPatchError(`${field} must be YYYY-MM-DD or null.`);
   }
   return value;
 }

@@ -20,12 +20,15 @@ import { AuthRequiredError, patchFeature } from "@/lib/api-client";
 export function FeatureDetailsEditor({
   specId,
   initial,
-  placeholder = "Add details…",
+  placeholder = "Add a description…",
+  minHeightClass,
 }: {
   specId: string;
   /** Current Markdown body (seed value; the editor owns state after mount). */
   initial: string;
   placeholder?: string;
+  /** Min-height utility for the editor surface (e.g. "min-h-[15rem]"). */
+  minHeightClass?: string;
 }) {
   const router = useRouter();
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -89,6 +92,7 @@ export function FeatureDetailsEditor({
         defaultValue={initial}
         placeholder={placeholder}
         onChange={onChange}
+        minHeightClass={minHeightClass}
       />
       {error ? (
         <p className="text-xs text-destructive">{error}</p>

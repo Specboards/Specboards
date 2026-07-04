@@ -1538,6 +1538,7 @@ export class DbStore implements FeatureStore {
           workspaceId: ws,
           name,
           status: normalizeReleaseStatus(input.status),
+          startDate: input.startDate ?? null,
           targetDate: input.targetDate ?? null,
         })
         .onConflictDoNothing({ target: [releases.workspaceId, releases.name] })
@@ -1563,6 +1564,7 @@ export class DbStore implements FeatureStore {
       if (patch.status !== undefined) {
         set.status = normalizeReleaseStatus(patch.status);
       }
+      if (patch.startDate !== undefined) set.startDate = patch.startDate;
       if (patch.targetDate !== undefined) set.targetDate = patch.targetDate;
       const [row] = await tx
         .update(releases)
@@ -2015,13 +2017,20 @@ function normalizeReleaseStatus(status: string | undefined): ReleaseStatus {
 }
 
 function toReleaseRecord(
-  row: { id: string; name: string; status: string; targetDate: string | null },
+  row: {
+    id: string;
+    name: string;
+    status: string;
+    startDate: string | null;
+    targetDate: string | null;
+  },
   itemCount: number,
 ): ReleaseRecord {
   return {
     id: row.id,
     name: row.name,
     status: row.status as ReleaseStatus,
+    startDate: row.startDate,
     targetDate: row.targetDate,
     itemCount,
   };

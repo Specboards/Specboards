@@ -306,6 +306,8 @@ export interface ReleaseRecord {
   id: string;
   name: string;
   status: ReleaseStatus;
+  /** Planned start date as YYYY-MM-DD, or null when unset. */
+  startDate: string | null;
   /** Target ship date as YYYY-MM-DD, or null when undated. */
   targetDate: string | null;
   /** Count of items scheduled into this release. */
@@ -315,12 +317,14 @@ export interface ReleaseRecord {
 export interface ReleaseInput {
   name: string;
   status?: ReleaseStatus;
+  startDate?: string | null;
   targetDate?: string | null;
 }
 
 export type ReleasePatch = Partial<{
   name: string;
   status: ReleaseStatus;
+  startDate: string | null;
   targetDate: string | null;
 }>;
 
