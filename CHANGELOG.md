@@ -14,6 +14,10 @@ for how and when the version is bumped.
   work into Plan / Build / Ship sections and adds document areas that can hold
   Specboard-native rich-text pages or link out to an external source, with a
   source chooser per area.
+- **GitHub-backed doc repositories** for the Research and Architecture areas. An
+  admin can create a private org repo from the source chooser; the area then
+  renders that repo's Markdown tree, and an explicit Save commits edits straight
+  to the default branch. The docs repo is kept separate from spec sync.
 - **Webhooks delivery log + manual redeliver** (Settings → Webhooks). Each
   endpoint expands to its recent deliveries (event, status, attempts, HTTP
   result, last error, time). A per-row **Redeliver** re-queues the stored
