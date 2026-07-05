@@ -8,13 +8,14 @@ import {
 } from "@specboard/core";
 
 import { resolveWorkflowFor } from "@/lib/repo-config";
-import { dispatchEvent } from "@/lib/webhooks/events";
+import { notifyOutbox } from "@/lib/webhooks/events";
 import {
   getStore,
   type CustomFieldValue,
   type FeatureDetail,
   type FeaturePatch,
   type FeatureRecord,
+  type OutboxEmit,
   type WorkspaceScope,
   type WorkspaceLevel,
 } from "@/lib/store";
@@ -211,28 +212,29 @@ export async function patchFeature(
     }
   }
 
-  await store.updateFeature(specId, patch, scope);
-  const updated = await store.getFeature(specId, scope);
-  const result = updated ?? feature;
-
-  // Emit a webhook when the status actually moved (not on same-status or
-  // non-status patches). `dispatchEvent` never throws, so this can't fail the
-  // write.
+  // Record a status-change event in the SAME transaction as the update (via the
+  // store's outbox), so a crash can't leave the change persisted but the event
+  // lost. The relay fans it out to webhooks afterward.
+  let emit: OutboxEmit | undefined;
   if (patch.status !== undefined && patch.status !== feature.status) {
-    await dispatchEvent(scope, {
+    emit = {
       type: "item.status_changed",
-      productId: result.productId,
+      productId: feature.productId,
       data: {
-        specId: result.specId,
-        title: result.title,
-        level: result.level,
+        specId: feature.specId,
+        title: patch.title ?? feature.title,
+        level: feature.level,
         from: feature.status,
         to: patch.status,
       },
-    });
+    };
   }
 
-  return result;
+  await store.updateFeature(specId, patch, scope, emit);
+  const updated = await store.getFeature(specId, scope);
+  if (emit) notifyOutbox(); // nudge the relay so delivery isn't delayed a tick
+
+  return updated ?? feature;
 }
 
 /**
@@ -689,21 +691,28 @@ export async function updateRelease(
   const store = await getStore();
   // Capture the prior status so we can detect the ship edge for the webhook.
   const before = (await store.listReleases(scope)).find((r) => r.id === id) ?? null;
-  const updated = await store.updateRelease(id, patch, scope);
 
-  if (before && before.status !== "shipped" && updated.status === "shipped") {
-    await dispatchEvent(scope, {
+  // Record release.shipped in the same transaction as the ship. A ship patch is
+  // status-only in practice; apply any name/date overrides in the patch so the
+  // payload reflects the post-update release (itemCount is unaffected by status).
+  let emit: OutboxEmit | undefined;
+  if (before && before.status !== "shipped" && patch.status === "shipped") {
+    emit = {
       type: "release.shipped",
       productId: null, // releases are workspace-level
       data: {
-        releaseId: updated.id,
-        name: updated.name,
-        startDate: updated.startDate,
-        targetDate: updated.targetDate,
-        itemCount: updated.itemCount,
+        releaseId: before.id,
+        name: patch.name?.trim() || before.name,
+        startDate: patch.startDate !== undefined ? patch.startDate : before.startDate,
+        targetDate:
+          patch.targetDate !== undefined ? patch.targetDate : before.targetDate,
+        itemCount: before.itemCount,
       },
-    });
+    };
   }
+
+  const updated = await store.updateRelease(id, patch, scope, emit);
+  if (emit) notifyOutbox();
 
   return updated;
 }
@@ -1129,17 +1138,10 @@ export async function createWorkItem(
   scope?: WorkspaceScope,
 ): Promise<FeatureRecord> {
   const store = await getStore();
-  const created = await store.createFeature(input, scope);
-  await dispatchEvent(scope, {
-    type: "item.created",
-    productId: created.productId,
-    data: {
-      specId: created.specId,
-      title: created.title,
-      level: created.level,
-      status: created.status,
-    },
-  });
+  // The store records item.created in the create transaction (it builds the data
+  // from the new row, since specId is generated there).
+  const created = await store.createFeature(input, scope, "item.created");
+  notifyOutbox();
   return created;
 }
 
@@ -1149,20 +1151,22 @@ export async function deleteWorkItem(
   scope?: WorkspaceScope,
 ): Promise<void> {
   const store = await getStore();
-  // Read the item before deleting so the webhook can describe what was removed.
+  // Read the item first so the event can describe what was removed; the store
+  // records item.deleted in the same transaction as the delete.
   const existing = await store.getFeature(specId, scope);
-  await store.deleteFeature(specId, scope);
-  if (existing) {
-    await dispatchEvent(scope, {
-      type: "item.deleted",
-      productId: existing.productId,
-      data: {
-        specId: existing.specId,
-        title: existing.title,
-        level: existing.level,
-      },
-    });
-  }
+  const emit: OutboxEmit | undefined = existing
+    ? {
+        type: "item.deleted",
+        productId: existing.productId,
+        data: {
+          specId: existing.specId,
+          title: existing.title,
+          level: existing.level,
+        },
+      }
+    : undefined;
+  await store.deleteFeature(specId, scope, emit);
+  if (emit) notifyOutbox();
 }
 
 /** Parse and validate an untrusted relation-create body. */

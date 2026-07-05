@@ -948,6 +948,40 @@ export const webhookDeliveries = pgTable(
   ],
 );
 
+/**
+ * Transactional outbox. Every domain change that should notify consumers writes
+ * one row here *in the same transaction* as the change (see the store's mutating
+ * methods), so an event can never be lost in the gap between a commit and a
+ * separate enqueue. A relay claims unprocessed rows, fans each out to matching
+ * webhook endpoints (creating `webhook_deliveries`), and stamps `processedAt`.
+ * `data` is an opaque snapshot the relay maps to a consumer format. Generic on
+ * purpose: future consumers (in-app notifications, activity feed) read the same
+ * stream. `productId`/`actorId` are historical snapshots (no FK), so deleting a
+ * product or user never rewrites past events.
+ */
+export const outboxEvents = pgTable(
+  "outbox_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    /** Routing scope snapshot; null = workspace-level event (no product). */
+    productId: uuid("product_id"),
+    /** The acting user at the time of the event, or null (system/unattributable). */
+    actorId: uuid("actor_id"),
+    type: text("type").notNull(),
+    data: jsonb("data").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    /** When the relay finished fanning this event out; null = still pending. */
+    processedAt: timestamp("processed_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("outbox_events_ws_idx").on(t.workspaceId),
+    index("outbox_events_created_idx").on(t.createdAt),
+  ],
+);
+
 export const workspaceRelations = relations(workspaces, ({ many }) => ({
   members: many(members),
   repositories: many(repositories),

@@ -3,7 +3,12 @@ import { createServer, type IncomingHttpHeaders } from "node:http";
 
 import { expect, test } from "@playwright/test";
 
-import { getWorkspace, resetReleases, resetWebhooks } from "./helpers/db";
+import {
+  getWorkspace,
+  outboxCounts,
+  resetReleases,
+  resetWebhooks,
+} from "./helpers/db";
 
 /**
  * Outbound webhooks, end to end: register an endpoint, cause a real event
@@ -104,6 +109,14 @@ test.describe("webhooks: outbound delivery", () => {
         .update(`${t}.${delivery.body}`)
         .digest("hex");
       expect(v1).toBe(expected);
+
+      // The event went through the transactional outbox: a row was written in the
+      // ship transaction and the relay has since processed it (none left pending).
+      await expect
+        .poll(() => outboxCounts(ws.id).then((c) => c.total), { timeout: 5_000 })
+        .toBeGreaterThan(0);
+      const counts = await outboxCounts(ws.id);
+      expect(counts.unprocessed).toBe(0);
     } finally {
       await receiver.close();
     }

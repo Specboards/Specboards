@@ -2,6 +2,7 @@ import { type Database } from "@specboard/db";
 
 import { decryptSecret } from "@/lib/crypto";
 import { getDb } from "@/lib/db";
+import { relayOutbox } from "@/lib/webhooks/relay";
 import { postSignedEnvelope } from "@/lib/webhooks/sender";
 import {
   claimDueDeliveries,
@@ -68,6 +69,9 @@ export async function drainOnce(): Promise<void> {
 
   draining = true;
   try {
+    // First expand any new outbox events into per-endpoint delivery rows, then
+    // send everything that's due.
+    await relayOutbox();
     const claimed = await claimDueDeliveries(db, CLAIM_LIMIT, LEASE_SECONDS);
     await Promise.all(claimed.map((d) => deliverOne(db, d)));
     // A full batch likely means more is waiting; sweep again next tick.

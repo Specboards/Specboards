@@ -1,4 +1,5 @@
 import {
+  and,
   createDb,
   detailTemplates,
   eq,
@@ -7,6 +8,8 @@ import {
   ideaSettings,
   ideaStatuses,
   ideas,
+  isNull,
+  outboxEvents,
   releases,
   repositories,
   schema,
@@ -76,6 +79,28 @@ export async function resetWebhooks(workspaceId: string): Promise<void> {
   await db()
     .delete(webhookEndpoints)
     .where(eq(webhookEndpoints.workspaceId, workspaceId));
+  await db().delete(outboxEvents).where(eq(outboxEvents.workspaceId, workspaceId));
+}
+
+/** Count outbox events for a workspace, split by whether the relay processed them. */
+export async function outboxCounts(
+  workspaceId: string,
+): Promise<{ total: number; unprocessed: number }> {
+  const d = db();
+  const [total] = await d
+    .select({ n: sql<number>`count(*)::int` })
+    .from(outboxEvents)
+    .where(eq(outboxEvents.workspaceId, workspaceId));
+  const [unprocessed] = await d
+    .select({ n: sql<number>`count(*)::int` })
+    .from(outboxEvents)
+    .where(
+      and(
+        eq(outboxEvents.workspaceId, workspaceId),
+        isNull(outboxEvents.processedAt),
+      ),
+    );
+  return { total: total?.n ?? 0, unprocessed: unprocessed?.n ?? 0 };
 }
 
 /** Remove every custom property definition in the workspace. */

@@ -459,6 +459,22 @@ export interface WorkspaceScope {
   workspaceId: string;
 }
 
+/**
+ * A domain event to record in the transactional outbox, written in the *same
+ * transaction* as the change that produced it (so the event can never be lost
+ * between the commit and a separate enqueue). `data` is an opaque snapshot the
+ * outbox relay maps to consumer formats (today: a webhook envelope; later, e.g.
+ * notifications). `productId` scopes routing (null = workspace-level). The store
+ * fills `actorId`/`workspaceId` from the scope. `createFeature` is special-cased:
+ * its `specId` is generated inside the write, so it takes just the event `type`
+ * and builds `data` from the new row itself.
+ */
+export interface OutboxEmit {
+  type: string;
+  productId: string | null;
+  data: Record<string, unknown>;
+}
+
 /** Serialized backlog filter bundle persisted with a saved view. */
 export type SavedViewFilters = Record<string, string | number>;
 
@@ -607,11 +623,13 @@ export interface FeatureStore {
     input: ReleaseInput,
     scope?: WorkspaceScope,
   ): Promise<ReleaseRecord>;
-  /** Update a release's name/status/target date. */
+  /** Update a release's name/status/target date. `emit`, when given, records an
+   * outbox event in the same transaction as the update. */
   updateRelease(
     id: string,
     patch: ReleasePatch,
     scope?: WorkspaceScope,
+    emit?: OutboxEmit,
   ): Promise<ReleaseRecord>;
   /** Delete a release; its items are unscheduled, not deleted. */
   deleteRelease(id: string, scope?: WorkspaceScope): Promise<void>;
@@ -652,17 +670,27 @@ export interface FeatureStore {
     userId: string,
     scope?: WorkspaceScope,
   ): Promise<void>;
-  /** Create a DB-native work item (initiative/epic). Returns the new record. */
+  /** Create a DB-native work item (initiative/epic). Returns the new record.
+   * `emitType`, when given, records an outbox event of that type (with data built
+   * from the new row) in the same transaction. */
   createFeature(
     input: CreateFeatureInput,
     scope?: WorkspaceScope,
+    emitType?: string,
   ): Promise<FeatureRecord>;
-  /** Delete a DB-native work item by id. Spec-backed items can't be deleted here. */
-  deleteFeature(specId: string, scope?: WorkspaceScope): Promise<void>;
+  /** Delete a DB-native work item by id. Spec-backed items can't be deleted here.
+   * `emit`, when given, records an outbox event in the same transaction. */
+  deleteFeature(
+    specId: string,
+    scope?: WorkspaceScope,
+    emit?: OutboxEmit,
+  ): Promise<void>;
+  /** `emit`, when given, records an outbox event in the same transaction. */
   updateFeature(
     specId: string,
     patch: FeaturePatch,
     scope?: WorkspaceScope,
+    emit?: OutboxEmit,
   ): Promise<void>;
   /** Create a typed relation from `specId` to another feature. */
   addRelation(

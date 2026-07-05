@@ -37,6 +37,7 @@ import {
   inArray,
   members,
   or,
+  outboxEvents,
   productMembers,
   products,
   releases,
@@ -70,6 +71,7 @@ import {
   type DetailTemplateInput,
   type DetailTemplatePatch,
   type LevelUpdate,
+  type OutboxEmit,
   type CustomFieldValue,
   type FeatureDetail,
   type FeaturePatch,
@@ -219,6 +221,26 @@ export class DbStore implements FeatureStore {
         sql`select set_config('app.user_id', ${scope.userId}, true)`,
       );
       return fn(tx);
+    });
+  }
+
+  /**
+   * Append a transactional-outbox row. Called from inside a mutating method's
+   * `scoped` transaction so the event commits atomically with the change that
+   * produced it. `actorId`/`workspaceId` come from the scope; the rest is the
+   * caller's opaque event.
+   */
+  private async writeOutbox(
+    tx: Tx,
+    scope: WorkspaceScope,
+    emit: OutboxEmit,
+  ): Promise<void> {
+    await tx.insert(outboxEvents).values({
+      workspaceId: scope.workspaceId,
+      productId: emit.productId,
+      actorId: scope.userId,
+      type: emit.type,
+      data: emit.data,
     });
   }
 
@@ -850,6 +872,7 @@ export class DbStore implements FeatureStore {
   async createFeature(
     input: CreateFeatureInput,
     scope?: WorkspaceScope,
+    emitType?: string,
   ): Promise<FeatureRecord> {
     return this.scoped(scope, async (tx) => {
       const ws = scope!.workspaceId;
@@ -932,6 +955,21 @@ export class DbStore implements FeatureStore {
         .returning();
       if (!row) throw new FeatureError("Failed to create work item.");
 
+      // Record the creation event in the same transaction. `specId` is generated
+      // here, so the store builds the payload (the caller can't know it yet).
+      if (emitType) {
+        await this.writeOutbox(tx, scope!, {
+          type: emitType,
+          productId: row.productId,
+          data: {
+            specId: row.specId,
+            title: row.title,
+            level: row.level,
+            status: row.status,
+          },
+        });
+      }
+
       return {
         specId: row.specId,
         title: row.title,
@@ -955,7 +993,11 @@ export class DbStore implements FeatureStore {
     });
   }
 
-  async deleteFeature(specId: string, scope?: WorkspaceScope): Promise<void> {
+  async deleteFeature(
+    specId: string,
+    scope?: WorkspaceScope,
+    emit?: OutboxEmit,
+  ): Promise<void> {
     await this.scoped(scope, async (tx) => {
       const ws = scope!.workspaceId;
       const row = await tx
@@ -981,6 +1023,7 @@ export class DbStore implements FeatureStore {
       await tx
         .delete(features)
         .where(and(eq(features.id, row[0].id), eq(features.workspaceId, ws)));
+      if (emit) await this.writeOutbox(tx, scope!, emit);
     });
   }
 
@@ -988,6 +1031,7 @@ export class DbStore implements FeatureStore {
     specId: string,
     patch: FeaturePatch,
     scope?: WorkspaceScope,
+    emit?: OutboxEmit,
   ): Promise<void> {
     // `parentSpecId` isn't a column, so translate it to the parent row's `parentId`.
     const { parentSpecId, ...rest } = patch;
@@ -1055,6 +1099,7 @@ export class DbStore implements FeatureStore {
             eq(features.workspaceId, scope!.workspaceId),
           ),
         );
+      if (emit) await this.writeOutbox(tx, scope!, emit);
     });
   }
 
@@ -1840,6 +1885,7 @@ export class DbStore implements FeatureStore {
     id: string,
     patch: ReleasePatch,
     scope?: WorkspaceScope,
+    emit?: OutboxEmit,
   ): Promise<ReleaseRecord> {
     return this.scoped(scope, async (tx) => {
       const ws = scope!.workspaceId;
@@ -1865,6 +1911,7 @@ export class DbStore implements FeatureStore {
         .select({ n: count() })
         .from(features)
         .where(and(eq(features.workspaceId, ws), eq(features.releaseId, id)));
+      if (emit) await this.writeOutbox(tx, scope!, emit);
       return toReleaseRecord(row, Number(items[0]?.n ?? 0));
     });
   }

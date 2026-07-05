@@ -2,8 +2,6 @@ import {
   and,
   desc,
   eq,
-  isNull,
-  or,
   sql,
   type Database,
   webhookDeliveries,
@@ -170,53 +168,6 @@ export async function endpointDeliveryTarget(
     .from(webhookEndpoints)
     .where(eq(webhookEndpoints.id, endpointId));
   return row ?? null;
-}
-
-/**
- * Active endpoints in a workspace subscribed to `eventType`, honoring per-product
- * routing: a null-product endpoint matches every event; a product-scoped endpoint
- * matches only its product. A workspace-level event (`productId === null`)
- * therefore reaches only null-product endpoints.
- */
-export async function endpointsForEvent(
-  db: Database,
-  workspaceId: string,
-  eventType: string,
-  productId: string | null,
-): Promise<{ id: string }[]> {
-  const productMatch =
-    productId === null
-      ? isNull(webhookEndpoints.productId)
-      : or(
-          isNull(webhookEndpoints.productId),
-          eq(webhookEndpoints.productId, productId),
-        );
-  return db
-    .select({ id: webhookEndpoints.id })
-    .from(webhookEndpoints)
-    .where(
-      and(
-        eq(webhookEndpoints.workspaceId, workspaceId),
-        eq(webhookEndpoints.active, true),
-        sql`${eventType} = ANY(${webhookEndpoints.eventTypes})`,
-        productMatch,
-      ),
-    );
-}
-
-/** Insert the outbox rows for one dispatched event (one per matched endpoint). */
-export async function insertDeliveries(
-  db: Database,
-  rows: {
-    endpointId: string;
-    workspaceId: string;
-    eventId: string;
-    eventType: string;
-    payload: WebhookEnvelope;
-  }[],
-): Promise<void> {
-  if (rows.length === 0) return;
-  await db.insert(webhookDeliveries).values(rows);
 }
 
 export type ClaimedDelivery = {

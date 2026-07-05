@@ -16,15 +16,18 @@ Phase 1 shipped, and the open questions were resolved toward the robust end of
 each option (see below), so a few things landed in V1 that the original plan had
 deferred:
 
-- **Delivery = durable outbox from day one** (not best-effort). `dispatchEvent`
-  writes a `webhook_deliveries` row per matched endpoint; an in-process drainer
-  (`lib/webhooks/drainer.ts`, started in `instrumentation.ts`) claims due rows
-  with `FOR UPDATE SKIP LOCKED`, POSTs with a 5s timeout, and records
-  `delivered|failed` with backoff (`1m, 5m, 30m, 2h, 6h`, then failed). One
-  honest softness: the outbox insert is *immediately after* the domain write,
-  not in the same transaction (the store abstraction doesn't expose its tx), so
-  a crash in the sub-millisecond gap can drop an event. Same-tx is a later
-  change.
+- **Delivery = durable outbox from day one** (not best-effort). Now a true
+  **transactional outbox** (migration 0029, shipped after 0.10.0): each domain
+  change writes a generic `outbox_events` row *in the same transaction* as the
+  change (the store's mutating methods take an optional event; see
+  `lib/store/db.ts`), so an event can never be lost between the commit and a
+  separate enqueue. A relay (`lib/webhooks/relay.ts`) claims unprocessed events
+  (`FOR UPDATE SKIP LOCKED`, one tx per event) and fans each out into
+  `webhook_deliveries`; the in-process drainer (`lib/webhooks/drainer.ts`,
+  started in `instrumentation.ts`) then POSTs due rows with a 5s timeout and
+  backoff (`1m, 5m, 30m, 2h, 6h`, then failed). The `outbox_events` stream is
+  generic on purpose - future consumers (in-app notifications #19, an activity
+  feed) can read the same rows.
 - **Events (4):** `item.status_changed`, `item.created`, `item.deleted`,
   `release.shipped`.
 - **Per-product routing:** `webhook_endpoints.product_id` (nullable; null = all
@@ -40,7 +43,10 @@ deferred:
   → ship a release → assert a signed delivery arrives at a local receiver).
 
 Still to do (Phase 2+): delivery-log UI + manual redeliver, endpoint
-auto-disable after a failure streak, and the same-transaction outbox write.
+auto-disable after a failure streak, and retention/pruning of old processed
+`outbox_events` (rows are written for every item/release change regardless of
+whether any endpoint is subscribed, so the table grows and should be pruned
+periodically).
 
 ## Why this is cheap to hook in (current-state findings)
 

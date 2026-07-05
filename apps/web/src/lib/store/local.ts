@@ -71,6 +71,7 @@ import {
   type RelationInput,
   type SavedView,
   type SavedViewInput,
+  type OutboxEmit,
   type WorkspaceScope,
 } from "./types";
 
@@ -554,6 +555,7 @@ export class LocalFileStore implements FeatureStore {
     specId: string,
     patch: FeaturePatch,
     _scope?: WorkspaceScope,
+    _emit?: OutboxEmit, // webhooks are DB-only; ignored in local file mode
   ): Promise<void> {
     // DB-native items live in their own file, not the spec-metadata map.
     const items = await this.readItems();
@@ -626,6 +628,7 @@ export class LocalFileStore implements FeatureStore {
   async createFeature(
     input: CreateFeatureInput,
     _scope?: WorkspaceScope,
+    _emitType?: string, // webhooks are DB-only; ignored in local file mode
   ): Promise<FeatureRecord> {
     const levels = resolveLevels();
     const title = input.title.trim();
@@ -688,7 +691,11 @@ export class LocalFileStore implements FeatureStore {
     } satisfies FeatureRecord;
   }
 
-  async deleteFeature(specId: string, _scope?: WorkspaceScope): Promise<void> {
+  async deleteFeature(
+    specId: string,
+    _scope?: WorkspaceScope,
+    _emit?: OutboxEmit, // webhooks are DB-only; ignored in local file mode
+  ): Promise<void> {
     const items = await this.readItems();
     if (!items.some((i) => i.id === specId))
       throw new FeatureError(
@@ -1246,6 +1253,7 @@ export class LocalFileStore implements FeatureStore {
     id: string,
     patch: ReleasePatch,
     _scope?: WorkspaceScope,
+    _emit?: OutboxEmit, // webhooks are DB-only; ignored in local file mode
   ): Promise<ReleaseRecord> {
     const rows = await this.readReleases();
     const release = rows.find((r) => r.id === id);
