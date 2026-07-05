@@ -40,20 +40,24 @@ test.describe("ideas: internal capture, vote, and promote", () => {
       "1",
     );
 
-    // Move it through the review workflow.
+    // Move it through the review workflow (inline status field on the row).
     await row.getByLabel("Status of Dark mode").selectOption("under_review");
     await expect(row.getByLabel("Status of Dark mode")).toHaveValue("under_review");
 
-    // Promote it into a feature (confirm dialog auto-accepted); the row then
-    // links to the promoted feature and the Promote action is gone.
-    page.once("dialog", (dialog) => dialog.accept());
-    await row.getByRole("button", { name: "Promote" }).click();
-    await expect(row.getByRole("link", { name: /Promoted/ })).toBeVisible();
-    await expect(row.getByRole("button", { name: "Promote" })).toHaveCount(0);
+    // Promote and Delete now live in the detail drawer, not the row. Open it by
+    // clicking the idea title.
+    await row.getByRole("button", { name: /Dark mode/ }).click();
 
-    // Delete it; the row disappears.
+    // Promote it into a feature (confirm dialog auto-accepted); the drawer's
+    // Promote action is replaced by a link to the promoted feature.
     page.once("dialog", (dialog) => dialog.accept());
-    await row.getByRole("button", { name: "Delete Dark mode" }).click();
+    await page.getByRole("button", { name: "Promote" }).click();
+    await expect(page.getByRole("link", { name: /Promoted/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Promote" })).toHaveCount(0);
+
+    // Delete it from the drawer; the drawer closes and the row disappears.
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.getByRole("button", { name: "Delete" }).click();
     await expect(page.locator("li", { hasText: "Dark mode" })).toHaveCount(0);
   });
 
