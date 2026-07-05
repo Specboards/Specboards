@@ -5,6 +5,26 @@ All notable changes to Specboard are recorded here. The format is based on
 [Semantic Versioning](https://semver.org/). See [VERSIONING.md](./VERSIONING.md)
 for how and when the version is bumped.
 
+## [0.10.0] - 2026-07-05
+
+### Added
+
+- **Outbound webhooks** (Settings → Webhooks, admin-only; migration 0028 adds
+  `webhook_endpoints` and `webhook_deliveries`). Register HTTPS endpoints that
+  receive a signed POST when items and releases change. Four events:
+  `item.status_changed`, `item.created`, `item.deleted`, and `release.shipped`.
+  Endpoints route per product (or workspace-wide) and subscribe to a chosen set
+  of events. Delivery is durable: each event is written to a transactional
+  outbox and an in-process drainer POSTs it with retries and exponential backoff
+  (1m, 5m, 30m, 2h, 6h). Every request is signed Stripe-style
+  (HMAC-SHA256 over the timestamp and body, sent as `X-Specboard-Signature`); the
+  per-endpoint signing secret is generated server-side, encrypted at rest, and
+  shown to the admin once. A "send test event" button delivers a sample payload
+  and reports the result. Outbound URLs are SSRF-guarded (https only; private,
+  loopback, link-local, and cloud-metadata targets are blocked), with an env
+  opt-out for self-hosted installs. Webhooks require a database (off in local
+  file mode).
+
 ## [0.9.0] - 2026-07-05
 
 ### Added
