@@ -5,6 +5,33 @@ All notable changes to Specboard are recorded here. The format is based on
 [Semantic Versioning](https://semver.org/). See [VERSIONING.md](./VERSIONING.md)
 for how and when the version is bumped.
 
+## [0.9.0] - 2026-07-05
+
+### Added
+
+- **Roadmap: drag to schedule.** The Roadmap is now an interactive board.
+  Editors drag a card into another release column to set its release (or into
+  Unscheduled to clear it); the drop is optimistic, persists the release, then
+  revalidates. Read-only viewers and the shipped view stay static.
+- **Release detail panel with notes.** Clicking a release name opens a drawer
+  showing its status, dates, item count, and Markdown notes (migration 0027
+  adds a nullable `notes` column to `releases`). The Release / Reopen, Edit, and
+  Delete actions now live in this panel instead of crowding the column heading,
+  and editing happens inline there.
+- **Ideas detail drawer.** Clicking an idea opens a full detail view (Markdown
+  details, vote, and, for editors, edit / promote / delete) mirroring the
+  feature flyout. Promote and Delete moved off the list row and into the drawer.
+
+### Changed
+
+- **Ideas: status is a distinct field.** The review-stage control on each idea
+  row is now a low-chrome status pill (colored dot, label, chevron) rather than
+  a button that looked like Promote. The list gains a status filter and a
+  votes / newest / oldest sort.
+- **Roadmap column heading.** The release name sits on its own line with the
+  dates (and any non-default status) smaller beneath it, instead of a single
+  crowded line of look-alike controls.
+
 ## [0.8.0] - 2026-07-04
 
 ### Added
