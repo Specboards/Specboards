@@ -442,6 +442,91 @@ export type IdeaSettingsPatch = Partial<{
 /** Raised when an idea can't be created/updated/deleted/promoted. */
 export class IdeaError extends Error {}
 
+/** The Plan-section areas that hold team docs. */
+export const DOC_AREAS = ["strategy", "research", "architecture"] as const;
+export type DocArea = (typeof DOC_AREAS)[number];
+
+export function isDocArea(v: unknown): v is DocArea {
+  return typeof v === "string" && (DOC_AREAS as readonly string[]).includes(v);
+}
+
+/**
+ * Where an area's docs live: `local` (pages held in Specboard), `external`
+ * (link out to an outside repository like SharePoint or Box), or `github`
+ * (a GitHub repo of Markdown files; a later slice). `unset` = the team
+ * hasn't chosen yet, so the area shows the setup chooser.
+ */
+export type DocSpaceMode = "unset" | "local" | "external" | "github";
+
+/** A product area's doc-source configuration. */
+export interface DocSpace {
+  productId: string;
+  area: DocArea;
+  mode: DocSpaceMode;
+  /** Link-out URL for `external` mode, else null. */
+  externalUrl: string | null;
+  /** Backing repo id for `github` mode, else null. */
+  repoId: string | null;
+}
+
+export interface DocSpaceInput {
+  mode: Exclude<DocSpaceMode, "unset">;
+  externalUrl?: string | null;
+  repoId?: string | null;
+}
+
+/** A folder or Markdown page in a locally-held doc space. */
+export interface DocPageRecord {
+  id: string;
+  productId: string;
+  area: DocArea;
+  /** Containing folder id, or null at the area root. */
+  parentId: string | null;
+  kind: "folder" | "page";
+  title: string;
+  /** Markdown body (empty for folders). */
+  content: string;
+  position: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DocPageInput {
+  productId: string;
+  area: DocArea;
+  parentId?: string | null;
+  kind?: "folder" | "page";
+  title: string;
+  content?: string;
+}
+
+export type DocPagePatch = Partial<{
+  title: string;
+  content: string;
+  parentId: string | null;
+}>;
+
+/** Raised when a doc space or doc page operation is invalid. */
+export class DocError extends Error {}
+
+/** Validate an external doc-repository link (SharePoint, Box, ...). */
+export function validateExternalDocUrl(raw: unknown): string {
+  if (typeof raw !== "string" || !raw.trim()) {
+    throw new DocError("A link URL is required.");
+  }
+  const url = raw.trim();
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new DocError("Enter a valid URL.");
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    throw new DocError("The link must be an http(s) URL.");
+  }
+  return url;
+}
+
 /** Raised when a work item can't be created/deleted (bad level, has a spec, …). */
 export class FeatureError extends Error {}
 
@@ -777,6 +862,39 @@ export interface FeatureStore {
     patch: IdeaSettingsPatch,
     scope?: WorkspaceScope,
   ): Promise<IdeaSettings>;
+  // ── Docs (Plan-section areas) ───────────────────────────────────────────
+  /** The area's doc-source configuration; mode `unset` when never chosen. */
+  getDocSpace(
+    productId: string,
+    area: DocArea,
+    scope?: WorkspaceScope,
+  ): Promise<DocSpace>;
+  /** Choose (or change) where the area's docs live. Returns the config. */
+  setDocSpace(
+    productId: string,
+    area: DocArea,
+    input: DocSpaceInput,
+    scope?: WorkspaceScope,
+  ): Promise<DocSpace>;
+  /** All folders/pages in the area, parents-first order within each level. */
+  listDocPages(
+    productId: string,
+    area: DocArea,
+    scope?: WorkspaceScope,
+  ): Promise<DocPageRecord[]>;
+  /** Create a folder or page. Returns the new record. */
+  createDocPage(
+    input: DocPageInput,
+    scope?: WorkspaceScope,
+  ): Promise<DocPageRecord>;
+  /** Update a page's title/content or move it to another folder. */
+  updateDocPage(
+    id: string,
+    patch: DocPagePatch,
+    scope?: WorkspaceScope,
+  ): Promise<DocPageRecord>;
+  /** Delete a folder (contents cascade) or page. */
+  deleteDocPage(id: string, scope?: WorkspaceScope): Promise<void>;
 }
 
 /** Raised when a relation can't be created (self-link, cycle, unknown target). */

@@ -9,6 +9,11 @@ import type {
   DetailTemplate,
   DetailTemplateInput,
   DetailTemplatePatch,
+  DocArea,
+  DocPageInput,
+  DocPagePatch,
+  DocPageRecord,
+  DocSpace,
   FeatureDetail,
   FeaturePatch,
   FeatureRecord,
@@ -1101,5 +1106,77 @@ export async function updateWorkspace(name: string): Promise<void> {
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as { error?: string } | null;
     throw new Error(body?.error ?? `Update failed with ${res.status}`);
+  }
+}
+
+/** Choose (or change) where a Plan-section area's docs live. */
+export async function setDocSpace(input: {
+  productId: string;
+  area: DocArea;
+  mode: "local" | "external" | "github";
+  externalUrl?: string | null;
+  repoId?: string | null;
+}): Promise<DocSpace> {
+  const res = await fetch("/api/v1/doc-spaces", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as
+    | { space?: DocSpace; error?: string }
+    | null;
+  if (!res.ok || !body?.space) {
+    throw new Error(body?.error ?? `Save failed with ${res.status}`);
+  }
+  return body.space;
+}
+
+/** Create a doc folder or page; returns the new record. */
+export async function createDocPage(input: DocPageInput): Promise<DocPageRecord> {
+  const res = await fetch("/api/v1/docs", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as
+    | { page?: DocPageRecord; error?: string }
+    | null;
+  if (!res.ok || !body?.page) {
+    throw new Error(body?.error ?? `Create failed with ${res.status}`);
+  }
+  return body.page;
+}
+
+/** Rename, edit, or move a doc page; returns the updated record. */
+export async function patchDocPage(
+  id: string,
+  patch: DocPagePatch,
+): Promise<DocPageRecord> {
+  const res = await fetch(`/api/v1/docs/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as
+    | { page?: DocPageRecord; error?: string }
+    | null;
+  if (!res.ok || !body?.page) {
+    throw new Error(body?.error ?? `Save failed with ${res.status}`);
+  }
+  return body.page;
+}
+
+/** Delete a doc page, or a folder and its contents. */
+export async function deleteDocPage(id: string): Promise<void> {
+  const res = await fetch(`/api/v1/docs/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (res.status === 401) throw new AuthRequiredError();
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(body?.error ?? `Delete failed with ${res.status}`);
   }
 }

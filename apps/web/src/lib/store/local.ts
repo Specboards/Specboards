@@ -37,6 +37,14 @@ import {
   type DetailTemplate,
   type DetailTemplateInput,
   type DetailTemplatePatch,
+  DocError,
+  validateExternalDocUrl,
+  type DocArea,
+  type DocPageInput,
+  type DocPagePatch,
+  type DocPageRecord,
+  type DocSpace,
+  type DocSpaceInput,
   type LevelUpdate,
   type CustomFieldValue,
   type FeatureDetail,
@@ -1698,6 +1706,186 @@ export class LocalFileStore implements FeatureStore {
       "utf8",
     );
     return next;
+  }
+
+  // ── Docs (Plan-section areas) ───────────────────────────────────────────
+  // Doc spaces + pages persist to `.specboard/local-doc-*.json`.
+
+  private get docSpacesPath() {
+    return path.join(this.root, ".specboard", "local-doc-spaces.json");
+  }
+
+  private get docPagesPath() {
+    return path.join(this.root, ".specboard", "local-doc-pages.json");
+  }
+
+  private async readJsonFile<T>(file: string): Promise<T[]> {
+    try {
+      return JSON.parse(await fs.readFile(file, "utf8")) as T[];
+    } catch {
+      return [];
+    }
+  }
+
+  private async writeJsonFile<T>(file: string, rows: T[]): Promise<void> {
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await fs.writeFile(file, JSON.stringify(rows, null, 2) + "\n", "utf8");
+  }
+
+  async getDocSpace(
+    productId: string,
+    area: DocArea,
+    _scope?: WorkspaceScope,
+  ): Promise<DocSpace> {
+    const rows = await this.readJsonFile<DocSpace>(this.docSpacesPath);
+    return (
+      rows.find((r) => r.productId === productId && r.area === area) ?? {
+        productId,
+        area,
+        mode: "unset",
+        externalUrl: null,
+        repoId: null,
+      }
+    );
+  }
+
+  async setDocSpace(
+    productId: string,
+    area: DocArea,
+    input: DocSpaceInput,
+    _scope?: WorkspaceScope,
+  ): Promise<DocSpace> {
+    const externalUrl =
+      input.mode === "external" ? validateExternalDocUrl(input.externalUrl) : null;
+    if (input.mode === "github" && !input.repoId) {
+      throw new DocError("Choose a repository.");
+    }
+    const next: DocSpace = {
+      productId,
+      area,
+      mode: input.mode,
+      externalUrl,
+      repoId: input.mode === "github" ? (input.repoId ?? null) : null,
+    };
+    const rows = await this.readJsonFile<DocSpace>(this.docSpacesPath);
+    const rest = rows.filter((r) => !(r.productId === productId && r.area === area));
+    await this.writeJsonFile(this.docSpacesPath, [...rest, next]);
+    return next;
+  }
+
+  async listDocPages(
+    productId: string,
+    area: DocArea,
+    _scope?: WorkspaceScope,
+  ): Promise<DocPageRecord[]> {
+    const rows = await this.readJsonFile<DocPageRecord>(this.docPagesPath);
+    return rows
+      .filter((r) => r.productId === productId && r.area === area)
+      .sort((a, b) => a.position - b.position || a.title.localeCompare(b.title));
+  }
+
+  async createDocPage(
+    input: DocPageInput,
+    _scope?: WorkspaceScope,
+  ): Promise<DocPageRecord> {
+    const title = input.title.trim();
+    if (!title) throw new DocError("A title is required.");
+    const rows = await this.readJsonFile<DocPageRecord>(this.docPagesPath);
+    const parentId = input.parentId ?? null;
+    if (parentId) this.assertLocalFolder(rows, parentId, input.productId, input.area);
+    const siblings = rows.filter(
+      (r) => r.productId === input.productId && r.area === input.area,
+    );
+    const now = new Date().toISOString();
+    const page: DocPageRecord = {
+      id: randomUUID(),
+      productId: input.productId,
+      area: input.area,
+      parentId,
+      kind: input.kind === "folder" ? "folder" : "page",
+      title,
+      content: input.content ?? "",
+      position: siblings.length,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await this.writeJsonFile(this.docPagesPath, [...rows, page]);
+    return page;
+  }
+
+  async updateDocPage(
+    id: string,
+    patch: DocPagePatch,
+    _scope?: WorkspaceScope,
+  ): Promise<DocPageRecord> {
+    const rows = await this.readJsonFile<DocPageRecord>(this.docPagesPath);
+    const page = rows.find((r) => r.id === id);
+    if (!page) throw new DocError(`Unknown page: ${id}`);
+    if (patch.title !== undefined) {
+      const title = patch.title.trim();
+      if (!title) throw new DocError("A title is required.");
+      page.title = title;
+    }
+    if (patch.content !== undefined) {
+      if (page.kind === "folder") throw new DocError("Folders have no content.");
+      page.content = patch.content;
+    }
+    if (patch.parentId !== undefined) {
+      if (patch.parentId === null) {
+        page.parentId = null;
+      } else {
+        if (patch.parentId === id) {
+          throw new DocError("A folder cannot contain itself.");
+        }
+        this.assertLocalFolder(rows, patch.parentId, page.productId, page.area);
+        // Refuse moving a folder under its own descendant (cycle).
+        let cursor: string | null = patch.parentId;
+        while (cursor) {
+          const anc = rows.find((r) => r.id === cursor);
+          const next: string | null = anc?.parentId ?? null;
+          if (next === id) throw new DocError("A folder cannot move inside itself.");
+          cursor = next;
+        }
+        page.parentId = patch.parentId;
+      }
+    }
+    page.updatedAt = new Date().toISOString();
+    await this.writeJsonFile(this.docPagesPath, rows);
+    return page;
+  }
+
+  async deleteDocPage(id: string, _scope?: WorkspaceScope): Promise<void> {
+    const rows = await this.readJsonFile<DocPageRecord>(this.docPagesPath);
+    if (!rows.some((r) => r.id === id)) throw new DocError(`Unknown page: ${id}`);
+    // Remove the row and everything beneath it (folders cascade).
+    const doomed = new Set([id]);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const r of rows) {
+        if (r.parentId && doomed.has(r.parentId) && !doomed.has(r.id)) {
+          doomed.add(r.id);
+          grew = true;
+        }
+      }
+    }
+    await this.writeJsonFile(
+      this.docPagesPath,
+      rows.filter((r) => !doomed.has(r.id)),
+    );
+  }
+
+  private assertLocalFolder(
+    rows: DocPageRecord[],
+    folderId: string,
+    productId: string,
+    area: DocArea,
+  ): void {
+    const folder = rows.find(
+      (r) => r.id === folderId && r.productId === productId && r.area === area,
+    );
+    if (!folder) throw new DocError("Unknown folder.");
+    if (folder.kind !== "folder") throw new DocError("Pages cannot contain pages.");
   }
 }
 

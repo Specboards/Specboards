@@ -2,11 +2,13 @@
 
 import {
   Compass,
+  DraftingCompass,
   KanbanSquare,
   Lightbulb,
   Map,
   Microscope,
   Settings,
+  TrendingUp,
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -49,17 +51,30 @@ interface NavGroup {
 
 const GROUPS: NavGroup[] = [
   {
+    label: "Plan",
     items: [
-      { label: "Strategy", icon: Compass, soon: true },
-      { label: "Research", icon: Microscope, soon: true },
+      { href: "/strategy", label: "Strategy", icon: Compass, productScoped: true },
+      { href: "/research", label: "Research", icon: Microscope, productScoped: true },
+      {
+        href: "/architecture",
+        label: "Architecture",
+        icon: DraftingCompass,
+        productScoped: true,
+      },
     ],
   },
   {
-    label: "Work",
+    label: "Build",
     items: [
       { href: "/ideas", label: "Ideas", icon: Lightbulb, productScoped: true },
       { href: "/backlog", label: "Backlog", icon: KanbanSquare, productScoped: true },
+    ],
+  },
+  {
+    label: "Ship",
+    items: [
       { href: "/roadmap", label: "Roadmap", icon: Map, productScoped: true },
+      { label: "Adoption", icon: TrendingUp, soon: true },
     ],
   },
   {

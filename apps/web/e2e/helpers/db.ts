@@ -2,6 +2,8 @@ import {
   and,
   createDb,
   detailTemplates,
+  docPages,
+  docSpaces,
   eq,
   features,
   githubInstallations,
@@ -25,10 +27,17 @@ import {
  * reset board state here rather than driving unimplemented UI. Connects as the
  * table owner (RLS bypassed), same as the app's owner connection.
  */
+let client: ReturnType<typeof createDb> | undefined;
+
 function db() {
-  const url = process.env.DATABASE_URL;
-  if (!url) throw new Error("DATABASE_URL must be set for E2E database access.");
-  return createDb(url);
+  if (!client) {
+    const url = process.env.DATABASE_URL;
+    if (!url) throw new Error("DATABASE_URL must be set for E2E database access.");
+    // One shared client for the whole runner process: a fresh pool per call
+    // exhausts Postgres max_connections as the suite grows.
+    client = createDb(url);
+  }
+  return client;
 }
 
 /** Wipe all user + workspace data so the next sign-up becomes the first admin. */
@@ -72,6 +81,12 @@ export async function resetIdeas(workspaceId: string): Promise<void> {
   await db().delete(ideas).where(eq(ideas.workspaceId, workspaceId));
   await db().delete(ideaStatuses).where(eq(ideaStatuses.workspaceId, workspaceId));
   await db().delete(ideaSettings).where(eq(ideaSettings.workspaceId, workspaceId));
+}
+
+/** Remove every doc space and doc page (Plan-section areas). */
+export async function resetDocs(workspaceId: string): Promise<void> {
+  await db().delete(docPages).where(eq(docPages.workspaceId, workspaceId));
+  await db().delete(docSpaces).where(eq(docSpaces.workspaceId, workspaceId));
 }
 
 /** Remove every webhook endpoint (and its deliveries, via cascade). */

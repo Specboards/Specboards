@@ -26,6 +26,8 @@ import {
   createDb,
   desc,
   detailTemplates,
+  docPages,
+  docSpaces,
   eq,
   featureGithubLinks,
   featureLinks,
@@ -70,6 +72,14 @@ import {
   type DetailTemplate,
   type DetailTemplateInput,
   type DetailTemplatePatch,
+  DocError,
+  validateExternalDocUrl,
+  type DocArea,
+  type DocPageInput,
+  type DocPagePatch,
+  type DocPageRecord,
+  type DocSpace,
+  type DocSpaceInput,
   type LevelUpdate,
   type OutboxEmit,
   type CustomFieldValue,
@@ -2415,6 +2425,276 @@ export class DbStore implements FeatureStore {
         });
       return next;
     });
+  }
+
+  // ── Docs (Plan-section areas) ───────────────────────────────────────────
+
+  /** Assert the acting user can read `productId`'s docs, returning nothing. */
+  private async requireDocRead(
+    tx: Tx,
+    scope: WorkspaceScope,
+    productId: string,
+  ): Promise<void> {
+    await this.requireProductId(tx, scope.workspaceId, productId);
+    const [access, productById] = await Promise.all([
+      this.accessIn(tx, scope),
+      this.productVisibilityIn(tx, scope.workspaceId),
+    ]);
+    if (!canReadProductId(access, productById, productId)) {
+      throw new DocError("Unknown product.");
+    }
+  }
+
+  /** Assert the acting user can edit `productId`'s docs. */
+  private async requireDocWrite(
+    tx: Tx,
+    scope: WorkspaceScope,
+    productId: string,
+  ): Promise<void> {
+    await this.requireDocRead(tx, scope, productId);
+    const access = await this.accessIn(tx, scope);
+    if (!canWriteProductId(access, productId)) {
+      throw new DocError("Your role does not permit editing these docs.");
+    }
+  }
+
+  private toDocPageRecord(row: typeof docPages.$inferSelect): DocPageRecord {
+    return {
+      id: row.id,
+      productId: row.productId,
+      area: row.area as DocArea,
+      parentId: row.parentId,
+      kind: row.kind === "folder" ? "folder" : "page",
+      title: row.title,
+      content: row.content,
+      position: row.position,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+    };
+  }
+
+  async getDocSpace(
+    productId: string,
+    area: DocArea,
+    scope?: WorkspaceScope,
+  ): Promise<DocSpace> {
+    return this.scoped(scope, async (tx) => {
+      await this.requireDocRead(tx, scope!, productId);
+      const [row] = await tx
+        .select()
+        .from(docSpaces)
+        .where(and(eq(docSpaces.productId, productId), eq(docSpaces.area, area)))
+        .limit(1);
+      if (!row) return { productId, area, mode: "unset" as const, externalUrl: null, repoId: null };
+      return {
+        productId,
+        area,
+        mode: row.mode as DocSpace["mode"],
+        externalUrl: row.externalUrl,
+        repoId: row.repoId,
+      };
+    });
+  }
+
+  async setDocSpace(
+    productId: string,
+    area: DocArea,
+    input: DocSpaceInput,
+    scope?: WorkspaceScope,
+  ): Promise<DocSpace> {
+    return this.scoped(scope, async (tx) => {
+      const ws = scope!.workspaceId;
+      await this.requireDocWrite(tx, scope!, productId);
+      let externalUrl: string | null = null;
+      let repoId: string | null = null;
+      if (input.mode === "external") {
+        externalUrl = validateExternalDocUrl(input.externalUrl);
+      } else if (input.mode === "github") {
+        if (!input.repoId) throw new DocError("Choose a repository.");
+        const [repo] = await tx
+          .select({ id: repositories.id })
+          .from(repositories)
+          .where(
+            and(eq(repositories.id, input.repoId), eq(repositories.workspaceId, ws)),
+          )
+          .limit(1);
+        if (!repo) throw new DocError("Unknown repository.");
+        repoId = repo.id;
+      }
+      await tx
+        .insert(docSpaces)
+        .values({ workspaceId: ws, productId, area, mode: input.mode, externalUrl, repoId })
+        .onConflictDoUpdate({
+          target: [docSpaces.productId, docSpaces.area],
+          set: { mode: input.mode, externalUrl, repoId, updatedAt: new Date() },
+        });
+      return { productId, area, mode: input.mode, externalUrl, repoId };
+    });
+  }
+
+  async listDocPages(
+    productId: string,
+    area: DocArea,
+    scope?: WorkspaceScope,
+  ): Promise<DocPageRecord[]> {
+    return this.scoped(scope, async (tx) => {
+      await this.requireDocRead(tx, scope!, productId);
+      const rows = await tx
+        .select()
+        .from(docPages)
+        .where(and(eq(docPages.productId, productId), eq(docPages.area, area)))
+        .orderBy(asc(docPages.position), asc(docPages.title));
+      return rows.map((r) => this.toDocPageRecord(r));
+    });
+  }
+
+  async createDocPage(
+    input: DocPageInput,
+    scope?: WorkspaceScope,
+  ): Promise<DocPageRecord> {
+    return this.scoped(scope, async (tx) => {
+      const ws = scope!.workspaceId;
+      await this.requireDocWrite(tx, scope!, input.productId);
+      const title = input.title.trim();
+      if (!title) throw new DocError("A title is required.");
+      const parentId = input.parentId ?? null;
+      if (parentId) {
+        await this.requireDocFolder(tx, parentId, input.productId, input.area);
+      }
+      const [max] = await tx
+        .select({ n: count() })
+        .from(docPages)
+        .where(
+          and(eq(docPages.productId, input.productId), eq(docPages.area, input.area)),
+        );
+      const [row] = await tx
+        .insert(docPages)
+        .values({
+          workspaceId: ws,
+          productId: input.productId,
+          area: input.area,
+          parentId,
+          kind: input.kind === "folder" ? "folder" : "page",
+          title,
+          content: input.content ?? "",
+          position: Number(max?.n ?? 0),
+        })
+        .returning();
+      if (!row) throw new DocError("Failed to create the page.");
+      return this.toDocPageRecord(row);
+    });
+  }
+
+  async updateDocPage(
+    id: string,
+    patch: DocPagePatch,
+    scope?: WorkspaceScope,
+  ): Promise<DocPageRecord> {
+    return this.scoped(scope, async (tx) => {
+      const ws = scope!.workspaceId;
+      const [current] = await tx
+        .select()
+        .from(docPages)
+        .where(and(eq(docPages.id, id), eq(docPages.workspaceId, ws)))
+        .limit(1);
+      if (!current) throw new DocError(`Unknown page: ${id}`);
+      await this.requireDocWrite(tx, scope!, current.productId);
+      const set: Record<string, unknown> = { updatedAt: new Date() };
+      if (patch.title !== undefined) {
+        const title = patch.title.trim();
+        if (!title) throw new DocError("A title is required.");
+        set.title = title;
+      }
+      if (patch.content !== undefined) {
+        if (current.kind === "folder") {
+          throw new DocError("Folders have no content.");
+        }
+        set.content = patch.content;
+      }
+      if (patch.parentId !== undefined) {
+        if (patch.parentId === null) {
+          set.parentId = null;
+        } else {
+          if (patch.parentId === id) {
+            throw new DocError("A folder cannot contain itself.");
+          }
+          await this.requireDocFolder(
+            tx,
+            patch.parentId,
+            current.productId,
+            current.area as DocArea,
+          );
+          // Refuse moving a folder under its own descendant (would orphan the
+          // subtree into a cycle).
+          if (current.kind === "folder") {
+            let cursor: string | null = patch.parentId;
+            while (cursor) {
+              const [anc] = await tx
+                .select({ parentId: docPages.parentId })
+                .from(docPages)
+                .where(eq(docPages.id, cursor))
+                .limit(1);
+              const next: string | null = anc?.parentId ?? null;
+              if (next === id) {
+                throw new DocError("A folder cannot move inside itself.");
+              }
+              cursor = next;
+            }
+          }
+          set.parentId = patch.parentId;
+        }
+      }
+      await tx
+        .update(docPages)
+        .set(set)
+        .where(and(eq(docPages.id, id), eq(docPages.workspaceId, ws)));
+      const [row] = await tx
+        .select()
+        .from(docPages)
+        .where(eq(docPages.id, id))
+        .limit(1);
+      if (!row) throw new DocError(`Unknown page: ${id}`);
+      return this.toDocPageRecord(row);
+    });
+  }
+
+  async deleteDocPage(id: string, scope?: WorkspaceScope): Promise<void> {
+    await this.scoped(scope, async (tx) => {
+      const ws = scope!.workspaceId;
+      const [current] = await tx
+        .select({ productId: docPages.productId })
+        .from(docPages)
+        .where(and(eq(docPages.id, id), eq(docPages.workspaceId, ws)))
+        .limit(1);
+      if (!current) throw new DocError(`Unknown page: ${id}`);
+      await this.requireDocWrite(tx, scope!, current.productId);
+      // Children cascade on the parent FK.
+      await tx
+        .delete(docPages)
+        .where(and(eq(docPages.id, id), eq(docPages.workspaceId, ws)));
+    });
+  }
+
+  /** Assert `folderId` is a folder in the same product + area. */
+  private async requireDocFolder(
+    tx: Tx,
+    folderId: string,
+    productId: string,
+    area: DocArea,
+  ): Promise<void> {
+    const [row] = await tx
+      .select({ kind: docPages.kind })
+      .from(docPages)
+      .where(
+        and(
+          eq(docPages.id, folderId),
+          eq(docPages.productId, productId),
+          eq(docPages.area, area),
+        ),
+      )
+      .limit(1);
+    if (!row) throw new DocError("Unknown folder.");
+    if (row.kind !== "folder") throw new DocError("Pages cannot contain pages.");
   }
 
   // ── Products ────────────────────────────────────────────────────────────

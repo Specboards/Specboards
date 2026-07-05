@@ -982,6 +982,84 @@ export const outboxEvents = pgTable(
   ],
 );
 
+/**
+ * Where a product keeps the docs for one Plan-section area ("strategy",
+ * "research", or "architecture"): one row per (product, area). `mode` is the
+ * team's choice for that area: `local` (pages live in Specboard, see
+ * `doc_pages`), `external` (an outside repository like SharePoint or Box that
+ * we only link out to via `externalUrl`), or `github` (a GitHub repo of
+ * Markdown files, `repoId`; edit-and-commit is a later slice). Absent row =
+ * the team hasn't chosen yet (the area shows the setup chooser). Strategy
+ * skips the chooser and is always `local`.
+ */
+export const docSpaces = pgTable(
+  "doc_spaces",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    /** Plan-section area key: strategy / research / architecture. */
+    area: text("area").notNull(),
+    /** Source choice: local / external / github. */
+    mode: text("mode").notNull(),
+    /** Link-out URL for `external` mode, else null. */
+    externalUrl: text("external_url"),
+    /** Backing repo for `github` mode, else null. */
+    repoId: uuid("repo_id").references(() => repositories.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("doc_spaces_product_area_uq").on(t.productId, t.area),
+    index("doc_spaces_ws_idx").on(t.workspaceId),
+  ],
+);
+
+/**
+ * A folder or Markdown page in a locally-held doc space (doc_spaces mode
+ * `local`; also Strategy, which is always local). Pages form a tree via
+ * `parentId` (a folder row); deleting a folder cascades to its contents.
+ * `content` is Markdown, edited with the rich-text editor and empty for
+ * folders. Ordered by `position` within a parent, then title.
+ */
+export const docPages = pgTable(
+  "doc_pages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    /** Plan-section area key: strategy / research / architecture. */
+    area: text("area").notNull(),
+    /** Containing folder, or null at the area root. */
+    parentId: uuid("parent_id").references((): AnyPgColumn => docPages.id, {
+      onDelete: "cascade",
+    }),
+    /** Row kind: folder / page. */
+    kind: text("kind").notNull().default("page"),
+    title: text("title").notNull(),
+    /** Markdown body (empty for folders). */
+    content: text("content").notNull().default(""),
+    position: integer("position").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("doc_pages_product_area_idx").on(t.productId, t.area),
+    index("doc_pages_ws_idx").on(t.workspaceId),
+    index("doc_pages_parent_idx").on(t.parentId),
+  ],
+);
+
 export const workspaceRelations = relations(workspaces, ({ many }) => ({
   members: many(members),
   repositories: many(repositories),
