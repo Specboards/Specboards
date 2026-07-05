@@ -186,8 +186,6 @@ export default async function RoadmapPage({
           features={features}
           workflow={workflow}
           productsById={productsById}
-          org={org}
-          productSlug={productSlug}
           allowDrag={canEdit && !showShipped}
           isAdmin={isAdmin}
         />

@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -19,6 +18,7 @@ import { toast } from "sonner";
 
 import type { StatusWorkflow } from "@specboard/core";
 
+import { FeatureEditSheet } from "@/components/feature-edit-sheet";
 import type { ProductTag } from "@/components/feature-card";
 import { ReleaseDetailSheet } from "@/components/release-detail-sheet";
 import { StatusDot } from "@/components/status-dot";
@@ -26,7 +26,6 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { AuthRequiredError, patchFeature } from "@/lib/api-client";
 import { statusLabel } from "@/lib/feature-helpers";
-import { itemPath } from "@/lib/org-path";
 import { productColorClasses } from "@/lib/product-color";
 import type { FeatureRecord, ReleaseRecord } from "@/lib/store/types";
 import { cn } from "@/lib/utils";
@@ -63,8 +62,6 @@ export function RoadmapBoard({
   features,
   workflow,
   productsById,
-  org,
-  productSlug,
   allowDrag,
   isAdmin,
 }: {
@@ -72,8 +69,6 @@ export function RoadmapBoard({
   features: FeatureRecord[];
   workflow: StatusWorkflow;
   productsById?: Record<string, ProductTag>;
-  org: string;
-  productSlug: string;
   /** Whether items can be re-scheduled by dragging (editors, active view). */
   allowDrag: boolean;
   isAdmin: boolean;
@@ -82,6 +77,7 @@ export function RoadmapBoard({
   const [placement, setPlacement] = useState<Record<string, string | null>>({});
   const [activeId, setActiveId] = useState<string | null>(null);
   const [detailReleaseId, setDetailReleaseId] = useState<string | null>(null);
+  const [editingSpecId, setEditingSpecId] = useState<string | null>(null);
 
   // Re-seed from the server whenever fresh features arrive (after a drop's
   // refresh, or an edit elsewhere). Placement holds only optimistic overrides
@@ -165,10 +161,9 @@ export function RoadmapBoard({
               items={byColumn.get(column.releaseId ?? UNSCHEDULED) ?? []}
               workflow={workflow}
               productsById={productsById}
-              org={org}
-              productSlug={productSlug}
               allowDrag={allowDrag}
               onOpenDetail={setDetailReleaseId}
+              onOpenItem={setEditingSpecId}
             />
           ))}
         </div>
@@ -178,8 +173,6 @@ export function RoadmapBoard({
               feature={activeFeature}
               workflow={workflow}
               productsById={productsById}
-              org={org}
-              productSlug={productSlug}
               dragging
             />
           ) : null}
@@ -190,6 +183,10 @@ export function RoadmapBoard({
         isAdmin={isAdmin}
         onClose={() => setDetailReleaseId(null)}
       />
+      <FeatureEditSheet
+        specId={editingSpecId}
+        onClose={() => setEditingSpecId(null)}
+      />
     </>
   );
 }
@@ -199,19 +196,17 @@ function Column({
   items,
   workflow,
   productsById,
-  org,
-  productSlug,
   allowDrag,
   onOpenDetail,
+  onOpenItem,
 }: {
   column: RoadmapColumn;
   items: FeatureRecord[];
   workflow: StatusWorkflow;
   productsById?: Record<string, ProductTag>;
-  org: string;
-  productSlug: string;
   allowDrag: boolean;
   onOpenDetail: (releaseId: string) => void;
+  onOpenItem: (specId: string) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({
     id: `${COL_PREFIX}${column.releaseId ?? UNSCHEDULED}`,
@@ -244,13 +239,20 @@ function Column({
             {items.length}
           </span>
         </div>
-        {dates || statusLabelText ? (
-          <p className="text-xs text-muted-foreground">
-            {dates}
-            {dates && statusLabelText ? " · " : ""}
-            {statusLabelText}
-          </p>
-        ) : null}
+        {/* Always render the date line (a non-breaking space when a column has
+            neither dates nor a status) so every column's cards start at the
+            same vertical offset, including "Unscheduled". */}
+        <p className="text-xs text-muted-foreground">
+          {dates || statusLabelText ? (
+            <>
+              {dates}
+              {dates && statusLabelText ? " · " : ""}
+              {statusLabelText}
+            </>
+          ) : (
+            " "
+          )}
+        </p>
       </div>
 
       <div
@@ -266,9 +268,8 @@ function Column({
             feature={f}
             workflow={workflow}
             productsById={productsById}
-            org={org}
-            productSlug={productSlug}
             allowDrag={allowDrag}
+            onOpenItem={onOpenItem}
           />
         ))}
         {items.length === 0 ? (
@@ -283,16 +284,14 @@ function DraggableCard({
   feature,
   workflow,
   productsById,
-  org,
-  productSlug,
   allowDrag,
+  onOpenItem,
 }: {
   feature: FeatureRecord;
   workflow: StatusWorkflow;
   productsById?: Record<string, ProductTag>;
-  org: string;
-  productSlug: string;
   allowDrag: boolean;
+  onOpenItem: (specId: string) => void;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: feature.specId,
@@ -310,8 +309,7 @@ function DraggableCard({
         feature={feature}
         workflow={workflow}
         productsById={productsById}
-        org={org}
-        productSlug={productSlug}
+        onOpenItem={onOpenItem}
       />
     </div>
   );
@@ -322,15 +320,14 @@ function CardBody({
   feature,
   workflow,
   productsById,
-  org,
-  productSlug,
+  onOpenItem,
   dragging,
 }: {
   feature: FeatureRecord;
   workflow: StatusWorkflow;
   productsById?: Record<string, ProductTag>;
-  org: string;
-  productSlug: string;
+  /** Open the item's preview panel; omitted for the drag overlay (inert). */
+  onOpenItem?: (specId: string) => void;
   dragging?: boolean;
 }) {
   const product =
@@ -350,14 +347,20 @@ function CardBody({
           </Badge>
         ) : null}
         <CardTitle className="text-sm">
-          <Link
-            href={itemPath(org, productSlug, feature)}
-            className="hover:underline"
+          {/* Opens the same preview panel as the Backlog board (not a full-page
+              nav), so the two spaces behave the same. stopPropagation keeps a
+              click from also being read as a drag start. */}
+          <button
+            type="button"
+            className="text-left hover:underline"
             onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenItem?.(feature.specId);
+            }}
           >
             {feature.title}
-          </Link>
+          </button>
         </CardTitle>
         <CardDescription className="flex items-center gap-2 text-xs">
           <StatusDot status={feature.status} />

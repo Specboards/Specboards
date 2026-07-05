@@ -170,8 +170,10 @@ export function ReleaseDetailSheet({
   return (
     <Sheet open onOpenChange={(open) => !open && onClose()}>
       <SheetContent className="w-full gap-0 p-0 sm:max-w-lg">
-        <SheetHeader className="border-b px-5 py-3">
-          <SheetTitle className="sr-only">{current.name}</SheetTitle>
+        {/* Visible title, padded clear of the sheet's top-right close button so
+            the two don't collide on the header's bottom border. */}
+        <SheetHeader className="border-b px-5 py-3 pr-12">
+          <SheetTitle className="truncate">{current.name}</SheetTitle>
         </SheetHeader>
 
         <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
@@ -260,19 +262,14 @@ export function ReleaseDetailSheet({
             </div>
           ) : (
             <>
-              <div className="space-y-1">
-                <h2 className="text-lg font-semibold tracking-tight">
-                  {current.name}
-                </h2>
-                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                  <Badge variant="outline" className="text-[10px]">
-                    {RELEASE_STATUS_LABELS[current.status]}
-                  </Badge>
-                  {dates ? <span>{dates}</span> : <span>No dates set</span>}
-                  <span>
-                    · {current.itemCount} item{current.itemCount === 1 ? "" : "s"}
-                  </span>
-                </div>
+              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <Badge variant="outline" className="text-[10px]">
+                  {RELEASE_STATUS_LABELS[current.status]}
+                </Badge>
+                {dates ? <span>{dates}</span> : <span>No dates set</span>}
+                <span>
+                  · {current.itemCount} item{current.itemCount === 1 ? "" : "s"}
+                </span>
               </div>
               {current.notes ? (
                 <div className="prose prose-sm prose-neutral max-w-none dark:prose-invert">
@@ -301,7 +298,6 @@ export function ReleaseDetailSheet({
             ) : (
               <Button
                 size="sm"
-                variant="outline"
                 onClick={() =>
                   setStatus(
                     "shipped",

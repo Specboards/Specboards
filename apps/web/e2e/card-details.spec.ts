@@ -5,7 +5,8 @@ import { getWorkspace, resetBoard, resetReleases } from "./helpers/db";
 /**
  * Creating a DB-native card from the Roadmap now captures a Details body (rich
  * text stored as Markdown) alongside title/status. This drives the real create
- * drawer end to end and confirms the body renders on the item page.
+ * drawer end to end and confirms the body renders in the item preview panel that
+ * a Roadmap card opens (the same in-context panel the Backlog board uses).
  */
 test.describe("roadmap: create card with details", () => {
   test.beforeEach(async () => {
@@ -40,11 +41,12 @@ test.describe("roadmap: create card with details", () => {
     ]);
     expect(createResp.ok()).toBeTruthy();
 
-    // The new card appears on the board; open it.
-    await page.getByRole("link", { name: "Login flow" }).click();
+    // The new card appears on the board; clicking its title opens the preview
+    // panel (an in-context drawer, not a full-page navigation).
+    await page.getByRole("button", { name: "Login flow", exact: true }).click();
 
-    // The details body shows on the item page (in the editable rich-text
-    // surface, since the admin can edit).
+    // The details body shows in the panel (in the editable rich-text surface,
+    // since the admin can edit).
     await expect(
       page.getByText("Problem statement for the login flow."),
     ).toBeVisible();
@@ -64,7 +66,10 @@ test.describe("roadmap: create card with details", () => {
     ]);
     expect(patchResp.ok()).toBeTruthy();
 
+    // Reload wipes the client-only panel state; reopening the card re-fetches
+    // from the API, proving the edit persisted server-side.
     await page.reload();
+    await page.getByRole("button", { name: "Login flow", exact: true }).click();
     await expect(
       page.getByText("Problem statement for the login flow. (updated)."),
     ).toBeVisible();
