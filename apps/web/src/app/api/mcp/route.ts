@@ -22,11 +22,14 @@ export const runtime = "nodejs";
 /**
  * 401 challenge pointing at the protected-resource metadata (RFC 9728), which
  * is how an MCP client learns where to run the OAuth flow. The origin comes
- * from APP_URL when set (behind Fly's proxy the request URL scheme is the
- * proxy's), falling back to the request origin for self-host/dev.
+ * from APP_URL / BETTER_AUTH_URL when set (same chain as auth.ts; inside the
+ * Fly container the request URL is the container's 0.0.0.0 bind address, not
+ * the public origin), falling back to the request origin for self-host/dev.
  */
 function unauthorized(req: Request): Response {
-  const origin = process.env.APP_URL?.trim() || new URL(req.url).origin;
+  const origin =
+    (process.env.APP_URL ?? process.env.BETTER_AUTH_URL)?.trim() ||
+    new URL(req.url).origin;
   const challenge = `Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource/api/mcp"`;
   return Response.json(
     rpcError(null, -32000, "Unauthorized: authentication required"),
