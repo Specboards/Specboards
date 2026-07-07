@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 
 import { ApiKeysCard } from "@/components/api-keys-card";
+import { IntegrationsTabs } from "@/components/integrations-tabs";
 import { McpCard } from "@/components/mcp-card";
 import {
   Card,
@@ -39,7 +40,11 @@ async function mcpEndpoint(): Promise<string> {
  * webhooks. API keys are per-user (any role); webhooks are admin-only. All are
  * unavailable in local file mode (no accounts / no server).
  */
-export default async function IntegrationsSettingsPage() {
+export default async function IntegrationsSettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string }>;
+}) {
   const access = await requireWorkspaceAccess();
   const db = getDb();
   const user = await getServerSessionUser();
@@ -73,25 +78,30 @@ export default async function IntegrationsSettingsPage() {
       ])
     : [[], []];
 
+  const { tab } = await searchParams;
+
   return (
-    <div className="space-y-6">
-      <McpCard endpoint={endpoint} />
-      <ApiKeysCard initialKeys={initialKeys} />
-      {isAdmin ? (
-        <WebhooksCard
-          initialEndpoints={endpoints}
-          products={products.map((p) => ({ id: p.id, name: p.name }))}
-        />
-      ) : (
-        <Card>
-          <CardHeader>
-            <CardTitle>Webhooks</CardTitle>
-            <CardDescription>
-              Only an organization admin can manage webhooks.
-            </CardDescription>
-          </CardHeader>
-        </Card>
-      )}
-    </div>
+    <IntegrationsTabs
+      initialTab={tab}
+      mcp={<McpCard endpoint={endpoint} />}
+      apiKeys={<ApiKeysCard initialKeys={initialKeys} />}
+      webhooks={
+        isAdmin ? (
+          <WebhooksCard
+            initialEndpoints={endpoints}
+            products={products.map((p) => ({ id: p.id, name: p.name }))}
+          />
+        ) : (
+          <Card>
+            <CardHeader>
+              <CardTitle>Webhooks</CardTitle>
+              <CardDescription>
+                Only an organization admin can manage webhooks.
+              </CardDescription>
+            </CardHeader>
+          </Card>
+        )
+      }
+    />
   );
 }
