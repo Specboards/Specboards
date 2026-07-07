@@ -1,6 +1,7 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError, createAuthMiddleware } from "better-auth/api";
+import { mcp } from "better-auth/plugins";
 
 import { isBlockedEmailDomain } from "@specboard/core";
 import { createDb, schema } from "@specboard/db";
@@ -19,7 +20,11 @@ function blockPublicEmailDomains(): boolean {
 }
 
 function createAuth(url: string) {
+  // The MCP OAuth provider needs an explicit issuer for its discovery
+  // metadata; everywhere else Better Auth can infer the URL per request.
+  const appUrl = (process.env.APP_URL ?? process.env.BETTER_AUTH_URL)?.trim();
   return betterAuth({
+    ...(appUrl ? { baseURL: appUrl } : {}),
     database: drizzleAdapter(createDb(url), {
       provider: "pg",
       schema: {
@@ -27,8 +32,28 @@ function createAuth(url: string) {
         session: schema.sessions,
         account: schema.accounts,
         verification: schema.verifications,
+        oauthApplication: schema.oauthApplications,
+        oauthAccessToken: schema.oauthAccessTokens,
+        oauthConsent: schema.oauthConsents,
       },
     }),
+    // OAuth 2.1 provider for the hosted MCP endpoint (/api/mcp): MCP clients
+    // discover it via /.well-known/oauth-*, self-register (DCR), send the user
+    // through sign-in + consent, and call /api/mcp with the minted bearer
+    // token. The sb_ API key path stays as the non-interactive alternative.
+    plugins: [
+      mcp({
+        loginPage: "/sign-in",
+        oidcConfig: {
+          // OIDCOptions requires loginPage too; the plugin overrides it with
+          // the top-level value, so keep them identical.
+          loginPage: "/sign-in",
+          consentPage: "/oauth/consent",
+          // OAuth 2.1: every client must use PKCE, public or confidential.
+          requirePKCE: true,
+        },
+      }),
+    ],
     emailAndPassword: {
       enabled: true,
       // Block sign-in until the address is confirmed. Combined with
@@ -140,6 +165,14 @@ function createAuth(url: string) {
     },
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
+        // Force every MCP authorize request through the consent screen. The
+        // mcp plugin only shows consent when the request carries
+        // prompt=consent, and MCP clients don't send it; without this, any
+        // dynamically-registered client could silently obtain an
+        // authorization code from a signed-in user's browser.
+        if (ctx.path === "/mcp/authorize") {
+          return { context: { query: { ...ctx.query, prompt: "consent" } } };
+        }
         if (ctx.path !== "/sign-up/email" || !blockPublicEmailDomains()) return;
         const email = typeof ctx.body?.email === "string" ? ctx.body.email : "";
         if (isBlockedEmailDomain(email)) {
@@ -163,6 +196,9 @@ function createAuth(url: string) {
         "/sign-up/email": { window: 3600, max: 10 },
         "/forget-password": { window: 3600, max: 5 },
         "/reset-password": { window: 3600, max: 10 },
+        // Dynamic Client Registration is unauthenticated and writes a row per
+        // call; a client registers once, so a low ceiling costs nothing.
+        "/mcp/register": { window: 3600, max: 10 },
       },
     },
     advanced: {

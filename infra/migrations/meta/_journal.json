@@ -225,6 +225,13 @@
       "when": 1783292528173,
       "tag": "0031_wealthy_rocket_raccoon",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1783449558155,
+      "tag": "0032_third_champions",
+      "breakpoints": true
     }
   ]
 }

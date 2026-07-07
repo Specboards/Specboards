@@ -1,5 +1,7 @@
+import { getAuth } from "@/lib/auth";
 import { resolveReadAccess } from "@/lib/auth-session";
-import { canWrite } from "@/lib/workspace";
+import { getDb } from "@/lib/db";
+import { canWrite, getMembership } from "@/lib/workspace";
 
 import { TOOLS, type McpContext } from "./tools";
 
@@ -26,34 +28,85 @@ const INSTRUCTIONS =
 
 export type McpAuth =
   | { ok: true; ctx: McpContext }
-  | { ok: false; message: string };
+  | { ok: false; unauthenticated: boolean; message: string };
 
-/** Resolve the caller from the request's API key, reusing the REST auth path. */
+const NO_WORKSPACE_MESSAGE = "You do not belong to a workspace.";
+
+/**
+ * Resolve the caller from the request's credentials. Two paths: an `sb_` API
+ * key (or browser session cookie) via the REST auth path, or an OAuth access
+ * token minted by the Better Auth mcp plugin's token endpoint. Either way the
+ * caller acts as the resolved user, inheriting their workspace membership and
+ * role. `unauthenticated: true` means no valid credential at all, which the
+ * route turns into a 401 + WWW-Authenticate challenge so OAuth-capable MCP
+ * clients start the sign-in flow.
+ */
 export async function resolveMcpAuth(req: Request): Promise<McpAuth> {
   const access = await resolveReadAccess(req);
-  if (!access.ok) {
+  if (access.ok) {
+    if (!access.access) {
+      // Local file mode (auth disabled): everything allowed with no scope.
+      return { ok: true, ctx: { scope: undefined, role: null, isLocal: true } };
+    }
     return {
-      ok: false,
-      message:
-        "Authentication required. Provide a Specboard API key as a bearer " +
-        "token (Authorization: Bearer sb_...).",
+      ok: true,
+      ctx: {
+        scope: {
+          userId: access.access.userId,
+          workspaceId: access.access.workspaceId,
+        },
+        role: access.access.role,
+        isLocal: false,
+      },
     };
   }
-  if (!access.access) {
-    // Local file mode (auth disabled): everything allowed with no scope.
-    return { ok: true, ctx: { scope: undefined, role: null, isLocal: true } };
+
+  // Authenticated (key or cookie) but no workspace membership.
+  if (access.response.status === 403) {
+    return { ok: false, unauthenticated: false, message: NO_WORKSPACE_MESSAGE };
   }
-  return {
-    ok: true,
-    ctx: {
-      scope: {
-        userId: access.access.userId,
-        workspaceId: access.access.workspaceId,
+
+  // No sb_ key or session: check for an OAuth access token.
+  const oauth = await resolveOAuthUser(req);
+  if (oauth) {
+    const db = getDb();
+    const membership = db ? await getMembership(db, oauth.userId) : null;
+    if (!membership) {
+      return { ok: false, unauthenticated: false, message: NO_WORKSPACE_MESSAGE };
+    }
+    return {
+      ok: true,
+      ctx: {
+        scope: { userId: oauth.userId, workspaceId: membership.workspaceId },
+        role: membership.role,
+        isLocal: false,
       },
-      role: access.access.role,
-      isLocal: false,
-    },
+    };
+  }
+
+  return {
+    ok: false,
+    unauthenticated: true,
+    message:
+      "Authentication required. Connect via OAuth (your MCP client will " +
+      "prompt you to sign in) or provide a Specboard API key as a bearer " +
+      "token (Authorization: Bearer sb_...).",
   };
+}
+
+/**
+ * Validate a bearer value as an MCP OAuth access token: an unexpired row in
+ * oauth_access_tokens. Returns the token's user, or `null` when the header is
+ * absent, not an OAuth token, or expired (getMcpSession checks expiry).
+ */
+async function resolveOAuthUser(req: Request): Promise<{ userId: string } | null> {
+  const auth = getAuth();
+  if (!auth) return null;
+  const bearer = req.headers.get("authorization");
+  if (!bearer?.startsWith("Bearer ")) return null;
+  const session = await auth.api.getMcpSession({ headers: req.headers });
+  if (!session?.userId) return null;
+  return { userId: session.userId };
 }
 
 function canWriteCtx(ctx: McpContext): boolean {

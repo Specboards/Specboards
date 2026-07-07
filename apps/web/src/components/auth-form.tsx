@@ -57,6 +57,15 @@ export function AuthForm({ mode }: { mode: Mode }) {
   // can't turn the sign-in link into an open redirect.
   const redirectTo = safeRedirectPath(searchParams.get("from"));
 
+  // The MCP OAuth authorize endpoint bounces unauthenticated users here with
+  // the original OAuth query intact. Resume that flow after sign-in by going
+  // back through authorize (same-origin path, so not an open redirect), which
+  // then forwards to the consent screen.
+  const isOAuthAuthorize =
+    searchParams.has("client_id") &&
+    searchParams.has("redirect_uri") &&
+    searchParams.has("response_type");
+
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const data = new FormData(e.currentTarget);
@@ -91,6 +100,10 @@ export function AuthForm({ mode }: { mode: Mode }) {
           return;
         }
         setError(error.message ?? "Something went wrong. Please try again.");
+        return;
+      }
+      if (isOAuthAuthorize) {
+        window.location.assign(`/api/auth/mcp/authorize?${searchParams.toString()}`);
         return;
       }
       router.push(redirectTo);

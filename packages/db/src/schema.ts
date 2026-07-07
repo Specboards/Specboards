@@ -849,6 +849,93 @@ export const verifications = pgTable("verifications", {
 });
 
 /**
+ * OAuth clients registered against the MCP OAuth provider (Better Auth `mcp`
+ * plugin, model `oauthApplication`). Rows are created by Dynamic Client
+ * Registration (RFC 7591) when an MCP client (Claude Code, claude.ai, …)
+ * connects for the first time; `clientId` is the public identifier the
+ * authorize/token endpoints key on. `redirectUrls` is a comma-joined list and
+ * `metadata` a JSON string because that is the shape the plugin reads back.
+ * Like the other auth tables: user-scoped, no workspaceId, no RLS.
+ */
+export const oauthApplications = pgTable(
+  "oauth_applications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** Client display name from DCR (`client_name`); optional in the RFC. */
+    name: text("name"),
+    icon: text("icon"),
+    metadata: text("metadata"),
+    clientId: text("client_id").notNull().unique(),
+    /** Empty for `public` (PKCE-only) clients; the plugin stores "" not NULL. */
+    clientSecret: text("client_secret"),
+    redirectUrls: text("redirect_urls").notNull(),
+    /** "web" (confidential) or "public" (native/PKCE-only). */
+    type: text("type").notNull(),
+    disabled: boolean("disabled").notNull().default(false),
+    /** Registering user when DCR happened with a session; else anonymous. */
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("oauth_applications_user_idx").on(table.userId)],
+);
+
+/**
+ * Access + refresh token pairs minted by the MCP OAuth token endpoint (model
+ * `oauthAccessToken`). The MCP endpoint validates `Authorization: Bearer`
+ * values against `accessToken` here (opaque tokens, not JWTs) and acts as
+ * `userId`, inheriting their workspace membership and role exactly like an
+ * `sb_` API key does.
+ */
+export const oauthAccessTokens = pgTable(
+  "oauth_access_tokens",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    accessToken: text("access_token").notNull().unique(),
+    refreshToken: text("refresh_token").notNull().unique(),
+    accessTokenExpiresAt: timestamp("access_token_expires_at", { withTimezone: true }).notNull(),
+    refreshTokenExpiresAt: timestamp("refresh_token_expires_at", { withTimezone: true }).notNull(),
+    clientId: text("client_id")
+      .notNull()
+      .references(() => oauthApplications.clientId, { onDelete: "cascade" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    scopes: text("scopes").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("oauth_access_tokens_client_idx").on(table.clientId),
+    index("oauth_access_tokens_user_idx").on(table.userId),
+  ],
+);
+
+/**
+ * Record of a user approving an OAuth client on the consent screen (model
+ * `oauthConsent`). Every authorize request is forced through consent (see
+ * auth.ts), so this is an audit trail of which clients a user has approved.
+ */
+export const oauthConsents = pgTable(
+  "oauth_consents",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    clientId: text("client_id")
+      .notNull()
+      .references(() => oauthApplications.clientId, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    scopes: text("scopes").notNull(),
+    consentGiven: boolean("consent_given").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("oauth_consents_client_idx").on(table.clientId),
+    index("oauth_consents_user_idx").on(table.userId),
+  ],
+);
+
+/**
  * Personal API keys for programmatic access (the CLI). We only ever store the
  * SHA-256 `keyHash`; the plaintext key is shown once at creation. `prefix` is
  * the leading, non-secret slice kept for display ("sb_live_a1b2c3…"). Scoped to
