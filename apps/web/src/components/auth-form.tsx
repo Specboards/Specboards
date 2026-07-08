@@ -57,6 +57,14 @@ export function AuthForm({ mode }: { mode: Mode }) {
   // can't turn the sign-in link into an open redirect.
   const redirectTo = safeRedirectPath(searchParams.get("from"));
 
+  // Carry the post-auth destination across the sign-in ↔ sign-up toggle, so an
+  // invited user who lands on /sign-in and switches to /sign-up keeps their
+  // `/invite/<token>` callback. Only appended when it's a real path (not "/").
+  const altHref =
+    redirectTo !== "/"
+      ? `${t.altHref}?from=${encodeURIComponent(redirectTo)}`
+      : t.altHref;
+
   // The MCP OAuth authorize endpoint bounces unauthenticated users here with
   // the original OAuth query intact. Resume that flow after sign-in by going
   // back through authorize (same-origin path, so not an open redirect), which
@@ -179,7 +187,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
         </form>
         <p className="mt-4 text-center text-xs text-muted-foreground">
           {t.altText}{" "}
-          <Link href={t.altHref} className="text-foreground underline-offset-4 hover:underline">
+          <Link href={altHref} className="text-foreground underline-offset-4 hover:underline">
             {t.altLabel}
           </Link>
         </p>

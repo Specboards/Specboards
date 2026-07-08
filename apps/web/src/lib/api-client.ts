@@ -27,6 +27,9 @@ import type {
   IdeaSettingsPatch,
   IdeaStage,
   LevelUpdate,
+  OrgInvitationRecord,
+  OrgMemberRecord,
+  OrgRole,
   ProductMemberInput,
   ProductMemberRecord,
   ProductPatch,
@@ -1092,6 +1095,101 @@ export async function removeProductMember(
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as { error?: string } | null;
     throw new Error(body?.error ?? `Remove member failed with ${res.status}`);
+  }
+}
+
+/** List the organization's members (org-admin only). */
+export async function listOrgMembers(): Promise<OrgMemberRecord[]> {
+  const res = await fetch("/api/v1/org/members");
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as
+    | { members?: OrgMemberRecord[]; error?: string }
+    | null;
+  if (!res.ok) throw new Error(body?.error ?? `Failed to load members (${res.status}).`);
+  return body?.members ?? [];
+}
+
+/** Change a member's org role and/or active flag. Org-admin only. */
+export async function updateOrgMember(
+  userId: string,
+  patch: { role?: OrgRole; active?: boolean },
+): Promise<void> {
+  const res = await fetch(`/api/v1/org/members/${encodeURIComponent(userId)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (res.status === 401) throw new AuthRequiredError();
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(body?.error ?? `Update member failed with ${res.status}`);
+  }
+}
+
+/** Remove a member from the organization. Org-admin only. */
+export async function removeOrgMember(userId: string): Promise<void> {
+  const res = await fetch(`/api/v1/org/members/${encodeURIComponent(userId)}`, {
+    method: "DELETE",
+  });
+  if (res.status === 401) throw new AuthRequiredError();
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(body?.error ?? `Remove member failed with ${res.status}`);
+  }
+}
+
+/** List the org's invitations (org-admin only). */
+export async function listInvitations(): Promise<OrgInvitationRecord[]> {
+  const res = await fetch("/api/v1/org/invitations");
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as
+    | { invitations?: OrgInvitationRecord[]; error?: string }
+    | null;
+  if (!res.ok) throw new Error(body?.error ?? `Failed to load invitations (${res.status}).`);
+  return body?.invitations ?? [];
+}
+
+/** Invite someone to the org by email with a role. Returns the new invitation. */
+export async function createInvitation(input: {
+  email: string;
+  role: OrgRole;
+}): Promise<OrgInvitationRecord> {
+  const res = await fetch("/api/v1/org/invitations", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as
+    | { invitation?: OrgInvitationRecord; error?: string }
+    | null;
+  if (!res.ok || !body?.invitation) {
+    throw new Error(body?.error ?? `Invite failed with ${res.status}`);
+  }
+  return body.invitation;
+}
+
+/** Revoke a pending invitation. Org-admin only. */
+export async function revokeInvitation(id: string): Promise<void> {
+  const res = await fetch(`/api/v1/org/invitations/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (res.status === 401) throw new AuthRequiredError();
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(body?.error ?? `Revoke failed with ${res.status}`);
+  }
+}
+
+/** Re-send a pending invitation (regenerates the token). Org-admin only. */
+export async function resendInvitation(id: string): Promise<void> {
+  const res = await fetch(`/api/v1/org/invitations/${encodeURIComponent(id)}/resend`, {
+    method: "POST",
+  });
+  if (res.status === 401) throw new AuthRequiredError();
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(body?.error ?? `Resend failed with ${res.status}`);
   }
 }
 

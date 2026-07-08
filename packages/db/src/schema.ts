@@ -32,6 +32,16 @@ export const productVisibility = pgEnum("product_visibility", ["org", "private"]
  * products, where it grants access). */
 export const productMemberRole = pgEnum("product_member_role", ["admin", "editor", "viewer"]);
 
+/** Lifecycle of an org invitation. `pending` until it is redeemed
+ * (`accepted`), revoked by an admin (`revoked`), or lapses past its expiry
+ * (`expired`, flipped lazily on the next read of a stale row). */
+export const invitationStatus = pgEnum("invitation_status", [
+  "pending",
+  "accepted",
+  "revoked",
+  "expired",
+]);
+
 /** Tenant root. SaaS has many; a self-host install typically has one. */
 export const workspaces = pgTable("workspaces", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -175,9 +185,49 @@ export const members = pgTable(
     // single-workspace self-host can run with auth disabled.
     userId: uuid("user_id").notNull(),
     role: memberRole("role").notNull().default("viewer"),
+    /** When non-null the membership is suspended: the user keeps their row (and
+     * any per-product grants) but is denied all access to this org. Deactivation
+     * is per-org, so a user can stay active elsewhere. Enforced centrally in
+     * `getMembership`/`getMembershipFor`. */
+    deactivatedAt: timestamp("deactivated_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [unique("members_workspace_user_uq").on(t.workspaceId, t.userId)],
+);
+
+/**
+ * A pending email invitation to join a workspace with a chosen role. The raw
+ * token is emailed once as an `/invite/<token>` link; only its SHA-256
+ * (`tokenHash`) is stored, mirroring `api_keys`. A partial-unique index on
+ * `(workspace_id, lower(email)) where status = 'pending'` (added in the
+ * migration by hand — Drizzle can't express it) keeps at most one live invite
+ * per email per org. `invitedBy`/`acceptedUserId` reference `users.id` without
+ * an FK for the same reason as `members.user_id`.
+ */
+export const invitations = pgTable(
+  "invitations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    /** Invited address, stored lowercased; the redeeming user's email must match. */
+    email: text("email").notNull(),
+    role: memberRole("role").notNull().default("viewer"),
+    /** SHA-256 hex of the raw token; the plaintext lives only in the emailed link. */
+    tokenHash: text("token_hash").notNull().unique(),
+    status: invitationStatus("status").notNull().default("pending"),
+    invitedBy: uuid("invited_by").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    acceptedUserId: uuid("accepted_user_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("invitations_ws_idx").on(t.workspaceId),
+    index("invitations_email_idx").on(t.email),
+    index("invitations_token_idx").on(t.tokenHash),
+  ],
 );
 
 /**

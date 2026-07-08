@@ -2,6 +2,7 @@ import {
   and,
   asc,
   eq,
+  isNull,
   members,
   products,
   users,
@@ -29,6 +30,8 @@ export interface WorkspaceMember {
   name: string;
   email: string;
   role: MemberRole;
+  /** Non-null when the membership is suspended (see `members.deactivatedAt`). */
+  deactivatedAt: Date | null;
 }
 
 /** List a workspace's members joined to their user records, ordered by name. */
@@ -42,6 +45,7 @@ export async function listWorkspaceMembers(
       name: users.name,
       email: users.email,
       role: members.role,
+      deactivatedAt: members.deactivatedAt,
     })
     .from(members)
     .innerJoin(users, eq(users.id, members.userId))
@@ -161,7 +165,7 @@ export async function getMembership(
   const rows = await db
     .select()
     .from(members)
-    .where(eq(members.userId, userId))
+    .where(and(eq(members.userId, userId), isNull(members.deactivatedAt)))
     .orderBy(members.createdAt)
     .limit(1);
   return rows[0] ?? null;
@@ -187,7 +191,13 @@ export async function getMembershipFor(
   const rows = await db
     .select()
     .from(members)
-    .where(and(eq(members.userId, userId), eq(members.workspaceId, workspaceId)))
+    .where(
+      and(
+        eq(members.userId, userId),
+        eq(members.workspaceId, workspaceId),
+        isNull(members.deactivatedAt),
+      ),
+    )
     .limit(1);
   return rows[0] ?? null;
 }
