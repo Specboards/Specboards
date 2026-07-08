@@ -263,6 +263,30 @@ export interface ProductMemberInput {
   role: ProductRole;
 }
 
+/** The organization-level roles (mirrors the `member_role` DB enum). */
+export type OrgRole = "admin" | "pm" | "ux" | "eng" | "viewer";
+
+/** An org member joined to their identity, as returned to the client. */
+export interface OrgMemberRecord {
+  userId: string;
+  name: string;
+  email: string;
+  role: OrgRole;
+  /** ISO timestamp when suspended, or null when active. */
+  deactivatedAt: string | null;
+}
+
+/** A pending/settled invitation, as returned to the client (no token). */
+export interface OrgInvitationRecord {
+  id: string;
+  email: string;
+  role: OrgRole;
+  status: "pending" | "accepted" | "revoked" | "expired";
+  invitedBy: string;
+  expiresAt: string;
+  createdAt: string;
+}
+
 /** Raised when a product can't be created/updated/deleted (in use, dup, …). */
 export class ProductError extends Error {}
 

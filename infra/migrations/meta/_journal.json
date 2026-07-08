@@ -232,6 +232,13 @@
       "when": 1783449558155,
       "tag": "0032_third_champions",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1783529359119,
+      "tag": "0033_chubby_preak",
+      "breakpoints": true
     }
   ]
 }

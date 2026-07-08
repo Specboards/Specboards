@@ -5,6 +5,26 @@ All notable changes to Specboard are recorded here. The format is based on
 [Semantic Versioning](https://semver.org/). See [VERSIONING.md](./VERSIONING.md)
 for how and when the version is bumped.
 
+## [0.13.0] - 2026-07-08
+
+### Added
+
+- **Organization user management** (Settings → Company & Team; migration 0033
+  adds the `invitations` table and a `members.deactivated_at` column). Admins
+  now get a real team roster: change a member's org role, remove a member, or
+  deactivate/reactivate them, all protected by a last-admin guard so the only
+  admin can't be demoted, removed, or suspended.
+- **Email invitations.** An admin invites a teammate by email with a chosen
+  role; the invitee gets a signed `/invite/<token>` link (7-day expiry, hashed
+  token stored, strict email match on accept), signs up or in, and joins the org
+  automatically at the invited role. This is what makes a hosted, multi-tenant
+  org usable by more than its founder. Pending invitations can be re-sent or
+  revoked.
+- **Member deactivation.** A suspended membership is denied everywhere at once
+  (web pages, REST API, API keys, and MCP) via a single membership choke-point,
+  without deleting the user. Deactivation is per-organization, so the same
+  account can stay active in another org.
+
 ## [0.12.0] - 2026-07-07
 
 ### Added
