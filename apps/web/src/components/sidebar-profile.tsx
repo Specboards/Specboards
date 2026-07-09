@@ -54,7 +54,7 @@ export function SidebarProfile() {
     <div ref={ref} className="relative">
       {open ? (
         <div className="absolute bottom-full left-0 mb-2 w-full space-y-1 rounded-md border bg-popover p-2 shadow-md">
-          <div className="px-1 pb-1">
+          <div className="pb-1">
             <ThemeToggle className="w-full justify-center" />
           </div>
           <Link

@@ -38,13 +38,13 @@ export function ThemeToggle({ className }: { className?: string }) {
           onClick={() => setTheme(value)}
           aria-pressed={active === value}
           className={cn(
-            "flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium transition-colors",
+            "flex items-center justify-center gap-1 rounded px-1.5 py-1 text-xs font-medium transition-colors",
             active === value
               ? "bg-secondary text-secondary-foreground"
               : "text-muted-foreground hover:text-foreground",
           )}
         >
-          <Icon className="h-3.5 w-3.5" aria-hidden />
+          <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
           {label}
         </button>
       ))}
