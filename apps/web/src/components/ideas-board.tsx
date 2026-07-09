@@ -368,7 +368,7 @@ function IdeaRow({
   const by = idea.submitterName ?? idea.authorName ?? null;
 
   return (
-    <li className="flex items-start gap-3 rounded-lg border bg-card p-3 shadow-sm transition-colors hover:border-foreground/20">
+    <li className="flex items-start gap-3 rounded-md border bg-card p-3 transition-colors hover:border-foreground/20">
       <button
         type="button"
         onClick={toggleVote}

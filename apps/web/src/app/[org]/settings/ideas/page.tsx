@@ -54,7 +54,7 @@ function SettingsGroup({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-xl border">
+    <section className="rounded-md border">
       <div className="border-b px-5 py-4">
         <h2 className="text-base font-semibold tracking-tight">{title}</h2>
         <p className="mt-0.5 text-sm text-muted-foreground">{description}</p>

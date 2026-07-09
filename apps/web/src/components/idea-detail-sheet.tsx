@@ -11,6 +11,7 @@ import type { IdeaStage } from "@specboard/core";
 
 import { IdeaStatusSelect } from "@/components/idea-status-select";
 import { Badge } from "@/components/ui/badge";
+import { Box, BoxHeader } from "@/components/ui/box";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -296,19 +297,23 @@ export function IdeaDetailSheet({
               <h2 className="text-lg font-semibold tracking-tight">
                 {current.title}
               </h2>
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                {by ? <span>by {by}</span> : null}
-                <span>{formatDate(current.createdAt)}</span>
-              </div>
-              {current.description ? (
-                <div className="prose prose-sm prose-neutral max-w-none dark:prose-invert">
-                  <ReactMarkdown>{current.description}</ReactMarkdown>
+              <Box>
+                <BoxHeader className="flex-wrap gap-x-3 text-xs font-normal text-muted-foreground">
+                  {by ? <span>by {by}</span> : null}
+                  <span>{formatDate(current.createdAt)}</span>
+                </BoxHeader>
+                <div className="px-4 py-3">
+                  {current.description ? (
+                    <div className="prose prose-sm prose-neutral max-w-none dark:prose-invert">
+                      <ReactMarkdown>{current.description}</ReactMarkdown>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      No details yet.
+                    </p>
+                  )}
                 </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  No details yet.
-                </p>
-              )}
+              </Box>
               {promotedHref ? (
                 <Link
                   href={promotedHref}

@@ -333,7 +333,7 @@ function CardBody({
   const product =
     productsById && feature.productId ? productsById[feature.productId] : undefined;
   return (
-    <Card className={cn("rounded-lg shadow-sm", dragging && "shadow-md")}>
+    <Card className={cn(dragging && "shadow-md")}>
       <CardHeader className="space-y-1 p-3">
         {product ? (
           <Badge

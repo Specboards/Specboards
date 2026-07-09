@@ -139,14 +139,14 @@ export default async function RoadmapPage({
           {showShipped ? (
             <Link
               href={roadmapViewHref(org, productSlug, sp.level, false)}
-              className="text-xs text-muted-foreground hover:text-foreground hover:underline"
+              className="text-xs text-link hover:underline"
             >
               ← Active roadmap
             </Link>
           ) : shippedReleases.length > 0 ? (
             <Link
               href={roadmapViewHref(org, productSlug, sp.level, true)}
-              className="text-xs text-muted-foreground hover:text-foreground hover:underline"
+              className="text-xs text-link hover:underline"
             >
               Shipped releases ({shippedReleases.length}) →
             </Link>

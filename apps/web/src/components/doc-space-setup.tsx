@@ -142,7 +142,7 @@ export function DocSpaceSetup({
       </div>
 
       <div className="space-y-3">
-        <div className="rounded-lg border p-4">
+        <div className="rounded-md border p-4">
           <div className="flex items-start gap-3">
             <ExternalLink className="mt-0.5 h-5 w-5 text-muted-foreground" aria-hidden />
             <div className="flex-1 space-y-2">
@@ -171,7 +171,7 @@ export function DocSpaceSetup({
           </div>
         </div>
 
-        <div className="rounded-lg border p-4">
+        <div className="rounded-md border p-4">
           <div className="flex items-start gap-3">
             <FileText className="mt-0.5 h-5 w-5 text-muted-foreground" aria-hidden />
             <div className="flex-1 space-y-2">
@@ -193,7 +193,7 @@ export function DocSpaceSetup({
           </div>
         </div>
 
-        <div className="rounded-lg border p-4">
+        <div className="rounded-md border p-4">
           <div className="flex items-start gap-3">
             <GitBranch className="mt-0.5 h-5 w-5 text-muted-foreground" aria-hidden />
             <div className="flex-1 space-y-2">
@@ -224,7 +224,7 @@ export function DocSpaceSetup({
                     <button
                       type="button"
                       onClick={() => void openPicker()}
-                      className="text-sm text-muted-foreground underline hover:text-foreground"
+                      className="text-sm text-link underline hover:text-link/80"
                     >
                       Or connect an existing repository
                     </button>

@@ -315,7 +315,7 @@ export function GithubDocsWorkspace({
           href={repoUrl}
           target="_blank"
           rel="noreferrer"
-          className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline"
+          className="inline-flex items-center gap-1 text-xs text-link hover:underline"
         >
           <ExternalLink className="h-3 w-3" aria-hidden />
           {repoFullName}

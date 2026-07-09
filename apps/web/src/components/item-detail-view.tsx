@@ -114,7 +114,7 @@ export function ItemDetailView({
             minHeightClass="min-h-[15rem]"
           />
         ) : feature.content.trim() === "" ? (
-          <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
+          <div className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">
             {childLabel
               ? `This ${levelLabel.toLowerCase()} groups work and has no body of its own. Add ${childLabel.toLowerCase()} items beneath it to build it out.`
               : "No details yet."}
@@ -144,7 +144,7 @@ export function ItemDetailView({
                     href={orgHref(
                       `/backlog/${parentKey}/${feature.parentSpecId}`,
                     )}
-                    className="hover:underline"
+                    className="text-link hover:underline"
                   >
                     {feature.parentTitle ?? feature.parentSpecId}
                   </Link>
@@ -178,7 +178,7 @@ export function ItemDetailView({
                   <StatusDot status={c.status} />
                   <Link
                     href={orgHref(`/backlog/${childKey}/${c.specId}`)}
-                    className="flex-1 truncate hover:underline"
+                    className="flex-1 truncate text-link hover:underline"
                     title={c.title}
                   >
                     {c.title}

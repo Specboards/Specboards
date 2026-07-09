@@ -6,6 +6,7 @@ import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
+import { Box, BoxHeader } from "@/components/ui/box";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -261,24 +262,29 @@ export function ReleaseDetailSheet({
               </div>
             </div>
           ) : (
-            <>
-              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                <Badge variant="outline" className="text-[10px]">
-                  {RELEASE_STATUS_LABELS[current.status]}
-                </Badge>
-                {dates ? <span>{dates}</span> : <span>No dates set</span>}
-                <span>
-                  · {current.itemCount} item{current.itemCount === 1 ? "" : "s"}
+            <Box>
+              <BoxHeader className="flex-wrap justify-between gap-2 text-xs font-normal text-muted-foreground">
+                <span className="flex items-center gap-2">
+                  <Badge variant="outline" className="text-[10px]">
+                    {RELEASE_STATUS_LABELS[current.status]}
+                  </Badge>
+                  {dates ? dates : "No dates set"}
                 </span>
+                <span className="flex items-center gap-1.5">
+                  <Badge variant="counter">{current.itemCount}</Badge>
+                  item{current.itemCount === 1 ? "" : "s"}
+                </span>
+              </BoxHeader>
+              <div className="px-4 py-3">
+                {current.notes ? (
+                  <div className="prose prose-sm prose-neutral max-w-none dark:prose-invert">
+                    <ReactMarkdown>{current.notes}</ReactMarkdown>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">No notes yet.</p>
+                )}
               </div>
-              {current.notes ? (
-                <div className="prose prose-sm prose-neutral max-w-none dark:prose-invert">
-                  <ReactMarkdown>{current.notes}</ReactMarkdown>
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">No notes yet.</p>
-              )}
-            </>
+            </Box>
           )}
         </div>
 

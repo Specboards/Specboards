@@ -76,7 +76,7 @@ export function GateChecklist({
   }
 
   return (
-    <div className="rounded-lg border bg-muted/30 p-3">
+    <div className="rounded-md border bg-muted/30 p-3">
       <div className="mb-2 flex items-center gap-2">
         <ListChecks className="size-4 text-muted-foreground" />
         <h3 className="text-sm font-medium">{stageLabel} checklist</h3>
@@ -86,9 +86,16 @@ export function GateChecklist({
             allDone ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground",
           )}
         >
-          {allDone
-            ? "Ready to advance"
-            : `${gates.length - remaining}/${gates.length} complete`}
+          {allDone ? (
+            "Ready to advance"
+          ) : (
+            <>
+              <span className="font-mono">
+                {gates.length - remaining}/{gates.length}
+              </span>{" "}
+              complete
+            </>
+          )}
         </span>
       </div>
       <ul className="space-y-1">
