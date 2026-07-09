@@ -22,7 +22,7 @@ fills the gap.
 > **Amendment (2026-06-12):** the Supabase + Vercel decision below is
 > superseded. The hosted SaaS will run on Fly.io with plain Postgres,
 > and auth moves to Better Auth (in-app, works identically for self-host).
-> Details and execution steps: [`PLAN-fly-better-auth.md`](./PLAN-fly-better-auth.md).
+> Details and execution steps: [`PLAN-fly-better-auth.md`](./archive/PLAN-fly-better-auth.md).
 >
 > **Executed later the same day:** both Fly environments are live
 > (test.specboard.ai auto-deploys from `main`; app.specboard.ai promotes via

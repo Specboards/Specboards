@@ -217,7 +217,7 @@ export class DbStore implements FeatureStore {
    * live in a transaction), and callers additionally filter by `workspaceId`.
    * Refuses to run unscoped because that would expose every tenant's rows, since the
    * app still connects as the table owner (RLS bypassed until the
-   * `specboard_app` non-owner role lands; see docs/PLAN-fly-better-auth.md).
+   * `specboard_app` non-owner role lands; see docs/archive/PLAN-fly-better-auth.md).
    */
   private async scoped<T>(
     scope: WorkspaceScope | undefined,
