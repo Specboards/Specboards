@@ -110,7 +110,7 @@ async function mcpScope(): Promise<McpScope> {
     workspaceId: membership.workspaceId,
     workspaceSlug: membership.slug,
     access: {
-      isOrgAdmin: membership.role === "admin",
+      isOrgAdmin: membership.role === "owner",
       roles: new Map(
         grants.map((grant) => [grant.productId, grant.role] as const),
       ),

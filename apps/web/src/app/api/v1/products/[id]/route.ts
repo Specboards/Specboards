@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
 type Params = { params: Promise<{ id: string }> };
 
 const FORBIDDEN = Response.json(
-  { error: "Only an organization admin or this product's admin can do this." },
+  { error: "Only the workspace owner or this product's admin can do this." },
   { status: 403 },
 );
 

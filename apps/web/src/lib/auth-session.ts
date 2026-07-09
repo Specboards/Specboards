@@ -4,7 +4,7 @@ import { extractApiKey, verifyApiKeyUser } from "@/lib/api-keys";
 import { getAuth } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import type { WorkspaceScope } from "@/lib/store/types";
-import { canWrite, getMembership, type MemberRole } from "@/lib/workspace";
+import { getMembership, type MemberRole } from "@/lib/workspace";
 
 export type SessionUser = { id: string; email: string; name: string };
 
@@ -62,12 +62,18 @@ export async function getSessionUser(req: Request): Promise<SessionUser | null> 
  * Resolve the tenant scope for an API request, enforcing authorization.
  *
  * In local file mode (auth disabled) everything is allowed with a `null`
- * scope. Otherwise the caller must have a session and belong to a workspace;
- * write requests additionally require a non-`viewer` role.
+ * scope. Otherwise the caller must have a session and belong to a workspace.
+ *
+ * Write authorization is now **per product**, not per org role: a member can
+ * belong to the org yet only edit the products they've been granted (owner
+ * edits everything). So this coarse gate only requires membership; the store
+ * enforces `canWriteProduct` on each mutation (see `db.ts` `canWriteProductId`)
+ * and rejects a write to a product the caller can't edit. `opts.write` is kept
+ * for call-site intent and future use.
  */
 async function resolveScope(
   req: Request,
-  opts: { write: boolean },
+  _opts: { write: boolean },
 ): Promise<ScopeResult> {
   const auth = getAuth();
   const db = getDb();
@@ -87,15 +93,6 @@ async function resolveScope(
       ok: false,
       response: Response.json(
         { error: "You do not belong to a workspace." },
-        { status: 403 },
-      ),
-    };
-  }
-  if (opts.write && !canWrite(membership.role)) {
-    return {
-      ok: false,
-      response: Response.json(
-        { error: "Your role does not permit this action." },
         { status: 403 },
       ),
     };
@@ -153,13 +150,17 @@ export async function resolveReadAccess(req: Request): Promise<ReadAccessResult>
   };
 }
 
-/** Scope for a write request: requires a member with a non-`viewer` role. */
+/**
+ * Scope for a write request: requires workspace membership. Per-product write
+ * authorization is enforced downstream by the store (`canWriteProduct`), so a
+ * member without a grant on the target product is rejected at the mutation.
+ */
 export function authorizeWrite(req: Request): Promise<ScopeResult> {
   return resolveScope(req, { write: true });
 }
 
 /**
- * Scope for an organization-admin action (creating products, managing the org).
+ * Scope for an owner-only action (creating products, managing the org).
  * Local file mode (auth disabled) is ungated with a `null` scope.
  */
 export async function authorizeOrgAdmin(req: Request): Promise<ScopeResult> {
@@ -184,11 +185,11 @@ export async function authorizeOrgAdmin(req: Request): Promise<ScopeResult> {
       ),
     };
   }
-  if (membership.role !== "admin") {
+  if (membership.role !== "owner") {
     return {
       ok: false,
       response: Response.json(
-        { error: "Only an organization admin can do this." },
+        { error: "Only the workspace owner can do this." },
         { status: 403 },
       ),
     };

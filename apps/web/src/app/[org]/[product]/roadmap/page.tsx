@@ -14,12 +14,12 @@ import { sortFeatures } from "@/lib/feature-helpers";
 import { getDb } from "@/lib/db";
 import { resolveWorkflowFor } from "@/lib/repo-config";
 import { getStore } from "@/lib/store";
+import { listWorkspaceMembers, type WorkspaceMember } from "@/lib/workspace";
 import {
-  canWrite,
-  listWorkspaceMembers,
-  type WorkspaceMember,
-} from "@/lib/workspace";
-import { canConnectRepos, requireWorkspaceAccess } from "@/lib/workspace-access";
+  canConnectRepos,
+  canEditProducts,
+  requireWorkspaceAccess,
+} from "@/lib/workspace-access";
 import { RoadmapBoard, type RoadmapColumn } from "./roadmap-board";
 
 export const dynamic = "force-dynamic";
@@ -33,8 +33,9 @@ export default async function RoadmapPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const access = await requireWorkspaceAccess();
-  const canEdit = !access || canWrite(access.role);
-  const isAdmin = !access || access.role === "admin";
+  // Releases are workspace-wide, so creating them stays owner-only (`isAdmin`);
+  // editing items is per-product (`canEdit`, computed once products load).
+  const isAdmin = !access || access.role === "owner";
   const org = access?.orgSlug ?? LOCAL_ORG_SLUG;
   const { product: productSlug } = await params;
   const sp = await searchParams;
@@ -57,6 +58,7 @@ export default async function RoadmapPage({
   const products = await store.listProducts(access ?? undefined);
   const activeProduct = resolveActiveProduct(products, productSlug);
   if (productSlug !== ALL_PRODUCTS && !activeProduct) notFound();
+  const canEdit = canEditProducts(access, products, activeProduct?.id ?? null);
   const scoped = activeProduct
     ? allFeatures.filter((f) => f.productId === activeProduct.id)
     : allFeatures;

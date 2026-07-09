@@ -62,7 +62,7 @@ export async function GET(req: Request) {
   const expectedState = jar.get(INSTALL_STATE_COOKIE)?.value;
   jar.delete(INSTALL_STATE_COOKIE);
   if (
-    membership.role !== "admin" ||
+    membership.role !== "owner" ||
     !installationId ||
     !state ||
     !expectedState ||

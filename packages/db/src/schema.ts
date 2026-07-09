@@ -21,7 +21,7 @@ import {
  * `workspaceId` so Postgres RLS can isolate tenants (see migrations).
  */
 
-export const memberRole = pgEnum("member_role", ["admin", "pm", "ux", "eng", "viewer"]);
+export const memberRole = pgEnum("member_role", ["owner", "member"]);
 
 /** A product's read visibility: `org` (every member can read) or `private`
  * (read requires org-admin or explicit product membership). */
@@ -30,7 +30,7 @@ export const productVisibility = pgEnum("product_visibility", ["org", "private"]
 /** A user's role on a single product: `admin` (manage product + members + edit
  * items), `editor` (edit items), `viewer` (read — only meaningful for private
  * products, where it grants access). */
-export const productMemberRole = pgEnum("product_member_role", ["admin", "editor", "viewer"]);
+export const productMemberRole = pgEnum("product_member_role", ["admin", "contributor", "viewer"]);
 
 /** Lifecycle of an org invitation. `pending` until it is redeemed
  * (`accepted`), revoked by an admin (`revoked`), or lapses past its expiry
@@ -184,7 +184,7 @@ export const members = pgTable(
     // References users.id, but deliberately without an FK so a
     // single-workspace self-host can run with auth disabled.
     userId: uuid("user_id").notNull(),
-    role: memberRole("role").notNull().default("viewer"),
+    role: memberRole("role").notNull().default("member"),
     /** When non-null the membership is suspended: the user keeps their row (and
      * any per-product grants) but is denied all access to this org. Deactivation
      * is per-org, so a user can stay active elsewhere. Enforced centrally in
@@ -213,7 +213,12 @@ export const invitations = pgTable(
       .references(() => workspaces.id, { onDelete: "cascade" }),
     /** Invited address, stored lowercased; the redeeming user's email must match. */
     email: text("email").notNull(),
-    role: memberRole("role").notNull().default("viewer"),
+    /** Org role granted on accept: `owner` (workspace admin) or `member`. */
+    role: memberRole("role").notNull().default("member"),
+    /** Per-product grants applied on accept: `[{ productId, role }]`, where role
+     * is a product role (admin/contributor/viewer). Empty for an owner invite
+     * (owner is admin on every product). */
+    productGrants: jsonb("product_grants").notNull().default([]),
     /** SHA-256 hex of the raw token; the plaintext lives only in the emailed link. */
     tokenHash: text("token_hash").notNull().unique(),
     status: invitationStatus("status").notNull().default("pending"),

@@ -53,24 +53,21 @@ export async function listWorkspaceMembers(
     .orderBy(asc(users.name));
 }
 
-/** Roles allowed to mutate workspace data. `viewer` (the default for everyone
- * past the first user) is read-only. */
-const WRITE_ROLES: ReadonlySet<MemberRole> = new Set<MemberRole>([
-  "admin",
-  "pm",
-  "ux",
-  "eng",
-]);
-
+/**
+ * Whether an org role grants *workspace-wide* write on its own. Only the
+ * `owner` does; every other member (the org baseline) gets write only through
+ * per-product grants, evaluated with `canWriteProduct`. Use this for
+ * non-product-scoped writes; product-scoped edits must check `canWriteProduct`.
+ */
 export function canWrite(role: MemberRole): boolean {
-  return WRITE_ROLES.has(role);
+  return role === "owner";
 }
 
 /**
  * Workspace + membership bootstrap. The hosted product runs one workspace per
  * Fly app (the "organization"), so "the active workspace" is simply the first
- * one created. The first user to sign up names it and becomes `admin` (see
- * `createWorkspaceWithOwner`); everyone after is auto-joined as a `viewer`
+ * one created. The first user to sign up names it and becomes the `owner` (see
+ * `createWorkspaceWithOwner`); everyone after is auto-joined as a `member`
  * ("basic user") by `ensureMembership` on their first authenticated request.
  */
 
@@ -226,7 +223,7 @@ export async function getWorkspaceBySlug(
 
 /**
  * Ensure `userId` belongs to the single active workspace, auto-joining them as
- * a `viewer`. This is the **single-tenant** convenience: when a deployment
+ * a `member`. This is the **single-tenant** convenience: when a deployment
  * serves one org, every authenticated user belongs to it. Idempotent; returns
  * `null` when no workspace exists yet — the caller routes the user to /setup.
  *
@@ -251,7 +248,7 @@ export async function ensureMembership(
 
   await db
     .insert(members)
-    .values({ workspaceId: workspace.id, userId, role: "viewer" })
+    .values({ workspaceId: workspace.id, userId, role: "member" })
     .onConflictDoNothing({ target: [members.workspaceId, members.userId] });
 
   // Re-read so a row inserted here or by a concurrent request is returned.
@@ -270,7 +267,7 @@ export async function ensureMembership(
  * - **Multi-tenant, no slug** (the bare `/` root): resolve the caller's own
  *   membership without auto-join — none means "send them to /setup".
  * - **Single-tenant (or no slug yet)**: the one workspace, auto-joined as
- *   viewer via {@link ensureMembership} — byte-for-byte the current behavior.
+ *   a `member` via {@link ensureMembership} — byte-for-byte the current behavior.
  */
 export async function resolveActiveWorkspace(
   db: Database,
@@ -354,7 +351,7 @@ async function provisionWorkspace(
 
   await db
     .insert(members)
-    .values({ workspaceId: workspace.id, userId, role: "admin" })
+    .values({ workspaceId: workspace.id, userId, role: "owner" })
     .onConflictDoNothing({ target: [members.workspaceId, members.userId] });
 
   // Seed the default work-tracking hierarchy (Initiative → Epic → Feature).
@@ -380,7 +377,7 @@ async function provisionWorkspace(
 }
 
 /**
- * Create an organization and make `userId` its `admin`.
+ * Create an organization and make `userId` its `owner`.
  *
  * - **Multi-tenant:** always creates a *new* org. The slug is derived from
  *   `name` (or an explicit `opts.slug`); if it's empty, reserved, or already

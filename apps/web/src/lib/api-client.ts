@@ -26,6 +26,7 @@ import type {
   IdeaSettings,
   IdeaSettingsPatch,
   IdeaStage,
+  InvitationProductGrant,
   LevelUpdate,
   OrgInvitationRecord,
   OrgMemberRecord,
@@ -1149,10 +1150,15 @@ export async function listInvitations(): Promise<OrgInvitationRecord[]> {
   return body?.invitations ?? [];
 }
 
-/** Invite someone to the org by email with a role. Returns the new invitation. */
+/**
+ * Invite someone to the org. `role` is the org role (`owner`/`member`);
+ * `productGrants` gives a member per-product access on accept (ignored for an
+ * owner). Returns the new invitation.
+ */
 export async function createInvitation(input: {
   email: string;
   role: OrgRole;
+  productGrants?: InvitationProductGrant[];
 }): Promise<OrgInvitationRecord> {
   const res = await fetch("/api/v1/org/invitations", {
     method: "POST",

@@ -92,9 +92,9 @@ export async function POST(req: Request) {
       { status: 403 },
     );
   }
-  if (membership.role !== "admin") {
+  if (membership.role !== "owner") {
     return Response.json(
-      { error: "Only an admin can connect repositories." },
+      { error: "Only the owner can connect repositories." },
       { status: 403 },
     );
   }

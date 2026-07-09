@@ -5,6 +5,30 @@ All notable changes to Specboard are recorded here. The format is based on
 [Semantic Versioning](https://semver.org/). See [VERSIONING.md](./VERSIONING.md)
 for how and when the version is bumped.
 
+## [0.14.0] - 2026-07-08
+
+### Changed
+
+- **Consolidated roles into a clear two-layer model** (migration 0034). The
+  workspace has one admin role, **Owner** (rename the org, manage products and
+  their relationships, manage members, and admin of every product); everyone
+  else is a **Member** (read-only at the org, so they still see the
+  cross-product rollups). Real capability is granted **per product**: **Admin**
+  (manage that product's config + members, and edit it), **Contributor** (edit
+  that product's items), or **Viewer** (read it). This replaces the old org
+  roles (admin/pm/ux/eng/viewer) and product roles (admin/editor/viewer):
+  `admin`→`owner`, pm/ux/eng→`member`, product `editor`→`contributor`. Existing
+  per-product grants are preserved, so no one loses edit access. Write
+  permission is now enforced per product end to end (web, REST, and MCP);
+  `whoami` reports the caller's per-product access.
+
+### Added
+
+- **Invitations grant product access.** A single invite chooses Owner or Member,
+  and a Member invite can grant access to several products at once (Admin /
+  Contributor / Viewer per product), all applied atomically when the invite is
+  accepted.
+
 ## [0.13.0] - 2026-07-08
 
 ### Added

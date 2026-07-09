@@ -27,8 +27,8 @@ export async function POST(req: Request) {
   if (!membership) {
     return Response.json({ error: "You do not belong to a workspace." }, { status: 403 });
   }
-  if (membership.role !== "admin") {
-    return Response.json({ error: "Only an admin can create a starter spec." }, { status: 403 });
+  if (membership.role !== "owner") {
+    return Response.json({ error: "Only the owner can create a starter spec." }, { status: 403 });
   }
 
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;

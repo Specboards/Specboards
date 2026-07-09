@@ -17,18 +17,37 @@ import {
   revokeInvitation,
   updateOrgMember,
 } from "@/lib/api-client";
-import type { OrgInvitationRecord, OrgMemberRecord, OrgRole } from "@/lib/store/types";
+import type {
+  InvitationProductGrant,
+  OrgInvitationRecord,
+  OrgMemberRecord,
+  OrgRole,
+  ProductRole,
+} from "@/lib/store/types";
 
-const ROLES: OrgRole[] = ["admin", "pm", "ux", "eng", "viewer"];
+/** A product the owner can grant invitees access to. */
+export interface InviteProduct {
+  id: string;
+  name: string;
+}
 
-/** Display labels for the org roles. */
-const ROLE_LABEL: Record<OrgRole, string> = {
+const ORG_ROLES: OrgRole[] = ["owner", "member"];
+
+const ORG_ROLE_LABEL: Record<OrgRole, string> = {
+  owner: "Owner",
+  member: "Member",
+};
+
+const PRODUCT_ROLES: ProductRole[] = ["admin", "contributor", "viewer"];
+
+const PRODUCT_ROLE_LABEL: Record<ProductRole, string> = {
   admin: "Admin",
-  pm: "PM",
-  ux: "UX",
-  eng: "Engineering",
+  contributor: "Contributor",
   viewer: "Viewer",
 };
+
+/** Sentinel for "no access to this product" in the grant picker. */
+const NO_ACCESS = "";
 
 function onAuthError() {
   window.location.href = "/sign-in";
@@ -36,25 +55,29 @@ function onAuthError() {
 
 /**
  * The org's Team roster (Settings → Company & Team). Everyone sees the member
- * list; admins additionally get role controls, remove, deactivate/reactivate,
- * an "Invite by email" form, and the pending-invitations list. All mutations
- * go through the org-admin-gated /api/v1/org endpoints; the last-admin guard is
+ * list; the owner additionally gets role controls (Owner/Member), remove,
+ * deactivate/reactivate, an "Invite a teammate" form (with per-product access),
+ * and the pending-invitations list. Real per-product capability is granted on
+ * the Products page; the org role here is just Owner vs. Member. Mutations go
+ * through the owner-gated /api/v1/org endpoints; the last-owner guard is
  * enforced server-side and surfaced here as a toast.
  */
 export function OrgMembers({
   initialMembers,
   currentUserId,
   canManage,
+  products,
 }: {
   initialMembers: OrgMemberRecord[];
   currentUserId: string;
   canManage: boolean;
+  products: InviteProduct[];
 }) {
   const [members, setMembers] = useState<OrgMemberRecord[]>(initialMembers);
   const [invites, setInvites] = useState<OrgInvitationRecord[] | null>(null);
   const [pending, startTransition] = useTransition();
 
-  // Admins load pending invitations lazily (the endpoint is admin-only).
+  // The owner loads pending invitations lazily (the endpoint is owner-only).
   useEffect(() => {
     if (!canManage) return;
     let active = true;
@@ -89,7 +112,7 @@ export function OrgMembers({
     });
   }
 
-  const activeAdmins = members.filter((m) => m.role === "admin" && !m.deactivatedAt).length;
+  const activeOwners = members.filter((m) => m.role === "owner" && !m.deactivatedAt).length;
 
   function changeRole(m: OrgMemberRecord, role: OrgRole) {
     run(async () => {
@@ -120,7 +143,7 @@ export function OrgMembers({
         <ul className="divide-y rounded-md border">
           {members.map((m) => {
             const isSelf = m.userId === currentUserId;
-            const isLastAdmin = m.role === "admin" && !m.deactivatedAt && activeAdmins <= 1;
+            const isLastOwner = m.role === "owner" && !m.deactivatedAt && activeOwners <= 1;
             return (
               <li key={m.userId} className="flex items-center gap-3 px-3 py-2.5 text-sm">
                 <span className="min-w-0 flex-1 truncate">
@@ -136,14 +159,14 @@ export function OrgMembers({
                   <>
                     <Select
                       value={m.role}
-                      disabled={pending || isLastAdmin}
+                      disabled={pending || isLastOwner}
                       onChange={(e) => changeRole(m, e.target.value as OrgRole)}
                       className="h-8 w-32"
-                      title={isLastAdmin ? "Promote another admin first." : undefined}
+                      title={isLastOwner ? "Make someone else an owner first." : undefined}
                     >
-                      {ROLES.map((r) => (
+                      {ORG_ROLES.map((r) => (
                         <option key={r} value={r}>
-                          {ROLE_LABEL[r]}
+                          {ORG_ROLE_LABEL[r]}
                         </option>
                       ))}
                     </Select>
@@ -151,7 +174,7 @@ export function OrgMembers({
                       type="button"
                       size="sm"
                       variant="ghost"
-                      disabled={pending || isSelf || isLastAdmin}
+                      disabled={pending || isSelf || isLastOwner}
                       className="text-muted-foreground"
                       onClick={() => toggleActive(m)}
                       title={isSelf ? "You can't deactivate yourself." : undefined}
@@ -162,7 +185,7 @@ export function OrgMembers({
                       type="button"
                       size="sm"
                       variant="ghost"
-                      disabled={pending || isSelf || isLastAdmin}
+                      disabled={pending || isSelf || isLastOwner}
                       className="text-destructive"
                       onClick={() => remove(m)}
                       title={isSelf ? "You can't remove yourself." : undefined}
@@ -171,17 +194,25 @@ export function OrgMembers({
                     </Button>
                   </>
                 ) : (
-                  <Badge variant="outline">{ROLE_LABEL[m.role]}</Badge>
+                  <Badge variant="outline">{ORG_ROLE_LABEL[m.role]}</Badge>
                 )}
               </li>
             );
           })}
         </ul>
+        {canManage ? (
+          <p className="text-xs text-muted-foreground">
+            An Owner administers the whole workspace. Everyone else is a Member
+            (read-only at the org); grant them per-product access below or on the
+            Products page.
+          </p>
+        ) : null}
       </section>
 
       {canManage ? (
         <>
           <InviteForm
+            products={products}
             disabled={pending}
             onInvited={(inv) => setInvites((rows) => [inv, ...(rows ?? [])])}
           />
@@ -196,28 +227,52 @@ export function OrgMembers({
   );
 }
 
-/** "Invite by email" form: an address + a role. */
+/**
+ * "Invite a teammate" form: an email, an org role (Owner or Member), and - for a
+ * Member - a per-product access picker. One invite can grant several products at
+ * once; each product's dropdown chooses No access / Viewer / Contributor /
+ * Admin. Owner invites skip product access (an owner administers everything).
+ */
 function InviteForm({
+  products,
   disabled,
   onInvited,
 }: {
+  products: InviteProduct[];
   disabled: boolean;
   onInvited: (inv: OrgInvitationRecord) => void;
 }) {
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState<OrgRole>("viewer");
+  const [role, setRole] = useState<OrgRole>("member");
+  // productId → chosen product role, or NO_ACCESS.
+  const [grants, setGrants] = useState<Record<string, ProductRole | typeof NO_ACCESS>>({});
   const [pending, startTransition] = useTransition();
+
+  function setGrant(productId: string, value: ProductRole | typeof NO_ACCESS) {
+    setGrants((g) => ({ ...g, [productId]: value }));
+  }
+
+  function reset() {
+    setEmail("");
+    setRole("member");
+    setGrants({});
+  }
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
     const address = email.trim();
     if (!address) return;
+    const productGrants: InvitationProductGrant[] =
+      role === "member"
+        ? Object.entries(grants)
+            .filter(([, r]) => r !== NO_ACCESS)
+            .map(([productId, r]) => ({ productId, role: r as ProductRole }))
+        : [];
     startTransition(async () => {
       try {
-        const inv = await createInvitation({ email: address, role });
+        const inv = await createInvitation({ email: address, role, productGrants });
         onInvited(inv);
-        setEmail("");
-        setRole("viewer");
+        reset();
         toast.success(`Invitation sent to ${address}.`);
       } catch (err) {
         if (err instanceof AuthRequiredError) return onAuthError();
@@ -229,33 +284,69 @@ function InviteForm({
   return (
     <section className="space-y-3">
       <h2 className="text-sm font-semibold">Invite a teammate</h2>
-      <form onSubmit={submit} className="flex flex-wrap items-center gap-2">
-        <Input
-          type="email"
-          required
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="teammate@example.com"
-          className="h-9 w-64"
-        />
-        <Select
-          value={role}
-          onChange={(e) => setRole(e.target.value as OrgRole)}
-          className="h-9 w-32"
-        >
-          {ROLES.map((r) => (
-            <option key={r} value={r}>
-              {ROLE_LABEL[r]}
-            </option>
-          ))}
-        </Select>
-        <Button type="submit" size="sm" disabled={disabled || pending || !email.trim()}>
-          Send invite
-        </Button>
+      <form onSubmit={submit} className="space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            type="email"
+            required
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="teammate@example.com"
+            className="h-9 w-64"
+          />
+          <Select
+            value={role}
+            onChange={(e) => setRole(e.target.value as OrgRole)}
+            className="h-9 w-32"
+            aria-label="Org role"
+          >
+            {ORG_ROLES.map((r) => (
+              <option key={r} value={r}>
+                {ORG_ROLE_LABEL[r]}
+              </option>
+            ))}
+          </Select>
+          <Button type="submit" size="sm" disabled={disabled || pending || !email.trim()}>
+            Send invite
+          </Button>
+        </div>
+
+        {role === "member" && products.length > 0 ? (
+          <div className="space-y-1.5 rounded-md border p-3">
+            <p className="text-xs font-medium text-muted-foreground">
+              Product access (optional)
+            </p>
+            <ul className="space-y-1.5">
+              {products.map((p) => (
+                <li key={p.id} className="flex items-center gap-2 text-sm">
+                  <span className="min-w-0 flex-1 truncate">{p.name}</span>
+                  <Select
+                    value={grants[p.id] ?? NO_ACCESS}
+                    disabled={pending}
+                    onChange={(e) =>
+                      setGrant(p.id, e.target.value as ProductRole | typeof NO_ACCESS)
+                    }
+                    className="h-8 w-36"
+                    aria-label={`${p.name} access`}
+                  >
+                    <option value={NO_ACCESS}>No access</option>
+                    {PRODUCT_ROLES.map((r) => (
+                      <option key={r} value={r}>
+                        {PRODUCT_ROLE_LABEL[r]}
+                      </option>
+                    ))}
+                  </Select>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
       </form>
       <p className="text-xs text-muted-foreground">
-        They get an email link to join with the role you pick. Invitations expire
-        after 7 days.
+        {role === "owner"
+          ? "An owner administers the entire workspace."
+          : "Members are read-only at the org until you grant them product access. You can adjust access anytime on the Products page."}{" "}
+        The invite is an email link that expires after 7 days.
       </p>
     </section>
   );
@@ -296,36 +387,42 @@ function PendingInvites({
     <section className="space-y-3">
       <h2 className="text-sm font-semibold">Pending invitations</h2>
       <ul className="divide-y rounded-md border">
-        {rows.map((inv) => (
-          <li key={inv.id} className="flex items-center gap-3 px-3 py-2.5 text-sm">
-            <span className="min-w-0 flex-1 truncate">
-              {inv.email}
-              <span className="ml-1.5 text-xs text-muted-foreground">
-                {ROLE_LABEL[inv.role]}
+        {rows.map((inv) => {
+          const summary =
+            inv.role === "owner"
+              ? "Owner"
+              : inv.productGrants.length > 0
+                ? `Member · ${inv.productGrants.length} product${inv.productGrants.length > 1 ? "s" : ""}`
+                : "Member";
+          return (
+            <li key={inv.id} className="flex items-center gap-3 px-3 py-2.5 text-sm">
+              <span className="min-w-0 flex-1 truncate">
+                {inv.email}
+                <span className="ml-1.5 text-xs text-muted-foreground">{summary}</span>
               </span>
-            </span>
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              disabled={disabled || pending}
-              className="text-muted-foreground"
-              onClick={() => act(() => resendInvitation(inv.id), "Invitation re-sent.")}
-            >
-              Resend
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              disabled={disabled || pending}
-              className="text-destructive"
-              onClick={() => act(() => revokeInvitation(inv.id), "Invitation revoked.")}
-            >
-              Revoke
-            </Button>
-          </li>
-        ))}
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={disabled || pending}
+                className="text-muted-foreground"
+                onClick={() => act(() => resendInvitation(inv.id), "Invitation re-sent.")}
+              >
+                Resend
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={disabled || pending}
+                className="text-destructive"
+                onClick={() => act(() => revokeInvitation(inv.id), "Invitation revoked.")}
+              >
+                Revoke
+              </Button>
+            </li>
+          );
+        })}
       </ul>
     </section>
   );

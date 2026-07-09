@@ -21,7 +21,7 @@ import {
  */
 
 const VISIBILITIES: readonly ProductVisibility[] = ["org", "private"];
-const PRODUCT_ROLES: readonly ProductRole[] = ["admin", "editor", "viewer"];
+const PRODUCT_ROLES: readonly ProductRole[] = ["admin", "contributor", "viewer"];
 const COLORS: readonly string[] = PRODUCT_COLORS;
 
 /** Validate an optional `color`: a known palette token, or null to clear it. */

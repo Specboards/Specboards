@@ -108,7 +108,7 @@ export function HierarchyEditor({
           ))}
         </ol>
         <p className="text-xs text-muted-foreground">
-          Only an admin can change the hierarchy.
+          Only the owner can change the hierarchy.
         </p>
       </div>
     );

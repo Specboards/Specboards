@@ -1,7 +1,7 @@
 import { getAuth } from "@/lib/auth";
 import { resolveReadAccess } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
-import { canWrite, getMembership } from "@/lib/workspace";
+import { getMembership } from "@/lib/workspace";
 
 import { TOOLS, type McpContext } from "./tools";
 
@@ -109,8 +109,15 @@ async function resolveOAuthUser(req: Request): Promise<{ userId: string } | null
   return { userId: session.userId };
 }
 
+/**
+ * Coarse write gate: any workspace member may attempt a write tool. Write
+ * authorization is now **per product** (owner, or an admin/contributor grant),
+ * enforced by the store on each mutation - so a member writing to a product
+ * they can't edit is rejected there with a specific message. This just blocks a
+ * caller with no workspace at all.
+ */
 function canWriteCtx(ctx: McpContext): boolean {
-  return ctx.isLocal || (ctx.role !== null && canWrite(ctx.role));
+  return ctx.isLocal || ctx.role !== null;
 }
 
 type JsonRpcId = string | number | null;
@@ -170,7 +177,7 @@ async function handleToolCall(
   if (tool.write && !canWriteCtx(auth.ctx)) {
     return ok(
       id,
-      toolError("Your role is read-only; this action requires edit access."),
+      toolError("You must belong to a workspace to make changes."),
     );
   }
   const rawArgs = (params as { arguments?: unknown })?.arguments;

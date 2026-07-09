@@ -16,8 +16,8 @@ import { cardFieldCatalog, resolveCardFields } from "@/lib/card-fields";
 import { getDb } from "@/lib/db";
 import { resolveWorkflowFor } from "@/lib/repo-config";
 import { getStore } from "@/lib/store";
-import { canWrite, listWorkspaceMembers, type WorkspaceMember } from "@/lib/workspace";
-import { canConnectRepos, requireWorkspaceAccess } from "@/lib/workspace-access";
+import { listWorkspaceMembers, type WorkspaceMember } from "@/lib/workspace";
+import { canConnectRepos, canEditProducts, requireWorkspaceAccess } from "@/lib/workspace-access";
 
 /**
  * Board view of the backlog: a kanban where you drag cards to reorder / change
@@ -32,7 +32,6 @@ export async function BoardView({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const access = await requireWorkspaceAccess();
-  const canEdit = !access || canWrite(access.role);
 
   const workflow = await resolveWorkflowFor(access);
   const columns = workflow.statuses.filter((s) => s !== "archived");
@@ -53,6 +52,10 @@ export async function BoardView({
   const products = await store.listProducts(access ?? undefined);
   const activeProduct = resolveActiveProduct(products, productSlug);
   if (productSlug !== ALL_PRODUCTS && !activeProduct) notFound();
+  // Editing is per-product now: the owner can edit anything, others need an
+  // admin/contributor grant on the product (any writable product in the "all"
+  // view). Server + RLS enforce the real boundary; this gates the affordances.
+  const canEdit = canEditProducts(access, products, activeProduct?.id ?? null);
   const scoped = activeProduct
     ? allFeatures.filter((f) => f.productId === activeProduct.id)
     : allFeatures;

@@ -12,8 +12,8 @@ import {
 import { sortFeatures } from "@/lib/feature-helpers";
 import { resolveWorkflowFor } from "@/lib/repo-config";
 import { getStore } from "@/lib/store";
-import { canWrite, listWorkspaceMembers } from "@/lib/workspace";
-import { canConnectRepos, requireWorkspaceAccess } from "@/lib/workspace-access";
+import { listWorkspaceMembers } from "@/lib/workspace";
+import { canConnectRepos, canEditProducts, requireWorkspaceAccess } from "@/lib/workspace-access";
 import { BacklogFilters, type FilterOptions } from "./backlog-filters";
 import { BacklogTable } from "./backlog-table";
 import { SavedViews } from "./saved-views";
@@ -33,7 +33,6 @@ export async function ListView({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const access = await requireWorkspaceAccess();
-  const canEdit = !access || canWrite(access.role);
   const workflow = await resolveWorkflowFor(access);
   const filters = parseFeatureFilters(await searchParams);
   const store = await getStore();
@@ -43,6 +42,8 @@ export async function ListView({
   const products = await store.listProducts(access ?? undefined);
   const activeProduct = resolveActiveProduct(products, productSlug);
   if (productSlug !== ALL_PRODUCTS && !activeProduct) notFound();
+  // Per-product edit gate (owner edits all; others need a product grant).
+  const canEdit = canEditProducts(access, products, activeProduct?.id ?? null);
 
   const features = sortFeatures(await store.listFeatures(access ?? undefined))
     .filter((f) => f.status !== "archived")

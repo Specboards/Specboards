@@ -15,7 +15,7 @@ export async function DELETE(req: Request, { params }: Params) {
   const { id, userId } = await params;
   if (!(await canManageProductForScope(id, authz.scope ?? undefined))) {
     return Response.json(
-      { error: "Only an organization admin or this product's admin can do this." },
+      { error: "Only the workspace owner or this product's admin can do this." },
       { status: 403 },
     );
   }

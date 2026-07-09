@@ -13,12 +13,12 @@ import {
 } from "@/lib/api-client";
 import type { ProductMemberRecord, ProductRole } from "@/lib/store/types";
 
-const ROLES: ProductRole[] = ["admin", "editor", "viewer"];
+const ROLES: ProductRole[] = ["admin", "contributor", "viewer"];
 
 /** Display labels for the per-product roles. */
 const ROLE_LABEL: Record<ProductRole, string> = {
   admin: "Admin",
-  editor: "Editor",
+  contributor: "Contributor",
   viewer: "Viewer",
 };
 

@@ -36,7 +36,7 @@ export async function GET(req: Request) {
   if (!membership) return redirectTo("/");
   const slug = await workspaceSlug(db, membership.workspaceId);
   const repos = (q = "") => orgPath(slug, `/settings/repositories${q}`);
-  if (membership.role !== "admin") return redirectTo(repos("?error=install"));
+  if (membership.role !== "owner") return redirectTo(repos("?error=install"));
 
   const appSlug = await getGithubAppSlug(db);
   const state = newSetupNonce();

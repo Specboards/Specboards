@@ -14,7 +14,7 @@ const privateProduct = { id: "p2", visibility: "private" as const };
 
 function access(
   isOrgAdmin: boolean,
-  roles: Record<string, "admin" | "editor" | "viewer"> = {},
+  roles: Record<string, "admin" | "contributor" | "viewer"> = {},
 ): ProductAccess {
   return { isOrgAdmin, roles: new Map(Object.entries(roles)) };
 }
@@ -42,8 +42,8 @@ describe("canWriteProduct", () => {
     expect(canWriteProduct(access(false, { p1: "viewer" }), "p1")).toBe(false);
   });
 
-  it("allows editor and admin grants", () => {
-    expect(canWriteProduct(access(false, { p1: "editor" }), "p1")).toBe(true);
+  it("allows contributor and admin grants", () => {
+    expect(canWriteProduct(access(false, { p1: "contributor" }), "p1")).toBe(true);
     expect(canWriteProduct(access(false, { p1: "admin" }), "p1")).toBe(true);
   });
 
@@ -57,8 +57,8 @@ describe("canWriteProduct", () => {
 });
 
 describe("canManageProduct", () => {
-  it("requires an admin grant (editor is not enough)", () => {
-    expect(canManageProduct(access(false, { p1: "editor" }), "p1")).toBe(false);
+  it("requires an admin grant (contributor is not enough)", () => {
+    expect(canManageProduct(access(false, { p1: "contributor" }), "p1")).toBe(false);
     expect(canManageProduct(access(false, { p1: "admin" }), "p1")).toBe(true);
   });
 
@@ -69,7 +69,7 @@ describe("canManageProduct", () => {
 
 describe("productRole", () => {
   it("returns the explicit grant or null", () => {
-    expect(productRole(access(false, { p1: "editor" }), "p1")).toBe("editor");
+    expect(productRole(access(false, { p1: "contributor" }), "p1")).toBe("contributor");
     expect(productRole(access(false), "p1")).toBeNull();
   });
 });

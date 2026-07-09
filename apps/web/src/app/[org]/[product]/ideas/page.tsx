@@ -6,8 +6,7 @@ import { IdeasBoard } from "@/components/ideas-board";
 import { ALL_PRODUCTS, resolveActiveProduct } from "@/lib/active-product";
 import { LOCAL_ORG_SLUG } from "@/lib/org-path";
 import { getStore } from "@/lib/store";
-import { canWrite } from "@/lib/workspace";
-import { requireWorkspaceAccess } from "@/lib/workspace-access";
+import { canEditProducts, requireWorkspaceAccess } from "@/lib/workspace-access";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +22,6 @@ export default async function IdeasPage({
   params: Promise<{ org: string; product: string }>;
 }) {
   const access = await requireWorkspaceAccess();
-  const canEdit = !access || canWrite(access.role);
   const org = access?.orgSlug ?? LOCAL_ORG_SLUG;
   const { product: productSlug } = await params;
   const store = await getStore();
@@ -36,6 +34,7 @@ export default async function IdeasPage({
 
   const activeProduct = resolveActiveProduct(products, productSlug);
   if (productSlug !== ALL_PRODUCTS && !activeProduct) notFound();
+  const canEdit = canEditProducts(access, products, activeProduct?.id ?? null);
   const ideas = activeProduct
     ? allIdeas.filter((i) => i.productId === activeProduct.id)
     : allIdeas;

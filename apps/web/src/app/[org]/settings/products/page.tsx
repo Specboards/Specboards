@@ -8,8 +8,8 @@ export const dynamic = "force-dynamic";
 
 /**
  * Products settings: create and manage the org's products (sibling backlogs).
- * Everyone sees the list; only an org admin can create products, and only an
- * org admin or a product's own admin can edit, delete, or manage its members
+ * Everyone sees the list; only the owner can create products, and only the
+ * owner or a product's own admin can edit, delete, or manage its members
  * (matching the /api/v1/products authorization).
  */
 export default async function ProductsSettingsPage() {
@@ -18,7 +18,7 @@ export default async function ProductsSettingsPage() {
   const products = await store.listProducts(access ?? undefined);
 
   // Org admins (and local file mode) can create products and manage any one.
-  const isOrgAdmin = !access || access.role === "admin";
+  const isOrgAdmin = !access || access.role === "owner";
 
   // Workspace members feed the "add member" picker on private products.
   const db = getDb();

@@ -18,10 +18,12 @@ import { listWorkspaceMembers, type MemberRole, type WorkspaceMember } from "@/l
  * (mirroring `workspace.ts`), not the tenant-scoped feature store.
  */
 
-/** The org roles, in privilege order, for validation and pickers. */
-export const MEMBER_ROLES: readonly MemberRole[] = ["admin", "pm", "ux", "eng", "viewer"];
+/** The org roles, in privilege order, for validation and pickers. `owner` is
+ * the workspace admin; `member` is the read-only org baseline (product access
+ * comes from per-product grants). */
+export const MEMBER_ROLES: readonly MemberRole[] = ["owner", "member"];
 
-/** Raised for a member action that can't proceed (unknown member, last admin). */
+/** Raised for a member action that can't proceed (unknown member, last owner). */
 export class OrgMemberError extends Error {}
 
 export type { WorkspaceMember };
@@ -53,15 +55,15 @@ async function getMemberRow(
   return rows[0] ?? null;
 }
 
-/** How many *active* admins the workspace has right now. */
-async function countActiveAdmins(db: Database, workspaceId: string): Promise<number> {
+/** How many *active* owners the workspace has right now. */
+async function countActiveOwners(db: Database, workspaceId: string): Promise<number> {
   const [row] = await db
     .select({ n: count() })
     .from(members)
     .where(
       and(
         eq(members.workspaceId, workspaceId),
-        eq(members.role, "admin"),
+        eq(members.role, "owner"),
         isNull(members.deactivatedAt),
       ),
     );
@@ -69,22 +71,22 @@ async function countActiveAdmins(db: Database, workspaceId: string): Promise<num
 }
 
 /**
- * Guard against removing the workspace's only admin. `member` is the target's
- * current row; the guard trips only when it is the last *active* admin and the
+ * Guard against removing the workspace's only owner. `member` is the target's
+ * current row; the guard trips only when it is the last *active* owner and the
  * action (demote / remove / deactivate) would drop it from that set.
  */
-async function assertNotLastAdmin(
+async function assertNotLastOwner(
   db: Database,
   member: typeof members.$inferSelect,
   verb: string,
 ): Promise<void> {
-  if (member.role !== "admin" || member.deactivatedAt !== null) return;
-  if ((await countActiveAdmins(db, member.workspaceId)) <= 1) {
-    throw new OrgMemberError(`You can't ${verb} the only admin. Promote someone else first.`);
+  if (member.role !== "owner" || member.deactivatedAt !== null) return;
+  if ((await countActiveOwners(db, member.workspaceId)) <= 1) {
+    throw new OrgMemberError(`You can't ${verb} the only owner. Make someone else an owner first.`);
   }
 }
 
-/** Change a member's org role. Refuses to demote the last admin. */
+/** Change a member's org role. Refuses to demote the last owner. */
 export async function setMemberRole(
   db: Database,
   workspaceId: string,
@@ -94,7 +96,7 @@ export async function setMemberRole(
   const member = await getMemberRow(db, workspaceId, userId);
   if (!member) throw new OrgMemberError("That person is not a member of this organization.");
   if (member.role === role) return;
-  if (role !== "admin") await assertNotLastAdmin(db, member, "demote");
+  if (role !== "owner") await assertNotLastOwner(db, member, "demote");
   await db
     .update(members)
     .set({ role })
@@ -109,7 +111,7 @@ export async function removeMember(
 ): Promise<void> {
   const member = await getMemberRow(db, workspaceId, userId);
   if (!member) return;
-  await assertNotLastAdmin(db, member, "remove");
+  await assertNotLastOwner(db, member, "remove");
   await db
     .delete(productMembers)
     .where(and(eq(productMembers.workspaceId, workspaceId), eq(productMembers.userId, userId)));
@@ -119,7 +121,7 @@ export async function removeMember(
 }
 
 /**
- * Suspend or restore a member. Deactivating the last active admin is refused;
+ * Suspend or restore a member. Deactivating the last active owner is refused;
  * reactivating clears `deactivatedAt`.
  */
 export async function setMemberActive(
@@ -130,7 +132,7 @@ export async function setMemberActive(
 ): Promise<void> {
   const member = await getMemberRow(db, workspaceId, userId);
   if (!member) throw new OrgMemberError("That person is not a member of this organization.");
-  if (!active) await assertNotLastAdmin(db, member, "deactivate");
+  if (!active) await assertNotLastOwner(db, member, "deactivate");
   await db
     .update(members)
     .set({ deactivatedAt: active ? null : new Date() })

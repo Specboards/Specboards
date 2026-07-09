@@ -26,8 +26,8 @@ export async function GET(req: Request) {
   if (!membership) {
     return Response.json({ error: "You do not belong to a workspace." }, { status: 403 });
   }
-  if (membership.role !== "admin") {
-    return Response.json({ error: "Only an admin can scan repositories." }, { status: 403 });
+  if (membership.role !== "owner") {
+    return Response.json({ error: "Only the owner can scan repositories." }, { status: 403 });
   }
 
   const repos = await scanWorkspaceSpecs(db, membership.workspaceId);

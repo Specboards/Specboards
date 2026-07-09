@@ -74,7 +74,7 @@ export async function POST(req: Request) {
   let seeded = 0;
   if (wantsSampleData) {
     const membership = await getMembership(db, user.id);
-    if (membership?.role === "admin") {
+    if (membership?.role === "owner") {
       seeded = await seedSampleData(db, workspace.id);
     }
   }

@@ -19,11 +19,11 @@ import type {
   WorkspaceScope,
 } from "@/lib/store/types";
 import {
-  canWrite,
   listWorkspaceMembers,
   type MemberRole,
   type WorkspaceMember,
 } from "@/lib/workspace";
+import { canEditProducts } from "@/lib/workspace-access";
 
 /**
  * Tenant scope plus the caller's role — the minimum the detail resolver needs
@@ -132,7 +132,7 @@ export async function getItemDetailData(
     .filter((f) => f.specId !== feature.specId)
     .map((f) => ({ specId: f.specId, title: f.title }));
 
-  const canEdit = !access || canWrite(access.role);
+  const canEdit = canEditProducts(access, products, feature.productId);
   const availableFields =
     levels.find((l) => l.key === feature.level)?.fields ?? null;
 

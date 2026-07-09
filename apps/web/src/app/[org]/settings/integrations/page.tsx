@@ -70,7 +70,7 @@ export default async function IntegrationsSettingsPage({
     createdAt: k.createdAt.toISOString(),
   }));
 
-  const isAdmin = access.role === "admin";
+  const isAdmin = access.role === "owner";
   const [endpoints, products] = isAdmin
     ? await Promise.all([
         listWebhookEndpoints(db, access.workspaceId),
@@ -96,7 +96,7 @@ export default async function IntegrationsSettingsPage({
             <CardHeader>
               <CardTitle>Webhooks</CardTitle>
               <CardDescription>
-                Only an organization admin can manage webhooks.
+                Only the workspace owner can manage webhooks.
               </CardDescription>
             </CardHeader>
           </Card>

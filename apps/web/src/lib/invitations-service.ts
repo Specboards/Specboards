@@ -4,9 +4,12 @@ import {
   and,
   desc,
   eq,
+  inArray,
   invitations,
   isNull,
   members,
+  productMembers,
+  products,
   sql,
   users,
   type Database,
@@ -14,8 +17,17 @@ import {
 
 import type { SessionUser } from "@/lib/auth-session";
 import { renderActionEmail, sendEmail } from "@/lib/email";
-import { MEMBER_ROLES, OrgMemberError } from "@/lib/org-members-service";
-import type { OrgInvitationRecord, OrgRole } from "@/lib/store/types";
+import type {
+  InvitationInput,
+  InvitationProductGrant,
+  OrgInvitationRecord,
+  OrgRole,
+  ProductRole,
+} from "@/lib/store/types";
+
+const ORG_ROLES: readonly OrgRole[] = ["owner", "member"];
+const PRODUCT_ROLES: readonly ProductRole[] = ["admin", "contributor", "viewer"];
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * Email-invitation flow for joining an org. An admin creates an invite (email +
@@ -57,8 +69,11 @@ function appOrigin(): string {
   return (process.env.APP_URL ?? process.env.BETTER_AUTH_URL)?.trim().replace(/\/$/, "") ?? "";
 }
 
-/** Validate an untrusted invite body ({ email, role }). */
-export function parseInvitationInput(body: unknown): { email: string; role: OrgRole } {
+/** Validate an untrusted invite body ({ email, role, productGrants? }). Shape
+ * only; whether each `productId` belongs to the workspace is checked in
+ * `createInvitation`. An `owner` invite ignores product grants (owner is admin
+ * on every product). */
+export function parseInvitationInput(body: unknown): InvitationInput {
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
     throw new InvitationError("Request body must be a JSON object.", 400);
   }
@@ -67,10 +82,34 @@ export function parseInvitationInput(body: unknown): { email: string; role: OrgR
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     throw new InvitationError("A valid email address is required.", 400);
   }
-  if (!MEMBER_ROLES.includes(raw.role as OrgRole)) {
-    throw new InvitationError(`role must be one of: ${MEMBER_ROLES.join(", ")}.`, 400);
+  if (!ORG_ROLES.includes(raw.role as OrgRole)) {
+    throw new InvitationError(`role must be one of: ${ORG_ROLES.join(", ")}.`, 400);
   }
-  return { email, role: raw.role as OrgRole };
+  const role = raw.role as OrgRole;
+
+  let productGrants: InvitationProductGrant[] = [];
+  if (role === "member" && raw.productGrants != null) {
+    if (!Array.isArray(raw.productGrants)) {
+      throw new InvitationError("productGrants must be an array.", 400);
+    }
+    productGrants = raw.productGrants.map((g) => {
+      const grant = g as Record<string, unknown>;
+      if (typeof grant.productId !== "string" || !UUID_RE.test(grant.productId)) {
+        throw new InvitationError("Each product grant needs a valid productId.", 400);
+      }
+      if (!PRODUCT_ROLES.includes(grant.role as ProductRole)) {
+        throw new InvitationError(
+          `Each product grant role must be one of: ${PRODUCT_ROLES.join(", ")}.`,
+          400,
+        );
+      }
+      return { productId: grant.productId, role: grant.role as ProductRole };
+    });
+    // Collapse duplicate products (last grant wins).
+    const byId = new Map(productGrants.map((g) => [g.productId, g]));
+    productGrants = [...byId.values()];
+  }
+  return { email, role, productGrants };
 }
 
 /** Effective status of a stored invite (a pending row past expiry reads expired). */
@@ -84,11 +123,28 @@ function toRecord(row: typeof invitations.$inferSelect): OrgInvitationRecord {
     id: row.id,
     email: row.email,
     role: row.role,
+    productGrants: (row.productGrants as InvitationProductGrant[]) ?? [],
     status: effectiveStatus(row),
     invitedBy: row.invitedBy,
     expiresAt: row.expiresAt.toISOString(),
     createdAt: row.createdAt.toISOString(),
   };
+}
+
+/** Keep only grants whose product still belongs to the workspace. */
+async function validProductGrants(
+  db: Database,
+  workspaceId: string,
+  grants: InvitationProductGrant[],
+): Promise<InvitationProductGrant[]> {
+  if (grants.length === 0) return [];
+  const ids = grants.map((g) => g.productId);
+  const rows = await db
+    .select({ id: products.id })
+    .from(products)
+    .where(and(eq(products.workspaceId, workspaceId), inArray(products.id, ids)));
+  const known = new Set(rows.map((r) => r.id));
+  return grants.filter((g) => known.has(g.productId));
 }
 
 /** Whether an active member with this (lowercased) email already exists. */
@@ -146,12 +202,16 @@ export async function createInvitation(
   db: Database,
   workspaceId: string,
   invitedBy: string,
-  email: string,
-  role: OrgRole,
+  input: InvitationInput,
 ): Promise<OrgInvitationRecord> {
+  const { email, role } = input;
   if (await activeMemberWithEmail(db, workspaceId, email)) {
     throw new InvitationError(`${email} is already a member of this organization.`, 409);
   }
+  // Owner invites carry no product grants (owner is admin everywhere); for a
+  // member, keep only grants whose product still exists in this workspace.
+  const productGrants =
+    role === "owner" ? [] : await validProductGrants(db, workspaceId, input.productGrants);
 
   const { raw, hash } = newToken();
   const row = await db.transaction(async (tx) => {
@@ -171,6 +231,7 @@ export async function createInvitation(
         workspaceId,
         email,
         role,
+        productGrants,
         tokenHash: hash,
         invitedBy,
         expiresAt: expiryFromNow(),
@@ -260,6 +321,8 @@ export async function redeemInvitation(
     return { ok: false, reason: "email_mismatch", email: invite.email };
   }
 
+  const grants = ((invite.productGrants as InvitationProductGrant[]) ?? []).slice();
+
   await db.transaction(async (tx) => {
     await tx
       .insert(members)
@@ -268,6 +331,25 @@ export async function redeemInvitation(
         target: [members.workspaceId, members.userId],
         set: { role: invite.role, deactivatedAt: null },
       });
+
+    // Apply the per-product grants, skipping any product removed since the
+    // invite was sent. Owner invites carry no grants (owner is admin already).
+    const live = await validProductGrants(tx as unknown as Database, invite.workspaceId, grants);
+    for (const grant of live) {
+      await tx
+        .insert(productMembers)
+        .values({
+          workspaceId: invite.workspaceId,
+          productId: grant.productId,
+          userId: user.id,
+          role: grant.role,
+        })
+        .onConflictDoUpdate({
+          target: [productMembers.productId, productMembers.userId],
+          set: { role: grant.role },
+        });
+    }
+
     await tx
       .update(invitations)
       .set({ status: "accepted", acceptedAt: new Date(), acceptedUserId: user.id })
@@ -276,6 +358,3 @@ export async function redeemInvitation(
 
   return { ok: true, workspaceId: invite.workspaceId };
 }
-
-// Re-export so callers get a single import surface for guard errors.
-export { OrgMemberError };

@@ -36,9 +36,9 @@ export async function PUT(req: Request) {
         { status: 403 },
       );
     }
-    if (membership.role !== "admin") {
+    if (membership.role !== "owner") {
       return Response.json(
-        { error: "Only an admin can change the hierarchy." },
+        { error: "Only the owner can change the hierarchy." },
         { status: 403 },
       );
     }

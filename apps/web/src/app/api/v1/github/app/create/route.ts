@@ -44,7 +44,7 @@ export async function GET(req: Request) {
   if (!membership) return htmlRedirect("/");
   const slug = await workspaceSlug(db, membership.workspaceId);
   const repos = (q = "") => orgPath(slug, `/settings/repositories${q}`);
-  if (membership.role !== "admin") {
+  if (membership.role !== "owner") {
     return htmlRedirect(repos("?error=forbidden"));
   }
 

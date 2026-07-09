@@ -31,7 +31,7 @@ export default async function CardsSettingsPage() {
       resolveWorkflowFor(access),
       store.listStageGates(access ?? undefined),
     ]);
-  const canEdit = !access || access.role === "admin";
+  const canEdit = !access || access.role === "owner";
 
   // The effective stages the editor starts from (DB-defined, or the built-in
   // default), excluding the system `archived` status.

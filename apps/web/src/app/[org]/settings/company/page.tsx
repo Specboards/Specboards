@@ -1,4 +1,5 @@
 import { getDb } from "@/lib/db";
+import { getStore } from "@/lib/store";
 import { listWorkspaceMembers, getWorkspaceById } from "@/lib/workspace";
 import { requireWorkspaceAccess } from "@/lib/workspace-access";
 import { CompanyCard } from "@/components/settings-form";
@@ -20,9 +21,11 @@ export default async function CompanySettingsPage() {
     );
   }
 
-  const [workspace, roster] = await Promise.all([
+  const store = await getStore();
+  const [workspace, roster, products] = await Promise.all([
     getWorkspaceById(db, access.workspaceId),
     listWorkspaceMembers(db, access.workspaceId),
+    store.listProducts(access),
   ]);
 
   const members: OrgMemberRecord[] = roster.map((m) => ({
@@ -35,11 +38,12 @@ export default async function CompanySettingsPage() {
 
   return (
     <div className="space-y-8">
-      <CompanyCard name={workspace?.name ?? ""} canEdit={access.role === "admin"} />
+      <CompanyCard name={workspace?.name ?? ""} canEdit={access.role === "owner"} />
       <OrgMembers
         initialMembers={members}
         currentUserId={access.userId}
-        canManage={access.role === "admin"}
+        canManage={access.role === "owner"}
+        products={products.map((p) => ({ id: p.id, name: p.name }))}
       />
     </div>
   );

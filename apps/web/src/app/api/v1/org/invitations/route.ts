@@ -40,13 +40,11 @@ export async function POST(req: Request) {
   }
 
   try {
-    const { email, role } = parseInvitationInput(body);
     const invitation = await createInvitation(
       db,
       authz.scope.workspaceId,
       authz.scope.userId,
-      email,
-      role,
+      parseInvitationInput(body),
     );
     return Response.json({ invitation }, { status: 201 });
   } catch (err) {

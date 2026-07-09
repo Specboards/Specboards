@@ -13,7 +13,7 @@ export default async function HierarchySettingsPage() {
   const access = await requireWorkspaceAccess();
   const store = await getStore();
   const levels = await store.listLevels(access ?? undefined);
-  const canEdit = !access || access.role === "admin";
+  const canEdit = !access || access.role === "owner";
 
   return (
     <div className="space-y-4">

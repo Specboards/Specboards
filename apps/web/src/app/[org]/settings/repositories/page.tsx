@@ -18,7 +18,7 @@ function noticeFor(params: Record<string, string | string[] | undefined>): Setup
     return { kind: "ok", message: "GitHub installed. Pick the repositories to connect below." };
   }
   const errors: Record<string, string> = {
-    forbidden: "Only an admin can set up GitHub.",
+    forbidden: "Only the owner can set up GitHub.",
     org: "That doesn't look like a valid GitHub organization name.",
     setup: "That setup session expired. Please start again.",
     exchange: "GitHub couldn't finish creating the app. Please try again.",
@@ -71,14 +71,14 @@ export default async function RepositoriesSettingsPage({
   // HTML instead of popping in after a client fetch. Costs one GitHub call per
   // workspace installation; a workspace with none skips GitHub entirely.
   const installations =
-    access.role === "admin" && configured
+    access.role === "owner" && configured
       ? await loadWorkspaceInstallations(db, access.workspaceId)
       : NO_INSTALLATIONS;
 
   return (
     <RepositoriesManager
       repos={rows}
-      canConnect={access.role === "admin"}
+      canConnect={access.role === "owner"}
       configured={configured}
       selfHosted={isSingleTenant()}
       installUrl={slug ? "/api/v1/github/install-start" : null}

@@ -5,22 +5,22 @@
  * UI use these helpers so all three agree on who can do what.
  *
  * Two layers:
- *  - **Org role** — an org admin can read/write/manage everything.
+ *  - **Org role** — the workspace `owner` can read/write/manage everything.
  *  - **Product role** — a per-product grant: `admin` (manage + edit),
- *    `editor` (edit items), `viewer` (read a private product).
+ *    `contributor` (edit items), `viewer` (read a private product).
  *
  * Reads of an `org`-visibility product are open to every member; only `private`
- * products require an org admin or an explicit product grant.
+ * products require the owner or an explicit product grant.
  */
 
 import type { Product, ProductVisibility } from "./products.js";
 
 /** A user's role on a single product. */
-export type ProductRole = "admin" | "editor" | "viewer";
+export type ProductRole = "admin" | "contributor" | "viewer";
 
 /** A user's effective access across the org, evaluated by the helpers below. */
 export interface ProductAccess {
-  /** True when the user is an organization admin (can do anything). */
+  /** True when the user is the workspace owner (can do anything). */
   isOrgAdmin: boolean;
   /** product id → the user's explicit role on it (absent = no grant). */
   roles: ReadonlyMap<string, ProductRole>;
@@ -57,7 +57,7 @@ export function canReadProduct(
 export function canWriteProduct(access: ProductAccess, productId: string): boolean {
   if (access.isOrgAdmin) return true;
   const role = access.roles.get(productId);
-  return role === "admin" || role === "editor";
+  return role === "admin" || role === "contributor";
 }
 
 /** Whether the user may manage a product's settings + membership. */

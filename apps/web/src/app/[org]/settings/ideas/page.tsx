@@ -21,7 +21,7 @@ export default async function IdeasSettingsPage() {
     store.listIdeaStatuses(access ?? undefined),
     store.getIdeaSettings(access ?? undefined),
   ]);
-  const canEdit = !access || access.role === "admin";
+  const canEdit = !access || access.role === "owner";
   const stages = resolveIdeaStages(stageRows);
 
   return (

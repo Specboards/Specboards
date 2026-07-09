@@ -17,11 +17,33 @@ import {
 export type PageAccess = WorkspaceScope & { role: MemberRole; orgSlug: string };
 
 /**
- * Whether the viewer can connect a GitHub repository (admin-only). `null`
+ * Whether the viewer can connect a GitHub repository (owner-only). `null`
  * access is local file mode, where repo connection isn't a concept.
  */
 export function canConnectRepos(access: PageAccess | null): boolean {
-  return access?.role === "admin";
+  return access?.role === "owner";
+}
+
+/**
+ * Product-aware edit gate for already-loaded products (which carry
+ * `viewerRole`). The workspace owner can edit anything; otherwise editing is a
+ * per-product grant (`admin` or `contributor`). Pass a `productId` for a
+ * single-product view, or `null` for the cross-product "all" view (returns true
+ * when the caller can edit *any* of `products`). `null` access is local file
+ * mode (always editable). Reuses the `viewerRole` already on each product, so
+ * no extra query — mirrors core `canWriteProduct`.
+ */
+export function canEditProducts(
+  access: { role: MemberRole } | null,
+  products: ProductRecord[],
+  productId: string | null,
+): boolean {
+  if (!access) return true;
+  if (access.role === "owner") return true;
+  const writable = (p: ProductRecord) =>
+    p.viewerRole === "admin" || p.viewerRole === "contributor";
+  if (productId) return products.some((p) => p.id === productId && writable(p));
+  return products.some(writable);
 }
 
 /**

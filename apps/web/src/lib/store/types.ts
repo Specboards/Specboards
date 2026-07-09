@@ -263,8 +263,10 @@ export interface ProductMemberInput {
   role: ProductRole;
 }
 
-/** The organization-level roles (mirrors the `member_role` DB enum). */
-export type OrgRole = "admin" | "pm" | "ux" | "eng" | "viewer";
+/** The organization-level roles (mirrors the `member_role` DB enum). `owner`
+ * is the workspace admin; `member` is the read-only org baseline whose real
+ * capability comes from per-product grants. */
+export type OrgRole = "owner" | "member";
 
 /** An org member joined to their identity, as returned to the client. */
 export interface OrgMemberRecord {
@@ -276,15 +278,30 @@ export interface OrgMemberRecord {
   deactivatedAt: string | null;
 }
 
+/** A per-product grant carried by an invitation (applied on accept). */
+export interface InvitationProductGrant {
+  productId: string;
+  role: ProductRole;
+}
+
 /** A pending/settled invitation, as returned to the client (no token). */
 export interface OrgInvitationRecord {
   id: string;
   email: string;
   role: OrgRole;
+  /** Product grants applied on accept (empty for an owner invite). */
+  productGrants: InvitationProductGrant[];
   status: "pending" | "accepted" | "revoked" | "expired";
   invitedBy: string;
   expiresAt: string;
   createdAt: string;
+}
+
+/** Body for creating an invitation (org role + optional product grants). */
+export interface InvitationInput {
+  email: string;
+  role: OrgRole;
+  productGrants: InvitationProductGrant[];
 }
 
 /** Raised when a product can't be created/updated/deleted (in use, dup, …). */

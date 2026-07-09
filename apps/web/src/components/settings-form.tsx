@@ -263,7 +263,7 @@ export function CompanyCard({ name, canEdit }: { name: string; canEdit: boolean 
         <CardDescription>
           {canEdit
             ? "Your organization's name across Specboard."
-            : "Your organization. Only an admin can change these details."}
+            : "Your organization. Only the owner can change these details."}
         </CardDescription>
       </CardHeader>
       <CardContent>

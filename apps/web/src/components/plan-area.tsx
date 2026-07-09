@@ -12,8 +12,7 @@ import { loadGithubDocs } from "@/lib/github-docs";
 import { LOCAL_ORG_SLUG, orgPath, orgProductPath } from "@/lib/org-path";
 import { getStore } from "@/lib/store";
 import type { DocArea } from "@/lib/store/types";
-import { canWrite } from "@/lib/workspace";
-import { requireWorkspaceAccess } from "@/lib/workspace-access";
+import { canEditProducts, requireWorkspaceAccess } from "@/lib/workspace-access";
 
 const AREA_COPY: Record<
   DocArea,
@@ -66,7 +65,6 @@ export async function PlanAreaView({
 }) {
   const copy = AREA_COPY[area];
   const access = await requireWorkspaceAccess();
-  const canEdit = !access || canWrite(access.role);
   const org = access?.orgSlug ?? LOCAL_ORG_SLUG;
   const store = await getStore();
   const products = await store.listProducts(access ?? undefined);
@@ -101,6 +99,9 @@ export async function PlanAreaView({
     );
   }
 
+  // Editing this area's docs follows the product's edit permission.
+  const canEdit = canEditProducts(access, products, product.id);
+
   const [space, pages] = await Promise.all([
     store.getDocSpace(product.id, area, access ?? undefined),
     store.listDocPages(product.id, area, access ?? undefined),
@@ -120,7 +121,7 @@ export async function PlanAreaView({
   }
   const githubSetup: GithubSetupState = {
     available: githubAvailable,
-    isAdmin: !access || access.role === "admin",
+    isAdmin: !access || access.role === "owner",
     suggestedName: `${product.key}-${area}`,
     installHref: orgPath(org, "/repositories"),
   };

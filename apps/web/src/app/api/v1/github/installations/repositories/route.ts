@@ -29,8 +29,8 @@ export async function GET(req: Request) {
   }
 
   const membership = await getMembership(db, user.id);
-  if (!membership || membership.role !== "admin") {
-    return Response.json({ error: "Only an admin can connect repositories." }, { status: 403 });
+  if (!membership || membership.role !== "owner") {
+    return Response.json({ error: "Only the owner can connect repositories." }, { status: 403 });
   }
 
   const state = await loadWorkspaceInstallations(db, membership.workspaceId);
@@ -79,8 +79,8 @@ export async function POST(req: Request) {
   }
 
   const membership = await getMembership(db, user.id);
-  if (!membership || membership.role !== "admin") {
-    return Response.json({ error: "Only an admin can create repositories." }, { status: 403 });
+  if (!membership || membership.role !== "owner") {
+    return Response.json({ error: "Only the owner can create repositories." }, { status: 403 });
   }
 
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;

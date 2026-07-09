@@ -127,7 +127,7 @@ export function RepositoriesManager({
       {!canConnect ? (
         <p className="text-sm text-muted-foreground">
           {configured
-            ? "Only an admin can connect repositories."
+            ? "Only the owner can connect repositories."
             : "GitHub isn't set up yet. Ask an admin to connect Specboard to GitHub."}
         </p>
       ) : configured ? (

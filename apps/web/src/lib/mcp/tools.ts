@@ -33,7 +33,8 @@ export interface McpTool {
   description: string;
   /** JSON Schema for the tool's arguments (advertised via tools/list). */
   inputSchema: Record<string, unknown>;
-  /** Write tools require a non-viewer role (checked centrally before `run`). */
+  /** Marks a mutating tool. Any member may attempt it; per-product write
+   * (owner, or an admin/contributor grant) is enforced by the store on run. */
   write: boolean;
   run: (args: Record<string, unknown>, ctx: McpContext) => Promise<unknown>;
 }
@@ -74,18 +75,33 @@ export const TOOLS: McpTool[] = [
   {
     name: "whoami",
     description:
-      "Identify the caller: the user, their workspace, their role, and the " +
-      "workspace's hierarchy levels (top to leaf). Call this first to learn " +
-      "which level keys are valid for create_item and whether you can write.",
+      "Identify the caller: the user, their workspace, their org role " +
+      "(`owner` administers everything; `member` is read-only at the org), the " +
+      "workspace's hierarchy levels (top to leaf), and their per-product access " +
+      "(`products[].role`: admin/contributor can write that product, viewer is " +
+      "read-only). Call this first to learn which products you can write and " +
+      "which level keys are valid for create_item.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     write: false,
     run: async (_args, ctx) => {
       const store = await getStore();
-      const levels = await store.listLevels(ctx.scope);
+      const [levels, products] = await Promise.all([
+        store.listLevels(ctx.scope),
+        store.listProducts(ctx.scope),
+      ]);
       const levelsOut = levels.map((l) => ({
         key: l.key,
         label: l.label,
         isLeaf: l.isLeaf,
+      }));
+      const isOwner = ctx.isLocal || ctx.role === "owner";
+      // Effective product role for the agent: owner (and local mode) is admin
+      // everywhere; otherwise the explicit per-product grant (or viewer for an
+      // org-visibility product the member can read but not edit).
+      const productsOut = products.map((p) => ({
+        key: p.key,
+        name: p.name,
+        role: isOwner ? "admin" : (p.viewerRole ?? "viewer"),
       }));
       if (ctx.isLocal || !ctx.scope) {
         return {
@@ -93,6 +109,8 @@ export const TOOLS: McpTool[] = [
           user: null,
           workspace: null,
           role: null,
+          isOwner: true,
+          products: productsOut,
           levels: levelsOut,
         };
       }
@@ -118,6 +136,8 @@ export const TOOLS: McpTool[] = [
         user,
         workspace,
         role: ctx.role,
+        isOwner,
+        products: productsOut,
         levels: levelsOut,
       };
     },

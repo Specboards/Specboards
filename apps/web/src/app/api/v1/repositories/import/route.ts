@@ -28,8 +28,8 @@ export async function POST(req: Request) {
   if (!membership) {
     return Response.json({ error: "You do not belong to a workspace." }, { status: 403 });
   }
-  if (membership.role !== "admin") {
-    return Response.json({ error: "Only an admin can import specs." }, { status: 403 });
+  if (membership.role !== "owner") {
+    return Response.json({ error: "Only the owner can import specs." }, { status: 403 });
   }
 
   const repos = await db

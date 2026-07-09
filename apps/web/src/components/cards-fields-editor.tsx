@@ -108,7 +108,7 @@ export function CardsFieldsEditor({
         </Button>
       ) : (
         <p className="text-xs text-muted-foreground">
-          Only an admin can change card fields.
+          Only the owner can change card fields.
         </p>
       )}
     </div>

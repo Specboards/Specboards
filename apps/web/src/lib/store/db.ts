@@ -2806,7 +2806,7 @@ export class DbStore implements FeatureStore {
         ),
       );
     const roles = new Map(mine.map((g) => [g.productId, g.role] as const));
-    return { isOrgAdmin: membership[0]?.role === "admin", roles };
+    return { isOrgAdmin: membership[0]?.role === "owner", roles };
   }
 
   /** Product visibility by id for owner-connection app-side RLS mirroring. */
@@ -2965,7 +2965,7 @@ export class DbStore implements FeatureStore {
           !(await this.accessIn(tx, scope!)).isOrgAdmin
         ) {
           throw new ProductError(
-            "Only an organization admin can change a product's visibility.",
+            "Only the workspace owner can change a product's visibility.",
           );
         }
         set.visibility = patch.visibility;

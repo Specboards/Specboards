@@ -22,9 +22,9 @@ export async function PATCH(req: Request) {
   if (!membership) {
     return Response.json({ error: "You do not belong to a workspace." }, { status: 403 });
   }
-  if (membership.role !== "admin") {
+  if (membership.role !== "owner") {
     return Response.json(
-      { error: "Only an admin can change company details." },
+      { error: "Only the owner can change company details." },
       { status: 403 },
     );
   }

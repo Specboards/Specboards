@@ -54,7 +54,7 @@ const SAMPLE_FEATURES: SampleFeature[] = [
     tags: ["team"],
     path: "specs/invite-team/spec.md",
     content:
-      "## Roles\n\nThe first user is the admin. Everyone who signs up after joins as a viewer; an admin promotes them to an editor role to change metadata.",
+      "## Roles\n\nThe first user is the workspace owner. Everyone invited after joins as a member; the owner (or a product admin) grants them a Contributor or Admin role on a product to let them edit it.",
   },
 ];
 

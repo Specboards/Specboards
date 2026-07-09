@@ -239,6 +239,13 @@
       "when": 1783529359119,
       "tag": "0033_chubby_preak",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1783554165899,
+      "tag": "0034_tiresome_gambit",
+      "breakpoints": true
     }
   ]
 }
