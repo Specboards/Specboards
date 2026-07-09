@@ -26,6 +26,7 @@ import type { StatusWorkflow } from "@specboard/core";
 import { FeatureCard, type ProductTag } from "@/components/feature-card";
 import { FeatureEditSheet } from "@/components/feature-edit-sheet";
 import { StatusDot } from "@/components/status-dot";
+import { Badge } from "@/components/ui/badge";
 import { AuthRequiredError, patchFeature } from "@/lib/api-client";
 import {
   rankBetween,
@@ -256,13 +257,13 @@ function Column({
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `${COL_PREFIX}${status}` });
   return (
-    <div className="w-72 shrink-0 rounded-lg bg-muted/35 p-2.5">
+    <div className="w-72 shrink-0 rounded-md bg-muted/35 p-2.5">
       <div className="flex items-center gap-2 px-2 py-1.5">
         <StatusDot status={status} />
         <span className="text-sm font-medium">{statusLabel(status, workflow)}</span>
-        <span className="ml-auto text-xs text-muted-foreground">
+        <Badge variant="counter" className="ml-auto">
           {cardIds.length}
-        </span>
+        </Badge>
       </div>
       <SortableContext items={cardIds} strategy={verticalListSortingStrategy}>
         <div

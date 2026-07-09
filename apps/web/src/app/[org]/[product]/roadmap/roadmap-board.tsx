@@ -226,7 +226,7 @@ function Column({
             <button
               type="button"
               onClick={() => onOpenDetail(column.release!.id)}
-              className="text-left text-sm font-medium hover:underline"
+              className="text-left text-sm font-medium text-link hover:underline"
             >
               {column.name}
             </button>
@@ -235,9 +235,9 @@ function Column({
               {column.name}
             </span>
           )}
-          <span className="shrink-0 text-xs text-muted-foreground">
+          <Badge variant="counter" className="shrink-0">
             {items.length}
-          </span>
+          </Badge>
         </div>
         {/* Always render the date line (a non-breaking space when a column has
             neither dates nor a status) so every column's cards start at the

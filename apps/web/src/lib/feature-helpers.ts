@@ -15,24 +15,30 @@ export function statusLabel(status: string, workflow?: StatusWorkflow): string {
   return status.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
 }
 
-/** Per-status accent for the small dot next to status text (default workflow). */
+/**
+ * Per-status accent for the small dot next to status text (default workflow).
+ * Hues track Primer's semantic labels: cool gray for open/neutral, accent blue
+ * for ready, attention amber for in-progress, purple for spec/definition work,
+ * and success green for done. Grays use `slate` (cool-biased) to sit with the
+ * Primer neutral palette rather than the old chroma-zero `zinc`.
+ */
 export const statusDotClass: Record<string, string> = {
-  backlog: "bg-zinc-400",
-  defining: "bg-violet-400",
-  ready: "bg-blue-400",
+  backlog: "bg-slate-400",
+  defining: "bg-purple-400",
+  ready: "bg-blue-500",
   in_progress: "bg-amber-400",
   in_review: "bg-pink-400",
-  done: "bg-emerald-400",
-  archived: "bg-zinc-300",
+  done: "bg-green-500",
+  archived: "bg-slate-300",
 };
 
 /** Palette for custom statuses not in the default map (assigned deterministically). */
 const FALLBACK_DOT_CLASSES = [
-  "bg-violet-400",
-  "bg-blue-400",
+  "bg-purple-400",
+  "bg-blue-500",
   "bg-amber-400",
   "bg-pink-400",
-  "bg-emerald-400",
+  "bg-green-500",
   "bg-cyan-400",
   "bg-rose-400",
   "bg-lime-400",

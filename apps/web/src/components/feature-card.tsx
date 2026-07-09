@@ -78,7 +78,7 @@ export function FeatureCard({
 
   return (
     <Card
-      className="cursor-pointer rounded-lg shadow-sm transition-colors hover:border-foreground/25"
+      className="cursor-pointer transition-colors hover:border-foreground/25"
       onClick={onOpen}
     >
       <CardHeader className="space-y-1 p-3">

@@ -68,12 +68,15 @@ export function DetailSection({
   }
 
   return (
-    <section className="rounded-lg border">
+    <section className="overflow-hidden rounded-md border">
       <button
         type="button"
         onClick={toggle}
         aria-expanded={!collapsed}
-        className="flex w-full items-center justify-between px-4 py-2.5 text-sm font-medium"
+        className={cn(
+          "flex w-full items-center justify-between px-4 py-2.5 text-sm font-medium",
+          collapsed ? "" : "border-b bg-muted",
+        )}
       >
         {title}
         <ChevronDown
@@ -83,7 +86,7 @@ export function DetailSection({
           )}
         />
       </button>
-      {collapsed ? null : <div className="border-t px-4 py-4">{children}</div>}
+      {collapsed ? null : <div className="px-4 py-4">{children}</div>}
     </section>
   );
 }
