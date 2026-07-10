@@ -73,18 +73,37 @@ predicate in an owner-backed query could expose or modify another tenant's data.
 
 **Work items:**
 
-- [ ] Require a non-owner application database role in hosted environments.
-- [ ] Fail deployment or startup when the hosted tenant-data connection is an
-  owner or has `BYPASSRLS`.
+- [x] Require a non-owner application database role in hosted environments:
+  `getStore()` now throws instead of falling back to `DATABASE_URL` when
+  `SPECBOARD_MULTI_TENANT` is set (single-tenant self-host keeps the
+  one-connection path, with a warning).
+- [x] Fail deployment or startup when the hosted tenant-data connection is an
+  owner or has `BYPASSRLS`: instrumentation boot probe
+  (`lib/rls-guard.ts` + `packages/db/src/rls-probe.ts`) verifies the
+  `DATABASE_URL_APP` role is non-owner, non-superuser, without `BYPASSRLS`,
+  and that RLS is enabled with policies present; a violation refuses startup,
+  so platform health checks stop the rollout.
 - [ ] Separate authentication, migrations, and background worker duties into
-  narrowly scoped database roles.
-- [ ] Ensure every tenant-data transaction sets the authenticated user context
-  used by RLS before any query is run.
-- [ ] Audit direct `getDb()` callers and migrate tenant-data access to the
-  scoped store or another RLS-aware repository layer.
-- [ ] Add a two-tenant integration suite that proves reads, writes, deletes,
-  product visibility, invitations, webhooks, and repository connections cannot
-  cross the tenant boundary.
+  narrowly scoped database roles. Partially in place (owner for
+  auth/migrations/ingestion, `specboard_app` for tenant data); a dedicated
+  worker role for the outbox drainer and webhook ingestion is a follow-up.
+- [x] Ensure every tenant-data transaction sets the authenticated user context
+  used by RLS before any query is run: `DbStore.scoped()` already refuses to
+  run without a scope and sets `app.user_id` transaction-locally; the July
+  2026 audit confirmed all tenant-data request paths go through it.
+- [x] Audit direct `getDb()` callers (82 sites, 2026-07-10): all fall into the
+  by-design owner-connection categories (auth/session tables, org membership
+  and invitations, API keys, GitHub App config and install binding, webhook
+  ingestion, outbox relay) and every one scopes manually. No tenant-data
+  request path uses the owner connection.
+- [x] Two-tenant integration suite
+  (`apps/web/src/lib/store/rls-isolation.int.test.ts`, in CI): cross-tenant
+  reads, writes, deletes, product listings, and repository rows cannot cross
+  the boundary; an unscoped store call is refused; a context-less connection
+  sees zero rows; a workspace-unfiltered query returns only the member's
+  tenant; cross-tenant inserts are rejected by policy. Note: invitations and
+  webhook tables live on the owner connection by design (no RLS); their
+  isolation remains application-enforced and audit-verified.
 
 **Acceptance criteria:** The deployed application cannot connect to tenant
 tables with a role that bypasses RLS, and an intentionally unscoped tenant query

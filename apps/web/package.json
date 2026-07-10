@@ -8,6 +8,7 @@
     "start": "next start",
     "start:e2e": "next start -p 3100",
     "test:e2e": "playwright test",
+    "test:int": "vitest run --config vitest.int.config.ts",
     "typecheck": "tsc --noEmit",
     "lint": "next lint"
   },
@@ -45,6 +46,8 @@
     "@tailwindcss/typography": "^0.5.20",
     "@types/node": "^22.20.0",
     "@types/react": "^19.0.2",
-    "@types/react-dom": "^19.0.2"
+    "@types/react-dom": "^19.0.2",
+    "postgres": "^3.4.5",
+    "vitest": "^3.2.6"
   }
 }
