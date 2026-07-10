@@ -1,12 +1,17 @@
 import { cookies } from "next/headers";
 
-import { githubInstallations, sql } from "@specboard/db";
 import { getInstallationAccount } from "@specboard/git";
 
 import { getSessionUser } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
-import { getGithubApp } from "@/lib/github-app";
-import { INSTALL_STATE_COOKIE } from "@/lib/github-install";
+import { getGithubApp, getGithubOauthCredentials } from "@/lib/github-app";
+import {
+  INSTALL_STATE_COOKIE,
+  appOriginFromRequest,
+  deleteInstallState,
+  findLiveInstallState,
+  stashInstallationOnState,
+} from "@/lib/github-install";
 import { orgPath } from "@/lib/org-path";
 import { getMembership, workspaceSlug } from "@/lib/workspace";
 
@@ -24,17 +29,17 @@ function redirectTo(path: string): Response {
 /**
  * GET /api/v1/github/setup — the GitHub App's post-install "Setup URL". GitHub
  * redirects the admin's browser here with `?installation_id=…&setup_action=…`
- * after they install (or reconfigure) the App. We bind that installation to the
- * admin's workspace in `github_installations`, so the connect picker and repo
- * creation keep working on later visits (no short-lived session to re-run).
+ * after they install (or reconfigure) the App.
  *
- * The id is validated against GitHub before it's stored: only installations of
- * THIS deployment's App resolve, so a made-up id never persists. Note the
- * residual trust gap: a hostile workspace admin who starts the flow could
- * substitute another real installation id of the shared App before returning
- * here. Binding it would let them list that installation's repo names and sync
- * contents. Closing this needs proof the caller controls the GitHub account
- * (e.g. GitHub OAuth identity), tracked for the pen-test follow-up.
+ * This route no longer binds anything. The CSRF `state` only proves a browser
+ * finished an install flow, not that the signed-in user controls the GitHub
+ * account that owns the returned `installation_id` (a hostile workspace owner
+ * could substitute another real installation's id). So we validate the flow
+ * (cookie nonce + the server-side `github_install_states` record for this
+ * user), verify the id resolves under OUR App, stash it on the flow record,
+ * and send the admin through GitHub's OAuth identity leg. The bind happens in
+ * /api/v1/github/oauth/callback only after that leg proves the admin owns or
+ * administers the installation's account.
  */
 export async function GET(req: Request) {
   const url = new URL(req.url);
@@ -56,11 +61,9 @@ export async function GET(req: Request) {
   const jar = await cookies();
 
   // CSRF: the install must have started via /install-start on this session, so
-  // require the `state` GitHub echoed back to match the one-time cookie. This
-  // stops an attacker from luring an admin to a setup URL that binds a foreign
-  // installation to their session. The cookie is single-use.
+  // require the `state` GitHub echoed back to match the one-time cookie. The
+  // cookie survives until the OAuth callback finishes the (single-use) flow.
   const expectedState = jar.get(INSTALL_STATE_COOKIE)?.value;
-  jar.delete(INSTALL_STATE_COOKIE);
   if (
     membership.role !== "owner" ||
     !installationId ||
@@ -68,38 +71,50 @@ export async function GET(req: Request) {
     !expectedState ||
     state !== expectedState
   ) {
+    jar.delete(INSTALL_STATE_COOKIE);
+    return redirectTo(repos("?error=install"));
+  }
+
+  // The server-side flow record is the source of truth: it must exist, be
+  // unexpired, belong to this user, and match the workspace they're acting in.
+  const flow = await findLiveInstallState(db, state, user.id);
+  if (!flow || flow.workspaceId !== membership.workspaceId) {
+    jar.delete(INSTALL_STATE_COOKIE);
     return redirectTo(repos("?error=install"));
   }
 
   const app = await getGithubApp(db);
-  if (!app) return redirectTo(repos("?error=install"));
+  const oauth = await getGithubOauthCredentials(db);
+  if (!app || !oauth) {
+    jar.delete(INSTALL_STATE_COOKIE);
+    await deleteInstallState(db, flow.id);
+    return redirectTo(repos("?error=install-config"));
+  }
 
   // Look the installation up on GitHub: validates the id belongs to this App
-  // and captures the account (org/user) for display and repo creation.
+  // and captures the account (org/user) the ownership check must match.
   let account;
   try {
     account = await getInstallationAccount(app, installationId);
   } catch (err) {
     console.error(`[github] setup callback couldn't resolve installation ${installationId}:`, err);
+    jar.delete(INSTALL_STATE_COOKIE);
+    await deleteInstallState(db, flow.id);
     return redirectTo(repos("?error=install"));
   }
 
-  await db
-    .insert(githubInstallations)
-    .values({
-      workspaceId: membership.workspaceId,
-      installationId,
-      accountLogin: account.login,
-      accountType: account.type,
-    })
-    .onConflictDoUpdate({
-      target: [githubInstallations.workspaceId, githubInstallations.installationId],
-      set: {
-        accountLogin: account.login,
-        accountType: account.type,
-        updatedAt: sql`now()`,
-      },
-    });
+  await stashInstallationOnState(db, flow.id, {
+    installationId,
+    accountLogin: account.login,
+    accountType: account.type,
+  });
 
-  return redirectTo(repos("?connected=1"));
+  // OAuth identity leg: GitHub sends the admin back to our callback with a
+  // `code` we exchange to learn who they are on GitHub. Same nonce as `state`.
+  const origin = appOriginFromRequest(req);
+  const authorize = new URL("https://github.com/login/oauth/authorize");
+  authorize.searchParams.set("client_id", oauth.clientId);
+  authorize.searchParams.set("redirect_uri", `${origin}/api/v1/github/oauth/callback`);
+  authorize.searchParams.set("state", state);
+  return redirectTo(authorize.toString());
 }

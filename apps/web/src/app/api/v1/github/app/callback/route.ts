@@ -19,6 +19,7 @@ interface ConversionResult {
   id: number;
   slug: string;
   client_id?: string;
+  client_secret?: string;
   webhook_secret: string;
   pem: string;
 }
@@ -88,6 +89,7 @@ export async function GET(req: Request) {
       appId: String(result.id),
       slug: result.slug,
       clientId: result.client_id ?? null,
+      clientSecret: result.client_secret ?? null,
       privateKey: result.pem,
       webhookSecret: result.webhook_secret,
     });

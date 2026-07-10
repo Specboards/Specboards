@@ -246,12 +246,53 @@ export const githubApp = pgTable("github_app", {
   appId: text("app_id").notNull(),
   slug: text("slug").notNull(),
   clientId: text("client_id"),
+  /**
+   * OAuth client secret for the App's "identify users" flow, encrypted at
+   * rest. The install callback uses it to verify the installing user actually
+   * administers the GitHub account the installation belongs to. Null for Apps
+   * saved before this column existed; those fall back to env credentials.
+   */
+  clientSecret: text("client_secret"),
   /** PEM, encrypted at rest (AES-256-GCM keyed off BETTER_AUTH_SECRET). */
   privateKey: text("private_key").notNull(),
   /** Webhook signing secret, encrypted at rest. */
   webhookSecret: text("webhook_secret").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * A pending GitHub App install flow, created when an owner clicks "Connect
+ * GitHub" and consumed by the OAuth identity callback that completes the bind.
+ * This is the server-side source of truth tying the CSRF nonce, the Specboard
+ * session, the workspace, and (after the setup callback) the returned
+ * installation together; possession of the nonce alone never binds anything.
+ * Rows are short-lived (expiresAt) and single-use. Flow state, not tenant
+ * data: accessed only through the owner connection, like `github_app`.
+ */
+export const githubInstallStates = pgTable(
+  "github_install_states",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** Random one-time nonce round-tripped as OAuth/install `state`. */
+    nonce: text("nonce").notNull().unique(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    /**
+     * The Specboard user who started the flow; only they may complete it.
+     * No FK for the same reason as `members.user_id` (auth-disabled self-host).
+     */
+    userId: uuid("user_id").notNull(),
+    /** Set by the setup callback once GitHub returns an installation id. */
+    installationId: text("installation_id"),
+    /** Account (org/user) the installation belongs to, per GitHub's API. */
+    accountLogin: text("account_login"),
+    accountType: text("account_type"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("github_install_states_expires_idx").on(t.expiresAt)],
+);
 
 /**
  * A GitHub App installation bound to a workspace, captured by the install

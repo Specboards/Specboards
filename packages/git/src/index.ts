@@ -131,4 +131,5 @@ export function injectSpecId(raw: string, id: string): string {
 }
 
 export * from "./github.js";
+export * from "./user-oauth.js";
 export * from "./webhook.js";
