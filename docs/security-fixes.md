@@ -21,18 +21,37 @@ connect them, and sync their contents.
 
 **Work items:**
 
-- [ ] Add a GitHub OAuth identity step to the installation flow.
-- [ ] On callback, verify that the authenticated GitHub identity is an owner or
-  administrator of the account that owns the installation.
-- [ ] Bind the OAuth transaction, Specboard session, expected workspace, and
-  returned installation account together in a short-lived server-side record.
-- [ ] Do not treat possession of a callback `state` value as proof of GitHub
-  account ownership.
-- [ ] Add a global uniqueness constraint or alert on `installation_id` to flag
-  multiple workspace bindings. Do not rely on this constraint as the primary
-  authorization control.
-- [ ] Add integration tests for a malicious workspace owner attempting to bind
-  an installation belonging to another workspace.
+- [x] Add a GitHub OAuth identity step to the installation flow (setup callback
+  now bounces through the App's authorize URL; the new
+  `/api/v1/github/oauth/callback` exchanges the code and performs the bind).
+- [x] On callback, verify that the authenticated GitHub identity is an owner or
+  administrator of the account that owns the installation
+  (`packages/git/src/user-oauth.ts`: login match for User accounts,
+  active/admin org membership for Organization accounts, everything else
+  rejected).
+- [x] Bind the OAuth transaction, Specboard session, expected workspace, and
+  returned installation account together in a short-lived server-side record
+  (`github_install_states`, migration 0035; single-use, 15 minute expiry).
+- [x] Do not treat possession of a callback `state` value as proof of GitHub
+  account ownership (the state only locates the flow record; binding requires
+  the verified identity).
+- [x] Alert on `installation_id` bound to multiple workspaces (loud
+  `[security]` log on bind; a hard global constraint was skipped on purpose,
+  since one GitHub org backing two workspaces is legitimate, and the doc says
+  not to rely on it as the control).
+- [x] Tests: unit coverage of the ownership checks (wrong user, plain member,
+  pending invite, non-member, unknown account type, API failure fails closed)
+  and fail-closed E2E tests for forged setup/OAuth callbacks. The full
+  malicious-bind path against a second live installation still needs a manual
+  smoke test on cloud test.
+
+**Deployment prerequisites (hosted):** generate a client secret on both GitHub
+Apps (specboards, specboards-test) and set `GITHUB_APP_CLIENT_ID` /
+`GITHUB_APP_CLIENT_SECRET` on the matching Fly apps; add the Callback URL
+`https://<host>/api/v1/github/oauth/callback` to each App. Until then,
+install-start fails closed with a clear banner. Self-host Apps created from the
+manifest flow now store the client secret automatically; pre-existing self-host
+Apps need the env vars or a re-run of App setup.
 
 **Acceptance criteria:** A user who is not a verified administrator of the
 GitHub installation account cannot bind, enumerate, create repositories in, or

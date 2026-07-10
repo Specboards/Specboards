@@ -132,6 +132,15 @@ export async function resetDetailTemplates(workspaceId: string): Promise<void> {
     .where(eq(detailTemplates.workspaceId, workspaceId));
 }
 
+/** Number of GitHub App installations bound to the workspace. */
+export async function installationCount(workspaceId: string): Promise<number> {
+  const [row] = await db()
+    .select({ n: sql<number>`count(*)::int` })
+    .from(githubInstallations)
+    .where(eq(githubInstallations.workspaceId, workspaceId));
+  return row?.n ?? 0;
+}
+
 /** Bind a GitHub App installation to the workspace (mirrors the setup callback). */
 export async function seedInstallation(input: {
   workspaceId: string;

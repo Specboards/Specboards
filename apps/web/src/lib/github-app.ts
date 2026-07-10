@@ -17,6 +17,8 @@ export interface GithubAppCredentials {
   appId: string;
   slug: string;
   clientId: string | null;
+  /** OAuth client secret for identifying users; null for pre-existing Apps. */
+  clientSecret: string | null;
   privateKey: string;
   webhookSecret: string;
 }
@@ -49,6 +51,7 @@ export async function getStoredCredentials(
     appId: row.appId,
     slug: row.slug,
     clientId: row.clientId,
+    clientSecret: row.clientSecret ? decryptSecret(row.clientSecret) : null,
     privateKey: decryptSecret(row.privateKey),
     webhookSecret: decryptSecret(row.webhookSecret),
   };
@@ -64,6 +67,7 @@ export async function saveCredentials(
     appId: creds.appId,
     slug: creds.slug,
     clientId: creds.clientId,
+    clientSecret: creds.clientSecret ? encryptSecret(creds.clientSecret) : null,
     privateKey: encryptSecret(creds.privateKey),
     webhookSecret: encryptSecret(creds.webhookSecret),
   });
@@ -77,6 +81,26 @@ export async function getGithubApp(db: Database): Promise<ReturnType<typeof gith
   const stored = await getStoredCredentials(db);
   if (stored) return githubAppFrom({ appId: stored.appId, privateKey: stored.privateKey });
   return githubAppFromEnv();
+}
+
+/**
+ * The App's OAuth client credentials for the "identify users" flow, used by
+ * the install callback to verify GitHub account ownership before binding an
+ * installation. Prefers stored credentials (self-host manifest flow), falling
+ * back to `GITHUB_APP_CLIENT_ID` / `GITHUB_APP_CLIENT_SECRET` (hosted). Null
+ * when neither is complete; the install flow fails closed in that case.
+ */
+export async function getGithubOauthCredentials(
+  db: Database,
+): Promise<{ clientId: string; clientSecret: string } | null> {
+  const stored = await getStoredCredentials(db);
+  if (stored?.clientId && stored.clientSecret) {
+    return { clientId: stored.clientId, clientSecret: stored.clientSecret };
+  }
+  const clientId = process.env.GITHUB_APP_CLIENT_ID?.trim();
+  const clientSecret = process.env.GITHUB_APP_CLIENT_SECRET?.trim();
+  if (clientId && clientSecret) return { clientId, clientSecret };
+  return null;
 }
 
 /** The webhook signing secret (stored or env), or null when unconfigured. */

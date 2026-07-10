@@ -17,9 +17,9 @@ export const dynamic = "force-dynamic";
 /**
  * GET /api/v1/github/installations/repositories: the workspace's GitHub App
  * installations and the repos each can access, for the connect picker. The
- * installations come from `github_installations` (bound by the setup callback,
- * not client-supplied), so this only ever lists installations the workspace's
- * admins actually performed.
+ * installations come from `github_installations` (bound by the install flow's
+ * ownership-verified OAuth callback, not client-supplied), so this only ever
+ * lists installations performed by a verified admin of the GitHub account.
  */
 export async function GET(req: Request) {
   const db = getDb();

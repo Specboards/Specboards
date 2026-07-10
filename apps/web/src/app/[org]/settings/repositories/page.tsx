@@ -24,6 +24,10 @@ function noticeFor(params: Record<string, string | string[] | undefined>): Setup
     exchange: "GitHub couldn't finish creating the app. Please try again.",
     store: "Couldn't save the GitHub credentials. Please try again.",
     install: "The installation didn't complete. Please try again.",
+    "install-config":
+      "GitHub connections are temporarily unavailable: the app is missing its OAuth client credentials. Contact your administrator.",
+    "install-denied":
+      "We couldn't verify that you're an owner or admin of that GitHub account, so the installation wasn't connected.",
     hosted: "GitHub is managed by Specboard on the hosted plan. Just install the app below.",
   };
   const err = typeof params.error === "string" ? errors[params.error] : undefined;

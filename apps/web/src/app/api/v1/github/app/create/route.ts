@@ -74,6 +74,9 @@ export async function GET(req: Request) {
     url: origin,
     hook_attributes: { url: `${origin}/api/webhooks/github`, active: true },
     redirect_url: `${origin}/api/v1/github/app/callback`,
+    // Where GitHub may send the user-identity OAuth leg; the setup callback
+    // bounces through it to prove the installer owns the installation account.
+    callback_urls: [`${origin}/api/v1/github/oauth/callback`],
     setup_url: `${origin}/api/v1/github/setup`,
     setup_on_update: true,
     public: false,
