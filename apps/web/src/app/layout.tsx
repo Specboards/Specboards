@@ -1,3 +1,4 @@
+import { headers } from "next/headers";
 import type { ReactNode } from "react";
 import { Toaster } from "sonner";
 
@@ -19,14 +20,15 @@ export const metadata = {
 };
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
-  const [orgs, products] = await Promise.all([
+  const [orgs, products, nonce] = await Promise.all([
     listSidebarOrgs(),
     listSidebarProducts(),
+    headers().then((h) => h.get("x-nonce") ?? undefined),
   ]);
   return (
     <html lang="en" suppressHydrationWarning>
       <body className="min-h-screen antialiased">
-        <ThemeProvider>
+        <ThemeProvider nonce={nonce}>
           <div className="flex min-h-screen">
             <AppSidebar orgs={orgs} products={products} />
             <main className="min-w-0 flex-1">

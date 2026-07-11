@@ -1,5 +1,6 @@
 import { relations } from "drizzle-orm";
 import {
+  bigint,
   boolean,
   foreignKey,
   index,
@@ -258,6 +259,34 @@ export const githubApp = pgTable("github_app", {
   /** Webhook signing secret, encrypted at rest. */
   webhookSecret: text("webhook_secret").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Better Auth's rate-limit counters (its `rateLimit` model). Backing the
+ * limiter with the database instead of process memory makes the auth / DCR
+ * limits hold across instances (the hosted app can scale past one machine).
+ * Deployment-global operational data: no `workspaceId`, no RLS, owner
+ * connection only. Better Auth reads/writes `key`, `count`, `lastRequest`.
+ */
+export const rateLimits = pgTable("rate_limits", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  key: text("key").notNull().unique(),
+  count: integer("count").notNull(),
+  /** Epoch millis of the window's first request; Better Auth stores a number. */
+  lastRequest: bigint("last_request", { mode: "number" }).notNull(),
+});
+
+/**
+ * Fixed-window quota counters for expensive API operations (repo scan/import/
+ * starter-spec/connect, webhook test sends). Keyed by an opaque string like
+ * `scan:<workspaceId>`; `windowStart` anchors the current window and `count`
+ * is the requests seen in it. Enforced atomically in `lib/rate-limit.ts`.
+ * Operational data, owner connection only (no RLS).
+ */
+export const operationLimits = pgTable("operation_limits", {
+  key: text("key").primaryKey(),
+  count: integer("count").notNull(),
+  windowStart: timestamp("window_start", { withTimezone: true }).notNull().defaultNow(),
 });
 
 /**

@@ -3,6 +3,7 @@ import { and, eq, repositories } from "@specboard/db";
 import { getDb } from "@/lib/db";
 import { authorizeOrgAdmin } from "@/lib/auth-session";
 import { createStarterSpec } from "@/lib/github-sync";
+import { enforceQuota, QUOTAS } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +24,9 @@ export async function POST(req: Request) {
       { status: 501 },
     );
   }
+
+  const limited = await enforceQuota(db, QUOTAS.starterSpec, authz.scope.workspaceId);
+  if (limited) return limited;
 
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
   const repoId = typeof body?.repoId === "string" ? body.repoId.trim() : "";

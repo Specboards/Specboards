@@ -104,6 +104,7 @@ function createAuth(url: string) {
         oauthApplication: schema.oauthApplications,
         oauthAccessToken: schema.oauthAccessTokens,
         oauthConsent: schema.oauthConsents,
+        rateLimit: schema.rateLimits,
       },
     }),
     // OAuth 2.1 provider for the hosted MCP endpoint (/api/mcp): MCP clients
@@ -257,10 +258,12 @@ function createAuth(url: string) {
     },
     // Throttle brute force against the auth surface. Defaults cover every
     // /api/auth/* route; the custom rules clamp the credential-guessing and
-    // account-enumeration paths harder. Memory-backed (per instance), which is
-    // a reasonable floor; a shared store can come later if we scale out.
+    // account-enumeration paths harder. Database-backed (the `rate_limits`
+    // table) rather than process memory, so the limits hold consistently even
+    // if the hosted app scales past one instance.
     rateLimit: {
       enabled: true,
+      storage: "database",
       window: 60,
       max: 120,
       customRules: {

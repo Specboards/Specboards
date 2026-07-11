@@ -4,22 +4,55 @@ import { NextResponse, type NextRequest } from "next/server";
 const GITHUB_SETUP_PATH = "/api/v1/github/setup";
 
 /**
- * Middleware. Two jobs:
+ * Build the per-request Content-Security-Policy. `script-src` carries a
+ * per-request nonce plus `strict-dynamic` and NO `'unsafe-inline'`, so only
+ * Next's own nonce-tagged bootstrap (and the chunks it loads) can execute:
+ * an injected inline `<script>` is refused by the browser. `style-src` keeps
+ * `'unsafe-inline'` for now (Tailwind + inline styles); narrowing it is a
+ * separate follow-up and isn't required to contain script injection.
+ */
+function contentSecurityPolicy(nonce: string): string {
+  return [
+    "default-src 'self'",
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: https://avatars.githubusercontent.com https://*.githubusercontent.com",
+    "font-src 'self' data:",
+    "connect-src 'self'",
+    "frame-ancestors 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "object-src 'none'",
+  ].join("; ");
+}
+
+/** A fresh base64 nonce for the CSP (edge-runtime safe: Web Crypto + btoa). */
+function newNonce(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return btoa(String.fromCharCode(...bytes));
+}
+
+/**
+ * Middleware. Three jobs:
  *
  * 1. Normalize a stray trailing space in the GitHub App's hand-configured
  *    "Setup URL". A space there makes GitHub redirect to
  *    `/api/v1/github/setup%20?installation_id=…`, a path segment that doesn't
  *    match the real route, so the admin hits a 404 mid-install. We catch any
  *    trailing-whitespace variant and redirect to the canonical route, keeping
- *    the `?installation_id=…&setup_action=…` query intact. The self-host
- *    manifest flow sets this URL programmatically, so only the manually
- *    configured hosted App can drift; this is the safety net for it.
+ *    the `?installation_id=…&setup_action=…` query intact.
  *
- * 2. Inject the active org slug (the first path segment) as the `x-org-slug`
+ * 2. Emit a nonce-based Content-Security-Policy. The nonce is generated here,
+ *    threaded to the request as `x-nonce` (Next reads the request CSP header to
+ *    tag its inline bootstrap, and the layout reads `x-nonce` for next-themes),
+ *    and set on the response. This is per-request, so it lives in middleware
+ *    rather than the static `next.config` headers.
+ *
+ * 3. Inject the active org slug (the first path segment) as the `x-org-slug`
  *    request header so server code can resolve the tenant without threading
  *    `params.org` through every page (ADR 0001, D3). Authority still comes from
- *    a validated membership in `requireWorkspaceAccess` — this header is only a
- *    hint. API routes resolve their own scope, so they're left untouched.
+ *    a validated membership in `requireWorkspaceAccess` — this is only a hint.
  */
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
@@ -40,15 +73,21 @@ export function middleware(req: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // API routes resolve their own scope; don't inject the org-slug hint for them.
-  if (pathname.startsWith("/api/")) {
-    return NextResponse.next();
+  const nonce = newNonce();
+  const csp = contentSecurityPolicy(nonce);
+
+  const headers = new Headers(req.headers);
+  headers.set("x-nonce", nonce);
+  // Next reads the request-side CSP to nonce-tag its own inline scripts.
+  headers.set("content-security-policy", csp);
+  // API routes resolve their own scope; only pages need the org-slug hint.
+  if (!pathname.startsWith("/api/")) {
+    headers.set("x-org-slug", pathname.split("/")[1] ?? "");
   }
 
-  const slug = pathname.split("/")[1] ?? "";
-  const headers = new Headers(req.headers);
-  headers.set("x-org-slug", slug);
-  return NextResponse.next({ request: { headers } });
+  const res = NextResponse.next({ request: { headers } });
+  res.headers.set("content-security-policy", csp);
+  return res;
 }
 
 export const config = {

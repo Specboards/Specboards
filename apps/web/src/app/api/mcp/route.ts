@@ -1,4 +1,10 @@
 import { handleMcpMessage, resolveMcpAuth, rpcError } from "@/lib/mcp/rpc";
+import { logSecurityEvent } from "@/lib/security-log";
+
+/** Reject bodies larger than this before parsing (JSON-RPC calls are small). */
+const MAX_BODY_BYTES = 1_000_000; // 1 MB
+/** Cap JSON-RPC batch length so one request can't fan out unbounded work. */
+const MAX_BATCH = 50;
 
 /**
  * POST /api/mcp - the hosted Model Context Protocol endpoint. Coding agents
@@ -44,11 +50,32 @@ function unauthorized(req: Request): Response {
 }
 
 export async function POST(req: Request) {
+  // Bound the body before reading it into memory. Trust the header when present
+  // (Next/undici enforce it); the read below is the backstop for a lying one.
+  const declared = Number(req.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) {
+    logSecurityEvent("request-oversized", { endpoint: "mcp", bytes: declared });
+    return Response.json(rpcError(null, -32600, "Request too large"), { status: 413 });
+  }
+
+  const raw = await req.text();
+  if (raw.length > MAX_BODY_BYTES) {
+    logSecurityEvent("request-oversized", { endpoint: "mcp", bytes: raw.length });
+    return Response.json(rpcError(null, -32600, "Request too large"), { status: 413 });
+  }
+
   let body: unknown;
   try {
-    body = await req.json();
+    body = JSON.parse(raw);
   } catch {
     return Response.json(rpcError(null, -32700, "Parse error"));
+  }
+
+  if (Array.isArray(body) && body.length > MAX_BATCH) {
+    logSecurityEvent("batch-oversized", { endpoint: "mcp", size: body.length });
+    return Response.json(rpcError(null, -32600, `Batch too large (max ${MAX_BATCH})`), {
+      status: 413,
+    });
   }
 
   const auth = await resolveMcpAuth(req);

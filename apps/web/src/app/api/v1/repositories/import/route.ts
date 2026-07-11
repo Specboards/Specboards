@@ -3,6 +3,7 @@ import { eq, repositories } from "@specboard/db";
 import { getDb } from "@/lib/db";
 import { authorizeOrgAdmin } from "@/lib/auth-session";
 import { syncRepository, type SyncSummary } from "@/lib/github-sync";
+import { enforceQuota, QUOTAS } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +25,9 @@ export async function POST(req: Request) {
       { status: 501 },
     );
   }
+
+  const limited = await enforceQuota(db, QUOTAS.import, authz.scope.workspaceId);
+  if (limited) return limited;
 
   const repos = await db
     .select()

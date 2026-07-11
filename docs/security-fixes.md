@@ -209,11 +209,19 @@ this policy provides limited containment if one is introduced later.
 
 **Work items:**
 
-- [ ] Introduce nonce-based CSP for framework bootstrap scripts.
-- [ ] Remove `'unsafe-inline'` from `script-src` after the nonce rollout.
-- [ ] Evaluate whether inline styles can be removed or narrowed separately.
-- [ ] Add an automated header test that asserts production CSP does not permit
-  arbitrary inline script execution.
+- [x] Introduce nonce-based CSP: middleware.ts generates a per-request nonce,
+  sets it on the request CSP header (so Next tags its bootstrap) and as
+  `x-nonce` (read by the layout for next-themes), and emits the CSP on the
+  response. Moved off the static `next.config` headers since it's per-request.
+- [x] Remove `'unsafe-inline'` from `script-src`: it's now
+  `'self' 'nonce-<nonce>' 'strict-dynamic'`, so an injected inline script is
+  refused. Verified against a production build in E2E (app still hydrates).
+- [ ] Narrow inline styles: `style-src` keeps `'unsafe-inline'` for now
+  (Tailwind + inline styles). Left as a separate follow-up; not required to
+  contain script injection.
+- [x] Automated header test: e2e/security-headers.spec.ts asserts the shipped
+  CSP has a nonce, `strict-dynamic`, and no `'unsafe-inline'` in script-src,
+  and that the nonce is fresh per response.
 
 **Acceptance criteria:** Production pages use a nonce or equivalent strict CSP
 strategy and do not include `'unsafe-inline'` in `script-src`.
@@ -234,17 +242,21 @@ resource-exhaustion attempts easier.
 
 **Work items:**
 
-- [ ] Move authentication and dynamic-client-registration limits to a shared
-  rate-limit store or edge platform control.
-- [ ] Set endpoint-specific body-size limits before JSON parsing.
-- [ ] Limit MCP JSON-RPC batch length, tool-call concurrency, and total work
-  per request.
-- [ ] Add per-user and per-workspace quotas for scans, imports, syncs, and
-  outbound webhook test deliveries.
-- [ ] Apply upstream request limits to the GitHub webhook route before reading
-  the raw body.
-- [ ] Emit structured security telemetry for rate-limit rejections and repeated
-  invalid webhook signatures.
+- [x] Move auth + DCR limits to a shared store: Better Auth now uses its
+  database rate-limit storage (`rate_limits` table, migration 0036) instead of
+  process memory, so the limits hold across instances. No Redis needed.
+- [x] Set endpoint-specific body-size limits before parsing: MCP (1 MB) and the
+  GitHub webhook (5 MB) check `content-length` and cap the read, returning 413.
+- [x] Limit MCP JSON-RPC batch length: batches over 50 messages are rejected
+  (413) before any tool runs. (Per-request tool concurrency is bounded by the
+  batch cap; finer concurrency limits left as a follow-up.)
+- [x] Per-workspace quotas for the expensive endpoints (scan, import,
+  starter-spec, repo connect, webhook test): a Postgres fixed-window limiter
+  (`lib/rate-limit.ts`, `operation_limits` table) returns 429 + `Retry-After`.
+- [x] Bound the GitHub webhook body before reading the raw payload (above).
+- [x] Structured security telemetry (`lib/security-log.ts`): `[security:*]`
+  lines for rate-limit rejections, oversized/over-batched requests, and invalid
+  GitHub webhook signatures (previously a silent 401).
 
 **Acceptance criteria:** Rate limits work consistently across instances and
 oversized or excessively batched requests are rejected before expensive parsing

@@ -10,6 +10,10 @@ import { and, eq, featureGithubLinks, githubInstallations, type Database } from 
 
 import { getDb } from "@/lib/db";
 import { getWebhookSecret } from "@/lib/github-app";
+import { logSecurityEvent } from "@/lib/security-log";
+
+/** GitHub webhook payloads are well under this; reject larger before reading. */
+const MAX_WEBHOOK_BYTES = 5_000_000; // 5 MB
 import { repoGlobs, resolveRepositories, syncRepository } from "@/lib/github-sync";
 
 export const dynamic = "force-dynamic";
@@ -62,11 +66,30 @@ export async function POST(req: Request) {
     );
   }
 
+  // Bound the body before reading it in (defends against a memory-exhaustion
+  // delivery ahead of the HMAC check).
+  const declared = Number(req.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > MAX_WEBHOOK_BYTES) {
+    logSecurityEvent("request-oversized", { endpoint: "github-webhook", bytes: declared });
+    return Response.json({ error: "Payload too large." }, { status: 413 });
+  }
+
   // Raw body is required: re-serializing parsed JSON would change the bytes the
   // HMAC was computed over.
   const raw = await req.text();
+  if (raw.length > MAX_WEBHOOK_BYTES) {
+    logSecurityEvent("request-oversized", { endpoint: "github-webhook", bytes: raw.length });
+    return Response.json({ error: "Payload too large." }, { status: 413 });
+  }
   const signature = req.headers.get("x-hub-signature-256") ?? "";
   if (!verifyWebhookSignature(raw, signature, secret)) {
+    // Repeated failures here mean either a secret mismatch or someone probing
+    // the endpoint; make it greppable rather than a silent 401.
+    logSecurityEvent("webhook-signature-invalid", {
+      endpoint: "github-webhook",
+      event: req.headers.get("x-github-event") ?? "unknown",
+      delivery: req.headers.get("x-github-delivery") ?? "none",
+    });
     return Response.json({ error: "Invalid signature." }, { status: 401 });
   }
 

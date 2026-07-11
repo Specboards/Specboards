@@ -1,24 +1,10 @@
 /** @type {import('next').NextConfig} */
 
-// Baseline security headers applied to every response. CSP uses `unsafe-inline`
-// for scripts/styles because Next injects inline bootstrap without nonces;
-// tightening to a nonce-based policy is a follow-up. `frame-ancestors 'none'`
-// (plus X-Frame-Options) blocks clickjacking of the authenticated app.
-const CSP = [
-  "default-src 'self'",
-  "script-src 'self' 'unsafe-inline'",
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: https://avatars.githubusercontent.com https://*.githubusercontent.com",
-  "font-src 'self' data:",
-  "connect-src 'self'",
-  "frame-ancestors 'none'",
-  "base-uri 'self'",
-  "form-action 'self'",
-  "object-src 'none'",
-].join("; ");
-
+// Baseline security headers applied to every response. The Content-Security-
+// Policy is NOT here: it carries a per-request nonce, so it's emitted from
+// middleware.ts instead. `frame-ancestors 'none'` (plus X-Frame-Options)
+// blocks clickjacking of the authenticated app.
 const securityHeaders = [
-  { key: "Content-Security-Policy", value: CSP },
   {
     key: "Strict-Transport-Security",
     value: "max-age=63072000; includeSubDomains; preload",

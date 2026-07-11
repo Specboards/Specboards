@@ -1,6 +1,7 @@
 import { getDb } from "@/lib/db";
 import { authorizeOrgAdmin } from "@/lib/auth-session";
 import { scanWorkspaceSpecs } from "@/lib/github-sync";
+import { enforceQuota, QUOTAS } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +23,9 @@ export async function GET(req: Request) {
       { status: 501 },
     );
   }
+
+  const limited = await enforceQuota(db, QUOTAS.scan, authz.scope.workspaceId);
+  if (limited) return limited;
 
   const repos = await scanWorkspaceSpecs(db, authz.scope.workspaceId);
   const totalSpecs = repos.reduce((sum, r) => sum + r.specs.length, 0);

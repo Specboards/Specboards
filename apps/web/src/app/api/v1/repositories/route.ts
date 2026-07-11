@@ -6,6 +6,7 @@ import { authorizeOrgAdmin, resolveReadScope } from "@/lib/auth-session";
 import { getGithubApp } from "@/lib/github-app";
 import { resolveWorkspaceInstallation } from "@/lib/github-connect";
 import { syncRepository, type SyncSummary } from "@/lib/github-sync";
+import { enforceQuota, QUOTAS } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -86,6 +87,9 @@ export async function POST(req: Request) {
     );
   }
   const workspaceId = authz.scope.workspaceId;
+
+  const limited = await enforceQuota(db, QUOTAS.connectRepo, workspaceId);
+  if (limited) return limited;
 
   const parsed = parseRegisterBody(await req.json().catch(() => null));
   if (!parsed) {

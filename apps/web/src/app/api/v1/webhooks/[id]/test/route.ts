@@ -1,5 +1,6 @@
 import { authorizeOrgAdmin } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
+import { enforceQuota, QUOTAS } from "@/lib/rate-limit";
 import { sendTestEvent } from "@/lib/webhooks-service";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +23,10 @@ export async function POST(
   if (!authz.ok) return authz.response;
   const db = getDb();
   if (!db || !authz.scope) return NO_DB;
+
+  const limited = await enforceQuota(db, QUOTAS.webhookTest, authz.scope.workspaceId);
+  if (limited) return limited;
+
   const { id } = await params;
 
   const result = await sendTestEvent(db, authz.scope.workspaceId, id);
