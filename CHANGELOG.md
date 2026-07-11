@@ -5,6 +5,50 @@ All notable changes to Specboard are recorded here. The format is based on
 [Semantic Versioning](https://semver.org/). See [VERSIONING.md](./VERSIONING.md)
 for how and when the version is bumped.
 
+## [0.15.0] - 2026-07-11
+
+Security hardening batch from the July 2026 adversarial source review (see
+`docs/security-fixes.md`). No new product features; these close the P0-P2
+findings.
+
+### Changed
+
+- **API requests now scope to an explicit, validated organization.** Requests
+  carry the active org as an `x-org-slug` header (the browser derives it from
+  the `/{org}/` route; the CLI reads `SPECBOARD_ORG` / `--org`), validated
+  against a real membership. The old "resolve the caller's oldest membership"
+  fallback is gone: a user in more than one org can no longer have a request
+  silently resolve to the wrong tenant, and an ambiguous call is rejected.
+  Single-org and self-host callers are unaffected.
+- **Content-Security-Policy is now nonce-based.** `script-src` uses a
+  per-request nonce with `strict-dynamic` and no longer allows
+  `'unsafe-inline'`, so injected inline scripts are refused.
+- **Auth rate limits are database-backed** (was in-process memory), so they
+  hold consistently across instances.
+
+### Fixed
+
+- **GitHub App installation binding requires proof of account ownership.** The
+  install flow now runs an OAuth identity step and binds an installation only
+  when the signed-in user owns the personal account or is an active admin of
+  the organization it belongs to, closing a takeover where a workspace owner
+  could bind another tenant's installation. Requires `GITHUB_APP_CLIENT_ID` /
+  `GITHUB_APP_CLIENT_SECRET` (hosted) or the in-app manifest flow (self-host).
+- **Database tenant isolation fails closed.** The hosted app refuses to serve
+  tenant data over an RLS-bypassing connection and verifies at boot that its
+  tenant-data role is non-owner, non-superuser, without `BYPASSRLS`.
+- **Webhook SSRF guard hardened** against DNS rebinding (the connection is
+  pinned to the pre-validated address) and against IPv4-mapped/hex IPv6 forms
+  (now judged with a maintained range parser).
+- **Request bounds and quotas.** Body-size limits on the MCP and GitHub webhook
+  routes, a JSON-RPC batch cap, and per-workspace quotas on expensive
+  operations (repo scan/import/starter-spec/connect, webhook test sends).
+- Structured `[security:*]` telemetry for rate-limit rejections, oversized
+  requests, and invalid GitHub webhook signatures.
+
+Migrations 0035 (GitHub install ownership) and 0036 (rate-limit tables),
+applied to test and production.
+
 ## [0.14.0] - 2026-07-08
 
 ### Changed
