@@ -1,71 +1,85 @@
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 
+import ipaddr from "ipaddr.js";
+
 /**
  * SSRF guard for user-supplied webhook URLs. On a hosted multi-tenant app the
  * endpoint URL is attacker-controllable, so a naive `fetch` is a server-side
  * request forgery primitive: it could hit the cloud metadata IP, internal
- * services, or loopback. We require HTTPS, reject URLs whose host is (or
- * resolves to) a private / loopback / link-local / metadata address, and the
- * caller disallows redirects so a 30x can't bounce to a private target.
+ * services, or loopback. We require HTTPS, reject any host that is (or resolves
+ * to) a non-global address, and the sender pins the TCP connection to the exact
+ * address we validated (see `resolveValidatedTarget` + sender.ts) so DNS can't
+ * rebind to a private target between validation and connect.
  *
- * Known residual gap (documented, acceptable for V1): DNS rebinding between this
- * check and the actual connection. Closing it fully means pinning the connection
- * to the validated IP, which the platform `fetch` doesn't expose.
+ * Address classification uses the maintained `ipaddr.js` range parser rather
+ * than hand-rolled range math, so hex/compressed IPv6, IPv4-mapped IPv6 (in
+ * any notation), 6to4, and Teredo forms are all covered.
  */
 
 export type UrlCheck = { ok: true } | { ok: false; reason: string };
 
-/** True if `ip` (v4 or v6 literal) is in a range we must never call out to. */
+/** A resolved, validated address to pin a connection to. */
+export interface PinnedAddress {
+  address: string;
+  /** 4 or 6, as reported by DNS resolution / literal parsing. */
+  family: 4 | 6;
+}
+
+export type TargetResolution =
+  | { ok: true; addresses: PinnedAddress[] }
+  | { ok: false; reason: string };
+
+/**
+ * True if `ip` (v4 or v6 literal) is one we must never call out to. Only
+ * globally-routable unicast is allowed; everything else (loopback, private,
+ * link-local incl. the 169.254.169.254 metadata IP, unique-local, CGNAT,
+ * multicast, reserved, unspecified) is blocked. IPv4-mapped IPv6 is unwrapped
+ * and judged as its embedded IPv4, and transitional embeddings (6to4/Teredo)
+ * are blocked outright since a webhook never needs them.
+ */
 export function isBlockedIp(ip: string): boolean {
-  const kind = isIP(ip);
-  if (kind === 4) return isBlockedIpv4(ip);
-  if (kind === 6) return isBlockedIpv6(ip);
-  return true; // not a parseable IP → treat as blocked
+  let addr: ipaddr.IPv4 | ipaddr.IPv6;
+  try {
+    addr = ipaddr.parse(ip);
+  } catch {
+    return true; // unparseable → treat as blocked
+  }
+
+  if (addr.kind() === "ipv6") {
+    const v6 = addr as ipaddr.IPv6;
+    if (v6.isIPv4MappedAddress()) {
+      // e.g. ::ffff:127.0.0.1 or its hex form ::ffff:7f00:1 — judge the v4.
+      return isBlockedIpv4Range(v6.toIPv4Address());
+    }
+    // Only global unicast v6 is allowed; everything else (incl. 6to4/teredo,
+    // which embed addresses we don't want to reach) is blocked.
+    return v6.range() !== "unicast";
+  }
+
+  return isBlockedIpv4Range(addr as ipaddr.IPv4);
 }
 
-function isBlockedIpv4(ip: string): boolean {
-  const o = ip.split(".").map((n) => Number(n));
-  if (o.length !== 4 || o.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) {
-    return true;
-  }
-  const a = o[0]!;
-  const b = o[1]!;
-  if (a === 0) return true; // 0.0.0.0/8 (incl. "this host")
-  if (a === 10) return true; // 10/8 private
-  if (a === 127) return true; // loopback
-  if (a === 169 && b === 254) return true; // link-local incl. 169.254.169.254 metadata
-  if (a === 172 && b >= 16 && b <= 31) return true; // 172.16/12 private
-  if (a === 192 && b === 168) return true; // 192.168/16 private
-  if (a === 100 && b >= 64 && b <= 127) return true; // 100.64/10 CGNAT
-  if (a >= 224) return true; // multicast / reserved / broadcast
-  return false;
-}
-
-function isBlockedIpv6(ip: string): boolean {
-  const addr = ip.toLowerCase().split("%")[0] ?? ""; // strip any zone id
-  if (addr === "::" || addr === "::1") return true; // unspecified / loopback
-  // IPv4-mapped (::ffff:a.b.c.d) and IPv4-compatible: re-check the v4 part.
-  const mapped = addr.match(/(?:::ffff:)?(\d+\.\d+\.\d+\.\d+)$/);
-  if (mapped?.[1]) return isBlockedIpv4(mapped[1]);
-  const head = addr.split(":")[0] ?? "";
-  if (head.startsWith("fc") || head.startsWith("fd")) return true; // fc00::/7 ULA
-  if (head.startsWith("fe8") || head.startsWith("fe9") || head.startsWith("fea") || head.startsWith("feb")) {
-    return true; // fe80::/10 link-local
-  }
-  if (head.startsWith("ff")) return true; // ff00::/8 multicast
-  return false;
+/** Allow only global unicast IPv4; block every special-use range. */
+function isBlockedIpv4Range(addr: ipaddr.IPv4): boolean {
+  const range = addr.range();
+  // ipaddr.js "unicast" is the only globally-routable class. `private`,
+  // `loopback`, `linkLocal`, `carrierGradeNat`, `broadcast`, `multicast`,
+  // `reserved`, and `unspecified` are all rejected.
+  return range !== "unicast";
 }
 
 /**
- * Validate a webhook target URL: HTTPS only, well-formed, and neither a literal
- * blocked IP nor a hostname that resolves to one. Resolves every A/AAAA record
- * and blocks if any is private (a single public record is not enough to be safe).
+ * Validate a webhook target URL and resolve it to the concrete address(es) a
+ * connection may use: HTTPS only, well-formed, and neither a literal non-global
+ * IP nor a hostname that resolves to one (every A/AAAA record is checked; a
+ * single private answer fails the whole set). Returns the validated addresses
+ * so the caller can pin the connection to exactly what was checked.
+ *
+ * In `SPECBOARD_WEBHOOK_ALLOW_PRIVATE` mode (self-host / e2e) all checks are
+ * skipped and no addresses are returned, so the sender connects normally.
  */
-export async function assertPublicUrl(raw: string): Promise<UrlCheck> {
-  // Self-host / test escape hatch: when set, allow http and private targets so a
-  // self-hosted install can hit internal services (and e2e can hit a local
-  // receiver). OFF by default, so the hosted multi-tenant app stays locked down.
+export async function resolveValidatedTarget(raw: string): Promise<TargetResolution> {
   const allowPrivate = process.env.SPECBOARD_WEBHOOK_ALLOW_PRIVATE === "1";
 
   let url: URL;
@@ -77,18 +91,21 @@ export async function assertPublicUrl(raw: string): Promise<UrlCheck> {
   if (url.protocol !== "https:" && !(allowPrivate && url.protocol === "http:")) {
     return { ok: false, reason: "Webhook URLs must use https." };
   }
-  if (allowPrivate) return { ok: true };
+  if (allowPrivate) return { ok: true, addresses: [] };
+
   const host = url.hostname;
 
-  // Literal IP host: check directly, no DNS.
-  if (isIP(host)) {
-    return isBlockedIp(host)
-      ? { ok: false, reason: "URL points at a private or reserved address." }
-      : { ok: true };
+  // Literal IP host: validate directly, no DNS.
+  const literal = isIP(host);
+  if (literal) {
+    if (isBlockedIp(host)) {
+      return { ok: false, reason: "URL points at a private or reserved address." };
+    }
+    return { ok: true, addresses: [{ address: host, family: literal === 4 ? 4 : 6 }] };
   }
 
-  // Hostname: resolve and reject if any resolved address is blocked.
-  let addrs: { address: string }[];
+  // Hostname: resolve and reject if ANY resolved address is blocked.
+  let addrs: { address: string; family: number }[];
   try {
     addrs = await lookup(host, { all: true });
   } catch {
@@ -100,5 +117,22 @@ export async function assertPublicUrl(raw: string): Promise<UrlCheck> {
       return { ok: false, reason: "Host resolves to a private or reserved address." };
     }
   }
-  return { ok: true };
+  return {
+    ok: true,
+    addresses: addrs.map((a) => ({
+      address: a.address,
+      family: a.family === 6 ? 6 : 4,
+    })),
+  };
+}
+
+/**
+ * Validate a webhook target URL (HTTPS + not private/reserved). Thin wrapper
+ * over {@link resolveValidatedTarget} for callers that only need a yes/no at
+ * save time (see webhooks-service). The delivery path uses the resolved
+ * addresses directly to pin the connection.
+ */
+export async function assertPublicUrl(raw: string): Promise<UrlCheck> {
+  const result = await resolveValidatedTarget(raw);
+  return result.ok ? { ok: true } : { ok: false, reason: result.reason };
 }
