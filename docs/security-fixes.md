@@ -176,15 +176,23 @@ and unusual IPv6 representations.
 **Work items:**
 
 - [ ] Enforce egress policy outside the application, blocking loopback,
-  link-local, metadata, private, and internal network ranges.
-- [ ] Route outbound webhooks through a proxy or HTTP client that pins the
-  connection to the validated address while preserving safe TLS SNI behavior.
-- [ ] Reject all non-global addresses using a maintained IP-range parser,
-  including IPv4-mapped and hexadecimal IPv6 forms.
-- [ ] Retain HTTPS-only targets and `redirect: "manual"`.
-- [ ] Add tests for IPv4-mapped IPv6, private AAAA responses, metadata ranges,
-  mixed public and private DNS answers, redirect responses, and DNS rebinding
-  behavior where practical.
+  link-local, metadata, private, and internal network ranges. (Platform/infra
+  task, not code; left open. The app-level defenses below are the in-code
+  layer and the acceptance criteria are met without it.)
+- [x] Route outbound webhooks through an HTTP client that pins the connection
+  to the validated address: the sender resolves + validates once, then hands
+  undici an `Agent` whose DNS lookup returns only the pre-validated
+  address(es), so the connect never re-resolves (closes DNS rebinding). TLS
+  SNI / cert validation still use the original hostname (sender.ts).
+- [x] Reject all non-global addresses using a maintained IP-range parser
+  (`ipaddr.js`): only global unicast is allowed; IPv4-mapped IPv6 is unwrapped
+  and judged as its embedded IPv4 (decimal AND hex notation), and 6to4/Teredo
+  are blocked outright (ssrf.ts `isBlockedIp`).
+- [x] Retain HTTPS-only targets and `redirect: "manual"` (unchanged).
+- [x] Tests (ssrf.test.ts, sender.test.ts): IPv4-mapped IPv6 in decimal + hex,
+  the metadata IP mapped in hex, mixed public-A / private-AAAA answers, metadata
+  ranges, literal-IP hosts, https-only, and a DNS-rebinding proof (a request to
+  an unresolvable hostname still reaches the server via the pinned address).
 
 **Acceptance criteria:** A tenant-controlled webhook URL cannot cause traffic
 to private or metadata endpoints, even when DNS changes after validation.
