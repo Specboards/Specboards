@@ -4,14 +4,20 @@ import { useState, type ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
-type TabKey = "mcp" | "api-keys" | "webhooks";
+type TabKey = "mcp" | "api-keys" | "webhooks" | "repositories";
 
-const TAB_KEYS: readonly TabKey[] = ["mcp", "api-keys", "webhooks"];
+const TAB_KEYS: readonly TabKey[] = [
+  "mcp",
+  "api-keys",
+  "webhooks",
+  "repositories",
+];
 
 const LABELS: Record<TabKey, string> = {
   mcp: "MCP",
   "api-keys": "API keys",
   webhooks: "Webhooks",
+  repositories: "Repositories",
 };
 
 /**
@@ -25,17 +31,20 @@ export function IntegrationsTabs({
   mcp,
   apiKeys,
   webhooks,
+  repositories,
   initialTab,
 }: {
   mcp: ReactNode;
   apiKeys: ReactNode;
   webhooks: ReactNode;
+  repositories: ReactNode;
   initialTab?: string;
 }) {
   const content: Record<TabKey, ReactNode> = {
     mcp,
     "api-keys": apiKeys,
     webhooks,
+    repositories,
   };
   const start = TAB_KEYS.includes(initialTab as TabKey)
     ? (initialTab as TabKey)

@@ -2922,6 +2922,22 @@ export class DbStore implements FeatureStore {
         })
         .returning();
       if (!row) throw new ProductError("Failed to create product.");
+      // Make the creator an explicit admin of the product they just created.
+      // Org admins already have full access via RLS, but recording membership
+      // keeps them in the product's member list and preserves their standing
+      // if they are later demoted from org admin.
+      await tx
+        .insert(productMembers)
+        .values({
+          workspaceId: ws,
+          productId: row.id,
+          userId: scope!.userId,
+          role: "admin",
+        })
+        .onConflictDoUpdate({
+          target: [productMembers.productId, productMembers.userId],
+          set: { role: "admin" },
+        });
       return {
         id: row.id,
         key: row.key,
@@ -2931,7 +2947,7 @@ export class DbStore implements FeatureStore {
         position: row.position,
         color: row.color,
         itemCount: 0,
-        viewerRole: null,
+        viewerRole: "admin",
       };
     });
   }
