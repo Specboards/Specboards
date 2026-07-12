@@ -3,6 +3,7 @@ import { eq, users, workspaces } from "@specboard/db";
 import { getDb } from "@/lib/db";
 import {
   createWorkItem,
+  deleteWorkItem,
   parseCreateFeatureInput,
   parseFeaturePatch,
   patchFeature,
@@ -333,6 +334,33 @@ export const TOOLS: McpTool[] = [
         tags: updated.tags,
         isDbNative: updated.isDbNative,
       };
+    },
+  },
+  {
+    name: "delete_item",
+    description:
+      "Delete a DB-native work item (an initiative/epic/feature card created " +
+      "with create_item). Its children are re-parented to the root (not " +
+      "deleted) and its relations are cleared automatically. Spec-backed items " +
+      "cannot be deleted here - remove their specs/<slug>/spec.md in git " +
+      "instead. This is irreversible, so confirm the specId with read_item " +
+      "first.",
+    inputSchema: {
+      type: "object",
+      properties: { specId: specIdSchema },
+      required: ["specId"],
+      additionalProperties: false,
+    },
+    write: true,
+    run: async (args, ctx) => {
+      const specId = requireString(args, "specId");
+      const store = await getStore();
+      // Read first so we can echo back what was removed (and give a clear
+      // error before attempting the delete if the id is unknown).
+      const existing = await store.getFeature(specId, ctx.scope);
+      if (!existing) throw new Error(`No item with spec id ${specId}.`);
+      await deleteWorkItem(specId, ctx.scope);
+      return { specId, title: existing.title, deleted: true };
     },
   },
   {

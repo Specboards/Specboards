@@ -24,7 +24,9 @@ const INSTRUCTIONS =
   "with update_spec_content (commits to git), and break a card down by " +
   "creating child specs with create_spec, then update_item(parentSpecId) to " +
   "nest each under the card. To roll changes up, read the child specs and " +
-  "write a summary into the parent card with update_item(details).";
+  "write a summary into the parent card with update_item(details). Remove a " +
+  "DB-native card you no longer need with delete_item (spec-backed items are " +
+  "deleted in git, not here).";
 
 export type McpAuth =
   | { ok: true; ctx: McpContext }
