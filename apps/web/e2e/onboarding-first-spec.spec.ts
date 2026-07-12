@@ -26,7 +26,10 @@ test.describe("onboarding: guided first spec", () => {
     await page.getByRole("button", { name: /Create my first spec/i }).click();
 
     // The starter spec was committed (to the fake) and the card is on the board.
-    await expect(page.getByText(/Committed/i)).toBeVisible();
+    // Match "Committed specs/..." specifically: /settings/repositories now
+    // redirects into the tabbed Integrations page, where the (hidden) MCP panel
+    // also contains the word "committed", so a bare /Committed/i is ambiguous.
+    await expect(page.getByText(/Committed specs\//i)).toBeVisible();
     await expect(page.getByText("specs/payments-onboarding/spec.md")).toBeVisible();
 
     // The fake repo now actually holds the committed file.
