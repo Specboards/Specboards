@@ -5,6 +5,31 @@ All notable changes to Specboard are recorded here. The format is based on
 [Semantic Versioning](https://semver.org/). See [VERSIONING.md](./VERSIONING.md)
 for how and when the version is bumped.
 
+## [0.16.0] - 2026-07-12
+
+Administrative polish surfaced while dogfooding Specboard on Specboard, plus a
+new MCP tool.
+
+### Added
+
+- **`delete_item` MCP tool.** Coding agents can now delete a DB-native card
+  (initiative/epic/feature) through the hosted MCP, not just create and update.
+  It wraps the same service path as the REST delete, so authorization, child
+  re-parenting, relation cleanup, and webhook emission are identical.
+  Spec-backed items are rejected (they are deleted in git).
+
+### Changed
+
+- **Creating a product now makes you its admin.** The person who creates a
+  product is recorded as an explicit product admin, so they appear in the
+  product's member list and keep that standing even if later demoted from org
+  admin.
+- **Repository management moved under Settings - Integrations.** Connected
+  repositories are now a fourth tab (alongside MCP, API keys, and Webhooks)
+  rather than a separate settings page, since a repository connection is a type
+  of integration. The old `/settings/repositories` route redirects, preserving
+  the GitHub install/callback banners.
+
 ## [0.15.0] - 2026-07-11
 
 Security hardening batch from the July 2026 adversarial source review (see
