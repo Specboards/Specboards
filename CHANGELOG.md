@@ -5,6 +5,32 @@ All notable changes to Specboard are recorded here. The format is based on
 [Semantic Versioning](https://semver.org/). See [VERSIONING.md](./VERSIONING.md)
 for how and when the version is bumped.
 
+## [0.17.0] - 2026-07-12
+
+Make browser sign-in the reliable way to connect an MCP client. The OAuth
+consent screen now scopes a connection to the right identity and workspace, so
+users no longer need a manual `x-org-slug` header or API key just to connect.
+
+### Added
+
+- **Workspace picker on the MCP consent screen.** A user who belongs to more
+  than one workspace picks which one a connection targets when they approve it.
+  The choice is stored per connection (keyed by user and OAuth client) and the
+  hosted MCP endpoint reads it when no explicit `x-org-slug` header is present.
+  An explicit header still wins, so one client can be pointed at two workspaces
+  from two configs. Membership is re-validated on every request, so a binding to
+  a workspace the user has left fails closed rather than granting access.
+
+### Changed
+
+- **The MCP consent screen confirms who you are.** It now shows "Signed in as
+  {email}" with a "Not you? Switch account" link, so the account a connection
+  binds to is a deliberate confirmation rather than easy-to-miss fine print.
+- **A workspace-less account can no longer complete MCP consent.** If the
+  signed-in account belongs to no workspace, the screen prompts you to switch
+  accounts instead of minting a token that fails every later call with "you do
+  not belong to a workspace."
+
 ## [0.16.0] - 2026-07-12
 
 Administrative polish surfaced while dogfooding Specboard on Specboard, plus a
