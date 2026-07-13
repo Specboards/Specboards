@@ -5,6 +5,16 @@ All notable changes to Specboard are recorded here. The format is based on
 [Semantic Versioning](https://semver.org/). See [VERSIONING.md](./VERSIONING.md)
 for how and when the version is bumped.
 
+## [0.18.2] - 2026-07-13
+
+### Changed
+
+- **New brand mark ("Slotted S") across all app icons.** Regenerated the
+  favicon, app icon, Apple touch icon, OpenGraph image, and the in-app sidebar /
+  auth / OAuth-consent mark (`public/brand/specboard-mark.png`) from the Gesso
+  design system: a green rounded tile with a white "S" built from three board
+  lanes and two offset connectors (the faded middle lane nods to "in progress").
+
 ## [0.18.1] - 2026-07-13
 
 ### Changed
