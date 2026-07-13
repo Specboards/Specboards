@@ -5,6 +5,31 @@ All notable changes to Specboard are recorded here. The format is based on
 [Semantic Versioning](https://semver.org/). See [VERSIONING.md](./VERSIONING.md)
 for how and when the version is bumped.
 
+## [0.18.0] - 2026-07-13
+
+Expose releases through the MCP server so agents can organize the backlog into
+versions, and consolidate the repo's implementation docs into Specboard itself.
+
+### Added
+
+- **`list_releases` and `create_release` MCP tools.** Agents can now read a
+  workspace's releases (id, name, status, start/target dates, notes, item count)
+  and create new ones, then schedule work into a release via
+  `update_item(releaseId)`. `create_release` is owner-only, mirroring the
+  admin-gated `POST /api/v1/releases` route; both are thin adapters over the same
+  service layer the REST API uses, so authorization and validation are identical.
+
+### Changed
+
+- **README refreshed for how the app works today.** Documents the hosted
+  `/api/mcp` OAuth 2.1 endpoint as the primary way agents connect (with the
+  current tool set) alongside the local stdio server, and clarifies that agents
+  edit spec content over MCP (committing to git) while the in-app spec editor is
+  still stubbed.
+- **Implementation docs consolidated into Specboard.** The product and platform
+  backlog now lives in the Specboard workspace; shipped and migrated planning
+  docs moved to `docs/archive/`, and `docs/BACKLOG.md` is now a pointer.
+
 ## [0.17.0] - 2026-07-12
 
 Make browser sign-in the reliable way to connect an MCP client. The OAuth
