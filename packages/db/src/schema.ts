@@ -1061,6 +1061,39 @@ export const oauthConsents = pgTable(
 );
 
 /**
+ * The workspace an MCP OAuth connection acts in, chosen on the consent screen.
+ * Keyed by (userId, clientId): one connection of a given OAuth client for a
+ * given user targets exactly one workspace. The `/api/mcp` resolver reads this
+ * when the request carries no explicit `x-org-slug` header, so a multi-org user
+ * who picked a workspace at consent time never has to configure a header. The
+ * header still wins when present, so a single client can be pointed at two
+ * workspaces from two configs if needed. Membership is re-validated on every
+ * request, so a stale binding to a workspace the user has left resolves to no
+ * access rather than silently granting it.
+ */
+export const mcpWorkspaceBindings = pgTable(
+  "mcp_workspace_bindings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    clientId: text("client_id")
+      .notNull()
+      .references(() => oauthApplications.clientId, { onDelete: "cascade" }),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("mcp_workspace_bindings_user_client_key").on(table.userId, table.clientId),
+    index("mcp_workspace_bindings_workspace_idx").on(table.workspaceId),
+  ],
+);
+
+/**
  * Personal API keys for programmatic access (the CLI). We only ever store the
  * SHA-256 `keyHash`; the plaintext key is shown once at creation. `prefix` is
  * the leading, non-secret slice kept for display ("sb_live_a1b2c3…"). Scoped to

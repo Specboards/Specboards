@@ -2,9 +2,10 @@ import { redirect } from "next/navigation";
 
 import { eq, schema } from "@specboard/db";
 
-import { OAuthConsentForm } from "@/components/oauth-consent-form";
+import { NoWorkspaceNotice, OAuthConsentForm } from "@/components/oauth-consent-form";
 import { getServerSessionUser } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
+import { consentWorkspaceOptions } from "@/lib/mcp/workspace-binding";
 
 export const metadata = { title: "Authorize access · Specboard" };
 export const dynamic = "force-dynamic";
@@ -44,12 +45,22 @@ export default async function OAuthConsentPage({
     : undefined;
   if (!client) redirect("/");
 
+  // Which workspace will the connection act in? The user picks when they belong
+  // to more than one; a zero-workspace account can't authorize anything useful,
+  // so we surface a switch-account prompt instead of a dead authorization.
+  const workspaces = db ? await consentWorkspaceOptions(db, user.id) : [];
+  if (workspaces.length === 0) {
+    return <NoWorkspaceNotice userEmail={user.email} />;
+  }
+
   return (
     <OAuthConsentForm
       clientName={client.name ?? "An MCP client"}
+      clientId={clientId}
       userEmail={user.email}
       scopes={scope.split(" ").filter(Boolean)}
       consentCode={consentCode}
+      workspaces={workspaces}
     />
   );
 }

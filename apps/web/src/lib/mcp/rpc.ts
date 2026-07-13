@@ -4,6 +4,7 @@ import { getDb } from "@/lib/db";
 import { resolveApiMembership } from "@/lib/workspace";
 
 import { TOOLS, type McpContext } from "./tools";
+import { boundWorkspaceSlug } from "./workspace-binding";
 
 /**
  * A minimal, stateless MCP server over the Streamable HTTP transport, spoken as
@@ -68,15 +69,19 @@ export async function resolveMcpAuth(req: Request): Promise<McpAuth> {
     return { ok: false, unauthenticated: false, message: NO_WORKSPACE_MESSAGE };
   }
 
-  // No sb_ key or session: check for an OAuth access token. The org comes from
-  // an `x-org-slug` header the MCP client sets (or the caller's sole membership
-  // when unambiguous); a multi-org caller who names none is rejected rather
-  // than silently pinned to their oldest org (the multi-org fix).
+  // No sb_ key or session: check for an OAuth access token. The org is resolved
+  // in priority order: an explicit `x-org-slug` header the MCP client sets, then
+  // the workspace the user picked for this client on the consent screen, then
+  // their sole membership when unambiguous. A multi-org caller who supplies none
+  // of these is rejected rather than silently pinned to their oldest org.
   const oauth = await resolveOAuthUser(req);
   if (oauth) {
     const db = getDb();
+    const orgSlug =
+      orgSlugFromRequest(req) ??
+      (db ? await boundWorkspaceSlug(db, oauth.userId, oauth.clientId) : null);
     const resolved = db
-      ? await resolveApiMembership(db, oauth.userId, orgSlugFromRequest(req))
+      ? await resolveApiMembership(db, oauth.userId, orgSlug)
       : null;
     if (!resolved || !resolved.ok) {
       const message =
@@ -110,14 +115,16 @@ export async function resolveMcpAuth(req: Request): Promise<McpAuth> {
  * oauth_access_tokens. Returns the token's user, or `null` when the header is
  * absent, not an OAuth token, or expired (getMcpSession checks expiry).
  */
-async function resolveOAuthUser(req: Request): Promise<{ userId: string } | null> {
+async function resolveOAuthUser(
+  req: Request,
+): Promise<{ userId: string; clientId: string } | null> {
   const auth = getAuth();
   if (!auth) return null;
   const bearer = req.headers.get("authorization");
   if (!bearer?.startsWith("Bearer ")) return null;
   const session = await auth.api.getMcpSession({ headers: req.headers });
   if (!session?.userId) return null;
-  return { userId: session.userId };
+  return { userId: session.userId, clientId: session.clientId };
 }
 
 /**
