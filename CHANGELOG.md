@@ -5,6 +5,20 @@ All notable changes to Specboard are recorded here. The format is based on
 [Semantic Versioning](https://semver.org/). See [VERSIONING.md](./VERSIONING.md)
 for how and when the version is bumped.
 
+## [0.18.3] - 2026-07-13
+
+### Changed
+
+- **Sidebar shows the two-tone "Specboard" wordmark** (Spec in foreground,
+  board muted) next to the brand mark, replacing the mark-only header.
+
+### Added
+
+- **Collapsible left navigation.** A toggle collapses the sidebar to an icon
+  rail (just the brand tile mark plus the area icons, with hover tooltips) and
+  expands it back to the full wordmark + labels. The choice persists per browser
+  (`localStorage`). Collapsed, the profile footer shows the avatar only.
+
 ## [0.18.2] - 2026-07-13
 
 ### Changed
