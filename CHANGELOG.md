@@ -5,6 +5,15 @@ All notable changes to Specboard are recorded here. The format is based on
 [Semantic Versioning](https://semver.org/). See [VERSIONING.md](./VERSIONING.md)
 for how and when the version is bumped.
 
+## [0.18.1] - 2026-07-13
+
+### Changed
+
+- **Roadmap releases now lay out as horizontal, laterally-scrolling columns**
+  instead of a wrapping grid that stacked them down the page. Matches the status
+  Board's kanban idiom (fixed-width columns, `overflow-x` scroll), so adding a
+  release pushes the row sideways rather than reflowing onto new rows.
+
 ## [0.18.0] - 2026-07-13
 
 Expose releases through the MCP server so agents can organize the backlog into
