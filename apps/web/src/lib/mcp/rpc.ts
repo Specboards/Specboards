@@ -20,7 +20,9 @@ const INSTRUCTIONS =
   "Specboard exposes your product backlog: initiatives, epics, and " +
   "git-backed feature specs, grouped into products. Call whoami first to " +
   "learn your role and the hierarchy levels. Use list_items / read_item to " +
-  "review work, update_item to change metadata or a DB-native card's body, " +
+  "review work, list_statuses (or read_item's allowedTransitions) to learn " +
+  "which stage keys a status change accepts, update_item to change metadata " +
+  "or a DB-native card's body, " +
   "and create_item to add higher-level cards. Edit an actual spec's Markdown " +
   "with update_spec_content (commits to git), and break a card down by " +
   "creating child specs with create_spec, then update_item(parentSpecId) to " +
@@ -166,6 +168,65 @@ function toolError(text: string) {
   return { content: [{ type: "text", text: `Error: ${text}` }], isError: true };
 }
 
+/**
+ * Cap how long a single tool call may run. A wedged dependency (a hung GitHub
+ * git call in a write tool, a stalled query) otherwise holds the POST open until
+ * the *client's* timeout fires, which the agent reports as the server
+ * "disconnecting". Returning a JSON-RPC error keeps the connection healthy and
+ * tells the model what happened. MCP clients typically allow ~60s; stay under.
+ */
+const TOOL_TIMEOUT_MS = 30_000;
+
+/**
+ * A dropped/reaped DB socket surfaces as one of these on the first query after
+ * an idle gap. postgres.js reconnects for the *next* query, so a single retry of
+ * a read clears it transparently. Writes are not retried: a mutation may have
+ * committed before the socket died, and replaying it could double-apply.
+ */
+function isTransientDbError(err: unknown): boolean {
+  const e = err as { code?: unknown; message?: unknown } | null;
+  const code = typeof e?.code === "string" ? e.code : "";
+  const msg = typeof e?.message === "string" ? e.message : "";
+  return (
+    code === "ECONNRESET" ||
+    code === "ETIMEDOUT" ||
+    code === "CONNECTION_CLOSED" ||
+    code === "CONNECTION_ENDED" ||
+    code === "CONNECTION_DESTROYED" ||
+    code === "CONNECT_TIMEOUT" ||
+    /connection.*(closed|reset|ended|terminated|destroyed)/i.test(msg) ||
+    /ECONNRESET|ETIMEDOUT/.test(msg)
+  );
+}
+
+/** Reject if `p` has not settled within `ms`; always clears its timer. */
+async function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`Tool "${label}" timed out after ${ms}ms.`)),
+      ms,
+    );
+  });
+  try {
+    return await Promise.race([p, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * One greppable line per tool call so mid-session failures are visible in the
+ * Fly logs (they were invisible before, which is why these disconnects were hard
+ * to diagnose). Shaped like `logSecurityEvent`: `[mcp:tool] key=value ...`.
+ */
+function logMcpCall(fields: Record<string, string | number | boolean>): void {
+  const parts = Object.entries(fields).map(
+    ([k, v]) => `${k}=${String(v).replace(/\s+/g, "_")}`,
+  );
+  console.info(`[mcp:tool] ${parts.join(" ")}`);
+}
+
 function initializeResult(params: unknown) {
   const requested = (params as { protocolVersion?: unknown })?.protocolVersion;
   const version =
@@ -205,8 +266,23 @@ async function handleToolCall(
     rawArgs && typeof rawArgs === "object" && !Array.isArray(rawArgs)
       ? (rawArgs as Record<string, unknown>)
       : {};
+  const started = Date.now();
+  const attempt = () =>
+    withTimeout(tool.run(args, auth.ctx), TOOL_TIMEOUT_MS, tool.name);
   try {
-    const out = await tool.run(args, auth.ctx);
+    let out: unknown;
+    try {
+      out = await attempt();
+    } catch (err) {
+      // Retry a read once when the DB socket was reaped mid-idle; never a write.
+      if (!tool.write && isTransientDbError(err)) {
+        logMcpCall({ tool: tool.name, retry: "transient_db" });
+        out = await attempt();
+      } else {
+        throw err;
+      }
+    }
+    logMcpCall({ tool: tool.name, ok: true, ms: Date.now() - started });
     return ok(id, {
       content: [
         {
@@ -216,6 +292,12 @@ async function handleToolCall(
       ],
     });
   } catch (err) {
+    logMcpCall({
+      tool: tool.name,
+      ok: false,
+      ms: Date.now() - started,
+      err: (err as Error).message,
+    });
     return ok(id, toolError((err as Error).message));
   }
 }

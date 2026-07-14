@@ -1,6 +1,7 @@
 import { eq, users, workspaces } from "@specboard/db";
 
 import { getDb } from "@/lib/db";
+import { resolveWorkflowFor } from "@/lib/repo-config";
 import {
   createRelease,
   createWorkItem,
@@ -147,6 +148,33 @@ export const TOOLS: McpTool[] = [
     },
   },
   {
+    name: "list_statuses",
+    description:
+      "List the workspace's status workflow: the ordered stage keys (use these " +
+      "exact keys with update_item), each stage's display label, and the moves " +
+      "allowed out of it. The default workflow permits only single-step moves " +
+      "(e.g. `backlog` reaches only `defining` or `archived`), so to advance " +
+      "several stages call update_item once per step. Call this before changing " +
+      "an item's status so you never have to guess a stage key.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    write: false,
+    run: async (_args, ctx) => {
+      const workflow = await resolveWorkflowFor(ctx.scope ?? null);
+      const titleCase = (key: string) =>
+        key
+          .split(/[_\s-]+/)
+          .map((w) => (w ? w[0]!.toUpperCase() + w.slice(1) : w))
+          .join(" ");
+      return {
+        statuses: workflow.statuses.map((key) => ({
+          key,
+          label: workflow.labels?.[key] ?? titleCase(key),
+          allowedTransitions: workflow.transitions[key] ?? [],
+        })),
+      };
+    },
+  },
+  {
     name: "list_products",
     description:
       "List the products (sibling backlogs) the caller can see. Each product " +
@@ -249,12 +277,16 @@ export const TOOLS: McpTool[] = [
       const store = await getStore();
       const f = await store.getFeature(specId, ctx.scope);
       if (!f) throw new Error(`No item with spec id ${specId}.`);
+      // Advertise the moves update_item will accept from here, so agents step
+      // the workflow instead of guessing stage keys (see list_statuses).
+      const workflow = await resolveWorkflowFor(ctx.scope ?? null);
       return {
         specId: f.specId,
         title: f.title,
         level: f.level,
         isDbNative: f.isDbNative,
         status: f.status,
+        allowedTransitions: workflow.transitions[f.status] ?? [],
         tags: f.tags,
         releaseId: f.releaseId,
         assigneeId: f.assigneeId,

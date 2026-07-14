@@ -1,6 +1,7 @@
 import {
   canTransition,
   isForwardTransition,
+  transitionErrorMessage,
   isPropertyType,
   isValidParentLevel,
   propertyKeyFromLabel,
@@ -181,9 +182,7 @@ export async function patchFeature(
   if (patch.status !== undefined) {
     const workflow = await resolveWorkflowFor(scope ?? null);
     if (!canTransition(feature.status, patch.status, workflow)) {
-      throw new InvalidPatchError(
-        `Illegal transition: ${feature.status} -> ${patch.status}`,
-      );
+      throw new InvalidPatchError(transitionErrorMessage(feature.status, patch.status, workflow));
     }
     // Stage gates block only forward moves; pulling back or archiving is free.
     if (isForwardTransition(feature.status, patch.status, workflow)) {

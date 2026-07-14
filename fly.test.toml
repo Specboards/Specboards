@@ -15,6 +15,15 @@ primary_region = "sjc"
   # Scale to zero when idle; cold start on first request is fine for test.
   min_machines_running = 0
 
+  # Mirror production's health check so staging surfaces probe/route issues first.
+  [[http_service.checks]]
+    interval = "15s"
+    timeout = "2s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/api/health"
+
 [[vm]]
   size = "shared-cpu-1x"
+  # Match production's 512 MB so staging surfaces the same memory ceiling.
   memory = "512mb"

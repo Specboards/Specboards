@@ -11,6 +11,7 @@ import {
   isForwardTransition,
   resolveWorkflow,
   safeParseRepoConfig,
+  transitionErrorMessage,
   workflowFromStages,
   type ProductAccess,
   type StatusWorkflow,
@@ -526,7 +527,7 @@ server.tool(
       const workflow = await resolveWorkspaceWorkflow(scope.workspaceId);
       if (!canTransition(row.status, status, workflow)) {
         return errorResult(
-          new Error(`Illegal transition: ${row.status} -> ${status}`),
+          new Error(transitionErrorMessage(row.status, status, workflow)),
         );
       }
       // Exit-criteria stage gates block forward moves (mirrors the web app).

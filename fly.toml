@@ -10,11 +10,33 @@ primary_region = "sjc"
 [http_service]
   internal_port = 3000
   force_https = true
-  auto_stop_machines = "stop"
+  # Suspend (not stop) idle machines above the warm floor: resume keeps RAM state
+  # so there is no cold-start latency spike that a mid-session MCP call could time
+  # out against.
+  auto_stop_machines = "suspend"
   auto_start_machines = true
-  # Keep one machine warm in production; raise further once webhooks land.
-  min_machines_running = 1
+  # Keep two machines warm so a single crash/OOM/deploy roll cannot take the MCP
+  # endpoint fully offline mid-session. Requires >= 2 machines provisioned
+  # (`fly scale count 2`); the config alone does not create them.
+  min_machines_running = 2
+
+  # Health checks so Fly detects and replaces a wedged machine instead of leaving
+  # it to keep failing requests. Points at the process-liveness probe (no DB), so
+  # a DB blip never triggers a restart storm.
+  [[http_service.checks]]
+    interval = "15s"
+    timeout = "2s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/api/health"
 
 [[vm]]
   size = "shared-cpu-1x"
+  # Stay at 512 MB to keep memory cost down: two machines already 2x the spend,
+  # and running two splits the load so concurrent git-operation memory spikes are
+  # less likely to land on one machine. With the second machine + health check
+  # above, an occasional OOM is now survivable (the other machine serves; Fly
+  # restarts the dead one) instead of a full outage. If the new [mcp:tool] logs
+  # show OOM restarts under real load, bump this to 768mb before adding memory
+  # everywhere.
   memory = "512mb"

@@ -5,6 +5,7 @@ import {
   defaultWorkflow,
   isForwardTransition,
   resolveWorkflow,
+  transitionErrorMessage,
   workflowFromStages,
 } from "./status.js";
 
@@ -31,6 +32,25 @@ describe("resolveWorkflow", () => {
     expect(canTransition("c", "a", wf)).toBe(true);
     // a status can always stay put
     expect(canTransition("a", "a", wf)).toBe(true);
+  });
+});
+
+describe("transitionErrorMessage", () => {
+  it("names the moves allowed from the current status", () => {
+    const msg = transitionErrorMessage("backlog", "ready", defaultWorkflow);
+    expect(msg).toContain("Illegal transition: backlog -> ready");
+    expect(msg).toContain('Allowed from "backlog": defining, archived.');
+  });
+
+  it("lists the full vocabulary when the target status is unknown", () => {
+    const msg = transitionErrorMessage("backlog", "todo", defaultWorkflow);
+    expect(msg).toContain('"todo" is not a status in this workspace');
+    expect(msg).toContain("valid statuses are: backlog, defining, ready");
+  });
+
+  it("does not add the vocabulary hint when the target is a real status", () => {
+    const msg = transitionErrorMessage("backlog", "done", defaultWorkflow);
+    expect(msg).not.toContain("is not a status");
   });
 });
 
