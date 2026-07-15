@@ -18,6 +18,11 @@ test.describe("settings: detail templates", () => {
     const ws = await getWorkspace();
     await page.goto(`/${ws.slug}/settings/work-cards`);
 
+    // Cards settings sections are collapsed by default; open Templates to reach
+    // the template editor. The choice persists (localStorage) across the reloads
+    // below.
+    await page.getByRole("button", { name: /^Templates/ }).click();
+
     // Create a template. With none yet, the only Name field and rich-text
     // editor on the page belong to the create form.
     await page

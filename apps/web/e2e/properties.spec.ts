@@ -28,6 +28,11 @@ test.describe("settings: custom properties", () => {
     const ws = await getWorkspace();
     await page.goto(`/${ws.slug}/settings/work-cards`);
 
+    // Cards settings sections are collapsed by default; open Fields to reach the
+    // custom-properties manager. The choice persists (localStorage) across the
+    // reloads below.
+    await page.getByRole("button", { name: /^Fields/ }).click();
+
     // Create a select-typed property with options.
     const createForm = page.getByRole("group", { name: "New property" });
     await createForm.getByLabel("Label").fill("Effort");

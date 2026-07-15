@@ -34,21 +34,20 @@ test.describe("roadmap: release lifecycle", () => {
     await expect(column).toBeVisible();
     await expect(page.getByText(/2026-11-01.*2026-12-01/)).toBeVisible();
 
-    // Open the detail panel and edit: rename, move to In progress, clear the
-    // ship date. Edit / Release / Delete all live in this panel now.
+    // Open the detail panel and edit inline: name / status / dates autosave on
+    // change or blur, so there's no Edit/Save round-trip. Release / Delete still
+    // live in this panel as deliberate buttons.
     await column.click();
-    await page.getByRole("button", { name: "Edit" }).click();
     await page.getByLabel("Name").fill("Winter GA");
+    await page.getByLabel("Name").blur();
     await page.getByLabel("Status").selectOption("in_progress");
     await page.getByLabel("Ship date").fill("");
-    await page.getByRole("button", { name: "Save" }).click();
+    // Wait for the autosave to flush before acting on the release.
+    await expect(page.getByText("Saved")).toBeVisible();
 
-    // Back in view mode, the (still-open) panel shows the new status and the
-    // ship date is gone. The column heading behind the panel is aria-hidden
-    // while it's open, so assert on the panel's own content here; the renamed
-    // heading is confirmed once the panel closes (below and in the shipped view).
-    await expect(page.getByText("In progress", { exact: true })).toBeVisible();
-    await expect(page.getByText("2026-12-01")).toHaveCount(0);
+    // The panel reflects the new status and the ship date is cleared.
+    await expect(page.getByLabel("Status")).toHaveValue("in_progress");
+    await expect(page.getByLabel("Ship date")).toHaveValue("");
 
     // Release it from the panel: the confirm dialog is auto-accepted; the panel
     // closes and the release leaves the active roadmap for the Shipped view.
