@@ -1,0 +1,30 @@
+diff --git a/dist/index.js b/dist/index.js
+index bd21e898f431298b70e941833c78819a1eb53a36..fed207afaf0c03f53b28899e6b0ebc8790c42873 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -1,5 +1,10 @@
+ 'use client';
+ function __insertCSS(code) {
++  // Specboard patch: sonner's runtime <style> injection has no nonce, which
++  // forces `style-src 'unsafe-inline'` in our CSP. We import the equivalent
++  // `sonner/dist/styles.css` statically instead (served from 'self'), so this
++  // runtime injection is disabled. See middleware.ts CSP + patches/sonner.
++  return
+   if (!code || typeof document == 'undefined') return
+   let head = document.head || document.getElementsByTagName('head')[0]
+   let style = document.createElement('style')
+diff --git a/dist/index.mjs b/dist/index.mjs
+index d0c7a5a1fa1ed8b19c27bea968bb404f2437a07e..6c6493a85a6f78c8b3b8c1d0d9755635df6d1e19 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -1,5 +1,10 @@
+ 'use client';
+ function __insertCSS(code) {
++  // Specboard patch: sonner's runtime <style> injection has no nonce, which
++  // forces `style-src 'unsafe-inline'` in our CSP. We import the equivalent
++  // `sonner/dist/styles.css` statically instead (served from 'self'), so this
++  // runtime injection is disabled. See middleware.ts CSP + patches/sonner.
++  return
+   if (!code || typeof document == 'undefined') return
+   let head = document.head || document.getElementsByTagName('head')[0]
+   let style = document.createElement('style')

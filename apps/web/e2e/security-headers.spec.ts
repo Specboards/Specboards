@@ -12,14 +12,31 @@ test.describe("security headers", () => {
     const csp = res.headers()["content-security-policy"] ?? "";
     expect(csp).not.toBe("");
 
-    const scriptSrc = csp
-      .split(";")
-      .map((d) => d.trim())
-      .find((d) => d.startsWith("script-src"));
+    const directive = (name: string) =>
+      csp
+        .split(";")
+        .map((d) => d.trim())
+        // Match the exact directive name, so `style-src` does not also match
+        // `style-src-attr`.
+        .find((d) => d === name || d.startsWith(`${name} `));
+
+    const scriptSrc = directive("script-src");
     expect(scriptSrc, "script-src directive present").toBeTruthy();
     expect(scriptSrc).not.toContain("'unsafe-inline'");
     expect(scriptSrc).toMatch(/'nonce-[^']+'/);
     expect(scriptSrc).toContain("'strict-dynamic'");
+
+    // style-src (the element directive) must also be free of 'unsafe-inline':
+    // an injected <style> block is refused. Inline style="..." attributes stay
+    // allowed through the narrower style-src-attr, which is expected.
+    const styleSrc = directive("style-src");
+    expect(styleSrc, "style-src directive present").toBeTruthy();
+    expect(styleSrc).not.toContain("'unsafe-inline'");
+    expect(styleSrc).toMatch(/'nonce-[^']+'/);
+
+    const styleSrcAttr = directive("style-src-attr");
+    expect(styleSrcAttr, "style-src-attr directive present").toBeTruthy();
+    expect(styleSrcAttr).toContain("'unsafe-inline'");
   });
 
   test("each response carries a fresh nonce", async ({ page }) => {

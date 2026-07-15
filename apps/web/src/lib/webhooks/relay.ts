@@ -16,7 +16,7 @@ import {
   type Database,
 } from "@specboard/db";
 
-import { getDb } from "@/lib/db";
+import { getWorkerDb } from "@/lib/db";
 import type { WebhookEnvelope, WebhookEventType } from "@/lib/webhooks/types";
 
 /**
@@ -37,7 +37,7 @@ const BATCH = 50;
 type Tx = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
 export async function relayOutbox(): Promise<void> {
-  const db = getDb();
+  const db = getWorkerDb();
   if (!db) return;
 
   // Candidate ids (unlocked read); each is then claimed + expanded in its own tx.

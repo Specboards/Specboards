@@ -8,7 +8,7 @@ import {
 } from "@specboard/git";
 import { and, eq, featureGithubLinks, githubInstallations, type Database } from "@specboard/db";
 
-import { getDb } from "@/lib/db";
+import { getWorkerDb } from "@/lib/db";
 import { getWebhookSecret } from "@/lib/github-app";
 import { logSecurityEvent } from "@/lib/security-log";
 
@@ -52,12 +52,14 @@ async function updateLinksFromEntityEvent(
  * `GITHUB_WEBHOOK_SECRET`, then on a push to a connected repo's default branch
  * reconciles its specs into `features` + `spec_index`.
  *
- * Writes go through the owner connection (`getDb()`) — this is owner-side
- * ingestion, not a tenant request. Non-actionable deliveries (ping, other
- * branches, no matching spec changes) return 2xx so GitHub marks them handled.
+ * Writes go through the dedicated worker connection (`getWorkerDb()`), the
+ * narrow non-owner `specboard_worker` role: this is cross-workspace ingestion
+ * with no per-user scope, but it no longer needs the broad owner connection.
+ * Non-actionable deliveries (ping, other branches, no matching spec changes)
+ * return 2xx so GitHub marks them handled.
  */
 export async function POST(req: Request) {
-  const db = getDb();
+  const db = getWorkerDb();
   const secret = db ? await getWebhookSecret(db) : null;
   if (!secret || !db) {
     return Response.json(

@@ -36,6 +36,24 @@ for how and when the version is bumped.
   stays as the parent-company name, and Specboard is now noted as a member of
   the Studio Palouse family of apps.
 
+### Security
+
+- **CSP `style-src` no longer allows `'unsafe-inline'`.** The style-src element
+  directive now carries only `'self'` plus the per-request nonce, so an injected
+  `<style>` block is refused; inline `style` attributes move to the narrower
+  `style-src-attr`. sonner's un-nonced runtime style injection is patched out in
+  favour of a static CSS import.
+- **Outbox/webhook workers run on a dedicated non-owner DB role.** The outbox
+  delivery drainer + relay and the incoming GitHub webhook sink no longer use
+  the owner connection (which bypasses RLS); they connect as a narrow
+  `specboard_worker` role scoped to just the tables they touch, with
+  role-targeted RLS policies for their cross-workspace access. Opt-in per
+  environment via `DATABASE_URL_WORKER` (`infra/worker-role.sql`).
+- **Operator runbooks** for the RLS non-owner cutover, the worker-role cutover,
+  the out-of-app webhook egress policy, and the GitHub install-bind smoke test
+  (`docs/RUNBOOK-db-role-cutover.md`, `docs/RUNBOOK-webhook-egress-policy.md`,
+  `docs/RUNBOOK-github-install-bind-smoke-test.md`).
+
 ## [0.18.3] - 2026-07-13
 
 ### Changed

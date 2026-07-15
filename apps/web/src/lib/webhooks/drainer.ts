@@ -1,7 +1,7 @@
 import { type Database } from "@specboard/db";
 
 import { decryptSecret } from "@/lib/crypto";
-import { getDb } from "@/lib/db";
+import { getWorkerDb } from "@/lib/db";
 import { relayOutbox } from "@/lib/webhooks/relay";
 import { postSignedEnvelope } from "@/lib/webhooks/sender";
 import {
@@ -57,7 +57,7 @@ let soonScheduled = false;
 /** Start the periodic sweeps once per process. No-op in local file mode. */
 export function startDrainer(): void {
   if (interval) return;
-  if (!getDb()) return;
+  if (!getWorkerDb()) return;
   interval = setInterval(() => void drainOnce(), INTERVAL_MS);
   // Kick shortly after boot to flush anything left pending across a restart.
   setTimeout(() => void drainOnce(), 2_000);
@@ -70,7 +70,7 @@ export function startDrainer(): void {
 /** Delete processed outbox events past the retention window, in bounded batches. */
 export async function pruneOnce(): Promise<void> {
   if (RETENTION_DAYS <= 0) return;
-  const db = getDb();
+  const db = getWorkerDb();
   if (!db) return;
   try {
     let total = 0;
@@ -107,7 +107,7 @@ export async function drainOnce(): Promise<void> {
     rerun = true;
     return;
   }
-  const db = getDb();
+  const db = getWorkerDb();
   if (!db) return;
 
   draining = true;

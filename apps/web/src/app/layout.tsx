@@ -7,6 +7,11 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { listSidebarOrgs, listSidebarProducts } from "@/lib/workspace-access";
 
 import "./globals.css";
+// sonner ships its CSS as a static file. We import it here (bundled, served
+// from 'self') instead of letting sonner inject an un-nonced <style> at
+// runtime, which our patch disables. That lets the CSP drop `'unsafe-inline'`
+// from `style-src`. See patches/sonner@2.0.7.patch and middleware.ts.
+import "sonner/dist/styles.css";
 
 // Public origin of this deployment, so file-convention metadata (the OG image)
 // resolves to absolute URLs. BETTER_AUTH_URL is set wherever the app runs

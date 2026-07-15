@@ -7,15 +7,23 @@ const GITHUB_SETUP_PATH = "/api/v1/github/setup";
  * Build the per-request Content-Security-Policy. `script-src` carries a
  * per-request nonce plus `strict-dynamic` and NO `'unsafe-inline'`, so only
  * Next's own nonce-tagged bootstrap (and the chunks it loads) can execute:
- * an injected inline `<script>` is refused by the browser. `style-src` keeps
- * `'unsafe-inline'` for now (Tailwind + inline styles); narrowing it is a
- * separate follow-up and isn't required to contain script injection.
+ * an injected inline `<script>` is refused by the browser.
+ *
+ * `style-src` (which governs `<style>` elements and `<link>` stylesheets) also
+ * drops `'unsafe-inline'`: our stylesheets are bundled and served from 'self',
+ * Next nonce-tags any `<style>` it injects, and sonner's runtime injection is
+ * patched out in favour of a static CSS import (see layout.tsx). So an injected
+ * `<style>` block is refused. `style-src-attr` keeps `'unsafe-inline'` for the
+ * inline `style="..."` attributes React and Radix legitimately set (dynamic
+ * widths, tree indentation, scroll-lock): those are element-scoped CSSOM
+ * mutations, not a script-injection or CSS-exfiltration vector.
  */
 function contentSecurityPolicy(nonce: string): string {
   return [
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
-    "style-src 'self' 'unsafe-inline'",
+    `style-src 'self' 'nonce-${nonce}'`,
+    "style-src-attr 'unsafe-inline'",
     "img-src 'self' data: https://avatars.githubusercontent.com https://*.githubusercontent.com",
     "font-src 'self' data:",
     "connect-src 'self'",

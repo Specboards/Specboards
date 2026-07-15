@@ -8,6 +8,11 @@ overrides:
   esbuild: 0.28.1
   postcss: 8.5.16
 
+patchedDependencies:
+  sonner@2.0.7:
+    hash: 05336a1d941bf52b202eb49cf0a3f8d856b1924ed96b569d7fb37bc63b0c0b49
+    path: patches/sonner@2.0.7.patch
+
 importers:
 
   .:
@@ -126,7 +131,7 @@ importers:
         version: 10.1.0(@types/react@19.2.17)(react@19.2.7)
       sonner:
         specifier: ^2.0.7
-        version: 2.0.7(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+        version: 2.0.7(patch_hash=05336a1d941bf52b202eb49cf0a3f8d856b1924ed96b569d7fb37bc63b0c0b49)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       tailwind-merge:
         specifier: ^3.6.0
         version: 3.6.0
@@ -5346,7 +5351,7 @@ snapshots:
 
   siginfo@2.0.0: {}
 
-  sonner@2.0.7(react-dom@19.2.7(react@19.2.7))(react@19.2.7):
+  sonner@2.0.7(patch_hash=05336a1d941bf52b202eb49cf0a3f8d856b1924ed96b569d7fb37bc63b0c0b49)(react-dom@19.2.7(react@19.2.7))(react@19.2.7):
     dependencies:
       react: 19.2.7
       react-dom: 19.2.7(react@19.2.7)
