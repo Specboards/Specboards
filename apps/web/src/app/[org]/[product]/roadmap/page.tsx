@@ -3,12 +3,16 @@ import { notFound } from "next/navigation";
 
 import { parentLevelKey } from "@specboard/core";
 
+import { BoardPrefsProvider } from "@/app/[org]/[product]/backlog/board-prefs";
+import { CardFieldsMenu } from "@/components/card-fields-menu";
 import { EmptyState } from "@/components/empty-state";
 import { LevelSwitcher } from "@/components/level-switcher";
 import { ReleaseCreate } from "@/components/release-controls";
 import { WorkItemCreate } from "@/components/work-item-create";
 import { resolveActiveLevel } from "@/lib/active-level";
 import { ALL_PRODUCTS, resolveActiveProduct } from "@/lib/active-product";
+import { getBoardPreferences } from "@/lib/board-preferences-service";
+import { cardFieldCatalog, resolveCardFields } from "@/lib/card-fields";
 import { LOCAL_ORG_SLUG, orgProductPath } from "@/lib/org-path";
 import { sortFeatures } from "@/lib/feature-helpers";
 import { getDb } from "@/lib/db";
@@ -45,6 +49,7 @@ export default async function RoadmapPage({
   ).filter((f) => f.status !== "archived");
   const releases = await store.listReleases(access ?? undefined);
   const detailTemplates = await store.listDetailTemplates(access ?? undefined);
+  const properties = await store.listProperties(access ?? undefined);
 
   // Card creation needs the workspace status workflow (first status is the
   // default) and the assignable members.
@@ -52,6 +57,20 @@ export default async function RoadmapPage({
   const db = getDb();
   const members: WorkspaceMember[] =
     access && db ? await listWorkspaceMembers(db, access.workspaceId) : [];
+
+  // Card-field display prefs are kept per space, so the Roadmap remembers its
+  // own selection separate from the Backlog (board = "roadmap"). The label maps
+  // let the card turn field keys into readable badges.
+  const prefs = await getBoardPreferences(access ?? undefined, "roadmap");
+  const catalog = cardFieldCatalog(properties);
+  const { fields: cardFields, featured } = resolveCardFields(prefs, catalog);
+  const customFieldLabels = Object.fromEntries(
+    properties.map((p) => [p.key, p.label]),
+  );
+  const memberNames = Object.fromEntries(
+    members.map((m) => [m.userId, m.name]),
+  );
+  const releaseNames = Object.fromEntries(releases.map((r) => [r.id, r.name]));
 
   // Roadmap scopes to the product in the URL (`all` = every product) and shows
   // one hierarchy level at a time (default: the Feature altitude).
@@ -83,7 +102,11 @@ export default async function RoadmapPage({
   const parents = parentKey
     ? scoped
         .filter((f) => f.level === parentKey)
-        .map((f) => ({ specId: f.specId, title: f.title, productId: f.productId }))
+        .map((f) => ({
+          specId: f.specId,
+          title: f.title,
+          productId: f.productId,
+        }))
     : [];
   const parentLabel = levels.find((l) => l.key === parentKey)?.label ?? null;
   // Seed the new-item Details editor with the active level's assigned template.
@@ -129,70 +152,91 @@ export default async function RoadmapPage({
   ];
 
   return (
-    <section className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-lg font-semibold tracking-tight">
-            {showShipped ? "Shipped releases" : "Roadmap"}
-          </h1>
-          <LevelSwitcher levels={levels} active={activeLevel.key} />
-          {showShipped ? (
-            <Link
-              href={roadmapViewHref(org, productSlug, sp.level, false)}
-              className="text-xs text-link hover:underline"
-            >
-              ← Active roadmap
-            </Link>
-          ) : shippedReleases.length > 0 ? (
-            <Link
-              href={roadmapViewHref(org, productSlug, sp.level, true)}
-              className="text-xs text-link hover:underline"
-            >
-              Shipped releases ({shippedReleases.length}) →
-            </Link>
-          ) : null}
+    <BoardPrefsProvider
+      board="roadmap"
+      initialFields={cardFields}
+      initialFeatured={featured}
+      orderedKeys={catalog.map((f) => f.key)}
+    >
+      <section className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-lg font-semibold tracking-tight">
+              {showShipped ? "Shipped releases" : "Roadmap"}
+            </h1>
+            <LevelSwitcher levels={levels} active={activeLevel.key} />
+            {showShipped ? (
+              <Link
+                href={roadmapViewHref(org, productSlug, sp.level, false)}
+                className="text-xs text-link hover:underline"
+              >
+                ← Active roadmap
+              </Link>
+            ) : shippedReleases.length > 0 ? (
+              <Link
+                href={roadmapViewHref(org, productSlug, sp.level, true)}
+                className="text-xs text-link hover:underline"
+              >
+                Shipped releases ({shippedReleases.length}) →
+              </Link>
+            ) : null}
+          </div>
+          <div className="flex items-center gap-2">
+            {isAdmin && !showShipped ? <ReleaseCreate /> : null}
+            {canEdit && !activeLevel.isLeaf ? (
+              <WorkItemCreate
+                levelKey={activeLevel.key}
+                levelLabel={activeLevel.label}
+                parentLabel={parentLabel}
+                parents={parents}
+                productId={activeProduct?.id ?? null}
+                products={products.map((p) => ({ id: p.id, name: p.name }))}
+                workflow={workflow}
+                members={members}
+                templateBody={templateBody}
+              />
+            ) : null}
+            {features.length > 0 && canEdit ? (
+              <CardFieldsMenu
+                catalog={catalog}
+                customFields={properties.map((f) => ({
+                  key: f.key,
+                  label: f.label,
+                }))}
+              />
+            ) : null}
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          {isAdmin && !showShipped ? <ReleaseCreate /> : null}
-          {canEdit && !activeLevel.isLeaf ? (
-            <WorkItemCreate
-              levelKey={activeLevel.key}
-              levelLabel={activeLevel.label}
-              parentLabel={parentLabel}
-              parents={parents}
-              productId={activeProduct?.id ?? null}
-              products={products.map((p) => ({ id: p.id, name: p.name }))}
-              workflow={workflow}
-              members={members}
-              templateBody={templateBody}
-            />
-          ) : null}
-        </div>
-      </div>
-      {features.length === 0 && releases.length === 0 ? (
-        activeLevel.isLeaf ? (
-          <EmptyState canConnect={canConnectRepos(access)} />
+        {features.length === 0 && releases.length === 0 ? (
+          activeLevel.isLeaf ? (
+            <EmptyState canConnect={canConnectRepos(access)} />
+          ) : (
+            <p className="py-8 text-center text-sm text-muted-foreground">
+              No {activeLevel.label.toLowerCase()} items yet.
+              {canEdit
+                ? ` Use “New ${activeLevel.label.toLowerCase()}” to add one.`
+                : ""}
+              {isAdmin ? " Create a release to start planning." : ""}
+            </p>
+          )
         ) : (
-          <p className="py-8 text-center text-sm text-muted-foreground">
-            No {activeLevel.label.toLowerCase()} items yet.
-            {canEdit ? ` Use “New ${activeLevel.label.toLowerCase()}” to add one.` : ""}
-            {isAdmin ? " Create a release to start planning." : ""}
-          </p>
-        )
-      ) : (
-        <RoadmapBoard
-          // Remount when the data set changes (level or product scope) so the
-          // board re-seeds its optimistic placement from the new features.
-          key={`${activeProduct?.id ?? ALL_PRODUCTS}:${activeLevel.key}:${showShipped ? "shipped" : "active"}`}
-          columns={columns}
-          features={features}
-          workflow={workflow}
-          productsById={productsById}
-          allowDrag={canEdit && !showShipped}
-          isAdmin={isAdmin}
-        />
-      )}
-    </section>
+          <RoadmapBoard
+            // Remount when the data set changes (level or product scope) so the
+            // board re-seeds its optimistic placement from the new features.
+            key={`${activeProduct?.id ?? ALL_PRODUCTS}:${activeLevel.key}:${showShipped ? "shipped" : "active"}`}
+            columns={columns}
+            features={features}
+            workflow={workflow}
+            productsById={productsById}
+            customFieldLabels={customFieldLabels}
+            memberNames={memberNames}
+            releaseNames={releaseNames}
+            allowDrag={canEdit && !showShipped}
+            isAdmin={isAdmin}
+          />
+        )}
+      </section>
+    </BoardPrefsProvider>
   );
 }
 

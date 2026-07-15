@@ -31,6 +31,7 @@ import {
   RelationError,
   ReleaseError,
   RELEASE_STATUSES,
+  type BoardKey,
   type BoardPreferences,
   type CreateFeatureInput,
   type CreateProductInput,
@@ -362,7 +363,9 @@ export class LocalFileStore implements FeatureStore {
   /** DB-native work items (initiatives/epics) persisted alongside metadata. */
   private async readItems(): Promise<LocalItem[]> {
     try {
-      return JSON.parse(await fs.readFile(this.itemsPath, "utf8")) as LocalItem[];
+      return JSON.parse(
+        await fs.readFile(this.itemsPath, "utf8"),
+      ) as LocalItem[];
     } catch {
       return [];
     }
@@ -507,7 +510,11 @@ export class LocalFileStore implements FeatureStore {
         continue;
       }
       f.parentTitle = parent.title;
-      parent.children.push({ specId: f.specId, title: f.title, status: f.status });
+      parent.children.push({
+        specId: f.specId,
+        title: f.title,
+        status: f.status,
+      });
       parent.childCount += 1;
       if (isDone(f.status)) parent.childDoneCount += 1;
     }
@@ -575,7 +582,8 @@ export class LocalFileStore implements FeatureStore {
       if (patch.tags !== undefined) it.tags = patch.tags;
       if (patch.releaseId !== undefined) it.releaseId = patch.releaseId;
       if (patch.assigneeId !== undefined) it.assigneeId = patch.assigneeId;
-      if (patch.parentSpecId !== undefined) it.parentSpecId = patch.parentSpecId;
+      if (patch.parentSpecId !== undefined)
+        it.parentSpecId = patch.parentSpecId;
       if (patch.details !== undefined)
         it.details = patch.details?.trim() ? patch.details : null;
       await this.writeItems(items);
@@ -600,7 +608,9 @@ export class LocalFileStore implements FeatureStore {
     try {
       resolved = resolveLevelUpdate(current, updates);
     } catch (err) {
-      throw new LevelError(err instanceof Error ? err.message : "Invalid levels.");
+      throw new LevelError(
+        err instanceof Error ? err.message : "Invalid levels.",
+      );
     }
     if (resolved.removedKeys.length > 0) {
       const items = await this.readItems();
@@ -651,7 +661,8 @@ export class LocalFileStore implements FeatureStore {
     if (input.parentSpecId) {
       const all = await this.loadAll();
       const parent = all.find((f) => f.specId === input.parentSpecId);
-      if (!parent) throw new FeatureError(`Unknown parent: ${input.parentSpecId}`);
+      if (!parent)
+        throw new FeatureError(`Unknown parent: ${input.parentSpecId}`);
       if (!isValidParentLevel(input.level, parent.level, levels))
         throw new FeatureError(
           `A ${input.level} can't sit under a ${parent.level}.`,
@@ -721,7 +732,8 @@ export class LocalFileStore implements FeatureStore {
       throw new RelationError("A feature cannot relate to itself.");
     const all = await this.loadAll();
     const known = new Set(all.map((f) => f.specId));
-    if (!known.has(specId)) throw new RelationError(`Unknown feature: ${specId}`);
+    if (!known.has(specId))
+      throw new RelationError(`Unknown feature: ${specId}`);
     if (!known.has(input.toSpecId))
       throw new RelationError(`Unknown related feature: ${input.toSpecId}`);
 
@@ -797,7 +809,9 @@ export class LocalFileStore implements FeatureStore {
   // implicit user in local mode, so no per-user scoping.
   private async readViews(): Promise<SavedView[]> {
     try {
-      return JSON.parse(await fs.readFile(this.viewsPath, "utf8")) as SavedView[];
+      return JSON.parse(
+        await fs.readFile(this.viewsPath, "utf8"),
+      ) as SavedView[];
     } catch {
       return [];
     }
@@ -836,28 +850,45 @@ export class LocalFileStore implements FeatureStore {
     await this.writeViews(views.filter((v) => v.id !== id));
   }
 
-  // Board preferences persist to `.specboard/local-board-prefs.json`. Single
-  // implicit user in local mode, so no per-user scoping.
+  // Board preferences persist to `.specboard/local-board-prefs.json` as a map
+  // keyed by board ("backlog"/"roadmap"). Single implicit user in local mode,
+  // so no per-user scoping. A legacy flat file (pre per-board prefs) is read as
+  // the Backlog's prefs and rewritten into the map on the next save.
+  private async readBoardPrefsMap(): Promise<
+    Partial<Record<BoardKey, BoardPreferences>>
+  > {
+    try {
+      const parsed = JSON.parse(
+        await fs.readFile(this.boardPrefsPath, "utf8"),
+      ) as BoardPreferences | Partial<Record<BoardKey, BoardPreferences>>;
+      if (parsed && ("cardFields" in parsed || "featured" in parsed)) {
+        return { backlog: parsed as BoardPreferences };
+      }
+      return (parsed ?? {}) as Partial<Record<BoardKey, BoardPreferences>>;
+    } catch {
+      return {};
+    }
+  }
+
   async getBoardPreferences(
     _scope?: WorkspaceScope,
+    board: BoardKey = "backlog",
   ): Promise<BoardPreferences | null> {
-    try {
-      return JSON.parse(
-        await fs.readFile(this.boardPrefsPath, "utf8"),
-      ) as BoardPreferences;
-    } catch {
-      return null;
-    }
+    const map = await this.readBoardPrefsMap();
+    return map[board] ?? null;
   }
 
   async setBoardPreferences(
     prefs: BoardPreferences,
     _scope?: WorkspaceScope,
+    board: BoardKey = "backlog",
   ): Promise<void> {
+    const map = await this.readBoardPrefsMap();
+    map[board] = prefs;
     await fs.mkdir(path.dirname(this.boardPrefsPath), { recursive: true });
     await fs.writeFile(
       this.boardPrefsPath,
-      JSON.stringify(prefs, null, 2) + "\n",
+      JSON.stringify(map, null, 2) + "\n",
       "utf8",
     );
   }
@@ -974,7 +1005,9 @@ export class LocalFileStore implements FeatureStore {
     if (!name) throw new DetailTemplateError("Template name is required.");
     const rows = await this.readTemplates();
     if (rows.some((t) => t.name === name))
-      throw new DetailTemplateError(`A template named "${name}" already exists.`);
+      throw new DetailTemplateError(
+        `A template named "${name}" already exists.`,
+      );
     const template: DetailTemplate = {
       id: randomUUID(),
       name,
@@ -996,7 +1029,9 @@ export class LocalFileStore implements FeatureStore {
       const name = patch.name.trim();
       if (!name) throw new DetailTemplateError("Template name is required.");
       if (rows.some((t) => t.id !== id && t.name === name))
-        throw new DetailTemplateError(`A template named "${name}" already exists.`);
+        throw new DetailTemplateError(
+          `A template named "${name}" already exists.`,
+        );
       template.name = name;
     }
     if (patch.body !== undefined) template.body = patch.body;
@@ -1125,7 +1160,8 @@ export class LocalFileStore implements FeatureStore {
     const sorted = rows
       .slice()
       .sort(
-        (a, b) => a.stageKey.localeCompare(b.stageKey) || a.position - b.position,
+        (a, b) =>
+          a.stageKey.localeCompare(b.stageKey) || a.position - b.position,
       );
     await fs.mkdir(path.dirname(this.stageGatesPath), { recursive: true });
     await fs.writeFile(
@@ -1217,10 +1253,14 @@ export class LocalFileStore implements FeatureStore {
   }
 
   async listReleases(_scope?: WorkspaceScope): Promise<ReleaseRecord[]> {
-    const [rows, all] = await Promise.all([this.readReleases(), this.loadAll()]);
+    const [rows, all] = await Promise.all([
+      this.readReleases(),
+      this.loadAll(),
+    ]);
     const counts = new Map<string, number>();
     for (const f of all) {
-      if (f.releaseId) counts.set(f.releaseId, (counts.get(f.releaseId) ?? 0) + 1);
+      if (f.releaseId)
+        counts.set(f.releaseId, (counts.get(f.releaseId) ?? 0) + 1);
     }
     return rows
       .map((r) => ({
@@ -1470,7 +1510,10 @@ export class LocalFileStore implements FeatureStore {
     );
   }
 
-  private toIdeaRecord(row: LocalIdea, promotedTitle: string | null): IdeaRecord {
+  private toIdeaRecord(
+    row: LocalIdea,
+    promotedTitle: string | null,
+  ): IdeaRecord {
     return {
       id: row.id,
       title: row.title,
@@ -1543,7 +1586,9 @@ export class LocalFileStore implements FeatureStore {
       idea.title = title;
     }
     if (patch.description !== undefined) {
-      idea.description = patch.description?.trim() ? patch.description.trim() : null;
+      idea.description = patch.description?.trim()
+        ? patch.description.trim()
+        : null;
     }
     if (patch.status !== undefined) {
       const stages = resolveIdeaStages(await this.readIdeaStages());
@@ -1566,7 +1611,8 @@ export class LocalFileStore implements FeatureStore {
 
   async deleteIdea(id: string, _scope?: WorkspaceScope): Promise<void> {
     const rows = await this.readIdeas();
-    if (!rows.some((r) => r.id === id)) throw new IdeaError(`Unknown idea: ${id}`);
+    if (!rows.some((r) => r.id === id))
+      throw new IdeaError(`Unknown idea: ${id}`);
     await this.writeIdeas(rows.filter((r) => r.id !== id));
   }
 
@@ -1756,7 +1802,9 @@ export class LocalFileStore implements FeatureStore {
     _scope?: WorkspaceScope,
   ): Promise<DocSpace> {
     const externalUrl =
-      input.mode === "external" ? validateExternalDocUrl(input.externalUrl) : null;
+      input.mode === "external"
+        ? validateExternalDocUrl(input.externalUrl)
+        : null;
     if (input.mode === "github" && !input.repoId) {
       throw new DocError("Choose a repository.");
     }
@@ -1768,7 +1816,9 @@ export class LocalFileStore implements FeatureStore {
       repoId: input.mode === "github" ? (input.repoId ?? null) : null,
     };
     const rows = await this.readJsonFile<DocSpace>(this.docSpacesPath);
-    const rest = rows.filter((r) => !(r.productId === productId && r.area === area));
+    const rest = rows.filter(
+      (r) => !(r.productId === productId && r.area === area),
+    );
     await this.writeJsonFile(this.docSpacesPath, [...rest, next]);
     return next;
   }
@@ -1781,7 +1831,9 @@ export class LocalFileStore implements FeatureStore {
     const rows = await this.readJsonFile<DocPageRecord>(this.docPagesPath);
     return rows
       .filter((r) => r.productId === productId && r.area === area)
-      .sort((a, b) => a.position - b.position || a.title.localeCompare(b.title));
+      .sort(
+        (a, b) => a.position - b.position || a.title.localeCompare(b.title),
+      );
   }
 
   async createDocPage(
@@ -1792,7 +1844,8 @@ export class LocalFileStore implements FeatureStore {
     if (!title) throw new DocError("A title is required.");
     const rows = await this.readJsonFile<DocPageRecord>(this.docPagesPath);
     const parentId = input.parentId ?? null;
-    if (parentId) this.assertLocalFolder(rows, parentId, input.productId, input.area);
+    if (parentId)
+      this.assertLocalFolder(rows, parentId, input.productId, input.area);
     const siblings = rows.filter(
       (r) => r.productId === input.productId && r.area === input.area,
     );
@@ -1827,7 +1880,8 @@ export class LocalFileStore implements FeatureStore {
       page.title = title;
     }
     if (patch.content !== undefined) {
-      if (page.kind === "folder") throw new DocError("Folders have no content.");
+      if (page.kind === "folder")
+        throw new DocError("Folders have no content.");
       page.content = patch.content;
     }
     if (patch.parentId !== undefined) {
@@ -1843,7 +1897,8 @@ export class LocalFileStore implements FeatureStore {
         while (cursor) {
           const anc = rows.find((r) => r.id === cursor);
           const next: string | null = anc?.parentId ?? null;
-          if (next === id) throw new DocError("A folder cannot move inside itself.");
+          if (next === id)
+            throw new DocError("A folder cannot move inside itself.");
           cursor = next;
         }
         page.parentId = patch.parentId;
@@ -1856,7 +1911,8 @@ export class LocalFileStore implements FeatureStore {
 
   async deleteDocPage(id: string, _scope?: WorkspaceScope): Promise<void> {
     const rows = await this.readJsonFile<DocPageRecord>(this.docPagesPath);
-    if (!rows.some((r) => r.id === id)) throw new DocError(`Unknown page: ${id}`);
+    if (!rows.some((r) => r.id === id))
+      throw new DocError(`Unknown page: ${id}`);
     // Remove the row and everything beneath it (folders cascade).
     const doomed = new Set([id]);
     let grew = true;
@@ -1885,7 +1941,8 @@ export class LocalFileStore implements FeatureStore {
       (r) => r.id === folderId && r.productId === productId && r.area === area,
     );
     if (!folder) throw new DocError("Unknown folder.");
-    if (folder.kind !== "folder") throw new DocError("Pages cannot contain pages.");
+    if (folder.kind !== "folder")
+      throw new DocError("Pages cannot contain pages.");
   }
 }
 

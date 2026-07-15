@@ -267,6 +267,13 @@
       "when": 1783904996317,
       "tag": "0037_parallel_union_jack",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1784129234149,
+      "tag": "0038_board_preferences_board",
+      "breakpoints": true
     }
   ]
 }

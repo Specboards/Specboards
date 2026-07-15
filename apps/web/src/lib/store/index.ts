@@ -5,6 +5,8 @@ import type { FeatureStore } from "./types";
 import { isMultiTenant } from "@/lib/tenancy";
 
 export type * from "./types";
+// Runtime values (types re-exported above via `export type *`).
+export { BOARD_KEYS } from "./types";
 
 let store: FeatureStore | undefined;
 

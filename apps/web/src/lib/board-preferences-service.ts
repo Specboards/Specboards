@@ -1,5 +1,7 @@
 import {
+  BOARD_KEYS,
   getStore,
+  type BoardKey,
   type BoardPreferences,
   type WorkspaceScope,
 } from "@/lib/store";
@@ -17,7 +19,9 @@ const MAX_KEY_LEN = 80;
 /** Parse and validate an untrusted board-preferences body. */
 export function parseBoardPreferences(body: unknown): BoardPreferences {
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
-    throw new InvalidBoardPreferencesError("Request body must be a JSON object.");
+    throw new InvalidBoardPreferencesError(
+      "Request body must be a JSON object.",
+    );
   }
   const raw = body as Record<string, unknown>;
 
@@ -55,17 +59,30 @@ export function parseBoardPreferences(body: unknown): BoardPreferences {
   return { cardFields, featured };
 }
 
+/**
+ * Coerce an untrusted board identifier (e.g. a `?board=` query param) to a
+ * known {@link BoardKey}, defaulting to "backlog" for anything unrecognized so
+ * a bad value can never point writes at a phantom board.
+ */
+export function parseBoard(value: unknown): BoardKey {
+  return (BOARD_KEYS as readonly string[]).includes(value as string)
+    ? (value as BoardKey)
+    : "backlog";
+}
+
 export async function getBoardPreferences(
   scope?: WorkspaceScope,
+  board: BoardKey = "backlog",
 ): Promise<BoardPreferences | null> {
   const store = await getStore();
-  return store.getBoardPreferences(scope);
+  return store.getBoardPreferences(scope, board);
 }
 
 export async function setBoardPreferences(
   prefs: BoardPreferences,
   scope?: WorkspaceScope,
+  board: BoardKey = "backlog",
 ): Promise<void> {
   const store = await getStore();
-  await store.setBoardPreferences(prefs, scope);
+  await store.setBoardPreferences(prefs, scope, board);
 }

@@ -9,6 +9,14 @@ for how and when the version is bumped.
 
 ### Added
 
+- **Configurable cards on the Roadmap.** The Roadmap gets the same "Card fields"
+  menu as the Backlog board, so you can choose which fields (assignee, tags,
+  custom properties, etc.) show on release cards and which custom field is
+  featured. Each space keeps its own selection: a new `board` discriminator on
+  `board_preferences` (migration 0038) stores the Backlog's and Roadmap's card
+  fields independently, so changing one leaves the other untouched. Existing
+  saved preferences carry over as the Backlog's.
+
 - **Invite-only pre-release access.** A public `POST /api/access-request`
   endpoint (validation, honeypot, per-IP throttle, CORS-locked to the marketing
   origins) takes access requests from the marketing site, emailing the review

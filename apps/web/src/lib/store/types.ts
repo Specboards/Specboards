@@ -85,11 +85,7 @@ export interface ChildRef {
  * `blocks` edge pointing *at* this feature surfaces as `blocked_by`).
  */
 export type RelationDirection =
-  | "blocks"
-  | "blocked_by"
-  | "relates_to"
-  | "duplicates"
-  | "duplicated_by";
+  "blocks" | "blocked_by" | "relates_to" | "duplicates" | "duplicated_by";
 
 /** The directions a user can create (the inverse "_by" forms are derived). */
 export const RELATION_DIRECTIONS = [
@@ -632,6 +628,14 @@ export interface BoardPreferences {
 }
 
 /**
+ * The spaces that keep their own card-field selection. Board preferences are
+ * stored once per (workspace, user, board), so toggling a field on the Backlog
+ * leaves the Roadmap untouched, and vice-versa.
+ */
+export const BOARD_KEYS = ["backlog", "roadmap"] as const;
+export type BoardKey = (typeof BOARD_KEYS)[number];
+
+/**
  * Storage boundary for the web app. Two implementations:
  * - `local`: reads specs from the filesystem, metadata in a JSON file —
  *   zero-setup local testing (scope ignored; single implicit workspace).
@@ -640,7 +644,10 @@ export interface BoardPreferences {
  */
 export interface FeatureStore {
   listFeatures(scope?: WorkspaceScope): Promise<FeatureRecord[]>;
-  getFeature(specId: string, scope?: WorkspaceScope): Promise<FeatureDetail | null>;
+  getFeature(
+    specId: string,
+    scope?: WorkspaceScope,
+  ): Promise<FeatureDetail | null>;
   /** The workspace's hierarchy levels, ordered top → leaf. */
   listLevels(scope?: WorkspaceScope): Promise<WorkspaceLevel[]>;
   /**
@@ -693,7 +700,10 @@ export interface FeatureStore {
    * The gate ids completed (checked off) for one feature. Absence of an id
    * means that gate is still open for the item.
    */
-  listGateCompletions(specId: string, scope?: WorkspaceScope): Promise<string[]>;
+  listGateCompletions(
+    specId: string,
+    scope?: WorkspaceScope,
+  ): Promise<string[]>;
   /**
    * Mark a gate complete/incomplete for a feature (idempotent upsert/delete).
    * `completedBy` records who checked it, for a future audit trail.
@@ -765,7 +775,10 @@ export interface FeatureStore {
   /** Products (sibling backlogs) the acting user can see, ordered by position. */
   listProducts(scope?: WorkspaceScope): Promise<ProductRecord[]>;
   /** A single product by its key (the `?product=` slug), or null. */
-  getProduct(key: string, scope?: WorkspaceScope): Promise<ProductRecord | null>;
+  getProduct(
+    key: string,
+    scope?: WorkspaceScope,
+  ): Promise<ProductRecord | null>;
   /** Create a product (org-admin action). Returns the new record. */
   createProduct(
     input: CreateProductInput,
@@ -851,12 +864,19 @@ export interface FeatureStore {
   ): Promise<SavedView>;
   /** Delete one of the acting user's saved views by id. */
   deleteSavedView(id: string, scope?: WorkspaceScope): Promise<void>;
-  /** The acting user's board preferences, or null when none are saved. */
-  getBoardPreferences(scope?: WorkspaceScope): Promise<BoardPreferences | null>;
-  /** Persist the acting user's board preferences (upsert). */
+  /**
+   * The acting user's board preferences for a space, or null when none saved.
+   * `board` defaults to "backlog" for callers predating per-board prefs.
+   */
+  getBoardPreferences(
+    scope?: WorkspaceScope,
+    board?: BoardKey,
+  ): Promise<BoardPreferences | null>;
+  /** Persist the acting user's board preferences for a space (upsert). */
   setBoardPreferences(
     prefs: BoardPreferences,
     scope?: WorkspaceScope,
+    board?: BoardKey,
   ): Promise<void>;
   // ── Ideas ───────────────────────────────────────────────────────────────
   /** The workspace's ideas the acting user can see, most-voted first. */

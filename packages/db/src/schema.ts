@@ -26,12 +26,19 @@ export const memberRole = pgEnum("member_role", ["owner", "member"]);
 
 /** A product's read visibility: `org` (every member can read) or `private`
  * (read requires org-admin or explicit product membership). */
-export const productVisibility = pgEnum("product_visibility", ["org", "private"]);
+export const productVisibility = pgEnum("product_visibility", [
+  "org",
+  "private",
+]);
 
 /** A user's role on a single product: `admin` (manage product + members + edit
  * items), `editor` (edit items), `viewer` (read — only meaningful for private
  * products, where it grants access). */
-export const productMemberRole = pgEnum("product_member_role", ["admin", "contributor", "viewer"]);
+export const productMemberRole = pgEnum("product_member_role", [
+  "admin",
+  "contributor",
+  "viewer",
+]);
 
 /** Lifecycle of an org invitation. `pending` until it is redeemed
  * (`accepted`), revoked by an admin (`revoked`), or lapses past its expiry
@@ -48,7 +55,9 @@ export const workspaces = pgTable("workspaces", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
   slug: text("slug").notNull().unique(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
 });
 
 /**
@@ -84,7 +93,9 @@ export const workspaceLevels = pgTable(
       () => detailTemplates.id,
       { onDelete: "set null" },
     ),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [
     unique("workspace_levels_ws_key_uq").on(t.workspaceId, t.key),
@@ -107,8 +118,12 @@ export const detailTemplates = pgTable(
     name: text("name").notNull(),
     /** Markdown body used as the starting point for a card's details. */
     body: text("body").notNull().default(""),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [
     unique("detail_templates_ws_name_uq").on(t.workspaceId, t.name),
@@ -139,8 +154,12 @@ export const products = pgTable(
     color: text("color"),
     /** Manual ordering in the product switcher; ascending. */
     position: integer("position").notNull().default(0),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [
     unique("products_ws_key_uq").on(t.workspaceId, t.key),
@@ -166,7 +185,9 @@ export const productMembers = pgTable(
       .references(() => products.id, { onDelete: "cascade" }),
     userId: uuid("user_id").notNull(),
     role: productMemberRole("role").notNull().default("viewer"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [
     unique("product_members_product_user_uq").on(t.productId, t.userId),
@@ -191,7 +212,9 @@ export const members = pgTable(
      * is per-org, so a user can stay active elsewhere. Enforced centrally in
      * `getMembership`/`getMembershipFor`. */
     deactivatedAt: timestamp("deactivated_at", { withTimezone: true }),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [unique("members_workspace_user_uq").on(t.workspaceId, t.userId)],
 );
@@ -227,7 +250,9 @@ export const invitations = pgTable(
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     acceptedAt: timestamp("accepted_at", { withTimezone: true }),
     acceptedUserId: uuid("accepted_user_id"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [
     index("invitations_ws_idx").on(t.workspaceId),
@@ -258,7 +283,9 @@ export const githubApp = pgTable("github_app", {
   privateKey: text("private_key").notNull(),
   /** Webhook signing secret, encrypted at rest. */
   webhookSecret: text("webhook_secret").notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
 });
 
 /**
@@ -286,7 +313,9 @@ export const rateLimits = pgTable("rate_limits", {
 export const operationLimits = pgTable("operation_limits", {
   key: text("key").primaryKey(),
   count: integer("count").notNull(),
-  windowStart: timestamp("window_start", { withTimezone: true }).notNull().defaultNow(),
+  windowStart: timestamp("window_start", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
 });
 
 /**
@@ -318,7 +347,9 @@ export const githubInstallStates = pgTable(
     accountLogin: text("account_login"),
     accountType: text("account_type"),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [index("github_install_states_expires_idx").on(t.expiresAt)],
 );
@@ -342,11 +373,18 @@ export const githubInstallations = pgTable(
     accountLogin: text("account_login").notNull(),
     /** "Organization" or "User"; repo creation is org-only. */
     accountType: text("account_type").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [
-    unique("github_installations_ws_install_uq").on(t.workspaceId, t.installationId),
+    unique("github_installations_ws_install_uq").on(
+      t.workspaceId,
+      t.installationId,
+    ),
     index("github_installations_install_idx").on(t.installationId),
   ],
 );
@@ -370,9 +408,13 @@ export const repositories = pgTable(
     isSpecRepo: boolean("is_spec_repo").notNull().default(false),
     /** Parsed `.specboard/config.yml`, refreshed on sync. */
     config: jsonb("config"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
-  (t) => [unique("repositories_owner_name_uq").on(t.workspaceId, t.owner, t.name)],
+  (t) => [
+    unique("repositories_owner_name_uq").on(t.workspaceId, t.owner, t.name),
+  ],
 );
 
 /**
@@ -450,8 +492,12 @@ export const features = pgTable(
      * instead; this stays null for them.
      */
     details: text("details"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [
     unique("features_repo_spec_uq").on(t.repoId, t.specId),
@@ -491,7 +537,9 @@ export const workspaceProperties = pgTable(
     levels: jsonb("levels"),
     /** Manual ordering in forms and settings; ascending. */
     position: integer("position").notNull().default(0),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [
     unique("workspace_properties_ws_key_uq").on(t.workspaceId, t.key),
@@ -518,7 +566,9 @@ export const workspaceStatuses = pgTable(
     label: text("label").notNull(),
     /** Manual ordering of stages (board column order); ascending. */
     position: integer("position").notNull().default(0),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [
     unique("workspace_statuses_ws_key_uq").on(t.workspaceId, t.key),
@@ -545,7 +595,9 @@ export const workspaceStageGates = pgTable(
     label: text("label").notNull(),
     /** Manual ordering within a stage's checklist; ascending. */
     position: integer("position").notNull().default(0),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [
     index("workspace_stage_gates_ws_idx").on(t.workspaceId),
@@ -613,8 +665,12 @@ export const releases = pgTable(
     /** Free-form release notes (Markdown), or null. Shown in the release detail
      * panel on the Roadmap. */
     notes: text("notes"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [
     unique("releases_ws_name_uq").on(t.workspaceId, t.name),
@@ -667,8 +723,12 @@ export const ideas = pgTable(
       () => features.id,
       { onDelete: "set null" },
     ),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [
     index("ideas_ws_idx").on(t.workspaceId),
@@ -694,7 +754,9 @@ export const ideaVotes = pgTable(
       .notNull()
       .references(() => ideas.id, { onDelete: "cascade" }),
     userId: uuid("user_id").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [
     unique("idea_votes_idea_user_uq").on(t.ideaId, t.userId),
@@ -720,7 +782,9 @@ export const ideaStatuses = pgTable(
     key: text("key").notNull(),
     label: text("label").notNull(),
     position: integer("position").notNull().default(0),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [
     unique("idea_statuses_ws_key_uq").on(t.workspaceId, t.key),
@@ -742,7 +806,9 @@ export const ideaSettings = pgTable("idea_settings", {
   portalEnabled: boolean("portal_enabled").notNull().default(false),
   /** Heading shown on the public portal, or null to use the workspace name. */
   portalTitle: text("portal_title"),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
 });
 
 /** Cached spec content + git pointers, kept in sync by the git service. */
@@ -755,7 +821,9 @@ export const specIndex = pgTable("spec_index", {
   content: text("content").notNull(),
   /** Parsed structure: { title, sections: [...] }. */
   parsed: jsonb("parsed"),
-  lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }).notNull().defaultNow(),
+  lastSyncedAt: timestamp("last_synced_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
 });
 
 export const comments = pgTable("comments", {
@@ -768,7 +836,9 @@ export const comments = pgTable("comments", {
     .references(() => features.id, { onDelete: "cascade" }),
   authorId: uuid("author_id").notNull(),
   body: text("body").notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
 });
 
 /**
@@ -789,7 +859,9 @@ export const savedViews = pgTable(
     view: text("view").notNull().default("backlog"),
     /** Serialized FeatureFilters (see apps/web feature-filters). */
     filters: jsonb("filters").notNull().default({}),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [index("saved_views_ws_user_idx").on(t.workspaceId, t.userId)],
 );
@@ -797,7 +869,9 @@ export const savedViews = pgTable(
 /**
  * A user's personal board display preferences: which fields render on a card
  * and which custom field is "featured". Personal — scoped to the creating user
- * within their workspace, one row per (workspace, user).
+ * within their workspace, one row per (workspace, user, board). The `board`
+ * discriminator lets each space (the Backlog and the Roadmap) keep its own
+ * card-field selection; existing rows default to "backlog".
  */
 export const boardPreferences = pgTable(
   "board_preferences",
@@ -807,14 +881,26 @@ export const boardPreferences = pgTable(
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
     userId: uuid("user_id").notNull(),
+    /** Which space these prefs belong to ("backlog" or "roadmap"). */
+    board: text("board").notNull().default("backlog"),
     /** Ordered list of field keys to show on a card (see apps/web card-fields). */
     cardFields: jsonb("card_fields").notNull().default([]),
     /** Custom-field key to feature prominently, or null. */
     featured: text("featured"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
-  (t) => [unique("board_preferences_ws_user_uq").on(t.workspaceId, t.userId)],
+  (t) => [
+    unique("board_preferences_ws_user_board_uq").on(
+      t.workspaceId,
+      t.userId,
+      t.board,
+    ),
+  ],
 );
 
 export const activityLog = pgTable("activity_log", {
@@ -822,11 +908,15 @@ export const activityLog = pgTable("activity_log", {
   workspaceId: uuid("workspace_id")
     .notNull()
     .references(() => workspaces.id, { onDelete: "cascade" }),
-  featureId: uuid("feature_id").references(() => features.id, { onDelete: "cascade" }),
+  featureId: uuid("feature_id").references(() => features.id, {
+    onDelete: "cascade",
+  }),
   actorId: uuid("actor_id"),
   action: text("action").notNull(),
   detail: jsonb("detail"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
 });
 
 export const featureLinkType = pgEnum("feature_link_type", [
@@ -857,7 +947,9 @@ export const featureLinks = pgTable(
       .notNull()
       .references(() => features.id, { onDelete: "cascade" }),
     type: featureLinkType("type").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [
     unique("feature_links_uq").on(t.fromFeatureId, t.toFeatureId, t.type),
@@ -902,7 +994,9 @@ export const featureGithubLinks = pgTable(
     title: text("title"),
     /** Cached state: open / closed / merged; null for a branch. */
     state: text("state"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [
     unique("feature_github_links_uq").on(t.featureId, t.url),
@@ -928,8 +1022,12 @@ export const users = pgTable("users", {
   image: text("image"),
   /** IANA time zone (e.g. "America/Los_Angeles"); set on Settings → Profile. */
   timezone: text("timezone"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
 });
 
 export const sessions = pgTable("sessions", {
@@ -941,8 +1039,12 @@ export const sessions = pgTable("sessions", {
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   ipAddress: text("ip_address"),
   userAgent: text("user_agent"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
 });
 
 /** Credential or OAuth provider link (email/password hashes live here). */
@@ -956,12 +1058,20 @@ export const accounts = pgTable("accounts", {
   accessToken: text("access_token"),
   refreshToken: text("refresh_token"),
   idToken: text("id_token"),
-  accessTokenExpiresAt: timestamp("access_token_expires_at", { withTimezone: true }),
-  refreshTokenExpiresAt: timestamp("refresh_token_expires_at", { withTimezone: true }),
+  accessTokenExpiresAt: timestamp("access_token_expires_at", {
+    withTimezone: true,
+  }),
+  refreshTokenExpiresAt: timestamp("refresh_token_expires_at", {
+    withTimezone: true,
+  }),
   scope: text("scope"),
   password: text("password"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
 });
 
 export const verifications = pgTable("verifications", {
@@ -969,8 +1079,12 @@ export const verifications = pgTable("verifications", {
   identifier: text("identifier").notNull(),
   value: text("value").notNull(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
 });
 
 /**
@@ -999,8 +1113,12 @@ export const oauthApplications = pgTable(
     disabled: boolean("disabled").notNull().default(false),
     /** Registering user when DCR happened with a session; else anonymous. */
     userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (table) => [index("oauth_applications_user_idx").on(table.userId)],
 );
@@ -1018,15 +1136,23 @@ export const oauthAccessTokens = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     accessToken: text("access_token").notNull().unique(),
     refreshToken: text("refresh_token").notNull().unique(),
-    accessTokenExpiresAt: timestamp("access_token_expires_at", { withTimezone: true }).notNull(),
-    refreshTokenExpiresAt: timestamp("refresh_token_expires_at", { withTimezone: true }).notNull(),
+    accessTokenExpiresAt: timestamp("access_token_expires_at", {
+      withTimezone: true,
+    }).notNull(),
+    refreshTokenExpiresAt: timestamp("refresh_token_expires_at", {
+      withTimezone: true,
+    }).notNull(),
     clientId: text("client_id")
       .notNull()
       .references(() => oauthApplications.clientId, { onDelete: "cascade" }),
     userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
     scopes: text("scopes").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (table) => [
     index("oauth_access_tokens_client_idx").on(table.clientId),
@@ -1051,8 +1177,12 @@ export const oauthConsents = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     scopes: text("scopes").notNull(),
     consentGiven: boolean("consent_given").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (table) => [
     index("oauth_consents_client_idx").on(table.clientId),
@@ -1084,11 +1214,18 @@ export const mcpWorkspaceBindings = pgTable(
     workspaceId: uuid("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (table) => [
-    unique("mcp_workspace_bindings_user_client_key").on(table.userId, table.clientId),
+    unique("mcp_workspace_bindings_user_client_key").on(
+      table.userId,
+      table.clientId,
+    ),
     index("mcp_workspace_bindings_workspace_idx").on(table.workspaceId),
   ],
 );
@@ -1113,7 +1250,9 @@ export const apiKeys = pgTable(
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (table) => [index("api_keys_user_idx").on(table.userId)],
 );
@@ -1152,8 +1291,12 @@ export const webhookEndpoints = pgTable(
      * resume. When it crosses the disable threshold the endpoint is set
      * `active = false` (auto-disabled) so a dead endpoint stops eating retries. */
     consecutiveFailures: integer("consecutive_failures").notNull().default(0),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [
     index("webhook_endpoints_ws_idx").on(t.workspaceId),
@@ -1186,10 +1329,14 @@ export const webhookDeliveries = pgTable(
     status: text("status").notNull().default("pending"),
     attempts: integer("attempts").notNull().default(0),
     /** When this row is next eligible to send; null once delivered/failed. */
-    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).defaultNow(),
+    nextAttemptAt: timestamp("next_attempt_at", {
+      withTimezone: true,
+    }).defaultNow(),
     lastStatusCode: integer("last_status_code"),
     lastError: text("last_error"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [
     index("webhook_deliveries_due_idx").on(t.nextAttemptAt),
@@ -1221,7 +1368,9 @@ export const outboxEvents = pgTable(
     actorId: uuid("actor_id"),
     type: text("type").notNull(),
     data: jsonb("data").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
     /** When the relay finished fanning this event out; null = still pending. */
     processedAt: timestamp("processed_at", { withTimezone: true }),
   },
@@ -1261,8 +1410,12 @@ export const docSpaces = pgTable(
     repoId: uuid("repo_id").references(() => repositories.id, {
       onDelete: "set null",
     }),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [
     unique("doc_spaces_product_area_uq").on(t.productId, t.area),
@@ -1299,8 +1452,12 @@ export const docPages = pgTable(
     /** Markdown body (empty for folders). */
     content: text("content").notNull().default(""),
     position: integer("position").notNull().default(0),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [
     index("doc_pages_product_area_idx").on(t.productId, t.area),

@@ -18,12 +18,23 @@ import { toast } from "sonner";
 
 import type { StatusWorkflow } from "@specboard/core";
 
+import { useBoardPrefs } from "@/app/[org]/[product]/backlog/board-prefs";
+import {
+  cardFieldBadges,
+  featuredBadge,
+  type CardFieldMaps,
+} from "@/components/card-field-badges";
 import { FeatureEditSheet } from "@/components/feature-edit-sheet";
 import type { ProductTag } from "@/components/feature-card";
 import { ReleaseDetailSheet } from "@/components/release-detail-sheet";
 import { StatusDot } from "@/components/status-dot";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { AuthRequiredError, patchFeature } from "@/lib/api-client";
 import { statusLabel } from "@/lib/feature-helpers";
 import { productColorClasses } from "@/lib/product-color";
@@ -62,6 +73,9 @@ export function RoadmapBoard({
   features,
   workflow,
   productsById,
+  customFieldLabels,
+  memberNames,
+  releaseNames,
   allowDrag,
   isAdmin,
 }: {
@@ -69,11 +83,17 @@ export function RoadmapBoard({
   features: FeatureRecord[];
   workflow: StatusWorkflow;
   productsById?: Record<string, ProductTag>;
+  /** Label for each custom-property key (without the `cf:` prefix). */
+  customFieldLabels: Record<string, string>;
+  memberNames: Record<string, string>;
+  /** Release name by id, for the release badge. */
+  releaseNames: Record<string, string>;
   /** Whether items can be re-scheduled by dragging (editors, active view). */
   allowDrag: boolean;
   isAdmin: boolean;
 }) {
   const router = useRouter();
+  const maps: CardFieldMaps = { customFieldLabels, memberNames, releaseNames };
   const [placement, setPlacement] = useState<Record<string, string | null>>({});
   const [activeId, setActiveId] = useState<string | null>(null);
   const [detailReleaseId, setDetailReleaseId] = useState<string | null>(null);
@@ -161,6 +181,7 @@ export function RoadmapBoard({
               items={byColumn.get(column.releaseId ?? UNSCHEDULED) ?? []}
               workflow={workflow}
               productsById={productsById}
+              maps={maps}
               allowDrag={allowDrag}
               onOpenDetail={setDetailReleaseId}
               onOpenItem={setEditingSpecId}
@@ -173,6 +194,7 @@ export function RoadmapBoard({
               feature={activeFeature}
               workflow={workflow}
               productsById={productsById}
+              maps={maps}
               dragging
             />
           ) : null}
@@ -196,6 +218,7 @@ function Column({
   items,
   workflow,
   productsById,
+  maps,
   allowDrag,
   onOpenDetail,
   onOpenItem,
@@ -204,6 +227,7 @@ function Column({
   items: FeatureRecord[];
   workflow: StatusWorkflow;
   productsById?: Record<string, ProductTag>;
+  maps: CardFieldMaps;
   allowDrag: boolean;
   onOpenDetail: (releaseId: string) => void;
   onOpenItem: (specId: string) => void;
@@ -268,6 +292,7 @@ function Column({
             feature={f}
             workflow={workflow}
             productsById={productsById}
+            maps={maps}
             allowDrag={allowDrag}
             onOpenItem={onOpenItem}
           />
@@ -284,12 +309,14 @@ function DraggableCard({
   feature,
   workflow,
   productsById,
+  maps,
   allowDrag,
   onOpenItem,
 }: {
   feature: FeatureRecord;
   workflow: StatusWorkflow;
   productsById?: Record<string, ProductTag>;
+  maps: CardFieldMaps;
   allowDrag: boolean;
   onOpenItem: (specId: string) => void;
 }) {
@@ -309,29 +336,41 @@ function DraggableCard({
         feature={feature}
         workflow={workflow}
         productsById={productsById}
+        maps={maps}
         onOpenItem={onOpenItem}
       />
     </div>
   );
 }
 
-/** Presentational roadmap card (shared by the column list and the drag overlay). */
+/**
+ * Presentational roadmap card (shared by the column list and the drag overlay).
+ * The user-selected card fields come from the shared board preferences (scoped
+ * to the Roadmap), rendered the same way as on the Backlog board.
+ */
 function CardBody({
   feature,
   workflow,
   productsById,
+  maps,
   onOpenItem,
   dragging,
 }: {
   feature: FeatureRecord;
   workflow: StatusWorkflow;
   productsById?: Record<string, ProductTag>;
+  maps: CardFieldMaps;
   /** Open the item's preview panel; omitted for the drag overlay (inert). */
   onOpenItem?: (specId: string) => void;
   dragging?: boolean;
 }) {
+  const { cardFields, featured } = useBoardPrefs();
   const product =
-    productsById && feature.productId ? productsById[feature.productId] : undefined;
+    productsById && feature.productId
+      ? productsById[feature.productId]
+      : undefined;
+  const featuredEl = featuredBadge(featured, cardFields, feature, maps);
+  const badges = cardFieldBadges(cardFields, featured, feature, maps);
   return (
     <Card className={cn(dragging && "shadow-md")}>
       <CardHeader className="space-y-1 p-3">
@@ -346,6 +385,7 @@ function CardBody({
             {product.name}
           </Badge>
         ) : null}
+        {featuredEl}
         <CardTitle className="text-sm">
           {/* Opens the same preview panel as the Backlog board (not a full-page
               nav), so the two spaces behave the same. stopPropagation keeps a
@@ -366,6 +406,9 @@ function CardBody({
           <StatusDot status={feature.status} />
           {statusLabel(feature.status, workflow)}
         </CardDescription>
+        {badges.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-1">{badges}</div>
+        ) : null}
       </CardHeader>
     </Card>
   );

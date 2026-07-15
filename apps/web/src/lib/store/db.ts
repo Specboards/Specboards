@@ -66,6 +66,7 @@ import {
   RelationError,
   ReleaseError,
   RELEASE_STATUSES,
+  type BoardKey,
   type BoardPreferences,
   type CreateFeatureInput,
   type CreateProductInput,
@@ -862,7 +863,10 @@ export class DbStore implements FeatureStore {
     });
   }
 
-  async deleteDetailTemplate(id: string, scope?: WorkspaceScope): Promise<void> {
+  async deleteDetailTemplate(
+    id: string,
+    scope?: WorkspaceScope,
+  ): Promise<void> {
     await this.scoped(scope, async (tx) => {
       // workspace_levels.detail_template_id is ON DELETE SET NULL, so pointing
       // levels fall back to a blank body automatically.
@@ -941,7 +945,8 @@ export class DbStore implements FeatureStore {
           "Your role does not permit editing this product.",
         );
       }
-      if (input.assigneeId) await this.assertWorkspaceMember(tx, ws, input.assigneeId);
+      if (input.assigneeId)
+        await this.assertWorkspaceMember(tx, ws, input.assigneeId);
 
       // DB-native items have no repo/spec; spec_id mirrors the row id so every
       // row stays uniformly routable by specId.
@@ -1411,12 +1416,14 @@ export class DbStore implements FeatureStore {
 
   async getBoardPreferences(
     scope?: WorkspaceScope,
+    board: BoardKey = "backlog",
   ): Promise<BoardPreferences | null> {
     return this.scoped(scope, async (tx) => {
       const row = await tx.query.boardPreferences.findFirst({
         where: and(
           eq(boardPreferences.workspaceId, scope!.workspaceId),
           eq(boardPreferences.userId, scope!.userId),
+          eq(boardPreferences.board, board),
         ),
       });
       if (!row) return null;
@@ -1432,6 +1439,7 @@ export class DbStore implements FeatureStore {
   async setBoardPreferences(
     prefs: BoardPreferences,
     scope?: WorkspaceScope,
+    board: BoardKey = "backlog",
   ): Promise<void> {
     await this.scoped(scope, async (tx) => {
       await tx
@@ -1439,11 +1447,16 @@ export class DbStore implements FeatureStore {
         .values({
           workspaceId: scope!.workspaceId,
           userId: scope!.userId,
+          board,
           cardFields: prefs.cardFields ?? [],
           featured: prefs.featured,
         })
         .onConflictDoUpdate({
-          target: [boardPreferences.workspaceId, boardPreferences.userId],
+          target: [
+            boardPreferences.workspaceId,
+            boardPreferences.userId,
+            boardPreferences.board,
+          ],
           set: {
             cardFields: prefs.cardFields ?? [],
             featured: prefs.featured,
@@ -1460,12 +1473,17 @@ export class DbStore implements FeatureStore {
       .select()
       .from(workspaceProperties)
       .where(eq(workspaceProperties.workspaceId, ws))
-      .orderBy(asc(workspaceProperties.position), asc(workspaceProperties.createdAt));
+      .orderBy(
+        asc(workspaceProperties.position),
+        asc(workspaceProperties.createdAt),
+      );
     return rows.map(toPropertyDef);
   }
 
   async listProperties(scope?: WorkspaceScope): Promise<PropertyDef[]> {
-    return this.scoped(scope, (tx) => this.propertiesIn(tx, scope!.workspaceId));
+    return this.scoped(scope, (tx) =>
+      this.propertiesIn(tx, scope!.workspaceId),
+    );
   }
 
   async listStatuses(scope?: WorkspaceScope): Promise<WorkspaceStatus[]> {
@@ -1550,7 +1568,11 @@ export class DbStore implements FeatureStore {
           })),
         );
       }
-      return stages.map((s, i) => ({ key: s.key, label: s.label, position: i }));
+      return stages.map((s, i) => ({
+        key: s.key,
+        label: s.label,
+        position: i,
+      }));
     });
   }
 
@@ -1584,7 +1606,12 @@ export class DbStore implements FeatureStore {
       const resolved = gates.map((g) => {
         const pos = perStage.get(g.stageKey) ?? 0;
         perStage.set(g.stageKey, pos + 1);
-        return { id: g.id, stageKey: g.stageKey, label: g.label, position: pos };
+        return {
+          id: g.id,
+          stageKey: g.stageKey,
+          label: g.label,
+          position: pos,
+        };
       });
 
       // Reconcile against the existing set so kept gates (matched by id) retain
@@ -1595,7 +1622,9 @@ export class DbStore implements FeatureStore {
         .where(eq(workspaceStageGates.workspaceId, ws));
       const existingIds = new Set(existing.map((r) => r.id));
       const keepIds = new Set(
-        resolved.map((g) => g.id).filter((id): id is string => !!id && existingIds.has(id)),
+        resolved
+          .map((g) => g.id)
+          .filter((id): id is string => !!id && existingIds.has(id)),
       );
 
       // Delete gates that are gone from the new set.
@@ -1746,7 +1775,10 @@ export class DbStore implements FeatureStore {
         throw new PropertyError(`Unknown property type: ${String(input.type)}`);
       }
       const existing = await this.propertiesIn(tx, ws);
-      const key = propertyKeyFromLabel(label, new Set(existing.map((p) => p.key)));
+      const key = propertyKeyFromLabel(
+        label,
+        new Set(existing.map((p) => p.key)),
+      );
       const levels = await this.normalizeLevels(tx, ws, input.levels);
       const position =
         existing.reduce((m, p) => Math.max(m, p.position), -1) + 1;
@@ -1886,7 +1918,8 @@ export class DbStore implements FeatureStore {
         })
         .onConflictDoNothing({ target: [releases.workspaceId, releases.name] })
         .returning();
-      if (!row) throw new ReleaseError(`A release named "${name}" already exists.`);
+      if (!row)
+        throw new ReleaseError(`A release named "${name}" already exists.`);
       return toReleaseRecord(row, 0);
     });
   }
@@ -1932,7 +1965,10 @@ export class DbStore implements FeatureStore {
       const deleted = await tx
         .delete(releases)
         .where(
-          and(eq(releases.id, id), eq(releases.workspaceId, scope!.workspaceId)),
+          and(
+            eq(releases.id, id),
+            eq(releases.workspaceId, scope!.workspaceId),
+          ),
         )
         .returning({ id: releases.id });
       if (!deleted[0]) throw new ReleaseError(`Unknown release: ${id}`);
@@ -1964,14 +2000,13 @@ export class DbStore implements FeatureStore {
     if (!canReadProductId(access, productById, row.productId)) return null;
 
     const [votes, mine, author, promoted] = await Promise.all([
-      tx
-        .select({ n: count() })
-        .from(ideaVotes)
-        .where(eq(ideaVotes.ideaId, id)),
+      tx.select({ n: count() }).from(ideaVotes).where(eq(ideaVotes.ideaId, id)),
       tx
         .select({ id: ideaVotes.id })
         .from(ideaVotes)
-        .where(and(eq(ideaVotes.ideaId, id), eq(ideaVotes.userId, scope.userId)))
+        .where(
+          and(eq(ideaVotes.ideaId, id), eq(ideaVotes.userId, scope.userId)),
+        )
         .limit(1),
       row.authorId
         ? tx.query.users.findFirst({
@@ -2067,7 +2102,9 @@ export class DbStore implements FeatureStore {
         voteRows.map((v) => [v.ideaId, Number(v.n)] as const),
       );
       const votedIds = new Set(myVotes.map((v) => v.ideaId));
-      const authorById = new Map(authorRows.map((a) => [a.id, a.name] as const));
+      const authorById = new Map(
+        authorRows.map((a) => [a.id, a.name] as const),
+      );
       const promotedById = new Map(promotedRows.map((f) => [f.id, f] as const));
 
       return visible
@@ -2092,7 +2129,11 @@ export class DbStore implements FeatureStore {
         .sort(
           (a, b) =>
             b.voteCount - a.voteCount ||
-            (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0),
+            (a.createdAt < b.createdAt
+              ? 1
+              : a.createdAt > b.createdAt
+                ? -1
+                : 0),
         );
     });
   }
@@ -2122,7 +2163,9 @@ export class DbStore implements FeatureStore {
           workspaceId: ws,
           productId,
           title,
-          description: input.description?.trim() ? input.description.trim() : null,
+          description: input.description?.trim()
+            ? input.description.trim()
+            : null,
           status: "new",
           authorId: scope!.userId,
         })
@@ -2157,7 +2200,9 @@ export class DbStore implements FeatureStore {
         set.title = title;
       }
       if (patch.description !== undefined) {
-        set.description = patch.description?.trim() ? patch.description.trim() : null;
+        set.description = patch.description?.trim()
+          ? patch.description.trim()
+          : null;
       }
       if (patch.status !== undefined) {
         const stages = await this.ideaStagesIn(tx, ws);
@@ -2198,7 +2243,9 @@ export class DbStore implements FeatureStore {
         throw new IdeaError("Your role does not permit deleting this idea.");
       }
       // idea_votes cascade on the FK.
-      await tx.delete(ideas).where(and(eq(ideas.id, id), eq(ideas.workspaceId, ws)));
+      await tx
+        .delete(ideas)
+        .where(and(eq(ideas.id, id), eq(ideas.workspaceId, ws)));
     });
   }
 
@@ -2254,7 +2301,8 @@ export class DbStore implements FeatureStore {
         throw new IdeaError("This idea has already been promoted.");
       }
       const access = await this.accessIn(tx, scope!);
-      const productId = current.productId ?? (await this.defaultProductId(tx, ws));
+      const productId =
+        current.productId ?? (await this.defaultProductId(tx, ws));
       if (!canWriteProductId(access, productId)) {
         throw new IdeaError("Your role does not permit promoting this idea.");
       }
@@ -2322,7 +2370,10 @@ export class DbStore implements FeatureStore {
   }
 
   /** Resolve the effective idea review stages for a workspace (custom or default). */
-  private async ideaStagesIn(tx: Tx, ws: string): Promise<readonly IdeaStage[]> {
+  private async ideaStagesIn(
+    tx: Tx,
+    ws: string,
+  ): Promise<readonly IdeaStage[]> {
     const rows = await tx
       .select()
       .from(ideaStatuses)
@@ -2362,7 +2413,9 @@ export class DbStore implements FeatureStore {
         .selectDistinct({ status: ideas.status })
         .from(ideas)
         .where(eq(ideas.workspaceId, ws));
-      const orphaned = used.map((u) => u.status).filter((s) => !validKeys.has(s));
+      const orphaned = used
+        .map((u) => u.status)
+        .filter((s) => !validKeys.has(s));
       if (orphaned.length > 0) {
         await tx
           .update(ideas)
@@ -2382,7 +2435,11 @@ export class DbStore implements FeatureStore {
           })),
         );
       }
-      return stages.map((s, i) => ({ key: s.key, label: s.label, position: i }));
+      return stages.map((s, i) => ({
+        key: s.key,
+        label: s.label,
+        position: i,
+      }));
     });
   }
 
@@ -2483,9 +2540,18 @@ export class DbStore implements FeatureStore {
       const [row] = await tx
         .select()
         .from(docSpaces)
-        .where(and(eq(docSpaces.productId, productId), eq(docSpaces.area, area)))
+        .where(
+          and(eq(docSpaces.productId, productId), eq(docSpaces.area, area)),
+        )
         .limit(1);
-      if (!row) return { productId, area, mode: "unset" as const, externalUrl: null, repoId: null };
+      if (!row)
+        return {
+          productId,
+          area,
+          mode: "unset" as const,
+          externalUrl: null,
+          repoId: null,
+        };
       return {
         productId,
         area,
@@ -2515,7 +2581,10 @@ export class DbStore implements FeatureStore {
           .select({ id: repositories.id })
           .from(repositories)
           .where(
-            and(eq(repositories.id, input.repoId), eq(repositories.workspaceId, ws)),
+            and(
+              eq(repositories.id, input.repoId),
+              eq(repositories.workspaceId, ws),
+            ),
           )
           .limit(1);
         if (!repo) throw new DocError("Unknown repository.");
@@ -2523,7 +2592,14 @@ export class DbStore implements FeatureStore {
       }
       await tx
         .insert(docSpaces)
-        .values({ workspaceId: ws, productId, area, mode: input.mode, externalUrl, repoId })
+        .values({
+          workspaceId: ws,
+          productId,
+          area,
+          mode: input.mode,
+          externalUrl,
+          repoId,
+        })
         .onConflictDoUpdate({
           target: [docSpaces.productId, docSpaces.area],
           set: { mode: input.mode, externalUrl, repoId, updatedAt: new Date() },
@@ -2565,7 +2641,10 @@ export class DbStore implements FeatureStore {
         .select({ n: count() })
         .from(docPages)
         .where(
-          and(eq(docPages.productId, input.productId), eq(docPages.area, input.area)),
+          and(
+            eq(docPages.productId, input.productId),
+            eq(docPages.area, input.area),
+          ),
         );
       const [row] = await tx
         .insert(docPages)
@@ -2694,7 +2773,8 @@ export class DbStore implements FeatureStore {
       )
       .limit(1);
     if (!row) throw new DocError("Unknown folder.");
-    if (row.kind !== "folder") throw new DocError("Pages cannot contain pages.");
+    if (row.kind !== "folder")
+      throw new DocError("Pages cannot contain pages.");
   }
 
   // ── Products ────────────────────────────────────────────────────────────

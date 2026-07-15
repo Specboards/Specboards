@@ -11,6 +11,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
 import { AuthRequiredError, saveBoardPreferences } from "@/lib/api-client";
+import type { BoardKey } from "@/lib/store";
 
 /**
  * Shared board display preferences (which fields show on cards, and the
@@ -29,11 +30,14 @@ interface BoardPrefs {
 const BoardPrefsContext = createContext<BoardPrefs | null>(null);
 
 export function BoardPrefsProvider({
+  board = "backlog",
   initialFields,
   initialFeatured,
   orderedKeys,
   children,
 }: {
+  /** Which space these prefs belong to; persisted independently per board. */
+  board?: BoardKey;
   initialFields: string[];
   initialFeatured: string | null;
   /** Canonical field order used when persisting the selection. */
@@ -48,21 +52,22 @@ export function BoardPrefsProvider({
     (fields: string[], nextFeatured: string | null) => {
       // Store in canonical order; the API de-dupes.
       const ordered = orderedKeys.filter((k) => fields.includes(k));
-      saveBoardPreferences({ cardFields: ordered, featured: nextFeatured }).catch(
-        (err) => {
-          if (err instanceof AuthRequiredError) {
-            router.push(
-              `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
-            );
-            return;
-          }
-          toast.error(
-            err instanceof Error ? err.message : "Couldn't save preferences.",
+      saveBoardPreferences(
+        { cardFields: ordered, featured: nextFeatured },
+        board,
+      ).catch((err) => {
+        if (err instanceof AuthRequiredError) {
+          router.push(
+            `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
           );
-        },
-      );
+          return;
+        }
+        toast.error(
+          err instanceof Error ? err.message : "Couldn't save preferences.",
+        );
+      });
     },
-    [orderedKeys, router],
+    [board, orderedKeys, router],
   );
 
   const toggleField = useCallback(

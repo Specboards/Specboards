@@ -4,17 +4,33 @@ import { authorizeWrite, resolveReadScope } from "@/lib/auth-session";
 import {
   InvalidBoardPreferencesError,
   getBoardPreferences,
+  parseBoard,
   parseBoardPreferences,
   setBoardPreferences,
 } from "@/lib/board-preferences-service";
+import type { BoardKey } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
+
+/** The page path whose cards a given board's prefs drive (for revalidation). */
+const BOARD_PATHS: Record<BoardKey, string> = {
+  backlog: "/[org]/[product]/backlog",
+  roadmap: "/[org]/[product]/roadmap",
+};
+
+/** Which space the request targets, from `?board=` (defaults to backlog). */
+function boardFromRequest(req: Request) {
+  return parseBoard(new URL(req.url).searchParams.get("board"));
+}
 
 /** GET /api/v1/board-preferences — the acting user's board display prefs. */
 export async function GET(req: Request) {
   const authz = await resolveReadScope(req);
   if (!authz.ok) return authz.response;
-  const preferences = await getBoardPreferences(authz.scope ?? undefined);
+  const preferences = await getBoardPreferences(
+    authz.scope ?? undefined,
+    boardFromRequest(req),
+  );
   return Response.json({ preferences });
 }
 
@@ -23,19 +39,25 @@ export async function PUT(req: Request) {
   const authz = await authorizeWrite(req);
   if (!authz.ok) return authz.response;
 
+  const board = boardFromRequest(req);
+
   let body: unknown;
   try {
     body = await req.json();
   } catch {
-    return Response.json({ error: "Request body must be JSON." }, { status: 400 });
+    return Response.json(
+      { error: "Request body must be JSON." },
+      { status: 400 },
+    );
   }
 
   try {
     await setBoardPreferences(
       parseBoardPreferences(body),
       authz.scope ?? undefined,
+      board,
     );
-    revalidatePath("/[org]/[product]/backlog", "page");
+    revalidatePath(BOARD_PATHS[board], "page");
     return Response.json({ ok: true });
   } catch (err) {
     if (err instanceof InvalidBoardPreferencesError) {

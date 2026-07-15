@@ -2,11 +2,15 @@
 
 import Link from "next/link";
 
+import {
+  cardFieldBadges,
+  featuredBadge,
+  type CardFieldMaps,
+} from "@/components/card-field-badges";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
-import { CUSTOM_FIELD_PREFIX } from "@/lib/card-fields";
 import { productColorClasses } from "@/lib/product-color";
-import type { CustomFieldValue, FeatureRecord } from "@/lib/store/types";
+import type { FeatureRecord } from "@/lib/store/types";
 import { useOrgProductPath } from "@/lib/use-org";
 import { cn } from "@/lib/utils";
 
@@ -21,12 +25,6 @@ function stop(e: React.PointerEvent | React.MouseEvent) {
 /** True when a click carries a modifier that should open a link in a new tab. */
 function isModifiedClick(e: React.MouseEvent): boolean {
   return e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button === 1;
-}
-
-function customFieldText(value: CustomFieldValue): string {
-  if (value === null || value === undefined) return "";
-  if (Array.isArray(value)) return value.join(", ");
-  return String(value);
 }
 
 /**
@@ -60,26 +58,9 @@ export function FeatureCard({
   product?: ProductTag;
 }) {
   const orgHref = useOrgProductPath();
-  const show = new Set(fields);
-  const featuredKey = featured ? `${CUSTOM_FIELD_PREFIX}${featured}` : null;
-
-  const badges: React.ReactNode[] = [];
-  for (const key of fields) {
-    if (key === featuredKey) continue; // rendered separately, up top
-    const badge = renderField(
-      key,
-      feature,
-      customFieldLabels,
-      memberNames,
-      releaseNames,
-    );
-    if (badge) badges.push(badge);
-  }
-
-  const featuredValue =
-    featured && show.has(`${CUSTOM_FIELD_PREFIX}${featured}`)
-      ? customFieldText(feature.customFields[featured] ?? null)
-      : "";
+  const maps: CardFieldMaps = { customFieldLabels, memberNames, releaseNames };
+  const badges = cardFieldBadges(fields, featured, feature, maps);
+  const featuredEl = featuredBadge(featured, fields, feature, maps);
 
   return (
     <Card
@@ -90,16 +71,15 @@ export function FeatureCard({
         {product ? (
           <Badge
             variant="secondary"
-            className={cn("w-fit border-transparent text-[10px]", productColorClasses(product).badge)}
+            className={cn(
+              "w-fit border-transparent text-[10px]",
+              productColorClasses(product).badge,
+            )}
           >
             {product.name}
           </Badge>
         ) : null}
-        {featuredValue ? (
-          <Badge variant="secondary" className="w-fit text-[10px]">
-            {customFieldLabels[featured!] ?? featured}: {featuredValue}
-          </Badge>
-        ) : null}
+        {featuredEl}
         <CardTitle className="text-[0.9375rem]">
           <Link
             href={orgHref(`/backlog/${feature.level}/${feature.specId}`)}
@@ -123,101 +103,4 @@ export function FeatureCard({
       </CardHeader>
     </Card>
   );
-}
-
-/** Render one card field as a badge (or null when there's nothing to show). */
-function renderField(
-  key: string,
-  f: FeatureRecord,
-  customFieldLabels: Record<string, string>,
-  memberNames: Record<string, string>,
-  releaseNames: Record<string, string>,
-): React.ReactNode {
-  switch (key) {
-    case "assignee":
-      return f.assigneeId ? (
-        <Badge key="assignee" variant="secondary" className="text-[10px]">
-          {memberNames[f.assigneeId] ?? "Assigned"}
-        </Badge>
-      ) : null;
-    case "blocked":
-      return f.blockedByCount > 0 ? (
-        <Badge
-          key="blocked"
-          variant="destructive"
-          className="text-[10px]"
-          title={`Blocked by ${f.blockedByCount} feature(s)`}
-        >
-          Blocked
-        </Badge>
-      ) : null;
-    case "epic":
-      return f.childCount > 0 ? (
-        <Badge
-          key="epic"
-          variant="outline"
-          className="text-[10px]"
-          title={`${f.childDoneCount} of ${f.childCount} children done`}
-        >
-          epic {f.childDoneCount}/{f.childCount}
-        </Badge>
-      ) : null;
-    case "sub":
-      return f.parentSpecId ? (
-        <Badge
-          key="sub"
-          variant="secondary"
-          className="text-[10px]"
-          title="Has a parent epic"
-        >
-          ↳ sub
-        </Badge>
-      ) : null;
-    case "release":
-      return f.releaseId ? (
-        <Badge key="release" variant="outline" className="text-[10px]">
-          {releaseNames[f.releaseId] ?? "Release"}
-        </Badge>
-      ) : null;
-    case "github": {
-      const g = f.githubSummary;
-      if (g.total === 0) return null;
-      if (g.mergedPrs > 0)
-        return (
-          <Badge key="github" variant="default" className="text-[10px]" title="Has a merged PR">
-            PR merged
-          </Badge>
-        );
-      if (g.openPrs > 0)
-        return (
-          <Badge key="github" variant="secondary" className="text-[10px]" title="Has an open PR">
-            PR open
-          </Badge>
-        );
-      return (
-        <Badge key="github" variant="outline" className="text-[10px]" title="Linked GitHub artifacts">
-          🔗 {g.total}
-        </Badge>
-      );
-    }
-    case "tags":
-      return f.tags.length > 0
-        ? f.tags.map((tag) => (
-            <Badge key={`tag:${tag}`} variant="secondary" className="text-[10px]">
-              {tag}
-            </Badge>
-          ))
-        : null;
-    default: {
-      if (!key.startsWith(CUSTOM_FIELD_PREFIX)) return null;
-      const cfKey = key.slice(CUSTOM_FIELD_PREFIX.length);
-      const text = customFieldText(f.customFields[cfKey] ?? null);
-      if (!text) return null;
-      return (
-        <Badge key={key} variant="secondary" className="text-[10px]">
-          {customFieldLabels[cfKey] ?? cfKey}: {text}
-        </Badge>
-      );
-    }
-  }
 }

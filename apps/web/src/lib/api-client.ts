@@ -2,6 +2,7 @@
 
 import type { ItemDetailData } from "@/lib/item-detail";
 import type {
+  BoardKey,
   BoardPreferences,
   CreatableRelationDirection,
   CreateFeatureInput,
@@ -115,9 +116,10 @@ export async function getItemDetail(specId: string): Promise<ItemDetailData> {
     `/api/v1/features/${encodeURIComponent(specId)}/context`,
   );
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { data?: ItemDetailData; error?: string }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    data?: ItemDetailData;
+    error?: string;
+  } | null;
   if (!res.ok || !body?.data) {
     throw new Error(body?.error ?? `Failed to load item (${res.status}).`);
   }
@@ -128,9 +130,10 @@ export async function getItemDetail(specId: string): Promise<ItemDetailData> {
 export async function getFeature(specId: string): Promise<FeatureDetail> {
   const res = await apiFetch(`/api/v1/features/${encodeURIComponent(specId)}`);
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { feature?: FeatureDetail; error?: string }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    feature?: FeatureDetail;
+    error?: string;
+  } | null;
   if (!res.ok || !body?.feature) {
     throw new Error(body?.error ?? `Failed to load feature (${res.status}).`);
   }
@@ -148,7 +151,9 @@ export async function patchFeature(
   });
   if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    const body = (await res.json().catch(() => null)) as {
+      error?: string;
+    } | null;
     throw new Error(body?.error ?? `PATCH failed with ${res.status}`);
   }
 }
@@ -163,9 +168,10 @@ export async function createWorkItem(
     body: JSON.stringify(input),
   });
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { feature?: FeatureRecord; error?: string }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    feature?: FeatureRecord;
+    error?: string;
+  } | null;
   if (!res.ok || !body?.feature) {
     throw new Error(body?.error ?? `Create failed with ${res.status}`);
   }
@@ -179,7 +185,9 @@ export async function deleteWorkItem(specId: string): Promise<void> {
   });
   if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    const body = (await res.json().catch(() => null)) as {
+      error?: string;
+    } | null;
     throw new Error(body?.error ?? `DELETE failed with ${res.status}`);
   }
 }
@@ -188,10 +196,12 @@ export async function deleteWorkItem(specId: string): Promise<void> {
 export async function listLevels(): Promise<WorkspaceLevel[]> {
   const res = await apiFetch("/api/v1/levels");
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { levels?: WorkspaceLevel[]; error?: string }
-    | null;
-  if (!res.ok) throw new Error(body?.error ?? `Failed to load levels (${res.status}).`);
+  const body = (await res.json().catch(() => null)) as {
+    levels?: WorkspaceLevel[];
+    error?: string;
+  } | null;
+  if (!res.ok)
+    throw new Error(body?.error ?? `Failed to load levels (${res.status}).`);
   return body?.levels ?? [];
 }
 
@@ -205,9 +215,10 @@ export async function updateLevels(
     body: JSON.stringify({ levels }),
   });
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { levels?: WorkspaceLevel[]; error?: string }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    levels?: WorkspaceLevel[];
+    error?: string;
+  } | null;
   if (!res.ok || !body?.levels) {
     throw new Error(body?.error ?? `Update failed with ${res.status}`);
   }
@@ -227,9 +238,10 @@ export async function updateLevelFields(
     body: JSON.stringify({ fields }),
   });
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { levels?: WorkspaceLevel[]; error?: string }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    levels?: WorkspaceLevel[];
+    error?: string;
+  } | null;
   if (!res.ok || !body?.levels) {
     throw new Error(body?.error ?? `Update failed with ${res.status}`);
   }
@@ -249,9 +261,10 @@ export async function updateLevelTemplates(
     body: JSON.stringify({ templates }),
   });
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { levels?: WorkspaceLevel[]; error?: string }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    levels?: WorkspaceLevel[];
+    error?: string;
+  } | null;
   if (!res.ok || !body?.levels) {
     throw new Error(body?.error ?? `Update failed with ${res.status}`);
   }
@@ -268,9 +281,10 @@ export async function createDetailTemplate(
     body: JSON.stringify(input),
   });
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { template?: DetailTemplate; error?: string }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    template?: DetailTemplate;
+    error?: string;
+  } | null;
   if (!res.ok || !body?.template) {
     throw new Error(body?.error ?? `Create template failed with ${res.status}`);
   }
@@ -291,9 +305,10 @@ export async function updateDetailTemplate(
     },
   );
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { template?: DetailTemplate; error?: string }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    template?: DetailTemplate;
+    error?: string;
+  } | null;
   if (!res.ok || !body?.template) {
     throw new Error(body?.error ?? `Update template failed with ${res.status}`);
   }
@@ -308,7 +323,9 @@ export async function deleteDetailTemplate(id: string): Promise<void> {
   );
   if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    const body = (await res.json().catch(() => null)) as {
+      error?: string;
+    } | null;
     throw new Error(body?.error ?? `Delete template failed with ${res.status}`);
   }
 }
@@ -319,10 +336,12 @@ export async function deleteDetailTemplate(id: string): Promise<void> {
 export async function listStatuses(): Promise<WorkspaceStatus[]> {
   const res = await apiFetch("/api/v1/statuses");
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { statuses?: WorkspaceStatus[]; error?: string }
-    | null;
-  if (!res.ok) throw new Error(body?.error ?? `Failed to load workflow (${res.status}).`);
+  const body = (await res.json().catch(() => null)) as {
+    statuses?: WorkspaceStatus[];
+    error?: string;
+  } | null;
+  if (!res.ok)
+    throw new Error(body?.error ?? `Failed to load workflow (${res.status}).`);
   return body?.statuses ?? [];
 }
 
@@ -336,9 +355,10 @@ export async function updateStatuses(
     body: JSON.stringify({ statuses: stages }),
   });
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { statuses?: WorkspaceStatus[]; error?: string }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    statuses?: WorkspaceStatus[];
+    error?: string;
+  } | null;
   if (!res.ok || !body?.statuses) {
     throw new Error(body?.error ?? `Update workflow failed with ${res.status}`);
   }
@@ -349,11 +369,14 @@ export async function updateStatuses(
 export async function listStageGates(): Promise<StageGate[]> {
   const res = await apiFetch("/api/v1/stage-gates");
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { gates?: StageGate[]; error?: string }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    gates?: StageGate[];
+    error?: string;
+  } | null;
   if (!res.ok) {
-    throw new Error(body?.error ?? `Failed to load stage gates (${res.status}).`);
+    throw new Error(
+      body?.error ?? `Failed to load stage gates (${res.status}).`,
+    );
   }
   return body?.gates ?? [];
 }
@@ -368,11 +391,14 @@ export async function updateStageGates(
     body: JSON.stringify({ gates }),
   });
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { gates?: StageGate[]; error?: string }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    gates?: StageGate[];
+    error?: string;
+  } | null;
   if (!res.ok || !body?.gates) {
-    throw new Error(body?.error ?? `Update stage gates failed with ${res.status}`);
+    throw new Error(
+      body?.error ?? `Update stage gates failed with ${res.status}`,
+    );
   }
   return body.gates;
 }
@@ -392,9 +418,10 @@ export async function setGateCompletion(
     },
   );
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { completed?: string[]; error?: string }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    completed?: string[];
+    error?: string;
+  } | null;
   if (!res.ok || !body?.completed) {
     throw new Error(body?.error ?? `Update gate failed with ${res.status}`);
   }
@@ -411,9 +438,10 @@ export async function createIdea(input: IdeaInput): Promise<IdeaRecord> {
     body: JSON.stringify(input),
   });
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { idea?: IdeaRecord; error?: string }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    idea?: IdeaRecord;
+    error?: string;
+  } | null;
   if (!res.ok || !body?.idea) {
     throw new Error(body?.error ?? `Create idea failed with ${res.status}`);
   }
@@ -431,9 +459,10 @@ export async function updateIdea(
     body: JSON.stringify(patch),
   });
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { idea?: IdeaRecord; error?: string }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    idea?: IdeaRecord;
+    error?: string;
+  } | null;
   if (!res.ok || !body?.idea) {
     throw new Error(body?.error ?? `Update idea failed with ${res.status}`);
   }
@@ -447,7 +476,9 @@ export async function deleteIdea(id: string): Promise<void> {
   });
   if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    const body = (await res.json().catch(() => null)) as {
+      error?: string;
+    } | null;
     throw new Error(body?.error ?? `Delete idea failed with ${res.status}`);
   }
 }
@@ -463,9 +494,10 @@ export async function setIdeaVote(
     body: JSON.stringify({ voted }),
   });
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { idea?: IdeaRecord; error?: string }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    idea?: IdeaRecord;
+    error?: string;
+  } | null;
   if (!res.ok || !body?.idea) {
     throw new Error(body?.error ?? `Vote failed with ${res.status}`);
   }
@@ -476,13 +508,18 @@ export async function setIdeaVote(
 export async function promoteIdea(
   id: string,
 ): Promise<{ idea: IdeaRecord; feature: FeatureRecord }> {
-  const res = await apiFetch(`/api/v1/ideas/${encodeURIComponent(id)}/promote`, {
-    method: "POST",
-  });
+  const res = await apiFetch(
+    `/api/v1/ideas/${encodeURIComponent(id)}/promote`,
+    {
+      method: "POST",
+    },
+  );
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { idea?: IdeaRecord; feature?: FeatureRecord; error?: string }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    idea?: IdeaRecord;
+    feature?: FeatureRecord;
+    error?: string;
+  } | null;
   if (!res.ok || !body?.idea || !body?.feature) {
     throw new Error(body?.error ?? `Promote failed with ${res.status}`);
   }
@@ -499,11 +536,14 @@ export async function updateIdeaStatuses(
     body: JSON.stringify({ statuses: stages }),
   });
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { statuses?: IdeaStage[]; error?: string }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    statuses?: IdeaStage[];
+    error?: string;
+  } | null;
   if (!res.ok || !body?.statuses) {
-    throw new Error(body?.error ?? `Update idea stages failed with ${res.status}`);
+    throw new Error(
+      body?.error ?? `Update idea stages failed with ${res.status}`,
+    );
   }
   return body.statuses;
 }
@@ -518,26 +558,32 @@ export async function updateIdeaSettings(
     body: JSON.stringify(patch),
   });
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { settings?: IdeaSettings; error?: string }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    settings?: IdeaSettings;
+    error?: string;
+  } | null;
   if (!res.ok || !body?.settings) {
-    throw new Error(body?.error ?? `Update Ideas settings failed with ${res.status}`);
+    throw new Error(
+      body?.error ?? `Update Ideas settings failed with ${res.status}`,
+    );
   }
   return body.settings;
 }
 
 /** Define a custom property (admin-only on the server); returns it. */
-export async function createProperty(input: PropertyInput): Promise<PropertyDef> {
+export async function createProperty(
+  input: PropertyInput,
+): Promise<PropertyDef> {
   const res = await apiFetch("/api/v1/properties", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
   });
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { property?: PropertyDef; error?: string }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    property?: PropertyDef;
+    error?: string;
+  } | null;
   if (!res.ok || !body?.property) {
     throw new Error(body?.error ?? `Create property failed with ${res.status}`);
   }
@@ -555,9 +601,10 @@ export async function updateProperty(
     body: JSON.stringify(patch),
   });
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { property?: PropertyDef; error?: string }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    property?: PropertyDef;
+    error?: string;
+  } | null;
   if (!res.ok || !body?.property) {
     throw new Error(body?.error ?? `Update property failed with ${res.status}`);
   }
@@ -571,22 +618,27 @@ export async function deleteProperty(id: string): Promise<void> {
   });
   if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    const body = (await res.json().catch(() => null)) as {
+      error?: string;
+    } | null;
     throw new Error(body?.error ?? `Delete property failed with ${res.status}`);
   }
 }
 
 /** Create a release (admin-only on the server); returns the new record. */
-export async function createRelease(input: ReleaseInput): Promise<ReleaseRecord> {
+export async function createRelease(
+  input: ReleaseInput,
+): Promise<ReleaseRecord> {
   const res = await apiFetch("/api/v1/releases", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
   });
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { release?: ReleaseRecord; error?: string }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    release?: ReleaseRecord;
+    error?: string;
+  } | null;
   if (!res.ok || !body?.release) {
     throw new Error(body?.error ?? `Create release failed with ${res.status}`);
   }
@@ -604,9 +656,10 @@ export async function updateRelease(
     body: JSON.stringify(patch),
   });
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { release?: ReleaseRecord; error?: string }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    release?: ReleaseRecord;
+    error?: string;
+  } | null;
   if (!res.ok || !body?.release) {
     throw new Error(body?.error ?? `Update release failed with ${res.status}`);
   }
@@ -620,7 +673,9 @@ export async function deleteRelease(id: string): Promise<void> {
   });
   if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    const body = (await res.json().catch(() => null)) as {
+      error?: string;
+    } | null;
     throw new Error(body?.error ?? `Delete release failed with ${res.status}`);
   }
 }
@@ -639,9 +694,10 @@ export async function addRelation(
     },
   );
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { relations?: FeatureRelation[]; error?: string }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    relations?: FeatureRelation[];
+    error?: string;
+  } | null;
   if (!res.ok) {
     throw new Error(body?.error ?? `Add relation failed with ${res.status}`);
   }
@@ -658,28 +714,37 @@ export async function removeRelation(
     { method: "DELETE" },
   );
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { relations?: FeatureRelation[]; error?: string }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    relations?: FeatureRelation[];
+    error?: string;
+  } | null;
   if (!res.ok) {
     throw new Error(body?.error ?? `Remove relation failed with ${res.status}`);
   }
   return body?.relations ?? [];
 }
 
-/** Persist the acting user's board display preferences. */
+/** Persist the acting user's board display preferences for a space. */
 export async function saveBoardPreferences(
   prefs: BoardPreferences,
+  board: BoardKey = "backlog",
 ): Promise<void> {
-  const res = await apiFetch("/api/v1/board-preferences", {
-    method: "PUT",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(prefs),
-  });
+  const res = await apiFetch(
+    `/api/v1/board-preferences?board=${encodeURIComponent(board)}`,
+    {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(prefs),
+    },
+  );
   if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { error?: string } | null;
-    throw new Error(body?.error ?? `Save preferences failed with ${res.status}`);
+    const body = (await res.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(
+      body?.error ?? `Save preferences failed with ${res.status}`,
+    );
   }
 }
 
@@ -697,9 +762,10 @@ export async function addGithubLink(
     },
   );
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { githubLinks?: GithubLink[]; error?: string }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    githubLinks?: GithubLink[];
+    error?: string;
+  } | null;
   if (!res.ok) {
     throw new Error(body?.error ?? `Add GitHub link failed with ${res.status}`);
   }
@@ -716,11 +782,14 @@ export async function removeGithubLink(
     { method: "DELETE" },
   );
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { githubLinks?: GithubLink[]; error?: string }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    githubLinks?: GithubLink[];
+    error?: string;
+  } | null;
   if (!res.ok) {
-    throw new Error(body?.error ?? `Remove GitHub link failed with ${res.status}`);
+    throw new Error(
+      body?.error ?? `Remove GitHub link failed with ${res.status}`,
+    );
   }
   return body?.githubLinks ?? [];
 }
@@ -733,9 +802,10 @@ export async function saveView(input: SavedViewInput): Promise<SavedView> {
     body: JSON.stringify(input),
   });
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { view?: SavedView; error?: string }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    view?: SavedView;
+    error?: string;
+  } | null;
   if (!res.ok || !body?.view) {
     throw new Error(body?.error ?? `Save view failed with ${res.status}`);
   }
@@ -749,7 +819,9 @@ export async function deleteView(id: string): Promise<void> {
   });
   if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    const body = (await res.json().catch(() => null)) as {
+      error?: string;
+    } | null;
     throw new Error(body?.error ?? `Delete view failed with ${res.status}`);
   }
 }
@@ -769,14 +841,12 @@ export async function createWorkspace(
     body: JSON.stringify({ name, seedSampleData, slug }),
   });
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | {
-        workspace?: { slug: string };
-        error?: string;
-        code?: "slug_taken" | "slug_invalid";
-        suggestion?: string;
-      }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    workspace?: { slug: string };
+    error?: string;
+    code?: "slug_taken" | "slug_invalid";
+    suggestion?: string;
+  } | null;
   if (!res.ok || !body?.workspace) {
     if (body?.code === "slug_taken" || body?.code === "slug_invalid") {
       throw new WorkspaceSlugTakenError(
@@ -785,7 +855,9 @@ export async function createWorkspace(
         body.suggestion,
       );
     }
-    throw new Error(body?.error ?? `Workspace creation failed with ${res.status}`);
+    throw new Error(
+      body?.error ?? `Workspace creation failed with ${res.status}`,
+    );
   }
   return body.workspace;
 }
@@ -823,9 +895,10 @@ export async function connectRepository(
     body: JSON.stringify(input),
   });
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { sync?: SyncResult | { error: string } | null; error?: string }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    sync?: SyncResult | { error: string } | null;
+    error?: string;
+  } | null;
   if (!res.ok) {
     throw new Error(body?.error ?? `Connect failed with ${res.status}`);
   }
@@ -846,12 +919,17 @@ export interface RepoScan {
  * Read-only scan of every connected repo for spec files, without importing.
  * Backs the onboarding "found N specs, create cards?" prompt. Admin-only.
  */
-export async function scanWorkspaceSpecs(): Promise<{ repos: RepoScan[]; totalSpecs: number }> {
+export async function scanWorkspaceSpecs(): Promise<{
+  repos: RepoScan[];
+  totalSpecs: number;
+}> {
   const res = await apiFetch("/api/v1/repositories/scan");
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { repos?: RepoScan[]; totalSpecs?: number; error?: string }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    repos?: RepoScan[];
+    totalSpecs?: number;
+    error?: string;
+  } | null;
   if (!res.ok) {
     throw new Error(body?.error ?? `Scan failed with ${res.status}`);
   }
@@ -879,15 +957,24 @@ export async function createStarterSpec(input: {
     body: JSON.stringify(input),
   });
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { path?: string; summary?: SyncResult; error?: string }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    path?: string;
+    summary?: SyncResult;
+    error?: string;
+  } | null;
   if (!res.ok) {
-    throw new Error(body?.error ?? `Couldn't create the starter spec (${res.status}).`);
+    throw new Error(
+      body?.error ?? `Couldn't create the starter spec (${res.status}).`,
+    );
   }
   return {
     path: body?.path ?? "",
-    summary: body?.summary ?? { upserted: 0, skipped: 0, idsInjected: 0, featuresCreated: 0 },
+    summary: body?.summary ?? {
+      upserted: 0,
+      skipped: 0,
+      idsInjected: 0,
+      featuresCreated: 0,
+    },
   };
 }
 
@@ -904,14 +991,21 @@ export interface ImportResult {
 export async function importWorkspaceSpecs(): Promise<ImportResult> {
   const res = await apiFetch("/api/v1/repositories/import", { method: "POST" });
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { summary?: SyncResult; errors?: ImportResult["errors"]; error?: string }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    summary?: SyncResult;
+    errors?: ImportResult["errors"];
+    error?: string;
+  } | null;
   if (!res.ok) {
     throw new Error(body?.error ?? `Import failed with ${res.status}`);
   }
   return {
-    summary: body?.summary ?? { upserted: 0, skipped: 0, idsInjected: 0, featuresCreated: 0 },
+    summary: body?.summary ?? {
+      upserted: 0,
+      skipped: 0,
+      idsInjected: 0,
+      featuresCreated: 0,
+    },
     errors: body?.errors ?? [],
   };
 }
@@ -926,7 +1020,9 @@ export async function disconnectRepository(id: string): Promise<void> {
   });
   if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    const body = (await res.json().catch(() => null)) as {
+      error?: string;
+    } | null;
     throw new Error(body?.error ?? `Disconnect failed with ${res.status}`);
   }
 }
@@ -963,11 +1059,15 @@ export interface InstallationConnectState {
 export async function listInstallationRepositories(): Promise<InstallationConnectState> {
   const res = await apiFetch("/api/v1/github/installations/repositories");
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as Partial<InstallationConnectState> & {
-    error?: string;
-  } | null;
+  const body = (await res.json().catch(() => null)) as
+    | (Partial<InstallationConnectState> & {
+        error?: string;
+      })
+    | null;
   if (!res.ok) {
-    throw new Error(body?.error ?? `Failed to load repositories (${res.status}).`);
+    throw new Error(
+      body?.error ?? `Failed to load repositories (${res.status}).`,
+    );
   }
   return {
     installations: body?.installations ?? [],
@@ -1000,11 +1100,14 @@ export async function createSpecRepository(input: {
     body: JSON.stringify(input),
   });
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { repository?: CreatedSpecRepo; error?: string }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    repository?: CreatedSpecRepo;
+    error?: string;
+  } | null;
   if (!res.ok || !body?.repository) {
-    throw new Error(body?.error ?? `Couldn't create the repository (${res.status}).`);
+    throw new Error(
+      body?.error ?? `Couldn't create the repository (${res.status}).`,
+    );
   }
   return body.repository;
 }
@@ -1015,10 +1118,12 @@ export async function createSpecRepository(input: {
 export async function listProducts(): Promise<ProductRecord[]> {
   const res = await apiFetch("/api/v1/products");
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { products?: ProductRecord[]; error?: string }
-    | null;
-  if (!res.ok) throw new Error(body?.error ?? `Failed to load products (${res.status}).`);
+  const body = (await res.json().catch(() => null)) as {
+    products?: ProductRecord[];
+    error?: string;
+  } | null;
+  if (!res.ok)
+    throw new Error(body?.error ?? `Failed to load products (${res.status}).`);
   return body?.products ?? [];
 }
 
@@ -1032,9 +1137,10 @@ export async function createProduct(
     body: JSON.stringify(input),
   });
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { product?: ProductRecord; error?: string }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    product?: ProductRecord;
+    error?: string;
+  } | null;
   if (!res.ok || !body?.product) {
     throw new Error(body?.error ?? `Create product failed with ${res.status}`);
   }
@@ -1052,9 +1158,10 @@ export async function updateProduct(
     body: JSON.stringify(patch),
   });
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { product?: ProductRecord; error?: string }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    product?: ProductRecord;
+    error?: string;
+  } | null;
   if (!res.ok || !body?.product) {
     throw new Error(body?.error ?? `Update product failed with ${res.status}`);
   }
@@ -1068,7 +1175,9 @@ export async function deleteProduct(id: string): Promise<void> {
   });
   if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    const body = (await res.json().catch(() => null)) as {
+      error?: string;
+    } | null;
     throw new Error(body?.error ?? `Delete product failed with ${res.status}`);
   }
 }
@@ -1081,10 +1190,12 @@ export async function listProductMembers(
     `/api/v1/products/${encodeURIComponent(productId)}/members`,
   );
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { members?: ProductMemberRecord[]; error?: string }
-    | null;
-  if (!res.ok) throw new Error(body?.error ?? `Failed to load members (${res.status}).`);
+  const body = (await res.json().catch(() => null)) as {
+    members?: ProductMemberRecord[];
+    error?: string;
+  } | null;
+  if (!res.ok)
+    throw new Error(body?.error ?? `Failed to load members (${res.status}).`);
   return body?.members ?? [];
 }
 
@@ -1103,7 +1214,9 @@ export async function setProductMember(
   );
   if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    const body = (await res.json().catch(() => null)) as {
+      error?: string;
+    } | null;
     throw new Error(body?.error ?? `Set member failed with ${res.status}`);
   }
 }
@@ -1119,7 +1232,9 @@ export async function removeProductMember(
   );
   if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    const body = (await res.json().catch(() => null)) as {
+      error?: string;
+    } | null;
     throw new Error(body?.error ?? `Remove member failed with ${res.status}`);
   }
 }
@@ -1128,10 +1243,12 @@ export async function removeProductMember(
 export async function listOrgMembers(): Promise<OrgMemberRecord[]> {
   const res = await apiFetch("/api/v1/org/members");
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { members?: OrgMemberRecord[]; error?: string }
-    | null;
-  if (!res.ok) throw new Error(body?.error ?? `Failed to load members (${res.status}).`);
+  const body = (await res.json().catch(() => null)) as {
+    members?: OrgMemberRecord[];
+    error?: string;
+  } | null;
+  if (!res.ok)
+    throw new Error(body?.error ?? `Failed to load members (${res.status}).`);
   return body?.members ?? [];
 }
 
@@ -1140,26 +1257,36 @@ export async function updateOrgMember(
   userId: string,
   patch: { role?: OrgRole; active?: boolean },
 ): Promise<void> {
-  const res = await apiFetch(`/api/v1/org/members/${encodeURIComponent(userId)}`, {
-    method: "PATCH",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(patch),
-  });
+  const res = await apiFetch(
+    `/api/v1/org/members/${encodeURIComponent(userId)}`,
+    {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(patch),
+    },
+  );
   if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    const body = (await res.json().catch(() => null)) as {
+      error?: string;
+    } | null;
     throw new Error(body?.error ?? `Update member failed with ${res.status}`);
   }
 }
 
 /** Remove a member from the organization. Org-admin only. */
 export async function removeOrgMember(userId: string): Promise<void> {
-  const res = await apiFetch(`/api/v1/org/members/${encodeURIComponent(userId)}`, {
-    method: "DELETE",
-  });
+  const res = await apiFetch(
+    `/api/v1/org/members/${encodeURIComponent(userId)}`,
+    {
+      method: "DELETE",
+    },
+  );
   if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    const body = (await res.json().catch(() => null)) as {
+      error?: string;
+    } | null;
     throw new Error(body?.error ?? `Remove member failed with ${res.status}`);
   }
 }
@@ -1168,10 +1295,14 @@ export async function removeOrgMember(userId: string): Promise<void> {
 export async function listInvitations(): Promise<OrgInvitationRecord[]> {
   const res = await apiFetch("/api/v1/org/invitations");
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { invitations?: OrgInvitationRecord[]; error?: string }
-    | null;
-  if (!res.ok) throw new Error(body?.error ?? `Failed to load invitations (${res.status}).`);
+  const body = (await res.json().catch(() => null)) as {
+    invitations?: OrgInvitationRecord[];
+    error?: string;
+  } | null;
+  if (!res.ok)
+    throw new Error(
+      body?.error ?? `Failed to load invitations (${res.status}).`,
+    );
   return body?.invitations ?? [];
 }
 
@@ -1191,9 +1322,10 @@ export async function createInvitation(input: {
     body: JSON.stringify(input),
   });
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { invitation?: OrgInvitationRecord; error?: string }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    invitation?: OrgInvitationRecord;
+    error?: string;
+  } | null;
   if (!res.ok || !body?.invitation) {
     throw new Error(body?.error ?? `Invite failed with ${res.status}`);
   }
@@ -1202,24 +1334,34 @@ export async function createInvitation(input: {
 
 /** Revoke a pending invitation. Org-admin only. */
 export async function revokeInvitation(id: string): Promise<void> {
-  const res = await apiFetch(`/api/v1/org/invitations/${encodeURIComponent(id)}`, {
-    method: "DELETE",
-  });
+  const res = await apiFetch(
+    `/api/v1/org/invitations/${encodeURIComponent(id)}`,
+    {
+      method: "DELETE",
+    },
+  );
   if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    const body = (await res.json().catch(() => null)) as {
+      error?: string;
+    } | null;
     throw new Error(body?.error ?? `Revoke failed with ${res.status}`);
   }
 }
 
 /** Re-send a pending invitation (regenerates the token). Org-admin only. */
 export async function resendInvitation(id: string): Promise<void> {
-  const res = await apiFetch(`/api/v1/org/invitations/${encodeURIComponent(id)}/resend`, {
-    method: "POST",
-  });
+  const res = await apiFetch(
+    `/api/v1/org/invitations/${encodeURIComponent(id)}/resend`,
+    {
+      method: "POST",
+    },
+  );
   if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    const body = (await res.json().catch(() => null)) as {
+      error?: string;
+    } | null;
     throw new Error(body?.error ?? `Resend failed with ${res.status}`);
   }
 }
@@ -1233,7 +1375,9 @@ export async function updateWorkspace(name: string): Promise<void> {
   });
   if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    const body = (await res.json().catch(() => null)) as {
+      error?: string;
+    } | null;
     throw new Error(body?.error ?? `Update failed with ${res.status}`);
   }
 }
@@ -1252,9 +1396,10 @@ export async function setDocSpace(input: {
     body: JSON.stringify(input),
   });
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { space?: DocSpace; error?: string }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    space?: DocSpace;
+    error?: string;
+  } | null;
   if (!res.ok || !body?.space) {
     throw new Error(body?.error ?? `Save failed with ${res.status}`);
   }
@@ -1262,16 +1407,19 @@ export async function setDocSpace(input: {
 }
 
 /** Create a doc folder or page; returns the new record. */
-export async function createDocPage(input: DocPageInput): Promise<DocPageRecord> {
+export async function createDocPage(
+  input: DocPageInput,
+): Promise<DocPageRecord> {
   const res = await apiFetch("/api/v1/docs", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
   });
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { page?: DocPageRecord; error?: string }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    page?: DocPageRecord;
+    error?: string;
+  } | null;
   if (!res.ok || !body?.page) {
     throw new Error(body?.error ?? `Create failed with ${res.status}`);
   }
@@ -1289,9 +1437,10 @@ export async function patchDocPage(
     body: JSON.stringify(patch),
   });
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { page?: DocPageRecord; error?: string }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    page?: DocPageRecord;
+    error?: string;
+  } | null;
   if (!res.ok || !body?.page) {
     throw new Error(body?.error ?? `Save failed with ${res.status}`);
   }
@@ -1305,7 +1454,9 @@ export async function deleteDocPage(id: string): Promise<void> {
   });
   if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    const body = (await res.json().catch(() => null)) as {
+      error?: string;
+    } | null;
     throw new Error(body?.error ?? `Delete failed with ${res.status}`);
   }
 }
@@ -1325,13 +1476,11 @@ export async function createGithubDocSpace(input: {
     body: JSON.stringify(input),
   });
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | {
-        space?: DocSpace;
-        repository?: { owner: string; name: string };
-        error?: string;
-      }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    space?: DocSpace;
+    repository?: { owner: string; name: string };
+    error?: string;
+  } | null;
   if (!res.ok || !body?.space || !body.repository) {
     throw new Error(body?.error ?? `Create failed with ${res.status}`);
   }
@@ -1360,13 +1509,11 @@ export async function connectGithubDocSpace(input: {
     }),
   });
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | {
-        space?: DocSpace;
-        repository?: { owner: string; name: string };
-        error?: string;
-      }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    space?: DocSpace;
+    repository?: { owner: string; name: string };
+    error?: string;
+  } | null;
   if (!res.ok || !body?.space || !body.repository) {
     throw new Error(body?.error ?? `Connect failed with ${res.status}`);
   }
@@ -1392,9 +1539,10 @@ export async function saveGithubDocFile(input: {
     body: JSON.stringify(input),
   });
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { blobSha?: string; error?: string }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    blobSha?: string;
+    error?: string;
+  } | null;
   if (!res.ok || typeof body?.blobSha !== "string") {
     throw new Error(body?.error ?? `Save failed with ${res.status}`);
   }
@@ -1414,9 +1562,12 @@ export async function renameGithubDocFile(input: {
     body: JSON.stringify(input),
   });
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as
-    | { path?: string; blobSha?: string; content?: string; error?: string }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    path?: string;
+    blobSha?: string;
+    content?: string;
+    error?: string;
+  } | null;
   if (
     !res.ok ||
     typeof body?.path !== "string" ||
@@ -1442,7 +1593,9 @@ export async function deleteGithubDocFile(input: {
   });
   if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    const body = (await res.json().catch(() => null)) as {
+      error?: string;
+    } | null;
     throw new Error(body?.error ?? `Delete failed with ${res.status}`);
   }
 }
