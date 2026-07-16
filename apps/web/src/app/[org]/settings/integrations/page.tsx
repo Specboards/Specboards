@@ -18,7 +18,7 @@ import { WebhooksCard } from "@/components/webhooks-card";
 import { listApiKeys } from "@/lib/api-keys";
 import { getServerSessionUser } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
-import { getGithubAppSlug, isGithubConfigured } from "@/lib/github-app";
+import { isGithubConfigured } from "@/lib/github-app";
 import { loadWorkspaceInstallations, NO_INSTALLATIONS } from "@/lib/github-connect";
 import { listProducts } from "@/lib/products-service";
 import { isSingleTenant } from "@/lib/tenancy";
@@ -126,10 +126,7 @@ export default async function IntegrationsSettingsPage({
     .from(repositories)
     .where(eq(repositories.workspaceId, access.workspaceId));
 
-  const [configured, slug] = await Promise.all([
-    isGithubConfigured(db),
-    getGithubAppSlug(db),
-  ]);
+  const configured = await isGithubConfigured(db);
 
   // Prefetch the connect picker's repo list so it renders with the initial
   // HTML instead of popping in after a client fetch. Costs one GitHub call per
@@ -170,7 +167,7 @@ export default async function IntegrationsSettingsPage({
           canConnect={isAdmin}
           configured={configured}
           selfHosted={isSingleTenant()}
-          installUrl={slug ? `/api/v1/github/install-start?org=${encodeURIComponent(slug)}` : null}
+          installUrl={configured ? `/api/v1/github/install-start?org=${encodeURIComponent(access.orgSlug)}` : null}
           notice={noticeFor(params)}
           installations={installations}
         />
