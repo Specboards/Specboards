@@ -12,6 +12,26 @@
   breadth or polish. Prefer a working narrow slice over a complete-but-untested
   layer. (From The Pragmatic Programmer.)
 
+## Deployment and infrastructure
+
+- **Hosting is Fly.io, data is Fly Postgres, auth is Better Auth.** There is no
+  Supabase in this project (an early plan considered it; the app moved to
+  Fly.io + Better Auth before any real auth shipped). Do not add Supabase
+  clients, dependencies, or migration paths.
+- **Two Fly apps, two configs, in the repo root:**
+  - `fly.toml` - production. Fly app `specboard`, served at
+    https://app.specboard.ai. Deploy from the repo root with `fly deploy`.
+  - `fly.test.toml` - test/staging. Fly app `specboard-test`, served at
+    https://test.specboard.ai. Deploy with `fly deploy -c fly.test.toml`.
+- **Always deploy to test first.** New code goes to `specboard-test` and is
+  verified there before production. Never deploy production from a feature
+  branch: merge to `main` first, then `fly deploy`.
+- **Databases are Fly Postgres apps:** `specboard-test-db` (test) and
+  `specboard-prod-db` (production). The app reads its connection string from the
+  `DATABASE_URL` secret. Run migrations against a cloud DB by fetching that
+  secret (`fly ssh console -a <app> -C 'printenv DATABASE_URL'`), tunnelling with
+  `fly proxy`, and running `pnpm db:migrate` against the local port.
+
 ## Writing style
 
 - **Never use em dashes (`—`).** This applies everywhere: code comments, docs,

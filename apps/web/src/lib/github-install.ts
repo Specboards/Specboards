@@ -5,7 +5,7 @@ import { and, eq, githubInstallStates, lt, sql, type Database } from "@specboard
 /**
  * GitHub App installation flow helpers.
  *
- * The connect experience mirrors Vercel/Supabase: the admin clicks "Connect
+ * The connect experience mirrors Vercel: the admin clicks "Connect
  * GitHub", installs the App (picking repos) on github.com, and GitHub redirects
  * back to our setup callback with an `installation_id`. We never ask anyone to
  * copy ids by hand.

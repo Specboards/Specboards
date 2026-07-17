@@ -31,10 +31,6 @@ apps/web/e2e/.tmp/
 .vscode/*
 !.vscode/extensions.json
 
-# Supabase
-infra/supabase/.branches/
-infra/supabase/.temp/
-
 # Personal saved backlog views (local file mode) — not sample data
 .specboard/local-views.json
 # Per-user board prefs + DB-native work items + hierarchy config (local file mode)
