@@ -12,6 +12,7 @@ import {
   and,
   eq,
   features,
+  productRepositories,
   repositories,
   specIndex,
   workspaceLevels,
@@ -29,6 +30,30 @@ import { fakeRepoClient } from "@/lib/github-e2e";
 import { ensureDefaultProduct } from "@/lib/workspace";
 
 export type RepoRecord = typeof repositories.$inferSelect;
+
+/**
+ * The product this repo's newly discovered specs are assigned to: the linked
+ * product marked `isDefault` in `product_repositories`, else the workspace's
+ * default product. The fallback covers repos connected before links existed
+ * (the 0040 backfill pins those explicitly), repos whose links were removed,
+ * and self-heals if a default row disappears (its product was deleted).
+ */
+export async function resolveRepoDefaultProduct(
+  db: Database,
+  repo: Pick<RepoRecord, "id" | "workspaceId">,
+): Promise<string> {
+  const row = await db
+    .select({ productId: productRepositories.productId })
+    .from(productRepositories)
+    .where(
+      and(
+        eq(productRepositories.repoId, repo.id),
+        eq(productRepositories.isDefault, true),
+      ),
+    )
+    .limit(1);
+  return row[0]?.productId ?? ensureDefaultProduct(db, repo.workspaceId);
+}
 
 /**
  * Resolve the git client for a connected repo. Normally this mints an
@@ -359,8 +384,9 @@ export async function syncRepository(db: Database, repo: RepoRecord): Promise<Sy
 
   const reconciled = await reconcileSpecs(client, globs);
 
-  // Synced specs land in the workspace's default product (until moved later).
-  const productId = await ensureDefaultProduct(db, repo.workspaceId);
+  // Synced specs land in the repo's default product (until moved later); a
+  // repo without product links falls back to the workspace default.
+  const productId = await resolveRepoDefaultProduct(db, repo);
 
   // Specs are the spec-backed leaf; set the level explicitly from the
   // workspace's configured hierarchy rather than relying on the column default

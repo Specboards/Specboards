@@ -59,6 +59,8 @@ grant select                            on workspace_levels   to specboard_worke
 grant select, insert, update, delete    on features           to specboard_worker;
 grant select, insert, update, delete    on spec_index         to specboard_worker;
 grant select, insert, update            on products           to specboard_worker;
+-- Sync resolves each repo's default product from its links (read-only).
+grant select                            on product_repositories to specboard_worker;
 
 -- Read-only context both paths need to build envelopes / resolve scope.
 grant select                            on workspaces         to specboard_worker;
@@ -76,7 +78,8 @@ declare
   worker_tables text[] := array[
     'outbox_events', 'webhook_endpoints', 'webhook_deliveries',
     'github_installations', 'repositories', 'feature_github_links',
-    'workspace_levels', 'features', 'spec_index', 'products', 'workspaces'
+    'workspace_levels', 'features', 'spec_index', 'products',
+    'product_repositories', 'workspaces'
   ];
 begin
   foreach t in array worker_tables loop

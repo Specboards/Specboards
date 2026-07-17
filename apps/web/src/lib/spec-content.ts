@@ -13,11 +13,11 @@ import {
 import {
   featureSlug,
   resolveRepoClient,
+  resolveRepoDefaultProduct,
   syncRepository,
   type RepoRecord,
 } from "@/lib/github-sync";
 import { getStore, type WorkspaceScope } from "@/lib/store";
-import { ensureDefaultProduct } from "@/lib/workspace";
 
 /**
  * Writing a spec's Markdown means committing to the connected GitHub repo (git
@@ -179,10 +179,10 @@ export async function createSpec(
     repo = repos.find((r) => r.isSpecRepo) ?? repos[0]!;
   }
 
-  // New specs sync into the workspace's default product; require write there.
+  // New specs sync into the target repo's default product; require write there.
   const store = await getStore();
   const access = await store.getProductAccess(scope);
-  const defaultProductId = await ensureDefaultProduct(db, scope.workspaceId);
+  const defaultProductId = await resolveRepoDefaultProduct(db, repo);
   if (!access.isOrgAdmin && !canWriteProduct(access, defaultProductId)) {
     throw new SpecContentError(
       "Your role does not permit creating specs in this workspace.",

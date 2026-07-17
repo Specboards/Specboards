@@ -475,6 +475,53 @@ export const repositories = pgTable(
   },
   (t) => [
     unique("repositories_owner_name_uq").on(t.workspaceId, t.owner, t.name),
+    // Target for composite FKs (product_repositories) scoping by tenant.
+    unique("repositories_id_ws_uq").on(t.id, t.workspaceId),
+  ],
+);
+
+/**
+ * An explicit repo → product link. A repo can feed several products and a
+ * product can be built from several repos (microservices); the row marked
+ * `isDefault` names the product that sync assigns newly discovered specs to.
+ * At most one default per repo (partial unique index, added by hand in the
+ * migration — Drizzle can't express it), and the default is one of the linked
+ * products by construction. A repo with no rows falls back to the workspace's
+ * default product, which is also the pre-migration behavior (see backfill).
+ */
+export const productRepositories = pgTable(
+  "product_repositories",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    repoId: uuid("repo_id")
+      .notNull()
+      .references(() => repositories.id, { onDelete: "cascade" }),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    /** Sync assigns this repo's newly discovered specs to this product. */
+    isDefault: boolean("is_default").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    unique("product_repositories_repo_product_uq").on(t.repoId, t.productId),
+    index("product_repositories_repo_idx").on(t.repoId),
+    index("product_repositories_product_idx").on(t.productId),
+    foreignKey({
+      columns: [t.repoId, t.workspaceId],
+      foreignColumns: [repositories.id, repositories.workspaceId],
+      name: "product_repositories_repo_ws_fk",
+    }),
+    foreignKey({
+      columns: [t.productId, t.workspaceId],
+      foreignColumns: [products.id, products.workspaceId],
+      name: "product_repositories_product_ws_fk",
+    }),
   ],
 );
 

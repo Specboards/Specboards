@@ -281,6 +281,13 @@
       "when": 1784301215760,
       "tag": "0039_jazzy_shockwave",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1784305127961,
+      "tag": "0040_conscious_la_nuit",
+      "breakpoints": true
     }
   ]
 }
