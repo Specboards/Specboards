@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import { type IdeaStage } from "@specboard/core";
 
+import { EmptyState } from "@/components/empty-state";
 import { IdeaDetailSheet } from "@/components/idea-detail-sheet";
 import { IdeaStatusSelect } from "@/components/idea-status-select";
 import { Badge } from "@/components/ui/badge";
@@ -70,7 +71,9 @@ export function IdeasBoard({
         : ideas.filter((i) => i.status === statusFilter);
     return [...filtered].sort((a, b) => {
       if (sort === "votes") {
-        return b.voteCount - a.voteCount || cmpDateDesc(a.createdAt, b.createdAt);
+        return (
+          b.voteCount - a.voteCount || cmpDateDesc(a.createdAt, b.createdAt)
+        );
       }
       if (sort === "newest") return cmpDateDesc(a.createdAt, b.createdAt);
       return -cmpDateDesc(a.createdAt, b.createdAt); // oldest first
@@ -92,7 +95,9 @@ export function IdeasBoard({
             best into feature work.
           </p>
         </div>
-        {canEdit ? (
+        {/* When the board is empty the empty state carries the only "New idea"
+            CTA; show the header action once there are ideas to sit beside. */}
+        {canEdit && ideas.length > 0 ? (
           <IdeaCreate
             defaultProductId={defaultProductId}
             products={products}
@@ -102,10 +107,19 @@ export function IdeasBoard({
       </div>
 
       {ideas.length === 0 ? (
-        <p className="py-10 text-center text-sm text-muted-foreground">
-          No ideas yet.
-          {canEdit ? " Capture the first one to start collecting demand." : ""}
-        </p>
+        <EmptyState
+          title="No ideas yet"
+          description="Ideas capture requests and feedback from your team and customers. Collect votes on what matters, then promote the best into feature work."
+          action={
+            canEdit ? (
+              <IdeaCreate
+                defaultProductId={defaultProductId}
+                products={products}
+                showProductPicker={defaultProductId === null}
+              />
+            ) : null
+          }
+        />
       ) : (
         <>
           <div className="flex flex-wrap items-center gap-2">
@@ -144,9 +158,18 @@ export function IdeasBoard({
           </div>
 
           {visible.length === 0 ? (
-            <p className="py-10 text-center text-sm text-muted-foreground">
-              No ideas match this filter.
-            </p>
+            <div className="flex flex-col items-center gap-2 py-10 text-center">
+              <p className="text-sm text-muted-foreground">
+                No ideas match this filter.
+              </p>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setStatusFilter("all")}
+              >
+                Clear filter
+              </Button>
+            </div>
           ) : (
             <ul className="space-y-2">
               {visible.map((idea) => (
@@ -329,7 +352,9 @@ function IdeaRow({
 
   function handleAuthError(err: unknown): boolean {
     if (err instanceof AuthRequiredError) {
-      router.push(`/sign-in?from=${encodeURIComponent(window.location.pathname)}`);
+      router.push(
+        `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
+      );
       return true;
     }
     return false;
@@ -392,7 +417,9 @@ function IdeaRow({
         className="min-w-0 flex-1 space-y-1 text-left"
       >
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm font-medium hover:underline">{idea.title}</span>
+          <span className="text-sm font-medium hover:underline">
+            {idea.title}
+          </span>
           {productName ? (
             <Badge variant="secondary" className="text-[10px]">
               {productName}

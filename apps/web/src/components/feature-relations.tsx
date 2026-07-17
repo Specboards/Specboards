@@ -55,10 +55,13 @@ export function FeatureRelations({
   const orgHref = useOrgProductPath();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
 
   function handleAuth(err: unknown): boolean {
     if (err instanceof AuthRequiredError) {
-      router.push(`/sign-in?from=${encodeURIComponent(window.location.pathname)}`);
+      router.push(
+        `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
+      );
       return true;
     }
     return false;
@@ -69,7 +72,9 @@ export function FeatureRelations({
     const data = new FormData(e.currentTarget);
     const form = e.currentTarget;
     const toSpecId = String(data.get("toSpecId") ?? "");
-    const direction = String(data.get("direction") ?? "") as CreatableRelationDirection;
+    const direction = String(
+      data.get("direction") ?? "",
+    ) as CreatableRelationDirection;
     if (!toSpecId) {
       setError("Pick a feature to relate.");
       return;
@@ -79,10 +84,13 @@ export function FeatureRelations({
       try {
         await addRelation(specId, { toSpecId, direction });
         form.reset();
+        setAdding(false);
         router.refresh();
       } catch (err) {
         if (handleAuth(err)) return;
-        setError(err instanceof Error ? err.message : "Could not add relation.");
+        setError(
+          err instanceof Error ? err.message : "Could not add relation.",
+        );
       }
     });
   }
@@ -95,7 +103,9 @@ export function FeatureRelations({
         router.refresh();
       } catch (err) {
         if (handleAuth(err)) return;
-        setError(err instanceof Error ? err.message : "Could not remove relation.");
+        setError(
+          err instanceof Error ? err.message : "Could not remove relation.",
+        );
       }
     });
   }
@@ -107,11 +117,14 @@ export function FeatureRelations({
 
   return (
     <div className="space-y-3">
-      <span className="text-xs font-medium text-muted-foreground">Relations</span>
+      <span className="text-xs font-medium text-muted-foreground">
+        Relations
+      </span>
 
-      {grouped.length === 0 ? (
+      {grouped.length === 0 && !adding ? (
         <p className="text-xs text-muted-foreground">No relations yet.</p>
-      ) : (
+      ) : null}
+      {grouped.length > 0 ? (
         <ul className="space-y-2">
           {grouped.map((group) => (
             <li key={group.dir} className="space-y-1">
@@ -119,10 +132,7 @@ export function FeatureRelations({
                 {DIRECTION_LABEL[group.dir]}
               </span>
               {group.items.map((r) => (
-                <div
-                  key={r.id}
-                  className="flex items-center gap-1 text-sm"
-                >
+                <div key={r.id} className="flex items-center gap-1 text-sm">
                   <Link
                     href={orgHref(`/backlog/${r.otherLevel}/${r.otherSpecId}`)}
                     className="flex-1 truncate hover:underline"
@@ -146,29 +156,56 @@ export function FeatureRelations({
             </li>
           ))}
         </ul>
-      )}
+      ) : null}
 
+      {/* Start as an "Add relation" affordance; reveal the form on opt-in (see
+          the "add" UX rule in CLAUDE.md). */}
       {canEdit && candidates.length > 0 ? (
-        <form onSubmit={onAdd} className="space-y-2">
-          <Select name="direction" defaultValue="blocked_by" className="h-8">
-            {RELATION_DIRECTIONS.map((d) => (
-              <option key={d} value={d}>
-                {DIRECTION_LABEL[d]}…
-              </option>
-            ))}
-          </Select>
-          <Select name="toSpecId" defaultValue="" className="h-8">
-            <option value="">Select a feature…</option>
-            {candidates.map((c) => (
-              <option key={c.specId} value={c.specId}>
-                {c.title}
-              </option>
-            ))}
-          </Select>
-          <Button type="submit" size="sm" variant="outline" disabled={pending}>
-            {pending ? "Saving…" : "Add relation"}
+        adding ? (
+          <form onSubmit={onAdd} className="space-y-2">
+            <Select name="direction" defaultValue="blocked_by" className="h-8">
+              {RELATION_DIRECTIONS.map((d) => (
+                <option key={d} value={d}>
+                  {DIRECTION_LABEL[d]}…
+                </option>
+              ))}
+            </Select>
+            <Select name="toSpecId" defaultValue="" className="h-8">
+              <option value="">Select a feature…</option>
+              {candidates.map((c) => (
+                <option key={c.specId} value={c.specId}>
+                  {c.title}
+                </option>
+              ))}
+            </Select>
+            <div className="flex gap-2">
+              <Button type="submit" size="sm" disabled={pending}>
+                {pending ? "Saving…" : "Add relation"}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setAdding(false);
+                  setError(null);
+                }}
+                disabled={pending}
+              >
+                Cancel
+              </Button>
+            </div>
+          </form>
+        ) : (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => setAdding(true)}
+          >
+            Add relation
           </Button>
-        </form>
+        )
       ) : null}
 
       {error ? <p className="text-xs text-destructive">{error}</p> : null}

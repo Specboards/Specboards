@@ -5,7 +5,7 @@ import { parentLevelKey } from "@specboard/core";
 import { BoardClient } from "./board-client";
 import { BoardPrefsProvider } from "./board-prefs";
 import { CardFieldsMenu } from "@/components/card-fields-menu";
-import { EmptyState } from "@/components/empty-state";
+import { NoSpecsEmptyState } from "@/components/empty-state";
 import { LevelSwitcher } from "@/components/level-switcher";
 import { WorkItemCreate } from "@/components/work-item-create";
 import { WorkViewTabs } from "@/components/work-view-tabs";
@@ -161,7 +161,7 @@ export async function BoardView({
         </div>
         {features.length === 0 ? (
           activeLevel.isLeaf ? (
-            <EmptyState canConnect={canConnectRepos(access)} />
+            <NoSpecsEmptyState canConnect={canConnectRepos(access)} />
           ) : (
             <p className="py-8 text-center text-sm text-muted-foreground">
               No {activeLevel.label.toLowerCase()} items yet.

@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import type { PropertyDef, PropertyType } from "@specboard/core";
 import { PROPERTY_TYPES } from "@specboard/core";
 
+import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -42,14 +43,24 @@ export function PropertiesManager({
   properties: PropertyDef[];
   canEdit: boolean;
 }) {
+  const [adding, setAdding] = useState(false);
   return (
     <div className="max-w-2xl space-y-4">
-      {properties.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No custom properties yet.
-          {canEdit ? " Add one below to extend your cards." : ""}
-        </p>
-      ) : (
+      {properties.length === 0 && !adding ? (
+        <EmptyState
+          variant="inline"
+          title="No custom properties yet"
+          description="Custom properties add fields like Effort or Team to your cards, editable on each item's detail page."
+          action={
+            canEdit ? (
+              <Button size="sm" onClick={() => setAdding(true)}>
+                Add property
+              </Button>
+            ) : null
+          }
+        />
+      ) : null}
+      {properties.length > 0 ? (
         <div className="space-y-3">
           {properties.map((property) => (
             <PropertyRow
@@ -60,8 +71,17 @@ export function PropertiesManager({
             />
           ))}
         </div>
-      )}
-      {canEdit ? <PropertyCreate levels={levels} /> : null}
+      ) : null}
+      {/* Start as an "Add property" affordance; reveal the form on opt-in (see
+          the "add" UX rule in CLAUDE.md). */}
+      {canEdit && adding ? (
+        <PropertyCreate levels={levels} onDone={() => setAdding(false)} />
+      ) : null}
+      {canEdit && !adding && properties.length > 0 ? (
+        <Button size="sm" variant="outline" onClick={() => setAdding(true)}>
+          Add property
+        </Button>
+      ) : null}
     </div>
   );
 }
@@ -130,17 +150,14 @@ function PropertyRow({
   const [checked, setChecked] = useState<Set<string>>(
     () =>
       new Set(
-        property.levels === null
-          ? levels.map((l) => l.key)
-          : property.levels,
+        property.levels === null ? levels.map((l) => l.key) : property.levels,
       ),
   );
   const [pending, startTransition] = useTransition();
 
   const dirty =
     label.trim() !== property.label ||
-    (hasOptions(property.type) &&
-      options !== property.options.join(", ")) ||
+    (hasOptions(property.type) && options !== property.options.join(", ")) ||
     JSON.stringify(levelsValue(levels, checked)) !==
       JSON.stringify(property.levels);
 
@@ -181,7 +198,11 @@ function PropertyRow({
   }
 
   function onDelete() {
-    if (!window.confirm(`Delete the "${property.label}" property? Items keep their stored values, but the field disappears everywhere.`)) {
+    if (
+      !window.confirm(
+        `Delete the "${property.label}" property? Items keep their stored values, but the field disappears everywhere.`,
+      )
+    ) {
       return;
     }
     startTransition(async () => {
@@ -267,7 +288,13 @@ function PropertyRow({
   );
 }
 
-function PropertyCreate({ levels }: { levels: WorkspaceLevel[] }) {
+function PropertyCreate({
+  levels,
+  onDone,
+}: {
+  levels: WorkspaceLevel[];
+  onDone: () => void;
+}) {
   const router = useRouter();
   const [label, setLabel] = useState("");
   const [type, setType] = useState<PropertyType>("text");
@@ -307,6 +334,7 @@ function PropertyCreate({ levels }: { levels: WorkspaceLevel[] }) {
         setType("text");
         setOptions("");
         setChecked(new Set(levels.map((l) => l.key)));
+        onDone();
         router.refresh();
       } catch (err) {
         if (err instanceof AuthRequiredError) {
@@ -331,6 +359,7 @@ function PropertyCreate({ levels }: { levels: WorkspaceLevel[] }) {
             onChange={(e) => setLabel(e.target.value)}
             placeholder="e.g. Effort"
             className="h-8"
+            autoFocus
           />
         </label>
         <label className="space-y-1.5">
@@ -375,14 +404,25 @@ function PropertyCreate({ levels }: { levels: WorkspaceLevel[] }) {
           idPrefix="new"
         />
       </div>
-      <Button
-        type="button"
-        size="sm"
-        onClick={onCreate}
-        disabled={pending || label.trim() === ""}
-      >
-        {pending ? "Adding…" : "Add property"}
-      </Button>
+      <div className="flex gap-2">
+        <Button
+          type="button"
+          size="sm"
+          onClick={onCreate}
+          disabled={pending || label.trim() === ""}
+        >
+          {pending ? "Adding…" : "Add property"}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          onClick={onDone}
+          disabled={pending}
+        >
+          Cancel
+        </Button>
+      </div>
     </fieldset>
   );
 }

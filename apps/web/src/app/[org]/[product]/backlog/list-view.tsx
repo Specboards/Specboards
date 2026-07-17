@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 
-import { EmptyState } from "@/components/empty-state";
+import { NoSpecsEmptyState } from "@/components/empty-state";
 import { WorkViewTabs } from "@/components/work-view-tabs";
 import { Badge } from "@/components/ui/badge";
 import { Box, BoxHeader } from "@/components/ui/box";
@@ -15,7 +15,11 @@ import { sortFeatures } from "@/lib/feature-helpers";
 import { resolveWorkflowFor } from "@/lib/repo-config";
 import { getStore } from "@/lib/store";
 import { listWorkspaceMembers } from "@/lib/workspace";
-import { canConnectRepos, canEditProducts, requireWorkspaceAccess } from "@/lib/workspace-access";
+import {
+  canConnectRepos,
+  canEditProducts,
+  requireWorkspaceAccess,
+} from "@/lib/workspace-access";
 import { BacklogFilters, type FilterOptions } from "./backlog-filters";
 import { BacklogTable } from "./backlog-table";
 import { SavedViews } from "./saved-views";
@@ -122,7 +126,7 @@ export async function ListView({
         </p>
       </div>
       {features.length === 0 ? (
-        <EmptyState canConnect={canConnectRepos(access)} />
+        <NoSpecsEmptyState canConnect={canConnectRepos(access)} />
       ) : (
         <>
           <BacklogFilters filters={filters} options={options} />
@@ -133,7 +137,8 @@ export async function ListView({
           />
           {rows.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">
-              No features match these filters.
+              No features match these filters. Use Clear filters above to see
+              everything.
             </p>
           ) : (
             <Box>
@@ -157,9 +162,9 @@ export async function ListView({
 }
 
 /** Order rows as a hierarchy: each top-level feature followed by its children. */
-function buildHierarchyRows<T extends { specId: string; parentSpecId: string | null }>(
-  features: T[],
-): { feature: T; depth: number }[] {
+function buildHierarchyRows<
+  T extends { specId: string; parentSpecId: string | null },
+>(features: T[]): { feature: T; depth: number }[] {
   const bySpec = new Map(features.map((f) => [f.specId, f]));
   const childrenOf = new Map<string, T[]>();
   const topLevel: T[] = [];

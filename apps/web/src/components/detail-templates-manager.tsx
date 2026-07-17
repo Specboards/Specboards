@@ -4,11 +4,9 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 
-import {
-  EXAMPLE_DETAIL_TEMPLATES,
-  type DetailTemplate,
-} from "@specboard/core";
+import { EXAMPLE_DETAIL_TEMPLATES, type DetailTemplate } from "@specboard/core";
 
+import { EmptyState } from "@/components/empty-state";
 import { MarkdownEditor } from "@/components/markdown-editor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,14 +34,24 @@ export function DetailTemplatesManager({
   levels: WorkspaceLevel[];
   canEdit: boolean;
 }) {
+  const [adding, setAdding] = useState(false);
   return (
     <div className="max-w-2xl space-y-4">
-      {templates.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No detail templates yet.
-          {canEdit ? " Add one below to standardize new-card details." : ""}
-        </p>
-      ) : (
+      {templates.length === 0 && !adding ? (
+        <EmptyState
+          variant="inline"
+          title="No detail templates yet"
+          description="A detail template is a Markdown skeleton that seeds a new card's details, so every card of a kind starts consistent."
+          action={
+            canEdit ? (
+              <Button size="sm" onClick={() => setAdding(true)}>
+                Add template
+              </Button>
+            ) : null
+          }
+        />
+      ) : null}
+      {templates.length > 0 ? (
         <div className="space-y-3">
           {templates.map((template) => (
             <TemplateRow
@@ -53,8 +61,17 @@ export function DetailTemplatesManager({
             />
           ))}
         </div>
-      )}
-      {canEdit ? <TemplateCreate /> : null}
+      ) : null}
+      {/* Start as an "Add template" affordance; reveal the form on opt-in (see
+          the "add" UX rule in CLAUDE.md). */}
+      {canEdit && adding ? (
+        <TemplateCreate onDone={() => setAdding(false)} />
+      ) : null}
+      {canEdit && !adding && templates.length > 0 ? (
+        <Button size="sm" variant="outline" onClick={() => setAdding(true)}>
+          Add template
+        </Button>
+      ) : null}
       {templates.length > 0 ? (
         <LevelTemplateAssign
           levels={levels}
@@ -125,7 +142,9 @@ function TemplateRow({
     <form onSubmit={onSubmit} className="space-y-3 rounded-md border p-4">
       <div className="flex flex-wrap items-end gap-2">
         <label className="min-w-40 flex-1 space-y-1.5">
-          <span className="text-xs font-medium text-muted-foreground">Name</span>
+          <span className="text-xs font-medium text-muted-foreground">
+            Name
+          </span>
           <Input
             name="name"
             defaultValue={template.name}
@@ -162,7 +181,7 @@ function TemplateRow({
   );
 }
 
-function TemplateCreate() {
+function TemplateCreate({ onDone }: { onDone: () => void }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   // Choosing an example remounts the editor (via key) with its starter body.
@@ -186,6 +205,7 @@ function TemplateCreate() {
         toast.success("Template added");
         form.reset();
         setExample("");
+        onDone();
         router.refresh();
       } catch (err) {
         if (err instanceof AuthRequiredError) return onAuthError(router);
@@ -202,8 +222,15 @@ function TemplateCreate() {
       <p className="text-sm font-medium">New template</p>
       <div className="flex flex-wrap items-end gap-2">
         <label className="min-w-40 flex-1 space-y-1.5">
-          <span className="text-xs font-medium text-muted-foreground">Name</span>
-          <Input name="name" placeholder="e.g. Feature spec" className="h-8" />
+          <span className="text-xs font-medium text-muted-foreground">
+            Name
+          </span>
+          <Input
+            name="name"
+            placeholder="e.g. Feature spec"
+            className="h-8"
+            autoFocus
+          />
         </label>
         <label className="space-y-1.5">
           <span className="text-xs font-medium text-muted-foreground">
@@ -227,9 +254,20 @@ function TemplateCreate() {
         <span className="text-xs font-medium text-muted-foreground">Body</span>
         <MarkdownEditor key={example} name="body" defaultValue={exampleBody} />
       </div>
-      <Button type="submit" size="sm" disabled={pending}>
-        {pending ? "Adding…" : "Add template"}
-      </Button>
+      <div className="flex gap-2">
+        <Button type="submit" size="sm" disabled={pending}>
+          {pending ? "Adding…" : "Add template"}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          onClick={onDone}
+          disabled={pending}
+        >
+          Cancel
+        </Button>
+      </div>
     </form>
   );
 }

@@ -63,7 +63,8 @@ function ColorPicker({
         aria-pressed={value === null}
         className={cn(
           "h-6 rounded-full border px-2 text-[11px] text-muted-foreground transition",
-          value === null && "ring-2 ring-ring ring-offset-1 ring-offset-background",
+          value === null &&
+            "ring-2 ring-ring ring-offset-1 ring-offset-background",
         )}
       >
         Auto
@@ -78,7 +79,8 @@ function ColorPicker({
           className={cn(
             "h-6 w-6 rounded-full transition",
             colorDot(c),
-            value === c && "ring-2 ring-ring ring-offset-1 ring-offset-background",
+            value === c &&
+              "ring-2 ring-ring ring-offset-1 ring-offset-background",
           )}
         />
       ))}
@@ -123,12 +125,11 @@ export function ProductsManager({
 
   return (
     <div className="space-y-4">
-      {isOrgAdmin ? (
-        <GroupsCard
-          groups={groups}
-          products={products}
-          onChanged={setGroups}
-        />
+      {/* Product groups only earn their place once there's more than one
+          product to organize. Existing groups keep the card visible even if the
+          product count later dips, so they never become unmanageable. */}
+      {isOrgAdmin && (products.length > 1 || groups.length > 0) ? (
+        <GroupsCard groups={groups} products={products} onChanged={setGroups} />
       ) : null}
 
       {isOrgAdmin ? (
@@ -213,6 +214,7 @@ function GroupsCard({
   onChanged: (groups: ProductGroupRecord[]) => void;
 }) {
   const router = useRouter();
+  const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [parentId, setParentId] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -222,9 +224,7 @@ function GroupsCard({
   const rows = flattenGroupTree(groups);
   const depthById = new Map(rows.map((r) => [r.group.id, r.depth]));
   // New groups land under parents that still have room below the depth cap.
-  const parentOptions = rows.filter(
-    (r) => r.depth + 1 < MAX_GROUP_DEPTH,
-  );
+  const parentOptions = rows.filter((r) => r.depth + 1 < MAX_GROUP_DEPTH);
 
   function onAuthError() {
     window.location.href = "/sign-in";
@@ -244,6 +244,7 @@ function GroupsCard({
         onChanged([...groups, group]);
         setName("");
         setParentId("");
+        setAdding(false);
         toast.success("Group created");
         router.refresh();
       } catch (err) {
@@ -292,8 +293,12 @@ function GroupsCard({
               depth={depth}
               groups={groups}
               depthById={depthById}
-              productCount={products.filter((p) => p.groupId === group.id).length}
-              subgroupCount={groups.filter((g) => g.parentId === group.id).length}
+              productCount={
+                products.filter((p) => p.groupId === group.id).length
+              }
+              subgroupCount={
+                groups.filter((g) => g.parentId === group.id).length
+              }
               editing={editingId === group.id}
               onEdit={() => setEditingId(group.id)}
               onCancel={() => setEditingId(null)}
@@ -305,32 +310,60 @@ function GroupsCard({
           ))}
         </ul>
       ) : null}
-      <form onSubmit={onCreate} className="flex flex-wrap items-center gap-2">
-        <Input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="New group name"
-          className="h-8 max-w-xs"
-        />
-        {parentOptions.length > 0 ? (
-          <Select
-            aria-label="Parent group"
-            value={parentId}
-            onChange={(e) => setParentId(e.target.value)}
-            className="h-8 w-auto"
+      {/* Start as an "Add group" affordance, not an always-open form: the
+          fields only appear once the admin opts in (see the "add" UX rule in
+          CLAUDE.md). */}
+      {adding ? (
+        <form onSubmit={onCreate} className="flex flex-wrap items-center gap-2">
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="New group name"
+            className="h-8 max-w-xs"
+            autoFocus
+          />
+          {parentOptions.length > 0 ? (
+            <Select
+              aria-label="Parent group"
+              value={parentId}
+              onChange={(e) => setParentId(e.target.value)}
+              className="h-8 w-auto"
+            >
+              <option value="">Top level</option>
+              {parentOptions.map(({ group, depth }) => (
+                <option key={group.id} value={group.id}>
+                  {`${"  ".repeat(depth)}${group.name}`}
+                </option>
+              ))}
+            </Select>
+          ) : null}
+          <Button type="submit" size="sm" disabled={pending || !name.trim()}>
+            {pending ? "Adding…" : "Add group"}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setAdding(false);
+              setName("");
+              setParentId("");
+              setError(null);
+            }}
           >
-            <option value="">Top level</option>
-            {parentOptions.map(({ group, depth }) => (
-              <option key={group.id} value={group.id}>
-                {`${"  ".repeat(depth)}${group.name}`}
-              </option>
-            ))}
-          </Select>
-        ) : null}
-        <Button type="submit" size="sm" variant="outline" disabled={pending || !name.trim()}>
-          {pending ? "Adding…" : "Add group"}
+            Cancel
+          </Button>
+        </form>
+      ) : (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() => setAdding(true)}
+        >
+          Add group
         </Button>
-      </form>
+      )}
       {error ? <p className="text-xs text-destructive">{error}</p> : null}
     </div>
   );
@@ -376,9 +409,9 @@ function GroupRow({
   // real guard, this narrows the menu to choices that can succeed.
   const subtree = descendantGroupIds(groups, group.id);
   const subtreeHeight =
-    Math.max(
-      ...[...subtree].map((id) => depthById.get(id) ?? depth),
-    ) - depth + 1;
+    Math.max(...[...subtree].map((id) => depthById.get(id) ?? depth)) -
+    depth +
+    1;
   const parentOptions = flattenGroupTree(groups).filter(
     ({ group: candidate, depth: candidateDepth }) =>
       !subtree.has(candidate.id) &&
@@ -421,8 +454,15 @@ function GroupRow({
       >
         <form onSubmit={onSave} className="space-y-3">
           <label className="block space-y-1.5">
-            <span className="text-xs font-medium text-muted-foreground">Name</span>
-            <Input name="name" defaultValue={group.name} className="h-8" autoFocus />
+            <span className="text-xs font-medium text-muted-foreground">
+              Name
+            </span>
+            <Input
+              name="name"
+              defaultValue={group.name}
+              className="h-8"
+              autoFocus
+            />
           </label>
           <label className="block space-y-1.5">
             <span className="text-xs font-medium text-muted-foreground">
@@ -434,15 +474,19 @@ function GroupRow({
               className="h-8"
             >
               <option value="">Top level</option>
-              {parentOptions.map(({ group: candidate, depth: candidateDepth }) => (
-                <option key={candidate.id} value={candidate.id}>
-                  {`${"  ".repeat(candidateDepth)}${candidate.name}`}
-                </option>
-              ))}
+              {parentOptions.map(
+                ({ group: candidate, depth: candidateDepth }) => (
+                  <option key={candidate.id} value={candidate.id}>
+                    {`${"  ".repeat(candidateDepth)}${candidate.name}`}
+                  </option>
+                ),
+              )}
             </Select>
           </label>
           <div className="space-y-1.5">
-            <span className="text-xs font-medium text-muted-foreground">Color</span>
+            <span className="text-xs font-medium text-muted-foreground">
+              Color
+            </span>
             <ColorPicker value={color} onChange={setColor} />
           </div>
           {error ? <p className="text-xs text-destructive">{error}</p> : null}
@@ -590,8 +634,15 @@ function ProductCard({
       {editing ? (
         <form onSubmit={onSave} className="space-y-3">
           <label className="block space-y-1.5">
-            <span className="text-xs font-medium text-muted-foreground">Name</span>
-            <Input name="name" defaultValue={product.name} className="h-8" autoFocus />
+            <span className="text-xs font-medium text-muted-foreground">
+              Name
+            </span>
+            <Input
+              name="name"
+              defaultValue={product.name}
+              className="h-8"
+              autoFocus
+            />
           </label>
           <label className="block space-y-1.5">
             <span className="text-xs font-medium text-muted-foreground">
@@ -636,7 +687,9 @@ function ProductCard({
             </label>
           ) : null}
           <div className="space-y-1.5">
-            <span className="text-xs font-medium text-muted-foreground">Color</span>
+            <span className="text-xs font-medium text-muted-foreground">
+              Color
+            </span>
             <ColorPicker value={color} onChange={setColor} />
           </div>
           {error ? <p className="text-xs text-destructive">{error}</p> : null}
@@ -661,7 +714,10 @@ function ProductCard({
         <div className="space-y-2">
           <div className="flex items-center gap-2">
             <span
-              className={cn("h-2.5 w-2.5 shrink-0 rounded-full", productColorClasses(product).dot)}
+              className={cn(
+                "h-2.5 w-2.5 shrink-0 rounded-full",
+                productColorClasses(product).dot,
+              )}
               aria-hidden
             />
             <span className="font-medium">{product.name}</span>
@@ -715,7 +771,9 @@ function ProductCard({
             ) : null}
           </div>
           {product.description ? (
-            <p className="text-sm text-muted-foreground">{product.description}</p>
+            <p className="text-sm text-muted-foreground">
+              {product.description}
+            </p>
           ) : null}
           {error ? <p className="text-xs text-destructive">{error}</p> : null}
           {showMembers && canManage ? (
@@ -783,7 +841,9 @@ function CreateProductSheet({
         </SheetHeader>
         <form onSubmit={onSubmit} className="space-y-3">
           <label className="block space-y-1.5">
-            <span className="text-xs font-medium text-muted-foreground">Name</span>
+            <span className="text-xs font-medium text-muted-foreground">
+              Name
+            </span>
             <Input name="name" autoFocus className="h-8" />
           </label>
           <label className="block space-y-1.5">
@@ -802,7 +862,9 @@ function CreateProductSheet({
             </Select>
           </label>
           <div className="space-y-1.5">
-            <span className="text-xs font-medium text-muted-foreground">Color</span>
+            <span className="text-xs font-medium text-muted-foreground">
+              Color
+            </span>
             <ColorPicker value={color} onChange={setColor} />
           </div>
           {error ? <p className="text-xs text-destructive">{error}</p> : null}

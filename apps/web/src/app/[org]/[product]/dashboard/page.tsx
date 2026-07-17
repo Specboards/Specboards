@@ -3,10 +3,12 @@ import { notFound, redirect } from "next/navigation";
 
 import { descendantGroupIds, resolveProductColor } from "@specboard/core";
 
+import { EmptyState } from "@/components/empty-state";
 import { StatusDot } from "@/components/status-dot";
+import { buttonVariants } from "@/components/ui/button";
 import { GROUP_SLUG_PREFIX, resolveActiveScope } from "@/lib/active-product";
 import { statusDotClassFor } from "@/lib/feature-helpers";
-import { LOCAL_ORG_SLUG, orgProductPath } from "@/lib/org-path";
+import { LOCAL_ORG_SLUG, orgPath, orgProductPath } from "@/lib/org-path";
 import { colorDot } from "@/lib/product-color";
 import { resolveWorkflowFor } from "@/lib/repo-config";
 import { getStore } from "@/lib/store";
@@ -55,7 +57,10 @@ function StatusBar({
     ...Object.keys(counts).filter((s) => !statusOrder.includes(s)),
   ];
   return (
-    <div className="flex h-2 w-full overflow-hidden rounded-full bg-muted" aria-hidden>
+    <div
+      className="flex h-2 w-full overflow-hidden rounded-full bg-muted"
+      aria-hidden
+    >
       {ordered.map((status) => (
         <div
           key={status}
@@ -83,7 +88,10 @@ function ReleaseProgress({
       <span className="w-32 truncate text-muted-foreground" title={name}>
         {name}
       </span>
-      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted" aria-hidden>
+      <div
+        className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted"
+        aria-hidden
+      >
         <div
           className="h-full rounded-full bg-emerald-500"
           style={{ width: `${pct}%` }}
@@ -159,7 +167,9 @@ export default async function GroupDashboardPage({
     resolveWorkflowFor(access),
   ]);
   const statusOrder = workflow.statuses.filter((s) => s !== "archived");
-  const releaseName = new Map(releases.map((r: ReleaseRecord) => [r.id, r.name]));
+  const releaseName = new Map(
+    releases.map((r: ReleaseRecord) => [r.id, r.name]),
+  );
   const productById = new Map(products.map((p) => [p.id, p]));
   const summariesById = new Map(summary.products.map((s) => [s.productId, s]));
 
@@ -202,11 +212,17 @@ export default async function GroupDashboardPage({
           {summary.products.length}{" "}
           {summary.products.length === 1 ? "product" : "products"} ·{" "}
           {totalItems} {totalItems === 1 ? "item" : "items"} ·{" "}
-          <Link href={orgProductPath(org, productSlug, "/backlog")} className="hover:underline">
+          <Link
+            href={orgProductPath(org, productSlug, "/backlog")}
+            className="hover:underline"
+          >
             Backlog
           </Link>{" "}
           ·{" "}
-          <Link href={orgProductPath(org, productSlug, "/roadmap")} className="hover:underline">
+          <Link
+            href={orgProductPath(org, productSlug, "/roadmap")}
+            className="hover:underline"
+          >
             Roadmap
           </Link>
         </p>
@@ -219,36 +235,47 @@ export default async function GroupDashboardPage({
       </div>
 
       {summary.products.length === 0 ? (
-        <p className="py-8 text-center text-sm text-muted-foreground">
-          No products in this group yet. Assign products to it under Settings →
-          Products.
-        </p>
+        <EmptyState
+          title="No products in this group yet"
+          description="A group dashboard rolls up the work across its products. Assign products to this group to see their combined status here."
+          action={
+            <Link
+              href={orgPath(org, "/settings/products")}
+              className={buttonVariants({ size: "sm" })}
+            >
+              Manage products
+            </Link>
+          }
+        />
       ) : null}
 
       {subgroupCards.length > 0 ? (
         <div className="space-y-2">
           <h2 className="text-sm font-semibold tracking-tight">Subgroups</h2>
           <div className="grid gap-3 sm:grid-cols-2">
-            {subgroupCards.map(({ group: sub, itemCount, productCount, counts }) => (
-              <Link
-                key={sub.id}
-                href={orgProductPath(
-                  org,
-                  `${GROUP_SLUG_PREFIX}${sub.key}`,
-                  "/dashboard",
-                )}
-                className="block space-y-2 rounded-md border p-3 transition-colors hover:bg-muted/50"
-              >
-                <div className="flex items-baseline justify-between gap-2">
-                  <span className="font-medium">{sub.name}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {productCount} {productCount === 1 ? "product" : "products"}{" "}
-                    · {itemCount} {itemCount === 1 ? "item" : "items"}
-                  </span>
-                </div>
-                <StatusBar counts={counts} statusOrder={statusOrder} />
-              </Link>
-            ))}
+            {subgroupCards.map(
+              ({ group: sub, itemCount, productCount, counts }) => (
+                <Link
+                  key={sub.id}
+                  href={orgProductPath(
+                    org,
+                    `${GROUP_SLUG_PREFIX}${sub.key}`,
+                    "/dashboard",
+                  )}
+                  className="block space-y-2 rounded-md border p-3 transition-colors hover:bg-muted/50"
+                >
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="font-medium">{sub.name}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {productCount}{" "}
+                      {productCount === 1 ? "product" : "products"} ·{" "}
+                      {itemCount} {itemCount === 1 ? "item" : "items"}
+                    </span>
+                  </div>
+                  <StatusBar counts={counts} statusOrder={statusOrder} />
+                </Link>
+              ),
+            )}
           </div>
         </div>
       ) : null}

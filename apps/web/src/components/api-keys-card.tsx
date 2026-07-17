@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 
+import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -36,7 +37,10 @@ export function ApiKeysCard({ initialKeys }: { initialKeys: ApiKeyView[] }) {
   const [keys, setKeys] = useState<ApiKeyView[]>(initialKeys);
   const [name, setName] = useState("");
   const [status, setStatus] = useState<Status>(null);
-  const [created, setCreated] = useState<{ name: string; key: string } | null>(null);
+  const [created, setCreated] = useState<{ name: string; key: string } | null>(
+    null,
+  );
+  const [adding, setAdding] = useState(false);
   const [pending, startTransition] = useTransition();
 
   function create() {
@@ -54,11 +58,21 @@ export function ApiKeysCard({ initialKeys }: { initialKeys: ApiKeyView[] }) {
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
-        setStatus({ kind: "error", message: body.error ?? "Could not create the key." });
+        setStatus({
+          kind: "error",
+          message: body.error ?? "Could not create the key.",
+        });
         return;
       }
       const body = (await res.json()) as {
-        key: { id: string; key: string; name: string; prefix: string; createdAt: string; expiresAt: string | null };
+        key: {
+          id: string;
+          key: string;
+          name: string;
+          prefix: string;
+          createdAt: string;
+          expiresAt: string | null;
+        };
       };
       setCreated({ name: body.key.name, key: body.key.key });
       setKeys((prev) => [
@@ -73,6 +87,7 @@ export function ApiKeysCard({ initialKeys }: { initialKeys: ApiKeyView[] }) {
         ...prev,
       ]);
       setName("");
+      setAdding(false);
     });
   }
 
@@ -92,16 +107,17 @@ export function ApiKeysCard({ initialKeys }: { initialKeys: ApiKeyView[] }) {
       <CardHeader>
         <CardTitle>API keys</CardTitle>
         <CardDescription>
-          Personal keys for the Specboard CLI and programmatic access. Each key acts
-          as you and inherits your workspace role. The full key is shown once, at
-          creation. Send it as the <code>x-api-key</code> header.
+          Personal keys for the Specboard CLI and programmatic access. Each key
+          acts as you and inherits your workspace role. The full key is shown
+          once, at creation. Send it as the <code>x-api-key</code> header.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
         {created && (
           <div className="space-y-2 rounded-md border border-brand/40 bg-brand/5 p-3">
             <p className="text-sm font-medium">
-              New key &ldquo;{created.name}&rdquo; created. Copy it now; you won&rsquo;t see it again.
+              New key &ldquo;{created.name}&rdquo; created. Copy it now; you
+              won&rsquo;t see it again.
             </p>
             <div className="flex items-center gap-2">
               <code className="min-w-0 flex-1 truncate rounded bg-muted px-2 py-1 font-mono text-xs">
@@ -115,49 +131,106 @@ export function ApiKeysCard({ initialKeys }: { initialKeys: ApiKeyView[] }) {
               >
                 Copy
               </Button>
-              <Button type="button" variant="ghost" size="sm" onClick={() => setCreated(null)}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setCreated(null)}
+              >
                 Done
               </Button>
             </div>
           </div>
         )}
 
-        <div className="flex items-end gap-2">
-          <div className="flex-1 space-y-1">
-            <label htmlFor="api-key-name" className="text-xs text-muted-foreground">
-              New key name
-            </label>
-            <Input
-              id="api-key-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. laptop CLI"
-              maxLength={80}
-            />
+        {/* Add API key: start as an affordance, reveal the form on opt-in
+            (see the "add" UX rule in CLAUDE.md). */}
+        {adding ? (
+          <div className="space-y-3">
+            <div className="flex items-end gap-2">
+              <div className="flex-1 space-y-1">
+                <label
+                  htmlFor="api-key-name"
+                  className="text-xs text-muted-foreground"
+                >
+                  New key name
+                </label>
+                <Input
+                  id="api-key-name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="e.g. laptop CLI"
+                  maxLength={80}
+                  autoFocus
+                />
+              </div>
+              <Button type="button" onClick={create} disabled={pending}>
+                Create key
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => {
+                  setAdding(false);
+                  setStatus(null);
+                }}
+                disabled={pending}
+              >
+                Cancel
+              </Button>
+            </div>
+            {status && (
+              <p
+                className={`text-xs ${status.kind === "ok" ? "text-muted-foreground" : "text-destructive"}`}
+              >
+                {status.message}
+              </p>
+            )}
           </div>
-          <Button type="button" onClick={create} disabled={pending}>
-            Create key
-          </Button>
-        </div>
-        {status && (
-          <p
-            className={`text-xs ${status.kind === "ok" ? "text-muted-foreground" : "text-destructive"}`}
+        ) : keys.length > 0 ? (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              setStatus(null);
+              setAdding(true);
+            }}
           >
-            {status.message}
-          </p>
-        )}
+            Add API key
+          </Button>
+        ) : null}
 
         {keys.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No API keys yet.</p>
+          !adding ? (
+            <EmptyState
+              variant="inline"
+              title="No API keys yet"
+              description="API keys let the Specboard CLI and scripts act as you, with your workspace role. The full key is shown once, at creation."
+              action={
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    setStatus(null);
+                    setAdding(true);
+                  }}
+                >
+                  Add API key
+                </Button>
+              }
+            />
+          ) : null
         ) : (
           <ul className="divide-y rounded-md border">
             {keys.map((k) => (
-              <li key={k.id} className="flex items-center justify-between gap-3 px-3 py-2">
+              <li
+                key={k.id}
+                className="flex items-center justify-between gap-3 px-3 py-2"
+              >
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">{k.name}</p>
                   <p className="text-xs text-muted-foreground">
-                    <code className="font-mono">{k.prefix}…</code> · created {fmt(k.createdAt)} ·
-                    last used {fmt(k.lastUsedAt)}
+                    <code className="font-mono">{k.prefix}…</code> · created{" "}
+                    {fmt(k.createdAt)} · last used {fmt(k.lastUsedAt)}
                     {k.expiresAt ? ` · expires ${fmt(k.expiresAt)}` : ""}
                   </p>
                 </div>

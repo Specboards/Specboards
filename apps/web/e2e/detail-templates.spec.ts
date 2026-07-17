@@ -23,6 +23,10 @@ test.describe("settings: detail templates", () => {
     // below.
     await page.getByRole("button", { name: /^Templates/ }).click();
 
+    // Adding starts as an "Add template" affordance (see the "add" UX rule);
+    // open the create form before filling it.
+    await page.getByRole("button", { name: "Add template" }).click();
+
     // Create a template. With none yet, the only Name field and rich-text
     // editor on the page belong to the create form.
     await page

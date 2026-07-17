@@ -5,7 +5,7 @@ import { parentLevelKey } from "@specboard/core";
 
 import { BoardPrefsProvider } from "@/app/[org]/[product]/backlog/board-prefs";
 import { CardFieldsMenu } from "@/components/card-fields-menu";
-import { EmptyState } from "@/components/empty-state";
+import { NoSpecsEmptyState } from "@/components/empty-state";
 import { LevelSwitcher } from "@/components/level-switcher";
 import { ReleaseCreate } from "@/components/release-controls";
 import { WorkItemCreate } from "@/components/work-item-create";
@@ -229,7 +229,7 @@ export default async function RoadmapPage({
         </div>
         {features.length === 0 && releases.length === 0 ? (
           activeLevel.isLeaf ? (
-            <EmptyState canConnect={canConnectRepos(access)} />
+            <NoSpecsEmptyState canConnect={canConnectRepos(access)} />
           ) : (
             <p className="py-8 text-center text-sm text-muted-foreground">
               No {activeLevel.label.toLowerCase()} items yet.

@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 
+import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -68,15 +69,23 @@ export function WebhooksCard({
   const [productId, setProductId] = useState<string>(ALL_PRODUCTS);
   const [events, setEvents] = useState<Set<WebhookEventType>>(new Set());
   const [status, setStatus] = useState<Status>(null);
-  const [created, setCreated] = useState<{ url: string; secret: string } | null>(null);
+  const [created, setCreated] = useState<{
+    url: string;
+    secret: string;
+  } | null>(null);
+  const [adding, setAdding] = useState(false);
   const [pending, startTransition] = useTransition();
   // Delivery log: which endpoint's log is expanded, and the rows fetched for it.
   const [openLog, setOpenLog] = useState<string | null>(null);
-  const [deliveries, setDeliveries] = useState<Record<string, WebhookDeliveryView[]>>({});
+  const [deliveries, setDeliveries] = useState<
+    Record<string, WebhookDeliveryView[]>
+  >({});
   const [loadingLog, setLoadingLog] = useState(false);
 
   const productName = (id: string | null) =>
-    id === null ? "All products" : (products.find((p) => p.id === id)?.name ?? "Unknown product");
+    id === null
+      ? "All products"
+      : (products.find((p) => p.id === id)?.name ?? "Unknown product");
 
   function toggleEvent(type: WebhookEventType) {
     setEvents((prev) => {
@@ -110,7 +119,10 @@ export function WebhooksCard({
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
-        setStatus({ kind: "error", message: body.error ?? "Could not create the endpoint." });
+        setStatus({
+          kind: "error",
+          message: body.error ?? "Could not create the endpoint.",
+        });
         return;
       }
       const body = (await res.json()) as {
@@ -123,6 +135,7 @@ export function WebhooksCard({
       setDescription("");
       setProductId(ALL_PRODUCTS);
       setEvents(new Set());
+      setAdding(false);
     });
   }
 
@@ -138,7 +151,9 @@ export function WebhooksCard({
         return;
       }
       const body = (await res.json()) as { endpoint: WebhookEndpointView };
-      setEndpoints((prev) => prev.map((e) => (e.id === ep.id ? body.endpoint : e)));
+      setEndpoints((prev) =>
+        prev.map((e) => (e.id === ep.id ? body.endpoint : e)),
+      );
     });
   }
 
@@ -156,7 +171,9 @@ export function WebhooksCard({
   function sendTest(id: string) {
     setStatus(null);
     startTransition(async () => {
-      const res = await fetch(`/api/v1/webhooks/${id}/test`, { method: "POST" });
+      const res = await fetch(`/api/v1/webhooks/${id}/test`, {
+        method: "POST",
+      });
       const body = (await res.json().catch(() => ({}))) as {
         ok?: boolean;
         statusCode?: number | null;
@@ -249,92 +266,147 @@ export function WebhooksCard({
               >
                 Copy
               </Button>
-              <Button type="button" variant="ghost" size="sm" onClick={() => setCreated(null)}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setCreated(null)}
+              >
                 Done
               </Button>
             </div>
           </div>
         )}
 
-        {/* Create form */}
-        <div className="space-y-3 rounded-md border p-3">
-          <div className="space-y-1">
-            <label htmlFor="wh-url" className="text-xs text-muted-foreground">
-              Delivery URL (https)
-            </label>
-            <Input
-              id="wh-url"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://example.com/hooks/specboard"
-            />
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
+        {/* Add endpoint: start as an affordance, reveal the form on opt-in
+            (see the "add" UX rule in CLAUDE.md). */}
+        {adding ? (
+          <div className="space-y-3 rounded-md border p-3">
             <div className="space-y-1">
-              <label htmlFor="wh-product" className="text-xs text-muted-foreground">
-                Product
-              </label>
-              <Select
-                id="wh-product"
-                value={productId}
-                onChange={(e) => setProductId(e.target.value)}
-              >
-                <option value={ALL_PRODUCTS}>All products</option>
-                {products.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div className="space-y-1">
-              <label htmlFor="wh-desc" className="text-xs text-muted-foreground">
-                Description (optional)
+              <label htmlFor="wh-url" className="text-xs text-muted-foreground">
+                Delivery URL (https)
               </label>
               <Input
-                id="wh-desc"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="e.g. Zapier deploy notifier"
-                maxLength={200}
+                id="wh-url"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                placeholder="https://example.com/hooks/specboard"
               />
             </div>
-          </div>
-          <fieldset className="space-y-1.5">
-            <legend className="text-xs text-muted-foreground">Events</legend>
-            <div className="flex flex-wrap gap-x-4 gap-y-1.5">
-              {WEBHOOK_EVENT_TYPES.map((type) => (
-                <label key={type} className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={events.has(type)}
-                    onChange={() => toggleEvent(type)}
-                    className="size-4 rounded border-input"
-                  />
-                  {WEBHOOK_EVENT_LABELS[type]}
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <label
+                  htmlFor="wh-product"
+                  className="text-xs text-muted-foreground"
+                >
+                  Product
                 </label>
-              ))}
+                <Select
+                  id="wh-product"
+                  value={productId}
+                  onChange={(e) => setProductId(e.target.value)}
+                >
+                  <option value={ALL_PRODUCTS}>All products</option>
+                  {products.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <label
+                  htmlFor="wh-desc"
+                  className="text-xs text-muted-foreground"
+                >
+                  Description (optional)
+                </label>
+                <Input
+                  id="wh-desc"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="e.g. Zapier deploy notifier"
+                  maxLength={200}
+                />
+              </div>
             </div>
-          </fieldset>
-          <div className="flex items-center gap-3">
-            <Button type="button" onClick={create} disabled={pending}>
-              Add endpoint
-            </Button>
-            {status && (
-              <p
-                className={`text-xs ${
-                  status.kind === "ok" ? "text-muted-foreground" : "text-destructive"
-                }`}
+            <fieldset className="space-y-1.5">
+              <legend className="text-xs text-muted-foreground">Events</legend>
+              <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+                {WEBHOOK_EVENT_TYPES.map((type) => (
+                  <label key={type} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={events.has(type)}
+                      onChange={() => toggleEvent(type)}
+                      className="size-4 rounded border-input"
+                    />
+                    {WEBHOOK_EVENT_LABELS[type]}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            <div className="flex items-center gap-3">
+              <Button type="button" onClick={create} disabled={pending}>
+                Add endpoint
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => {
+                  setAdding(false);
+                  setStatus(null);
+                }}
+                disabled={pending}
               >
-                {status.message}
-              </p>
-            )}
+                Cancel
+              </Button>
+              {status && (
+                <p
+                  className={`text-xs ${
+                    status.kind === "ok"
+                      ? "text-muted-foreground"
+                      : "text-destructive"
+                  }`}
+                >
+                  {status.message}
+                </p>
+              )}
+            </div>
           </div>
-        </div>
+        ) : endpoints.length > 0 ? (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              setStatus(null);
+              setAdding(true);
+            }}
+          >
+            Add endpoint
+          </Button>
+        ) : null}
 
         {/* List */}
         {endpoints.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No endpoints yet.</p>
+          !adding ? (
+            <EmptyState
+              variant="inline"
+              title="No endpoints yet"
+              description="Webhooks POST a signed payload to your URL when items and releases change - wire up Slack, a deploy notifier, or your own service."
+              action={
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    setStatus(null);
+                    setAdding(true);
+                  }}
+                >
+                  Add endpoint
+                </Button>
+              }
+            />
+          ) : null
         ) : (
           <ul className="divide-y rounded-md border">
             {endpoints.map((ep) => (
@@ -345,7 +417,10 @@ export function WebhooksCard({
                     <p className="text-xs text-muted-foreground">
                       {productName(ep.productId)} ·{" "}
                       {ep.eventTypes
-                        .map((t) => WEBHOOK_EVENT_LABELS[t as WebhookEventType] ?? t)
+                        .map(
+                          (t) =>
+                            WEBHOOK_EVENT_LABELS[t as WebhookEventType] ?? t,
+                        )
                         .join(", ")}
                       {ep.description ? ` · ${ep.description}` : ""}
                     </p>
@@ -353,7 +428,8 @@ export function WebhooksCard({
                   {(() => {
                     const autoDisabled =
                       !ep.active &&
-                      ep.consecutiveFailures >= WEBHOOK_FAILURE_DISABLE_THRESHOLD;
+                      ep.consecutiveFailures >=
+                        WEBHOOK_FAILURE_DISABLE_THRESHOLD;
                     return (
                       <span
                         title={
@@ -369,7 +445,11 @@ export function WebhooksCard({
                               : "bg-muted text-muted-foreground"
                         }`}
                       >
-                        {ep.active ? "Active" : autoDisabled ? "Auto-disabled" : "Paused"}
+                        {ep.active
+                          ? "Active"
+                          : autoDisabled
+                            ? "Auto-disabled"
+                            : "Paused"}
                       </span>
                     );
                   })()}
@@ -478,12 +558,14 @@ function DeliveryLog({
           {rows.map((d) => (
             <tr key={d.id} className="border-b last:border-0 align-top">
               <td className="px-2 py-1.5">
-                {WEBHOOK_EVENT_LABELS[d.eventType as WebhookEventType] ?? d.eventType}
+                {WEBHOOK_EVENT_LABELS[d.eventType as WebhookEventType] ??
+                  d.eventType}
               </td>
               <td className="px-2 py-1.5">
                 <span
                   className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
-                    DELIVERY_STATUS_STYLE[d.status] ?? "bg-muted text-muted-foreground"
+                    DELIVERY_STATUS_STYLE[d.status] ??
+                    "bg-muted text-muted-foreground"
                   }`}
                 >
                   {d.status}
@@ -493,7 +575,10 @@ function DeliveryLog({
               <td className="min-w-0 max-w-[16rem] px-2 py-1.5">
                 {d.lastStatusCode ? `HTTP ${d.lastStatusCode}` : ""}
                 {d.lastError ? (
-                  <span className="block truncate text-muted-foreground" title={d.lastError}>
+                  <span
+                    className="block truncate text-muted-foreground"
+                    title={d.lastError}
+                  >
                     {d.lastError}
                   </span>
                 ) : null}

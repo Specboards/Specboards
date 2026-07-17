@@ -33,6 +33,10 @@ test.describe("settings: custom properties", () => {
     // reloads below.
     await page.getByRole("button", { name: /^Fields/ }).click();
 
+    // Adding starts as an "Add property" affordance (see the "add" UX rule);
+    // open the create form before filling it.
+    await page.getByRole("button", { name: "Add property" }).click();
+
     // Create a select-typed property with options.
     const createForm = page.getByRole("group", { name: "New property" });
     await createForm.getByLabel("Label").fill("Effort");
@@ -66,12 +70,13 @@ test.describe("settings: custom properties", () => {
     ]);
     expect(saveResp.ok()).toBeTruthy();
     await page.reload();
-    await expect(page.getByRole("textbox", { name: "Label" }).first()).toHaveValue(
-      "Sizing",
-    );
+    await expect(
+      page.getByRole("textbox", { name: "Label" }).first(),
+    ).toHaveValue("Sizing");
 
-    // Delete it (confirm dialog auto-accepted); only the empty create form
-    // remains, so a single "Label" textbox is left.
+    // Delete it (confirm dialog auto-accepted). With no properties left the
+    // manager collapses back to the empty state (no open form), so no "Label"
+    // textbox remains.
     page.once("dialog", (dialog) => dialog.accept());
     const [deleteResp] = await Promise.all([
       page.waitForResponse(
@@ -83,6 +88,7 @@ test.describe("settings: custom properties", () => {
     ]);
     expect(deleteResp.ok()).toBeTruthy();
     await page.reload();
-    await expect(page.getByRole("textbox", { name: "Label" })).toHaveCount(1);
+    await expect(page.getByText("No custom properties yet")).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "Label" })).toHaveCount(0);
   });
 });

@@ -29,7 +29,9 @@ test.describe("settings: product groups", () => {
       page.locator("li").filter({ hasText: "Payments API" }),
     ).toBeVisible();
 
-    // Create a group in the Groups card.
+    // Create a group in the Groups card. The form starts as an "Add group"
+    // affordance (see the "add" UX rule); open it before filling.
+    await page.getByRole("button", { name: "Add group" }).click();
     await page.getByPlaceholder("New group name").fill("Payments Platform");
     await page.getByRole("button", { name: "Add group" }).click();
     const groupRow = page
@@ -54,9 +56,7 @@ test.describe("settings: product groups", () => {
 
     // The switcher now offers the group scope; selecting it lands on the
     // group-scoped backlog under the `~key` segment.
-    await page
-      .getByLabel("Switch product")
-      .selectOption("~payments-platform");
+    await page.getByLabel("Switch product").selectOption("~payments-platform");
     await expect(page).toHaveURL(new RegExp(`/${ws.slug}/~payments-platform/`));
 
     // A group scope unlocks the Dashboard area in the sidebar; the roll-up
@@ -66,7 +66,9 @@ test.describe("settings: product groups", () => {
       page.getByRole("heading", { name: "Payments Platform" }),
     ).toBeVisible();
     await expect(page.getByText("1 product ·")).toBeVisible();
-    await expect(page.getByRole("link", { name: "Payments API" })).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "Payments API" }),
+    ).toBeVisible();
   });
 
   test("deleting a populated group is blocked until it is emptied", async ({
@@ -83,6 +85,8 @@ test.describe("settings: product groups", () => {
     await page.getByRole("button", { name: "Create product" }).click();
     const cardsRow = page.locator("li").filter({ hasText: "Cards" });
     await expect(cardsRow).toBeVisible();
+    // Open the "Add group" affordance before filling the group form.
+    await page.getByRole("button", { name: "Add group" }).click();
     await page.getByPlaceholder("New group name").fill("Retail");
     await page.getByRole("button", { name: "Add group" }).click();
     await cardsRow.getByRole("button", { name: "Edit" }).click();
@@ -96,7 +100,9 @@ test.describe("settings: product groups", () => {
       .locator("li")
       .filter({ hasText: "Retail" })
       .filter({ hasText: "1 product" });
-    await expect(retailRow.getByRole("button", { name: "Delete" })).toBeDisabled();
+    await expect(
+      retailRow.getByRole("button", { name: "Delete" }),
+    ).toBeDisabled();
 
     // Move the product out; Delete unlocks and removes the group.
     await cardsRow.getByRole("button", { name: "Edit" }).click();

@@ -107,12 +107,16 @@ export function OrgMembers({
         await action();
       } catch (err) {
         if (err instanceof AuthRequiredError) return onAuthError();
-        toast.error(err instanceof Error ? err.message : "Something went wrong.");
+        toast.error(
+          err instanceof Error ? err.message : "Something went wrong.",
+        );
       }
     });
   }
 
-  const activeOwners = members.filter((m) => m.role === "owner" && !m.deactivatedAt).length;
+  const activeOwners = members.filter(
+    (m) => m.role === "owner" && !m.deactivatedAt,
+  ).length;
 
   function changeRole(m: OrgMemberRecord, role: OrgRole) {
     run(async () => {
@@ -143,12 +147,18 @@ export function OrgMembers({
         <ul className="divide-y rounded-md border">
           {members.map((m) => {
             const isSelf = m.userId === currentUserId;
-            const isLastOwner = m.role === "owner" && !m.deactivatedAt && activeOwners <= 1;
+            const isLastOwner =
+              m.role === "owner" && !m.deactivatedAt && activeOwners <= 1;
             return (
-              <li key={m.userId} className="flex items-center gap-3 px-3 py-2.5 text-sm">
+              <li
+                key={m.userId}
+                className="flex items-center gap-3 px-3 py-2.5 text-sm"
+              >
                 <span className="min-w-0 flex-1 truncate">
                   {m.name}
-                  <span className="ml-1.5 text-xs text-muted-foreground">{m.email}</span>
+                  <span className="ml-1.5 text-xs text-muted-foreground">
+                    {m.email}
+                  </span>
                   {m.deactivatedAt ? (
                     <Badge variant="secondary" className="ml-2 align-middle">
                       Deactivated
@@ -162,7 +172,11 @@ export function OrgMembers({
                       disabled={pending || isLastOwner}
                       onChange={(e) => changeRole(m, e.target.value as OrgRole)}
                       className="h-8 w-32"
-                      title={isLastOwner ? "Make someone else an owner first." : undefined}
+                      title={
+                        isLastOwner
+                          ? "Make someone else an owner first."
+                          : undefined
+                      }
                     >
                       {ORG_ROLES.map((r) => (
                         <option key={r} value={r}>
@@ -177,7 +191,9 @@ export function OrgMembers({
                       disabled={pending || isSelf || isLastOwner}
                       className="text-muted-foreground"
                       onClick={() => toggleActive(m)}
-                      title={isSelf ? "You can't deactivate yourself." : undefined}
+                      title={
+                        isSelf ? "You can't deactivate yourself." : undefined
+                      }
                     >
                       {m.deactivatedAt ? "Reactivate" : "Deactivate"}
                     </Button>
@@ -203,8 +219,8 @@ export function OrgMembers({
         {canManage ? (
           <p className="text-xs text-muted-foreground">
             An Owner administers the whole workspace. Everyone else is a Member
-            (read-only at the org); grant them per-product access below or on the
-            Products page.
+            (read-only at the org); grant them per-product access below or on
+            the Products page.
           </p>
         ) : null}
       </section>
@@ -219,7 +235,11 @@ export function OrgMembers({
           <PendingInvites
             invites={invites}
             disabled={pending}
-            onChanged={() => listInvitations().then(setInvites).catch(() => {})}
+            onChanged={() =>
+              listInvitations()
+                .then(setInvites)
+                .catch(() => {})
+            }
           />
         </>
       ) : null}
@@ -242,10 +262,13 @@ function InviteForm({
   disabled: boolean;
   onInvited: (inv: OrgInvitationRecord) => void;
 }) {
+  const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<OrgRole>("member");
   // productId → chosen product role, or NO_ACCESS.
-  const [grants, setGrants] = useState<Record<string, ProductRole | typeof NO_ACCESS>>({});
+  const [grants, setGrants] = useState<
+    Record<string, ProductRole | typeof NO_ACCESS>
+  >({});
   const [pending, startTransition] = useTransition();
 
   function setGrant(productId: string, value: ProductRole | typeof NO_ACCESS) {
@@ -270,9 +293,14 @@ function InviteForm({
         : [];
     startTransition(async () => {
       try {
-        const inv = await createInvitation({ email: address, role, productGrants });
+        const inv = await createInvitation({
+          email: address,
+          role,
+          productGrants,
+        });
         onInvited(inv);
         reset();
+        setOpen(false);
         toast.success(`Invitation sent to ${address}.`);
       } catch (err) {
         if (err instanceof AuthRequiredError) return onAuthError();
@@ -283,71 +311,107 @@ function InviteForm({
 
   return (
     <section className="space-y-3">
-      <h2 className="text-sm font-semibold">Invite a teammate</h2>
-      <form onSubmit={submit} className="space-y-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <Input
-            type="email"
-            required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="teammate@example.com"
-            className="h-9 w-64"
-          />
-          <Select
-            value={role}
-            onChange={(e) => setRole(e.target.value as OrgRole)}
-            className="h-9 w-32"
-            aria-label="Org role"
-          >
-            {ORG_ROLES.map((r) => (
-              <option key={r} value={r}>
-                {ORG_ROLE_LABEL[r]}
-              </option>
-            ))}
-          </Select>
-          <Button type="submit" size="sm" disabled={disabled || pending || !email.trim()}>
-            Send invite
-          </Button>
-        </div>
+      {/* Start as an "Invite teammate" affordance; reveal the form on opt-in
+          (see the "add" UX rule in CLAUDE.md). */}
+      {open ? (
+        <>
+          <h2 className="text-sm font-semibold">Invite a teammate</h2>
+          <form onSubmit={submit} className="space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="teammate@example.com"
+                className="h-9 w-64"
+                autoFocus
+              />
+              <Select
+                value={role}
+                onChange={(e) => setRole(e.target.value as OrgRole)}
+                className="h-9 w-32"
+                aria-label="Org role"
+              >
+                {ORG_ROLES.map((r) => (
+                  <option key={r} value={r}>
+                    {ORG_ROLE_LABEL[r]}
+                  </option>
+                ))}
+              </Select>
+              <Button
+                type="submit"
+                size="sm"
+                disabled={disabled || pending || !email.trim()}
+              >
+                Send invite
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  reset();
+                  setOpen(false);
+                }}
+                disabled={pending}
+              >
+                Cancel
+              </Button>
+            </div>
 
-        {role === "member" && products.length > 0 ? (
-          <div className="space-y-1.5 rounded-md border p-3">
-            <p className="text-xs font-medium text-muted-foreground">
-              Product access (optional)
-            </p>
-            <ul className="space-y-1.5">
-              {products.map((p) => (
-                <li key={p.id} className="flex items-center gap-2 text-sm">
-                  <span className="min-w-0 flex-1 truncate">{p.name}</span>
-                  <Select
-                    value={grants[p.id] ?? NO_ACCESS}
-                    disabled={pending}
-                    onChange={(e) =>
-                      setGrant(p.id, e.target.value as ProductRole | typeof NO_ACCESS)
-                    }
-                    className="h-8 w-36"
-                    aria-label={`${p.name} access`}
-                  >
-                    <option value={NO_ACCESS}>No access</option>
-                    {PRODUCT_ROLES.map((r) => (
-                      <option key={r} value={r}>
-                        {PRODUCT_ROLE_LABEL[r]}
-                      </option>
-                    ))}
-                  </Select>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
-      </form>
-      <p className="text-xs text-muted-foreground">
-        {role === "owner"
-          ? "An owner administers the entire workspace."
-          : "Members are read-only at the org until you grant them product access. You can adjust access anytime on the Products page."}{" "}
-        The invite is an email link that expires after 7 days.
-      </p>
+            {role === "member" && products.length > 0 ? (
+              <div className="space-y-1.5 rounded-md border p-3">
+                <p className="text-xs font-medium text-muted-foreground">
+                  Product access (optional)
+                </p>
+                <ul className="space-y-1.5">
+                  {products.map((p) => (
+                    <li key={p.id} className="flex items-center gap-2 text-sm">
+                      <span className="min-w-0 flex-1 truncate">{p.name}</span>
+                      <Select
+                        value={grants[p.id] ?? NO_ACCESS}
+                        disabled={pending}
+                        onChange={(e) =>
+                          setGrant(
+                            p.id,
+                            e.target.value as ProductRole | typeof NO_ACCESS,
+                          )
+                        }
+                        className="h-8 w-36"
+                        aria-label={`${p.name} access`}
+                      >
+                        <option value={NO_ACCESS}>No access</option>
+                        {PRODUCT_ROLES.map((r) => (
+                          <option key={r} value={r}>
+                            {PRODUCT_ROLE_LABEL[r]}
+                          </option>
+                        ))}
+                      </Select>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </form>
+          <p className="text-xs text-muted-foreground">
+            {role === "owner"
+              ? "An owner administers the entire workspace."
+              : "Members are read-only at the org until you grant them product access. You can adjust access anytime on the Products page."}{" "}
+            The invite is an email link that expires after 7 days.
+          </p>
+        </>
+      ) : (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() => setOpen(true)}
+          disabled={disabled}
+        >
+          Invite teammate
+        </Button>
+      )}
     </section>
   );
 }
@@ -365,7 +429,9 @@ function PendingInvites({
   const [pending, startTransition] = useTransition();
 
   if (invites === null) {
-    return <p className="text-xs text-muted-foreground">Loading invitations…</p>;
+    return (
+      <p className="text-xs text-muted-foreground">Loading invitations…</p>
+    );
   }
   const rows = invites.filter((i) => i.status === "pending");
   if (rows.length === 0) return null;
@@ -395,10 +461,15 @@ function PendingInvites({
                 ? `Member · ${inv.productGrants.length} product${inv.productGrants.length > 1 ? "s" : ""}`
                 : "Member";
           return (
-            <li key={inv.id} className="flex items-center gap-3 px-3 py-2.5 text-sm">
+            <li
+              key={inv.id}
+              className="flex items-center gap-3 px-3 py-2.5 text-sm"
+            >
               <span className="min-w-0 flex-1 truncate">
                 {inv.email}
-                <span className="ml-1.5 text-xs text-muted-foreground">{summary}</span>
+                <span className="ml-1.5 text-xs text-muted-foreground">
+                  {summary}
+                </span>
               </span>
               <Button
                 type="button"
@@ -406,7 +477,9 @@ function PendingInvites({
                 variant="ghost"
                 disabled={disabled || pending}
                 className="text-muted-foreground"
-                onClick={() => act(() => resendInvitation(inv.id), "Invitation re-sent.")}
+                onClick={() =>
+                  act(() => resendInvitation(inv.id), "Invitation re-sent.")
+                }
               >
                 Resend
               </Button>
@@ -416,7 +489,9 @@ function PendingInvites({
                 variant="ghost"
                 disabled={disabled || pending}
                 className="text-destructive"
-                onClick={() => act(() => revokeInvitation(inv.id), "Invitation revoked.")}
+                onClick={() =>
+                  act(() => revokeInvitation(inv.id), "Invitation revoked.")
+                }
               >
                 Revoke
               </Button>
