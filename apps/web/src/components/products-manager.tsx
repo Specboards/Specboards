@@ -1156,12 +1156,7 @@ function EditProductSheet({
               </Button>
             </form>
             <Separator />
-            <div className="space-y-2">
-              <p className="text-xs font-medium text-muted-foreground">
-                Members
-              </p>
-              <ProductMembers productId={product.id} candidates={members} />
-            </div>
+            <ProductMembers productId={product.id} candidates={members} />
           </div>
         ) : null}
       </SheetContent>
