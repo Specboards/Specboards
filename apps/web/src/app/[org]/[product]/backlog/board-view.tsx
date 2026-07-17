@@ -154,7 +154,9 @@ export async function BoardView({
             <LevelSwitcher levels={levels} active={activeLevel.key} />
           </div>
           <div className="flex items-center gap-2">
-            {newItemButton}
+            {/* On an empty board the empty state carries this button instead,
+                so the affordance renders exactly once. */}
+            {features.length === 0 ? null : newItemButton}
             {features.length > 0 && canEdit ? (
               <CardFieldsMenu
                 catalog={catalog}

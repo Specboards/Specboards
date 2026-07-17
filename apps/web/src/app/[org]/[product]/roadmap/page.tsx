@@ -172,8 +172,12 @@ export default async function RoadmapPage({
       : []),
   ];
 
-  // Creation affordances, shared between the toolbar and the empty states so
-  // a blank roadmap offers its next step in place.
+  // Creation affordances. When a page-level empty state is showing, it takes
+  // over the relevant button so the next step sits where the user is looking;
+  // the toolbar hides its twin so each affordance renders exactly once.
+  const itemCtaInEmptyState =
+    features.length === 0 && !activeLevel.isLeaf && !showShipped;
+  const releaseCtaInEmptyState = itemCtaInEmptyState && releases.length === 0;
   const newReleaseButton = isAdmin && !showShipped ? <ReleaseCreate /> : null;
   const newItemButton =
     canEdit && !activeLevel.isLeaf ? (
@@ -244,8 +248,8 @@ export default async function RoadmapPage({
             ) : null}
           </div>
           <div className="flex items-center gap-2">
-            {newReleaseButton}
-            {newItemButton}
+            {releaseCtaInEmptyState ? null : newReleaseButton}
+            {itemCtaInEmptyState ? null : newItemButton}
             {features.length > 0 && canEdit ? (
               <CardFieldsMenu
                 catalog={catalog}
