@@ -1,6 +1,6 @@
 {
   "name": "@specboard/cli",
-  "version": "0.18.3",
+  "version": "0.19.0",
   "private": true,
   "type": "module",
   "description": "Command-line interface for Specboard (manage specs, status, and GitHub links from the terminal).",

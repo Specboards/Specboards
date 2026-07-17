@@ -7,6 +7,8 @@ for how and when the version is bumped.
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-07-16
+
 ### Added
 
 - **Configurable cards on the Roadmap.** The Roadmap gets the same "Card fields"
@@ -47,12 +49,28 @@ for how and when the version is bumped.
   delivery drainer + relay and the incoming GitHub webhook sink no longer use
   the owner connection (which bypasses RLS); they connect as a narrow
   `specboard_worker` role scoped to just the tables they touch, with
-  role-targeted RLS policies for their cross-workspace access. Opt-in per
-  environment via `DATABASE_URL_WORKER` (`infra/worker-role.sql`).
+  role-targeted RLS policies for their cross-workspace access. Provisioned and
+  activated on test + prod via `DATABASE_URL_WORKER` (`infra/worker-role.sql`).
+- **Tenant data served over the RLS-enforced non-owner connection.** The
+  `specboard_app` role + `DATABASE_URL_APP` are live on both environments, so
+  row-level security is a real database backstop behind the app's `workspaceId`
+  filters rather than a bypassed owner connection.
 - **Operator runbooks** for the RLS non-owner cutover, the worker-role cutover,
   the out-of-app webhook egress policy, and the GitHub install-bind smoke test
   (`docs/RUNBOOK-db-role-cutover.md`, `docs/RUNBOOK-webhook-egress-policy.md`,
   `docs/RUNBOOK-github-install-bind-smoke-test.md`).
+
+### Fixed
+
+- **Connecting a repository no longer bounces to the backlog.** The Integrations
+  page built the GitHub install link with the App slug in the `?org=` parameter
+  instead of the workspace slug, so membership resolution failed and redirected
+  to the board. It now uses the workspace slug.
+- **GitHub App installs on an organization now complete.** The install-bind
+  ownership check reads the installer's org membership, which needs the App's
+  Organization Members (read) permission; the App requested only repository
+  permissions, so org installs failed with "The installation didn't complete."
+  The App manifest now requests `members: read`.
 
 ## [0.18.3] - 2026-07-13
 
