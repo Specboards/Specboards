@@ -8,7 +8,7 @@ import {
   parseProductPatch,
   updateProduct,
 } from "@/lib/products-service";
-import { ProductError } from "@/lib/store/types";
+import { GroupError, ProductError } from "@/lib/store/types";
 
 export const dynamic = "force-dynamic";
 
@@ -44,7 +44,11 @@ export async function PATCH(req: Request, { params }: Params) {
       revalidatePath(path, "page");
     return Response.json({ product });
   } catch (err) {
-    if (err instanceof InvalidPatchError || err instanceof ProductError) {
+    if (
+      err instanceof InvalidPatchError ||
+      err instanceof ProductError ||
+      err instanceof GroupError
+    ) {
       return Response.json({ error: err.message }, { status: 422 });
     }
     throw err;

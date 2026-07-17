@@ -132,6 +132,55 @@ export const detailTemplates = pgTable(
 );
 
 /**
+ * A product group: a management-level node that collects products (and other
+ * groups, via `parent_id`) into parts of the customer's platform so their
+ * content can be rolled up. Group metadata (name/key/color) is member-visible
+ * like releases; roll-up surfaces hide groups whose subtree holds no readable
+ * product, and aggregates are computed only over readable products (enforced
+ * in the app layer; see plan). Cycle/depth invariants are enforced in the
+ * store transaction, not by trigger: writes are org-admin-only and the
+ * composite parent FK already rules out the cross-workspace variant.
+ */
+export const productGroups = pgTable(
+  "product_groups",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    /** Parent group for nesting; null = top-level. */
+    parentId: uuid("parent_id").references((): AnyPgColumn => productGroups.id),
+    /** Stable slug used as the `~{key}` scope segment in product-slot URLs. */
+    key: text("key").notNull(),
+    name: text("name").notNull(),
+    description: text("description"),
+    /** Accent-color token (core `PRODUCT_COLORS`), or null. */
+    color: text("color"),
+    /** Manual sibling ordering; ascending. */
+    position: integer("position").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    unique("product_groups_ws_key_uq").on(t.workspaceId, t.key),
+    // Target for composite FKs (self + products.group_id) so a parent/member
+    // in another workspace is impossible at the DB level.
+    unique("product_groups_id_ws_uq").on(t.id, t.workspaceId),
+    index("product_groups_ws_idx").on(t.workspaceId),
+    index("product_groups_parent_idx").on(t.parentId),
+    foreignKey({
+      columns: [t.parentId, t.workspaceId],
+      foreignColumns: [t.id, t.workspaceId],
+      name: "product_groups_parent_ws_fk",
+    }),
+  ],
+);
+
+/**
  * A product: a sibling backlog within the organization (the workspace). Each
  * product holds its own work-tracking hierarchy (Initiative → Epic → Feature)
  * via `features.product_id`. `visibility` gates reads: `org` products are
@@ -152,6 +201,10 @@ export const products = pgTable(
     /** Accent-color token (see core `PRODUCT_COLORS`). Nullable: a null row
      * derives a stable color from its key via `resolveProductColor`. */
     color: text("color"),
+    /** Product group this product belongs to; null = ungrouped. At most one
+     * group per product. The store blocks deleting a populated group, so the
+     * composite FK's default NO ACTION is only a backstop. */
+    groupId: uuid("group_id"),
     /** Manual ordering in the product switcher; ascending. */
     position: integer("position").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -163,7 +216,15 @@ export const products = pgTable(
   },
   (t) => [
     unique("products_ws_key_uq").on(t.workspaceId, t.key),
+    // Target for composite FKs (e.g. product_repositories) scoping by tenant.
+    unique("products_id_ws_uq").on(t.id, t.workspaceId),
     index("products_ws_idx").on(t.workspaceId),
+    index("products_group_idx").on(t.groupId),
+    foreignKey({
+      columns: [t.groupId, t.workspaceId],
+      foreignColumns: [productGroups.id, productGroups.workspaceId],
+      name: "products_group_ws_fk",
+    }),
   ],
 );
 

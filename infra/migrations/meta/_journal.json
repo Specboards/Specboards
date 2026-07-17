@@ -274,6 +274,13 @@
       "when": 1784129234149,
       "tag": "0038_board_preferences_board",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1784301215760,
+      "tag": "0039_jazzy_shockwave",
+      "breakpoints": true
     }
   ]
 }

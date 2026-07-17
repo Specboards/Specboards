@@ -5,7 +5,11 @@ import { getServerSessionUser } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
 import { LOCAL_ORG_SLUG } from "@/lib/org-path";
 import { getStore } from "@/lib/store";
-import type { ProductRecord, WorkspaceScope } from "@/lib/store/types";
+import type {
+  ProductGroupRecord,
+  ProductRecord,
+  WorkspaceScope,
+} from "@/lib/store/types";
 import {
   getWorkspaceById,
   listMembershipsForUser,
@@ -28,21 +32,25 @@ export function canConnectRepos(access: PageAccess | null): boolean {
  * Product-aware edit gate for already-loaded products (which carry
  * `viewerRole`). The workspace owner can edit anything; otherwise editing is a
  * per-product grant (`admin` or `contributor`). Pass a `productId` for a
- * single-product view, or `null` for the cross-product "all" view (returns true
- * when the caller can edit *any* of `products`). `null` access is local file
- * mode (always editable). Reuses the `viewerRole` already on each product, so
- * no extra query — mirrors core `canWriteProduct`.
+ * single-product view, a set of ids for a group-scoped view (true when the
+ * caller can edit any product in the set), or `null` for the cross-product
+ * "all" view (true when the caller can edit *any* of `products`). `null`
+ * access is local file mode (always editable). Reuses the `viewerRole` already
+ * on each product, so no extra query — mirrors core `canWriteProduct`.
  */
 export function canEditProducts(
   access: { role: MemberRole } | null,
   products: ProductRecord[],
-  productId: string | null,
+  productId: string | ReadonlySet<string> | null,
 ): boolean {
   if (!access) return true;
   if (access.role === "owner") return true;
   const writable = (p: ProductRecord) =>
     p.viewerRole === "admin" || p.viewerRole === "contributor";
-  if (productId) return products.some((p) => p.id === productId && writable(p));
+  if (typeof productId === "string") {
+    return products.some((p) => p.id === productId && writable(p));
+  }
+  if (productId) return products.some((p) => productId.has(p.id) && writable(p));
   return products.some(writable);
 }
 
@@ -84,6 +92,27 @@ export async function listSidebarProducts(): Promise<ProductRecord[]> {
   const membership = await resolveActiveWorkspace(db, user.id, { orgSlug });
   if (!membership) return [];
   return store.listProducts({
+    userId: user.id,
+    workspaceId: membership.workspaceId,
+  });
+}
+
+/**
+ * Product groups of the active org, for the sidebar switcher and group-scoped
+ * pages. Same org resolution as `listSidebarProducts`. Returns every group in
+ * the workspace (metadata is member-visible); callers hide groups without
+ * readable products where that matters.
+ */
+export async function listSidebarGroups(): Promise<ProductGroupRecord[]> {
+  const db = getDb();
+  const store = await getStore();
+  if (!db) return store.listProductGroups(); // file mode, unscoped
+  const user = await getServerSessionUser();
+  if (!user) return [];
+  const orgSlug = (await headers()).get("x-org-slug") || undefined;
+  const membership = await resolveActiveWorkspace(db, user.id, { orgSlug });
+  if (!membership) return [];
+  return store.listProductGroups({
     userId: user.id,
     workspaceId: membership.workspaceId,
   });

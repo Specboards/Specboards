@@ -10,7 +10,11 @@ import { LevelSwitcher } from "@/components/level-switcher";
 import { WorkItemCreate } from "@/components/work-item-create";
 import { WorkViewTabs } from "@/components/work-view-tabs";
 import { resolveActiveLevel } from "@/lib/active-level";
-import { ALL_PRODUCTS, resolveActiveProduct } from "@/lib/active-product";
+import {
+  ALL_PRODUCTS,
+  resolveActiveScope,
+  scopeProductFilter,
+} from "@/lib/active-product";
 import { getBoardPreferences } from "@/lib/board-preferences-service";
 import { cardFieldCatalog, resolveCardFields } from "@/lib/card-fields";
 import { getDb } from "@/lib/db";
@@ -47,27 +51,44 @@ export async function BoardView({
       store.listDetailTemplates(access ?? undefined),
     ]);
 
-  // The board scopes to the product in the URL (`all` = every product) and
+  // The board scopes to the segment in the URL: one product, a product group
+  // (`~key`, covering its subtree's products), or `all` = every product; it
   // shows one hierarchy level at a time (default: the leaf/specs).
-  const products = await store.listProducts(access ?? undefined);
-  const activeProduct = resolveActiveProduct(products, productSlug);
-  if (productSlug !== ALL_PRODUCTS && !activeProduct) notFound();
+  const [products, groups] = await Promise.all([
+    store.listProducts(access ?? undefined),
+    store.listProductGroups(access ?? undefined),
+  ]);
+  const scope = resolveActiveScope(products, groups, productSlug);
+  if (!scope) notFound();
+  const activeProduct = scope.kind === "product" ? scope.product : null;
   // Editing is per-product now: the owner can edit anything, others need an
   // admin/contributor grant on the product (any writable product in the "all"
-  // view). Server + RLS enforce the real boundary; this gates the affordances.
-  const canEdit = canEditProducts(access, products, activeProduct?.id ?? null);
-  const scoped = activeProduct
-    ? allFeatures.filter((f) => f.productId === activeProduct.id)
-    : allFeatures;
+  // or group view). Server + RLS enforce the real boundary; this gates the
+  // affordances.
+  const canEdit = canEditProducts(
+    access,
+    products,
+    scope.kind === "product"
+      ? scope.product.id
+      : scope.kind === "group"
+        ? scope.productIds
+        : null,
+  );
+  const inScope = scopeProductFilter(scope);
+  const scoped = allFeatures.filter((f) => inScope(f.productId));
 
-  // In the cross-product ("All products") view, tag each card with its owning
-  // product; scoped to one product, or when the workspace only has one product,
-  // the badge carries no information, so omit it.
+  // When the scope spans more than one product ("All products" or a group),
+  // tag each card with its owning product; scoped to one product, or when the
+  // workspace only has one product, the badge carries no information, so omit.
+  const scopedProducts =
+    scope.kind === "group"
+      ? products.filter((p) => scope.productIds.has(p.id))
+      : products;
   const productsById =
-    activeProduct || products.length <= 1
+    activeProduct || scopedProducts.length <= 1
       ? undefined
       : Object.fromEntries(
-          products.map((p) => [
+          scopedProducts.map((p) => [
             p.id,
             { name: p.name, key: p.key, color: p.color },
           ]),
@@ -121,7 +142,7 @@ export async function BoardView({
                 parentLabel={parentLabel}
                 parents={parents}
                 productId={activeProduct?.id ?? null}
-                products={products.map((p) => ({ id: p.id, name: p.name }))}
+                products={scopedProducts.map((p) => ({ id: p.id, name: p.name }))}
                 workflow={workflow}
                 members={members}
                 templateBody={templateBody}
@@ -152,7 +173,13 @@ export async function BoardView({
             // Remount when the board's data set changes (level or product scope).
             // BoardClient seeds drag-and-drop state from `features` once on mount,
             // so without a fresh key it would keep showing the prior level's cards.
-            key={`${activeProduct?.id ?? ALL_PRODUCTS}:${activeLevel.key}`}
+            key={`${
+              scope.kind === "product"
+                ? scope.product.id
+                : scope.kind === "group"
+                  ? `group:${scope.group.id}`
+                  : ALL_PRODUCTS
+            }:${activeLevel.key}`}
             features={features}
             columns={columns}
             workflow={workflow}

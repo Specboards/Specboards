@@ -15,7 +15,10 @@ export const dynamic = "force-dynamic";
 export default async function ProductsSettingsPage() {
   const access = await requireWorkspaceAccess();
   const store = await getStore();
-  const products = await store.listProducts(access ?? undefined);
+  const [products, groups] = await Promise.all([
+    store.listProducts(access ?? undefined),
+    store.listProductGroups(access ?? undefined),
+  ]);
 
   // Org admins (and local file mode) can create products and manage any one.
   const isOrgAdmin = !access || access.role === "owner";
@@ -36,6 +39,7 @@ export default async function ProductsSettingsPage() {
       </div>
       <ProductsManager
         products={products}
+        groups={groups}
         members={members}
         isOrgAdmin={isOrgAdmin}
       />

@@ -5,6 +5,9 @@ import {
   canWriteProduct,
   DEFAULT_PRODUCT_KEY,
   extractSections,
+  groupKeyFromName,
+  wouldCreateCycle,
+  wouldExceedDepth,
   isLeafLevel,
   isPropertyType,
   isValidParentLevel,
@@ -40,6 +43,7 @@ import {
   members,
   or,
   outboxEvents,
+  productGroups,
   productMembers,
   products,
   releases,
@@ -60,6 +64,7 @@ import {
   compareReleases,
   DetailTemplateError,
   FeatureError,
+  GroupError,
   LevelError,
   ProductError,
   PropertyError,
@@ -98,7 +103,10 @@ import {
   type IdeaRecord,
   type IdeaSettings,
   type IdeaSettingsPatch,
+  type CreateProductGroupInput,
   type ProductAccess,
+  type ProductGroupPatch,
+  type ProductGroupRecord,
   type ProductMemberInput,
   type ProductMemberRecord,
   type ProductPatch,
@@ -2935,6 +2943,7 @@ export class DbStore implements FeatureStore {
           visibility: p.visibility,
           position: p.position,
           color: p.color,
+          groupId: p.groupId,
           itemCount: counts.get(p.id) ?? 0,
           viewerRole: access.roles.get(p.id) ?? null,
         }));
@@ -2962,6 +2971,7 @@ export class DbStore implements FeatureStore {
         visibility: row.visibility,
         position: row.position,
         color: row.color,
+        groupId: row.groupId,
         itemCount: counts.get(row.id) ?? 0,
         viewerRole: access.roles.get(row.id) ?? null,
       };
@@ -3026,6 +3036,7 @@ export class DbStore implements FeatureStore {
         visibility: row.visibility,
         position: row.position,
         color: row.color,
+        groupId: row.groupId,
         itemCount: 0,
         viewerRole: "admin",
       };
@@ -3068,6 +3079,12 @@ export class DbStore implements FeatureStore {
       }
       if (patch.position !== undefined) set.position = patch.position;
       if (patch.color !== undefined) set.color = patch.color;
+      if (patch.groupId !== undefined) {
+        if (patch.groupId !== null) {
+          await this.requireGroupId(tx, ws, patch.groupId);
+        }
+        set.groupId = patch.groupId;
+      }
       const [row] = await tx
         .update(products)
         .set(set)
@@ -3084,6 +3101,7 @@ export class DbStore implements FeatureStore {
         visibility: row.visibility,
         position: row.position,
         color: row.color,
+        groupId: row.groupId,
         itemCount: counts.get(row.id) ?? 0,
         viewerRole: access.roles.get(row.id) ?? null,
       };
@@ -3107,6 +3125,203 @@ export class DbStore implements FeatureStore {
         .where(and(eq(products.id, id), eq(products.workspaceId, ws)))
         .returning({ id: products.id });
       if (!deleted[0]) throw new ProductError(`Unknown product: ${id}`);
+    });
+  }
+
+  /** Verify a group id belongs to the workspace, returning it. */
+  private async requireGroupId(
+    tx: Tx,
+    ws: string,
+    groupId: string,
+  ): Promise<string> {
+    const row = await tx
+      .select({ id: productGroups.id })
+      .from(productGroups)
+      .where(
+        and(eq(productGroups.id, groupId), eq(productGroups.workspaceId, ws)),
+      )
+      .limit(1);
+    if (!row[0]) throw new GroupError(`Unknown product group: ${groupId}`);
+    return row[0].id;
+  }
+
+  /** Direct-member product counts per group across the workspace. */
+  private async groupProductCounts(
+    tx: Tx,
+    ws: string,
+  ): Promise<Map<string, number>> {
+    const rows = await tx
+      .select({ groupId: products.groupId, n: count() })
+      .from(products)
+      .where(eq(products.workspaceId, ws))
+      .groupBy(products.groupId);
+    const out = new Map<string, number>();
+    for (const r of rows) if (r.groupId) out.set(r.groupId, Number(r.n));
+    return out;
+  }
+
+  private groupRecord(
+    row: typeof productGroups.$inferSelect,
+    counts: Map<string, number>,
+  ): ProductGroupRecord {
+    return {
+      id: row.id,
+      key: row.key,
+      name: row.name,
+      description: row.description,
+      color: row.color,
+      parentId: row.parentId,
+      position: row.position,
+      productCount: counts.get(row.id) ?? 0,
+    };
+  }
+
+  async listProductGroups(
+    scope?: WorkspaceScope,
+  ): Promise<ProductGroupRecord[]> {
+    return this.scoped(scope, async (tx) => {
+      const ws = scope!.workspaceId;
+      const [rows, counts] = await Promise.all([
+        tx
+          .select()
+          .from(productGroups)
+          .where(eq(productGroups.workspaceId, ws))
+          .orderBy(asc(productGroups.position), asc(productGroups.name)),
+        this.groupProductCounts(tx, ws),
+      ]);
+      return rows.map((row) => this.groupRecord(row, counts));
+    });
+  }
+
+  async createProductGroup(
+    input: CreateProductGroupInput,
+    scope?: WorkspaceScope,
+  ): Promise<ProductGroupRecord> {
+    return this.scoped(scope, async (tx) => {
+      const ws = scope!.workspaceId;
+      const name = input.name.trim();
+      if (!name) throw new GroupError("Group name is required.");
+      const existing = await tx
+        .select({
+          id: productGroups.id,
+          parentId: productGroups.parentId,
+          key: productGroups.key,
+          position: productGroups.position,
+        })
+        .from(productGroups)
+        .where(eq(productGroups.workspaceId, ws));
+      const parentId = input.parentId ?? null;
+      if (parentId) {
+        await this.requireGroupId(tx, ws, parentId);
+        if (wouldExceedDepth(existing, "new-group", parentId)) {
+          throw new GroupError(
+            "Groups can only be nested a few levels deep.",
+          );
+        }
+      }
+      const key = groupKeyFromName(name, new Set(existing.map((g) => g.key)));
+      const position =
+        existing.reduce((m, g) => Math.max(m, g.position), -1) + 1;
+      const [row] = await tx
+        .insert(productGroups)
+        .values({
+          workspaceId: ws,
+          key,
+          name,
+          description: input.description ?? null,
+          color: input.color ?? null,
+          parentId,
+          position,
+        })
+        .returning();
+      if (!row) throw new GroupError("Failed to create group.");
+      return this.groupRecord(row, new Map());
+    });
+  }
+
+  async updateProductGroup(
+    id: string,
+    patch: ProductGroupPatch,
+    scope?: WorkspaceScope,
+  ): Promise<ProductGroupRecord> {
+    return this.scoped(scope, async (tx) => {
+      const ws = scope!.workspaceId;
+      const set: Record<string, unknown> = { updatedAt: new Date() };
+      if (patch.name !== undefined) {
+        const name = patch.name.trim();
+        if (!name) throw new GroupError("Group name is required.");
+        set.name = name;
+      }
+      if (patch.description !== undefined) set.description = patch.description;
+      if (patch.color !== undefined) set.color = patch.color;
+      if (patch.position !== undefined) set.position = patch.position;
+      if (patch.parentId !== undefined) {
+        if (patch.parentId !== null) {
+          await this.requireGroupId(tx, ws, patch.parentId);
+          const existing = await tx
+            .select({
+              id: productGroups.id,
+              parentId: productGroups.parentId,
+            })
+            .from(productGroups)
+            .where(eq(productGroups.workspaceId, ws));
+          if (wouldCreateCycle(existing, id, patch.parentId)) {
+            throw new GroupError(
+              "A group can't be nested inside itself or its own subgroups.",
+            );
+          }
+          if (wouldExceedDepth(existing, id, patch.parentId)) {
+            throw new GroupError(
+              "Groups can only be nested a few levels deep.",
+            );
+          }
+        }
+        set.parentId = patch.parentId;
+      }
+      const [row] = await tx
+        .update(productGroups)
+        .set(set)
+        .where(and(eq(productGroups.id, id), eq(productGroups.workspaceId, ws)))
+        .returning();
+      if (!row) throw new GroupError(`Unknown product group: ${id}`);
+      const counts = await this.groupProductCounts(tx, ws);
+      return this.groupRecord(row, counts);
+    });
+  }
+
+  async deleteProductGroup(id: string, scope?: WorkspaceScope): Promise<void> {
+    await this.scoped(scope, async (tx) => {
+      const ws = scope!.workspaceId;
+      const [children, memberProducts] = await Promise.all([
+        tx
+          .select({ n: count() })
+          .from(productGroups)
+          .where(
+            and(
+              eq(productGroups.workspaceId, ws),
+              eq(productGroups.parentId, id),
+            ),
+          ),
+        tx
+          .select({ n: count() })
+          .from(products)
+          .where(and(eq(products.workspaceId, ws), eq(products.groupId, id))),
+      ]);
+      if (Number(children[0]?.n ?? 0) > 0) {
+        throw new GroupError(
+          "Can't delete a group while it still has subgroups.",
+        );
+      }
+      if (Number(memberProducts[0]?.n ?? 0) > 0) {
+        throw new GroupError(
+          "Can't delete a group while it still has products.",
+        );
+      }
+      const deleted = await tx
+        .delete(productGroups)
+        .where(and(eq(productGroups.id, id), eq(productGroups.workspaceId, ws)))
+        .returning({ id: productGroups.id });
+      if (!deleted[0]) throw new GroupError(`Unknown product group: ${id}`);
     });
   }
 

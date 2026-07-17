@@ -6,6 +6,7 @@ import type {
   BoardPreferences,
   CreatableRelationDirection,
   CreateFeatureInput,
+  CreateProductGroupInput,
   CreateProductInput,
   DetailTemplate,
   DetailTemplateInput,
@@ -32,6 +33,8 @@ import type {
   OrgInvitationRecord,
   OrgMemberRecord,
   OrgRole,
+  ProductGroupPatch,
+  ProductGroupRecord,
   ProductMemberInput,
   ProductMemberRecord,
   ProductPatch,
@@ -1179,6 +1182,76 @@ export async function deleteProduct(id: string): Promise<void> {
       error?: string;
     } | null;
     throw new Error(body?.error ?? `Delete product failed with ${res.status}`);
+  }
+}
+
+// ── Product groups ──────────────────────────────────────────────────────
+
+/** List the workspace's product groups. */
+export async function listProductGroups(): Promise<ProductGroupRecord[]> {
+  const res = await apiFetch("/api/v1/product-groups");
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as {
+    groups?: ProductGroupRecord[];
+    error?: string;
+  } | null;
+  if (!res.ok)
+    throw new Error(body?.error ?? `Failed to load groups (${res.status}).`);
+  return body?.groups ?? [];
+}
+
+/** Create a product group (org-admin only); returns the new record. */
+export async function createProductGroup(
+  input: CreateProductGroupInput,
+): Promise<ProductGroupRecord> {
+  const res = await apiFetch("/api/v1/product-groups", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as {
+    group?: ProductGroupRecord;
+    error?: string;
+  } | null;
+  if (!res.ok || !body?.group) {
+    throw new Error(body?.error ?? `Create group failed with ${res.status}`);
+  }
+  return body.group;
+}
+
+/** Update a product group (org-admin only); returns the updated record. */
+export async function updateProductGroup(
+  id: string,
+  patch: ProductGroupPatch,
+): Promise<ProductGroupRecord> {
+  const res = await apiFetch(`/api/v1/product-groups/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as {
+    group?: ProductGroupRecord;
+    error?: string;
+  } | null;
+  if (!res.ok || !body?.group) {
+    throw new Error(body?.error ?? `Update group failed with ${res.status}`);
+  }
+  return body.group;
+}
+
+/** Delete a product group (must have no subgroups or products). */
+export async function deleteProductGroup(id: string): Promise<void> {
+  const res = await apiFetch(`/api/v1/product-groups/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (res.status === 401) throw new AuthRequiredError();
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(body?.error ?? `Delete group failed with ${res.status}`);
   }
 }
 

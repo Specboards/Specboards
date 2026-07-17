@@ -10,7 +10,11 @@ import { LevelSwitcher } from "@/components/level-switcher";
 import { ReleaseCreate } from "@/components/release-controls";
 import { WorkItemCreate } from "@/components/work-item-create";
 import { resolveActiveLevel } from "@/lib/active-level";
-import { ALL_PRODUCTS, resolveActiveProduct } from "@/lib/active-product";
+import {
+  ALL_PRODUCTS,
+  resolveActiveScope,
+  scopeProductFilter,
+} from "@/lib/active-product";
 import { getBoardPreferences } from "@/lib/board-preferences-service";
 import { cardFieldCatalog, resolveCardFields } from "@/lib/card-fields";
 import { LOCAL_ORG_SLUG, orgProductPath } from "@/lib/org-path";
@@ -72,24 +76,40 @@ export default async function RoadmapPage({
   );
   const releaseNames = Object.fromEntries(releases.map((r) => [r.id, r.name]));
 
-  // Roadmap scopes to the product in the URL (`all` = every product) and shows
-  // one hierarchy level at a time (default: the Feature altitude).
-  const products = await store.listProducts(access ?? undefined);
-  const activeProduct = resolveActiveProduct(products, productSlug);
-  if (productSlug !== ALL_PRODUCTS && !activeProduct) notFound();
-  const canEdit = canEditProducts(access, products, activeProduct?.id ?? null);
-  const scoped = activeProduct
-    ? allFeatures.filter((f) => f.productId === activeProduct.id)
-    : allFeatures;
+  // Roadmap scopes to the segment in the URL (a product, a `~key` group, or
+  // `all` = every product) and shows one hierarchy level at a time (default:
+  // the Feature altitude).
+  const [products, groups] = await Promise.all([
+    store.listProducts(access ?? undefined),
+    store.listProductGroups(access ?? undefined),
+  ]);
+  const scope = resolveActiveScope(products, groups, productSlug);
+  if (!scope) notFound();
+  const activeProduct = scope.kind === "product" ? scope.product : null;
+  const canEdit = canEditProducts(
+    access,
+    products,
+    scope.kind === "product"
+      ? scope.product.id
+      : scope.kind === "group"
+        ? scope.productIds
+        : null,
+  );
+  const inScope = scopeProductFilter(scope);
+  const scoped = allFeatures.filter((f) => inScope(f.productId));
 
-  // Cross-product view: tag each card with its owning product. Skipped when a
-  // single product is in context or the workspace only has one product (the tag
-  // carries no information then).
+  // Multi-product scope ("all" or a group): tag each card with its owning
+  // product. Skipped when a single product is in context or the scope only
+  // covers one product (the tag carries no information then).
+  const scopedProducts =
+    scope.kind === "group"
+      ? products.filter((p) => scope.productIds.has(p.id))
+      : products;
   const productsById =
-    activeProduct || products.length <= 1
+    activeProduct || scopedProducts.length <= 1
       ? undefined
       : Object.fromEntries(
-          products.map((p) => [
+          scopedProducts.map((p) => [
             p.id,
             { name: p.name, key: p.key, color: p.color },
           ]),
@@ -223,7 +243,13 @@ export default async function RoadmapPage({
           <RoadmapBoard
             // Remount when the data set changes (level or product scope) so the
             // board re-seeds its optimistic placement from the new features.
-            key={`${activeProduct?.id ?? ALL_PRODUCTS}:${activeLevel.key}:${showShipped ? "shipped" : "active"}`}
+            key={`${
+              scope.kind === "product"
+                ? scope.product.id
+                : scope.kind === "group"
+                  ? `group:${scope.group.id}`
+                  : ALL_PRODUCTS
+            }:${activeLevel.key}:${showShipped ? "shipped" : "active"}`}
             columns={columns}
             features={features}
             workflow={workflow}

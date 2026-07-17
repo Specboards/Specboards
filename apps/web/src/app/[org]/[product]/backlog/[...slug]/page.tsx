@@ -3,7 +3,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { ItemDetailView } from "@/components/item-detail-view";
 
-import { ALL_PRODUCTS } from "@/lib/active-product";
+import { ALL_PRODUCTS, GROUP_SLUG_PREFIX } from "@/lib/active-product";
 import { getItemDetailData } from "@/lib/item-detail";
 import { LOCAL_ORG_SLUG, orgProductPath } from "@/lib/org-path";
 import { requireWorkspaceAccess } from "@/lib/workspace-access";
@@ -52,11 +52,14 @@ export default async function ItemPage({
   const { feature } = data;
 
   // Canonicalize: the feature's current product is its context, and its level
-  // key is the type segment. Redirect when either is stale/missing. `all` is
-  // kept as-is so the cross-product view's links don't bounce on every click.
-  const productStale = product !== data.productSlug && product !== ALL_PRODUCTS;
+  // key is the type segment. Redirect when either is stale/missing. `all` and
+  // group scopes (`~key`) are kept as-is so multi-product views' links don't
+  // bounce on every click.
+  const multiScope =
+    product === ALL_PRODUCTS || product.startsWith(GROUP_SLUG_PREFIX);
+  const productStale = product !== data.productSlug && !multiScope;
   if (productStale || levelSeg !== feature.level) {
-    const targetProduct = product === ALL_PRODUCTS ? ALL_PRODUCTS : data.productSlug;
+    const targetProduct = multiScope ? product : data.productSlug;
     redirect(
       orgProductPath(org, targetProduct, `/backlog/${feature.level}/${specId}`),
     );

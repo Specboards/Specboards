@@ -127,9 +127,15 @@ export function parseProductPatch(body: unknown): ProductPatch {
     patch.position = raw.position;
   }
   if ("color" in raw) patch.color = parseColor(raw);
+  if ("groupId" in raw) {
+    if (raw.groupId !== null && !isUuid(raw.groupId)) {
+      throw new InvalidPatchError("groupId must be a UUID or null.");
+    }
+    patch.groupId = raw.groupId as string | null;
+  }
   if (Object.keys(patch).length === 0) {
     throw new InvalidPatchError(
-      "Patch must set at least one of: name, description, visibility, position, color.",
+      "Patch must set at least one of: name, description, visibility, position, color, groupId.",
     );
   }
   return patch;

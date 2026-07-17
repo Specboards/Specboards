@@ -6,7 +6,7 @@ import { eq, githubInstallations } from "@specboard/db";
 import { DocAreaBody, type GithubDocsData } from "@/components/doc-area-body";
 import type { GithubSetupState } from "@/components/doc-space-setup";
 import { DocsWorkspace } from "@/components/docs-workspace";
-import { ALL_PRODUCTS, resolveActiveProduct } from "@/lib/active-product";
+import { resolveActiveScope } from "@/lib/active-product";
 import { getDb } from "@/lib/db";
 import { loadGithubDocs } from "@/lib/github-docs";
 import { LOCAL_ORG_SLUG, orgPath, orgProductPath } from "@/lib/org-path";
@@ -67,13 +67,21 @@ export async function PlanAreaView({
   const access = await requireWorkspaceAccess();
   const org = access?.orgSlug ?? LOCAL_ORG_SLUG;
   const store = await getStore();
-  const products = await store.listProducts(access ?? undefined);
+  const [products, groups] = await Promise.all([
+    store.listProducts(access ?? undefined),
+    store.listProductGroups(access ?? undefined),
+  ]);
 
-  let product = resolveActiveProduct(products, productSlug);
-  if (!product) {
-    if (productSlug !== ALL_PRODUCTS) notFound();
-    if (products.length === 1) product = products[0] ?? null;
-  }
+  const scope = resolveActiveScope(products, groups, productSlug);
+  if (!scope) notFound();
+  let product = scope.kind === "product" ? scope.product : null;
+  // Docs are per-product: in the "all" (or a single-product group) scope with
+  // exactly one candidate, use it; otherwise prompt for a product below.
+  const candidates =
+    scope.kind === "group"
+      ? products.filter((p) => scope.productIds.has(p.id))
+      : products;
+  if (!product && candidates.length === 1) product = candidates[0] ?? null;
 
   if (!product) {
     return (
@@ -84,7 +92,7 @@ export async function PlanAreaView({
             {copy.label} is per product. Pick one:
           </p>
           <div className="flex flex-wrap justify-center gap-2">
-            {products.map((p) => (
+            {candidates.map((p) => (
               <Link
                 key={p.id}
                 href={orgProductPath(org, p.key, `/${area}`)}

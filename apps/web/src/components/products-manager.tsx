@@ -21,11 +21,17 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   AuthRequiredError,
   createProduct,
+  createProductGroup,
   deleteProduct,
+  deleteProductGroup,
   updateProduct,
 } from "@/lib/api-client";
 import { colorDot, productColorClasses } from "@/lib/product-color";
-import type { ProductRecord, ProductVisibility } from "@/lib/store/types";
+import type {
+  ProductGroupRecord,
+  ProductRecord,
+  ProductVisibility,
+} from "@/lib/store/types";
 import { cn } from "@/lib/utils";
 
 type Member = { userId: string; name: string; email: string };
@@ -81,14 +87,17 @@ function ColorPicker({
  */
 export function ProductsManager({
   products: initial,
+  groups: initialGroups = [],
   members,
   isOrgAdmin,
 }: {
   products: ProductRecord[];
+  groups?: ProductGroupRecord[];
   members: Member[];
   isOrgAdmin: boolean;
 }) {
   const [products, setProducts] = useState(initial);
+  const [groups, setGroups] = useState(initialGroups);
   const [creating, setCreating] = useState(false);
 
   function onCreated(product: ProductRecord) {
@@ -108,6 +117,14 @@ export function ProductsManager({
   return (
     <div className="space-y-4">
       {isOrgAdmin ? (
+        <GroupsCard
+          groups={groups}
+          products={products}
+          onChanged={setGroups}
+        />
+      ) : null}
+
+      {isOrgAdmin ? (
         <Button size="sm" variant="outline" onClick={() => setCreating(true)}>
           New product
         </Button>
@@ -118,6 +135,7 @@ export function ProductsManager({
           <ProductCard
             key={product.id}
             product={product}
+            groups={groups}
             members={members}
             canManage={isOrgAdmin || product.viewerRole === "admin"}
             onUpdated={onUpdated}
@@ -137,6 +155,121 @@ export function ProductsManager({
   );
 }
 
+/**
+ * Manage the org's product groups (org-admin only): create one, delete an
+ * empty one. Products join a group via each product's editor below; a group
+ * scopes the Board/Roadmap through the product switcher and rolls its
+ * products' content up for management visibility.
+ */
+function GroupsCard({
+  groups,
+  products,
+  onChanged,
+}: {
+  groups: ProductGroupRecord[];
+  products: ProductRecord[];
+  onChanged: (groups: ProductGroupRecord[]) => void;
+}) {
+  const router = useRouter();
+  const [name, setName] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  function onCreate(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    startTransition(async () => {
+      setError(null);
+      try {
+        const group = await createProductGroup({ name: trimmed });
+        onChanged([...groups, group]);
+        setName("");
+        toast.success("Group created");
+        router.refresh();
+      } catch (err) {
+        if (err instanceof AuthRequiredError) {
+          window.location.href = "/sign-in";
+          return;
+        }
+        setError(err instanceof Error ? err.message : "Create failed.");
+      }
+    });
+  }
+
+  function onDelete(group: ProductGroupRecord) {
+    startTransition(async () => {
+      setError(null);
+      try {
+        await deleteProductGroup(group.id);
+        onChanged(groups.filter((g) => g.id !== group.id));
+        toast.success("Group deleted");
+        router.refresh();
+      } catch (err) {
+        if (err instanceof AuthRequiredError) {
+          window.location.href = "/sign-in";
+          return;
+        }
+        setError(err instanceof Error ? err.message : "Delete failed.");
+      }
+    });
+  }
+
+  return (
+    <div className="space-y-3 rounded-md border p-3">
+      <div>
+        <p className="text-sm font-medium">Product groups</p>
+        <p className="text-xs text-muted-foreground">
+          Group products into parts of your platform. A group appears in the
+          product switcher and rolls up its products&apos; work.
+        </p>
+      </div>
+      {groups.length > 0 ? (
+        <ul className="space-y-1">
+          {groups.map((group) => {
+            const count = products.filter((p) => p.groupId === group.id).length;
+            return (
+              <li key={group.id} className="flex items-center gap-2 text-sm">
+                <span className="font-medium">{group.name}</span>
+                <span className="text-xs text-muted-foreground">
+                  {count} {count === 1 ? "product" : "products"}
+                </span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="ml-auto text-destructive"
+                  disabled={pending || count > 0}
+                  title={
+                    count > 0
+                      ? "Move its products out of the group before deleting."
+                      : undefined
+                  }
+                  onClick={() => onDelete(group)}
+                >
+                  Delete
+                </Button>
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+      <form onSubmit={onCreate} className="flex items-center gap-2">
+        <Input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="New group name"
+          className="h-8 max-w-xs"
+        />
+        <Button type="submit" size="sm" variant="outline" disabled={pending || !name.trim()}>
+          {pending ? "Adding…" : "Add group"}
+        </Button>
+      </form>
+      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+    </div>
+  );
+}
+
 const VISIBILITY_LABEL: Record<ProductVisibility, string> = {
   org: "Everyone in org",
   private: "Private",
@@ -145,12 +278,14 @@ const VISIBILITY_LABEL: Record<ProductVisibility, string> = {
 /** One product row: summary, an inline editor, a members panel, and delete. */
 function ProductCard({
   product,
+  groups,
   members,
   canManage,
   onUpdated,
   onDeleted,
 }: {
   product: ProductRecord;
+  groups: ProductGroupRecord[];
   members: Member[];
   canManage: boolean;
   onUpdated: (p: ProductRecord) => void;
@@ -180,6 +315,10 @@ function ProductCard({
       description: String(data.get("description") ?? "").trim() || null,
       visibility: String(data.get("visibility")) as ProductVisibility,
       color,
+      // Only sent when the group select is rendered (there are groups).
+      ...(groups.length > 0
+        ? { groupId: String(data.get("groupId") ?? "") || null }
+        : {}),
     };
     startTransition(async () => {
       setError(null);
@@ -242,6 +381,25 @@ function ProductCard({
               <option value="private">{VISIBILITY_LABEL.private}</option>
             </Select>
           </label>
+          {groups.length > 0 ? (
+            <label className="block space-y-1.5">
+              <span className="text-xs font-medium text-muted-foreground">
+                Group
+              </span>
+              <Select
+                name="groupId"
+                defaultValue={product.groupId ?? ""}
+                className="h-8"
+              >
+                <option value="">No group</option>
+                {groups.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name}
+                  </option>
+                ))}
+              </Select>
+            </label>
+          ) : null}
           <div className="space-y-1.5">
             <span className="text-xs font-medium text-muted-foreground">Color</span>
             <ColorPicker value={color} onChange={setColor} />
@@ -275,6 +433,11 @@ function ProductCard({
             {product.visibility === "private" ? (
               <Badge variant="outline" className="text-[10px]">
                 Private
+              </Badge>
+            ) : null}
+            {product.groupId ? (
+              <Badge variant="outline" className="text-[10px]">
+                {groups.find((g) => g.id === product.groupId)?.name ?? "Group"}
               </Badge>
             ) : null}
             <span className="text-xs text-muted-foreground">

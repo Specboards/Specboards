@@ -4,7 +4,11 @@ import { Toaster } from "sonner";
 
 import { AppSidebar } from "@/components/app-sidebar";
 import { ThemeProvider } from "@/components/theme-provider";
-import { listSidebarOrgs, listSidebarProducts } from "@/lib/workspace-access";
+import {
+  listSidebarGroups,
+  listSidebarOrgs,
+  listSidebarProducts,
+} from "@/lib/workspace-access";
 
 import "./globals.css";
 // sonner ships its CSS as a static file. We import it here (bundled, served
@@ -25,9 +29,10 @@ export const metadata = {
 };
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
-  const [orgs, products, nonce] = await Promise.all([
+  const [orgs, products, groups, nonce] = await Promise.all([
     listSidebarOrgs(),
     listSidebarProducts(),
+    listSidebarGroups(),
     headers().then((h) => h.get("x-nonce") ?? undefined),
   ]);
   return (
@@ -35,7 +40,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
       <body className="min-h-screen antialiased">
         <ThemeProvider nonce={nonce}>
           <div className="flex min-h-screen">
-            <AppSidebar orgs={orgs} products={products} />
+            <AppSidebar orgs={orgs} products={products} groups={groups} />
             <main className="min-w-0 flex-1">
               <div className="mx-auto max-w-6xl px-6 py-8">{children}</div>
             </main>

@@ -224,6 +224,8 @@ export interface ProductRecord {
   /** Accent-color token, or null to derive one from the key (see core
    * `resolveProductColor`). */
   color: string | null;
+  /** Product group the product belongs to, or null when ungrouped. */
+  groupId: string | null;
   /** Count of work items in this product. */
   itemCount: number;
   /** The acting user's explicit role on this product, or null (org admins
@@ -244,7 +246,43 @@ export type ProductPatch = Partial<{
   visibility: ProductVisibility;
   position: number;
   color: string | null;
+  groupId: string | null;
 }>;
+
+/** A product group (management roll-up node) as the UI consumes it. */
+export interface ProductGroupRecord {
+  id: string;
+  /** Stable slug used as the `~{key}` scope segment in product-slot URLs. */
+  key: string;
+  name: string;
+  description: string | null;
+  /** Accent-color token, or null. */
+  color: string | null;
+  /** Parent group id for nesting; null = top-level. */
+  parentId: string | null;
+  position: number;
+  /** Count of products directly in this group (not descendants). */
+  productCount: number;
+}
+
+export interface CreateProductGroupInput {
+  name: string;
+  description?: string | null;
+  color?: string | null;
+  parentId?: string | null;
+}
+
+export type ProductGroupPatch = Partial<{
+  name: string;
+  description: string | null;
+  color: string | null;
+  parentId: string | null;
+  position: number;
+}>;
+
+/** Raised when a group can't be created/updated/deleted (cycle, depth, in
+ * use, …). */
+export class GroupError extends Error {}
 
 /** A user's membership of one product, joined to their identity. */
 export interface ProductMemberRecord {
@@ -792,6 +830,24 @@ export interface FeatureStore {
   ): Promise<ProductRecord>;
   /** Delete a product (must have no items). */
   deleteProduct(id: string, scope?: WorkspaceScope): Promise<void>;
+  /** All product groups in the workspace, ordered by position then name.
+   * Group metadata is member-visible; roll-up surfaces additionally hide
+   * groups whose subtree holds no readable product (applied by callers). */
+  listProductGroups(scope?: WorkspaceScope): Promise<ProductGroupRecord[]>;
+  /** Create a product group (org-admin action). Returns the new record. */
+  createProductGroup(
+    input: CreateProductGroupInput,
+    scope?: WorkspaceScope,
+  ): Promise<ProductGroupRecord>;
+  /** Update a group (rename/recolor/reposition/reparent). Rejects cycles and
+   * nesting past MAX_GROUP_DEPTH with GroupError. */
+  updateProductGroup(
+    id: string,
+    patch: ProductGroupPatch,
+    scope?: WorkspaceScope,
+  ): Promise<ProductGroupRecord>;
+  /** Delete a group (must have no child groups or member products). */
+  deleteProductGroup(id: string, scope?: WorkspaceScope): Promise<void>;
   /** A product's members joined to their identities, ordered by name. */
   listProductMembers(
     productId: string,

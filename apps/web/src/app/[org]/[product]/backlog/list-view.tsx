@@ -4,7 +4,7 @@ import { EmptyState } from "@/components/empty-state";
 import { WorkViewTabs } from "@/components/work-view-tabs";
 import { Badge } from "@/components/ui/badge";
 import { Box, BoxHeader } from "@/components/ui/box";
-import { ALL_PRODUCTS, resolveActiveProduct } from "@/lib/active-product";
+import { resolveActiveScope, scopeProductFilter } from "@/lib/active-product";
 import { getDb } from "@/lib/db";
 import {
   applyFeatureFilters,
@@ -39,27 +39,45 @@ export async function ListView({
   const filters = parseFeatureFilters(await searchParams);
   const store = await getStore();
 
-  // Scope to the product in the URL (`all` = every product).
+  // Scope to the segment in the URL: a product, a group (`~key`), or `all`.
   const { product: productSlug } = await params;
-  const products = await store.listProducts(access ?? undefined);
-  const activeProduct = resolveActiveProduct(products, productSlug);
-  if (productSlug !== ALL_PRODUCTS && !activeProduct) notFound();
+  const [products, groups] = await Promise.all([
+    store.listProducts(access ?? undefined),
+    store.listProductGroups(access ?? undefined),
+  ]);
+  const scope = resolveActiveScope(products, groups, productSlug);
+  if (!scope) notFound();
+  const activeProduct = scope.kind === "product" ? scope.product : null;
   // Per-product edit gate (owner edits all; others need a product grant).
-  const canEdit = canEditProducts(access, products, activeProduct?.id ?? null);
+  const canEdit = canEditProducts(
+    access,
+    products,
+    scope.kind === "product"
+      ? scope.product.id
+      : scope.kind === "group"
+        ? scope.productIds
+        : null,
+  );
 
+  const inScope = scopeProductFilter(scope);
   const features = sortFeatures(await store.listFeatures(access ?? undefined))
     .filter((f) => f.status !== "archived")
-    .filter((f) => !activeProduct || f.productId === activeProduct.id);
+    .filter((f) => inScope(f.productId));
   const releases = await store.listReleases(access ?? undefined);
   const releaseNames = Object.fromEntries(releases.map((r) => [r.id, r.name]));
 
-  // Cross-product view: show a Product column tagging each row's owner. Omitted
-  // when a single product is in context or the workspace only has one product.
+  // Multi-product scope ("all" or a group): show a Product column tagging each
+  // row's owner. Omitted when a single product is in context or the scope only
+  // covers one product.
+  const scopedProducts =
+    scope.kind === "group"
+      ? products.filter((p) => scope.productIds.has(p.id))
+      : products;
   const productsById =
-    activeProduct || products.length <= 1
+    activeProduct || scopedProducts.length <= 1
       ? undefined
       : Object.fromEntries(
-          products.map((p) => [
+          scopedProducts.map((p) => [
             p.id,
             { name: p.name, key: p.key, color: p.color },
           ]),
@@ -80,7 +98,7 @@ export async function ListView({
       .map((f) => ({ specId: f.specId, title: f.title })),
     releases: releases.map((r) => ({ id: r.id, name: r.name })),
     products: productsById
-      ? products.map((p) => ({ id: p.id, name: p.name }))
+      ? scopedProducts.map((p) => ({ id: p.id, name: p.name }))
       : undefined,
   };
 

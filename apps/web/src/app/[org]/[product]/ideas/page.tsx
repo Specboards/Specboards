@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { resolveIdeaStages } from "@specboard/core";
 
 import { IdeasBoard } from "@/components/ideas-board";
-import { ALL_PRODUCTS, resolveActiveProduct } from "@/lib/active-product";
+import { resolveActiveScope, scopeProductFilter } from "@/lib/active-product";
 import { LOCAL_ORG_SLUG } from "@/lib/org-path";
 import { getStore } from "@/lib/store";
 import { canEditProducts, requireWorkspaceAccess } from "@/lib/workspace-access";
@@ -26,27 +26,41 @@ export default async function IdeasPage({
   const { product: productSlug } = await params;
   const store = await getStore();
 
-  const [allIdeas, stageRows, products] = await Promise.all([
+  const [allIdeas, stageRows, products, groups] = await Promise.all([
     store.listIdeas(access ?? undefined),
     store.listIdeaStatuses(access ?? undefined),
     store.listProducts(access ?? undefined),
+    store.listProductGroups(access ?? undefined),
   ]);
 
-  const activeProduct = resolveActiveProduct(products, productSlug);
-  if (productSlug !== ALL_PRODUCTS && !activeProduct) notFound();
-  const canEdit = canEditProducts(access, products, activeProduct?.id ?? null);
-  const ideas = activeProduct
-    ? allIdeas.filter((i) => i.productId === activeProduct.id)
-    : allIdeas;
+  const scope = resolveActiveScope(products, groups, productSlug);
+  if (!scope) notFound();
+  const activeProduct = scope.kind === "product" ? scope.product : null;
+  const canEdit = canEditProducts(
+    access,
+    products,
+    scope.kind === "product"
+      ? scope.product.id
+      : scope.kind === "group"
+        ? scope.productIds
+        : null,
+  );
+  const inScope = scopeProductFilter(scope);
+  const ideas = allIdeas.filter((i) => inScope(i.productId));
 
   const stages = resolveIdeaStages(stageRows);
 
-  // Cross-product view tags each idea with its owning product (skipped when a
-  // single product is in context or the org has just one product).
+  // Multi-product scope ("all" or a group) tags each idea with its owning
+  // product (skipped when a single product is in context or the scope only
+  // covers one product).
+  const scopedProducts =
+    scope.kind === "group"
+      ? products.filter((p) => scope.productIds.has(p.id))
+      : products;
   const productsById =
-    activeProduct || products.length <= 1
+    activeProduct || scopedProducts.length <= 1
       ? undefined
-      : Object.fromEntries(products.map((p) => [p.id, p.name]));
+      : Object.fromEntries(scopedProducts.map((p) => [p.id, p.name]));
 
   return (
     <IdeasBoard
@@ -56,7 +70,7 @@ export default async function IdeasPage({
       org={org}
       productSlug={productSlug}
       defaultProductId={activeProduct?.id ?? null}
-      products={products.map((p) => ({ id: p.id, name: p.name }))}
+      products={scopedProducts.map((p) => ({ id: p.id, name: p.name }))}
       productsById={productsById}
     />
   );

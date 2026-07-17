@@ -179,18 +179,24 @@ export const TOOLS: McpTool[] = [
     description:
       "List the products (sibling backlogs) the caller can see. Each product " +
       "has its own hierarchy of items. Use a product's `key` to filter " +
-      "list_items, or its `id` for create_item.",
+      "list_items, or its `id` for create_item. `group` is the key of the " +
+      "product group the product belongs to (null when ungrouped).",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     write: false,
     run: async (_args, ctx) => {
       const store = await getStore();
-      const products = await store.listProducts(ctx.scope);
+      const [products, groups] = await Promise.all([
+        store.listProducts(ctx.scope),
+        store.listProductGroups(ctx.scope),
+      ]);
+      const groupKeyById = new Map(groups.map((g) => [g.id, g.key]));
       return products.map((p) => ({
         id: p.id,
         key: p.key,
         name: p.name,
         description: p.description,
         visibility: p.visibility,
+        group: (p.groupId && groupKeyById.get(p.groupId)) || null,
         itemCount: p.itemCount,
       }));
     },

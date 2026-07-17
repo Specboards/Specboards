@@ -20,7 +20,7 @@ import { useEffect, useState } from "react";
 import { OrgSwitcher } from "@/components/org-switcher";
 import { ProductSwitcher } from "@/components/product-switcher";
 import { SidebarProfile } from "@/components/sidebar-profile";
-import type { ProductRecord } from "@/lib/store";
+import type { ProductGroupRecord, ProductRecord } from "@/lib/store";
 import { useOrgPath, useOrgProductPath } from "@/lib/use-org";
 import { cn } from "@/lib/utils";
 
@@ -93,11 +93,14 @@ const GROUPS: NavGroup[] = [
 export function AppSidebar({
   orgs = [],
   products = [],
+  groups = [],
 }: {
   /** The signed-in user's orgs, for the switcher (empty hides it). */
   orgs?: { slug: string; name: string }[];
   /** The active org's products, for the switcher (≤1 hides it). */
   products?: ProductRecord[];
+  /** The active org's product groups, for the switcher's group scopes. */
+  groups?: ProductGroupRecord[];
 }) {
   const pathname = usePathname();
   const orgHref = useOrgPath();
@@ -166,7 +169,7 @@ export function AppSidebar({
         ) : (
           <>
             <OrgSwitcher orgs={orgs} />
-            <ProductSwitcher products={products} />
+            <ProductSwitcher products={products} groups={groups} />
           </>
         )}
       </div>
