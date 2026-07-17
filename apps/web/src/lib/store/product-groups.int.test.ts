@@ -71,6 +71,9 @@ describe.skipIf(!OWNER_URL)("product groups (store + RLS)", () => {
     await owner`insert into products (id, workspace_id, key, name) values
       (${productId.alpha}, ${ws.a}, 'alpha', 'Alpha'),
       (${productId.beta}, ${ws.b}, 'beta', 'Beta')`;
+    // features.level carries a composite FK to workspace_levels.
+    await owner`insert into workspace_levels (workspace_id, key, label, position, is_leaf) values
+      (${ws.a}, 'work', 'Work Items', 0, true)`;
 
     store = new DbStore(appUrlFrom(OWNER_URL!));
   });
@@ -136,6 +139,49 @@ describe.skipIf(!OWNER_URL)("product groups (store + RLS)", () => {
     await expect(
       store.updateProductGroup(parent.id, { parentId: child.id }, scopeA),
     ).rejects.toThrow(GroupError);
+  });
+
+  it("rolls up per-product status counts and release progress in a summary", async () => {
+    const releaseId = randomUUID();
+    await owner`insert into releases (id, workspace_id, name) values
+      (${releaseId}, ${ws.a}, ${"grp-int-rel-" + suffix})`;
+    await owner`insert into features (spec_id, workspace_id, product_id, level, title, status, release_id) values
+      (${randomUUID()}, ${ws.a}, ${productId.alpha}, 'work', 'one', 'backlog', null),
+      (${randomUUID()}, ${ws.a}, ${productId.alpha}, 'work', 'two', 'backlog', ${releaseId}),
+      (${randomUUID()}, ${ws.a}, ${productId.alpha}, 'work', 'three', 'done', ${releaseId})`;
+
+    const groups = await store.listProductGroups(scopeA);
+    const payments = groups.find((g) => g.name === "Payments Platform")!;
+    const summary = await store.getGroupSummary(payments.id, scopeA);
+
+    expect(summary.group.id).toBe(payments.id);
+    expect(summary.products).toHaveLength(1);
+    const alpha = summary.products[0]!;
+    expect(alpha.productId).toBe(productId.alpha);
+    expect(alpha.itemCount).toBe(3);
+    expect(alpha.statusCounts).toEqual({ backlog: 2, done: 1 });
+    expect(alpha.releases).toEqual([{ releaseId, total: 2, done: 1 }]);
+
+    // A group with no subtree products reports empty aggregates but still
+    // lists its direct subgroups.
+    const parent = groups.find((g) => g.name === "Cycle Parent")!;
+    const parentSummary = await store.getGroupSummary(parent.id, scopeA);
+    expect(parentSummary.products).toEqual([]);
+    expect(parentSummary.subgroups.map((g) => g.name)).toEqual(["Cycle Child"]);
+  });
+
+  it("includes subtree products in an ancestor group's summary", async () => {
+    const groups = await store.listProductGroups(scopeA);
+    const parent = groups.find((g) => g.name === "Cycle Parent")!;
+    const child = groups.find((g) => g.name === "Cycle Child")!;
+    await store.updateProduct(productId.alpha, { groupId: child.id }, scopeA);
+
+    const summary = await store.getGroupSummary(parent.id, scopeA);
+    expect(summary.products.map((p) => p.productId)).toEqual([productId.alpha]);
+
+    // Restore for the delete-guard tests below.
+    const payments = groups.find((g) => g.name === "Payments Platform")!;
+    await store.updateProduct(productId.alpha, { groupId: payments.id }, scopeA);
   });
 
   it("blocks deleting a group that still has products or subgroups", async () => {

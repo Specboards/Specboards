@@ -3,6 +3,7 @@
 import {
   Compass,
   DraftingCompass,
+  Gauge,
   KanbanSquare,
   Lightbulb,
   Map,
@@ -20,8 +21,9 @@ import { useEffect, useState } from "react";
 import { OrgSwitcher } from "@/components/org-switcher";
 import { ProductSwitcher } from "@/components/product-switcher";
 import { SidebarProfile } from "@/components/sidebar-profile";
+import { GROUP_SLUG_PREFIX } from "@/lib/active-product";
 import type { ProductGroupRecord, ProductRecord } from "@/lib/store";
-import { useOrgPath, useOrgProductPath } from "@/lib/use-org";
+import { useOrgPath, useOrgProductPath, useProductSlug } from "@/lib/use-org";
 import { cn } from "@/lib/utils";
 
 /**
@@ -104,6 +106,27 @@ export function AppSidebar({
 }) {
   const pathname = usePathname();
   const orgHref = useOrgPath();
+  const productSlug = useProductSlug();
+
+  // A group scope (`~key` product segment) gets a Dashboard area: the group's
+  // management roll-up. Hidden otherwise (for a product or "all" the route
+  // just redirects to the backlog).
+  const navGroups = productSlug.startsWith(GROUP_SLUG_PREFIX)
+    ? [
+        {
+          label: "Track",
+          items: [
+            {
+              href: "/dashboard",
+              label: "Dashboard",
+              icon: Gauge,
+              productScoped: true,
+            },
+          ],
+        },
+        ...GROUPS,
+      ]
+    : GROUPS;
 
   // Collapsed = icon rail (mark + area icons only). Persisted per browser;
   // starts expanded on first paint (matches SSR), then reflects the stored
@@ -174,7 +197,7 @@ export function AppSidebar({
         )}
       </div>
       <nav className="flex-1 space-y-5 overflow-y-auto px-2 py-2">
-        {GROUPS.map((group, i) => (
+        {navGroups.map((group, i) => (
           <div key={group.label ?? i} className="space-y-1">
             {group.label && !collapsed ? (
               <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">

@@ -4,6 +4,7 @@ import path from "node:path";
 
 import {
   DEFAULT_PRODUCT_KEY,
+  descendantGroupIds,
   groupKeyFromName,
   isLeafLevel,
   isPropertyType,
@@ -65,6 +66,8 @@ import {
   type IdeaRecord,
   type IdeaSettings,
   type IdeaSettingsPatch,
+  type GroupProductSummary,
+  type GroupSummary,
   type ProductAccess,
   type ProductGroupPatch,
   type ProductGroupRecord,
@@ -1600,6 +1603,66 @@ export class LocalFileStore implements FeatureStore {
       throw new GroupError("Can't delete a group while it still has products.");
     }
     await this.writeGroups(groups.filter((g) => g.id !== id));
+  }
+
+  async getGroupSummary(
+    id: string,
+    _scope?: WorkspaceScope,
+  ): Promise<GroupSummary> {
+    const [groups, products, allFeatures] = await Promise.all([
+      this.readGroups(),
+      this.readProducts(),
+      this.loadAll(),
+    ]);
+    const group = groups.find((g) => g.id === id);
+    if (!group) throw new GroupError(`Unknown product group: ${id}`);
+
+    const subtree = descendantGroupIds(groups, id);
+    const member = products.filter((p) => p.groupId && subtree.has(p.groupId));
+    const summaries = new Map<string, GroupProductSummary>(
+      member.map((p) => [
+        p.id,
+        { productId: p.id, itemCount: 0, statusCounts: {}, releases: [] },
+      ]),
+    );
+    const releaseTotals = new Map<string, Map<string, { total: number; done: number }>>();
+    for (const f of allFeatures) {
+      if (!f.productId) continue;
+      const summary = summaries.get(f.productId);
+      if (!summary) continue;
+      summary.itemCount += 1;
+      summary.statusCounts[f.status] = (summary.statusCounts[f.status] ?? 0) + 1;
+      if (f.releaseId) {
+        const byRelease =
+          releaseTotals.get(f.productId) ??
+          new Map<string, { total: number; done: number }>();
+        releaseTotals.set(f.productId, byRelease);
+        const entry = byRelease.get(f.releaseId) ?? { total: 0, done: 0 };
+        entry.total += 1;
+        if (f.status === "done") entry.done += 1;
+        byRelease.set(f.releaseId, entry);
+      }
+    }
+    for (const [productId, byRelease] of releaseTotals) {
+      const summary = summaries.get(productId);
+      if (!summary) continue;
+      summary.releases = [...byRelease.entries()].map(
+        ([releaseId, { total, done }]) => ({ releaseId, total, done }),
+      );
+    }
+
+    const productCount = (gid: string) =>
+      products.filter((p) => p.groupId === gid).length;
+    return {
+      group: { ...group, productCount: productCount(group.id) },
+      subgroups: groups
+        .filter((g) => g.parentId === id)
+        .sort((a, b) => a.position - b.position || a.name.localeCompare(b.name))
+        .map((g) => ({ ...g, productCount: productCount(g.id) })),
+      products: [...member]
+        .sort((a, b) => a.position - b.position || a.name.localeCompare(b.name))
+        .map((p) => summaries.get(p.id)!),
+    };
   }
 
   async deleteProduct(id: string, _scope?: WorkspaceScope): Promise<void> {

@@ -4,6 +4,7 @@ import {
   canReadProduct,
   canWriteProduct,
   DEFAULT_PRODUCT_KEY,
+  descendantGroupIds,
   extractSections,
   groupKeyFromName,
   wouldCreateCycle,
@@ -104,6 +105,8 @@ import {
   type IdeaSettings,
   type IdeaSettingsPatch,
   type CreateProductGroupInput,
+  type GroupProductSummary,
+  type GroupSummary,
   type ProductAccess,
   type ProductGroupPatch,
   type ProductGroupRecord,
@@ -3322,6 +3325,104 @@ export class DbStore implements FeatureStore {
         .where(and(eq(productGroups.id, id), eq(productGroups.workspaceId, ws)))
         .returning({ id: productGroups.id });
       if (!deleted[0]) throw new GroupError(`Unknown product group: ${id}`);
+    });
+  }
+
+  async getGroupSummary(
+    id: string,
+    scope?: WorkspaceScope,
+  ): Promise<GroupSummary> {
+    return this.scoped(scope, async (tx) => {
+      const ws = scope!.workspaceId;
+      const [groupRows, counts, access] = await Promise.all([
+        tx
+          .select()
+          .from(productGroups)
+          .where(eq(productGroups.workspaceId, ws))
+          .orderBy(asc(productGroups.position), asc(productGroups.name)),
+        this.groupProductCounts(tx, ws),
+        this.accessIn(tx, scope!),
+      ]);
+      const group = groupRows.find((g) => g.id === id);
+      if (!group) throw new GroupError(`Unknown product group: ${id}`);
+
+      // Aggregates only ever cover products the viewer can read; a private
+      // product in the subtree simply doesn't contribute (matching listProducts).
+      const subtree = descendantGroupIds(groupRows, id);
+      const productRows = await tx
+        .select()
+        .from(products)
+        .where(eq(products.workspaceId, ws));
+      const readable = productRows.filter(
+        (p) => p.groupId && subtree.has(p.groupId) && canReadProduct(access, p),
+      );
+
+      const summaries = new Map<string, GroupProductSummary>(
+        readable.map((p) => [
+          p.id,
+          { productId: p.id, itemCount: 0, statusCounts: {}, releases: [] },
+        ]),
+      );
+      if (readable.length > 0) {
+        // One grouped scan of features yields item totals, the status
+        // breakdown, and per-release progress (all derived at read time, no
+        // denormalized counts).
+        const rows = await tx
+          .select({
+            productId: features.productId,
+            status: features.status,
+            releaseId: features.releaseId,
+            n: count(),
+          })
+          .from(features)
+          .where(
+            and(
+              eq(features.workspaceId, ws),
+              inArray(features.productId, [...summaries.keys()]),
+            ),
+          )
+          .groupBy(features.productId, features.status, features.releaseId);
+        const releaseTotals = new Map<string, Map<string, { total: number; done: number }>>();
+        for (const row of rows) {
+          if (!row.productId) continue;
+          const summary = summaries.get(row.productId);
+          if (!summary) continue;
+          const n = Number(row.n);
+          summary.itemCount += n;
+          summary.statusCounts[row.status] =
+            (summary.statusCounts[row.status] ?? 0) + n;
+          if (row.releaseId) {
+            const byRelease =
+              releaseTotals.get(row.productId) ??
+              new Map<string, { total: number; done: number }>();
+            releaseTotals.set(row.productId, byRelease);
+            const entry = byRelease.get(row.releaseId) ?? { total: 0, done: 0 };
+            entry.total += n;
+            if (isDone(row.status)) entry.done += n;
+            byRelease.set(row.releaseId, entry);
+          }
+        }
+        for (const [productId, byRelease] of releaseTotals) {
+          const summary = summaries.get(productId);
+          if (!summary) continue;
+          summary.releases = [...byRelease.entries()].map(
+            ([releaseId, { total, done }]) => ({ releaseId, total, done }),
+          );
+        }
+      }
+
+      // Keep product order consistent with listProducts (position, then name).
+      const ordered = [...readable]
+        .sort((a, b) => a.position - b.position || a.name.localeCompare(b.name))
+        .map((p) => summaries.get(p.id)!);
+
+      return {
+        group: this.groupRecord(group, counts),
+        subgroups: groupRows
+          .filter((g) => g.parentId === id)
+          .map((g) => this.groupRecord(g, counts)),
+        products: ordered,
+      };
     });
   }
 

@@ -284,6 +284,29 @@ export type ProductGroupPatch = Partial<{
  * use, …). */
 export class GroupError extends Error {}
 
+/** One product's contribution to a group roll-up. */
+export interface GroupProductSummary {
+  productId: string;
+  /** Total work items in the product (all levels). */
+  itemCount: number;
+  /** Item counts keyed by status key (see workspace statuses). */
+  statusCounts: Record<string, number>;
+  /** Per-release progress; `done` uses the terminal "done" status, matching
+   * hierarchy roll-up progress elsewhere. Unscheduled items are not listed. */
+  releases: { releaseId: string; total: number; done: number }[];
+}
+
+/**
+ * A group's roll-up: the group, its direct subgroups, and a summary for every
+ * readable product in its subtree (recursive). Aggregates are computed only
+ * over products the viewer can read.
+ */
+export interface GroupSummary {
+  group: ProductGroupRecord;
+  subgroups: ProductGroupRecord[];
+  products: GroupProductSummary[];
+}
+
 /** A user's membership of one product, joined to their identity. */
 export interface ProductMemberRecord {
   userId: string;
@@ -848,6 +871,8 @@ export interface FeatureStore {
   ): Promise<ProductGroupRecord>;
   /** Delete a group (must have no child groups or member products). */
   deleteProductGroup(id: string, scope?: WorkspaceScope): Promise<void>;
+  /** A group's roll-up over the readable products in its subtree. */
+  getGroupSummary(id: string, scope?: WorkspaceScope): Promise<GroupSummary>;
   /** A product's members joined to their identities, ordered by name. */
   listProductMembers(
     productId: string,

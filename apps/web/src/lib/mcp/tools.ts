@@ -1,3 +1,4 @@
+import { descendantGroupIds } from "@specboard/core";
 import { eq, users, workspaces } from "@specboard/db";
 
 import { getDb } from "@/lib/db";
@@ -202,11 +203,85 @@ export const TOOLS: McpTool[] = [
     },
   },
   {
+    name: "list_product_groups",
+    description:
+      "List the workspace's product groups: management-level nodes that " +
+      "collect products (and other groups) for roll-up. `productKeys` are the " +
+      "caller-readable products directly in the group; nested groups point at " +
+      "their parent via `parentKey`. Use a group's key with list_items " +
+      "(`group`) or group_summary.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    write: false,
+    run: async (_args, ctx) => {
+      const store = await getStore();
+      const [groups, products] = await Promise.all([
+        store.listProductGroups(ctx.scope),
+        store.listProducts(ctx.scope),
+      ]);
+      const keyById = new Map(groups.map((g) => [g.id, g.key]));
+      return groups.map((g) => ({
+        key: g.key,
+        name: g.name,
+        description: g.description,
+        parentKey: (g.parentId && keyById.get(g.parentId)) || null,
+        productKeys: products.filter((p) => p.groupId === g.id).map((p) => p.key),
+      }));
+    },
+  },
+  {
+    name: "group_summary",
+    description:
+      "A product group's management roll-up: per-product item counts, status " +
+      "breakdowns, and release progress over the readable products in the " +
+      "group's subtree (nested groups included), plus its direct subgroups. " +
+      "Aggregates only cover products the caller can read.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        group: {
+          type: "string",
+          description: "The group's key (see list_product_groups).",
+        },
+      },
+      required: ["group"],
+      additionalProperties: false,
+    },
+    write: false,
+    run: async (args, ctx) => {
+      const store = await getStore();
+      const [groups, products, releases] = await Promise.all([
+        store.listProductGroups(ctx.scope),
+        store.listProducts(ctx.scope),
+        store.listReleases(ctx.scope),
+      ]);
+      const group = groups.find((g) => g.key === args.group);
+      if (!group) throw new Error(`No product group with key "${args.group}".`);
+      const summary = await store.getGroupSummary(group.id, ctx.scope);
+      const productKeyById = new Map(products.map((p) => [p.id, p.key]));
+      const releaseNameById = new Map(releases.map((r) => [r.id, r.name]));
+      return {
+        group: { key: summary.group.key, name: summary.group.name },
+        subgroups: summary.subgroups.map((g) => ({ key: g.key, name: g.name })),
+        products: summary.products.map((s) => ({
+          product: productKeyById.get(s.productId) ?? s.productId,
+          itemCount: s.itemCount,
+          statusCounts: s.statusCounts,
+          releases: s.releases.map((r) => ({
+            release: releaseNameById.get(r.releaseId) ?? r.releaseId,
+            total: r.total,
+            done: r.done,
+          })),
+        })),
+      };
+    },
+  },
+  {
     name: "list_items",
     description:
       "List work items (specs and DB-native cards) in the caller's workspace " +
-      "with their metadata. Optionally filter by status, product key, or " +
-      "assignee user id. Returns lean rows; call read_item for full content.",
+      "with their metadata. Optionally filter by status, product key, product " +
+      "group key (includes nested groups' products), or assignee user id. " +
+      "Returns lean rows; call read_item for full content.",
     inputSchema: {
       type: "object",
       properties: {
@@ -214,6 +289,12 @@ export const TOOLS: McpTool[] = [
         product: {
           type: "string",
           description: "Filter to one product by its key (see list_products).",
+        },
+        group: {
+          type: "string",
+          description:
+            "Filter to a product group's subtree by its key (see " +
+            "list_product_groups).",
         },
         assignee: {
           type: "string",
@@ -236,6 +317,18 @@ export const TOOLS: McpTool[] = [
         if (!match) throw new Error(`No product with key "${args.product}".`);
         productId = match.id;
       }
+      let groupProductIds: Set<string> | undefined;
+      if (typeof args.group === "string" && args.group) {
+        const groups = await store.listProductGroups(ctx.scope);
+        const match = groups.find((g) => g.key === args.group);
+        if (!match) throw new Error(`No product group with key "${args.group}".`);
+        const subtree = descendantGroupIds(groups, match.id);
+        groupProductIds = new Set(
+          products
+            .filter((p) => p.groupId && subtree.has(p.groupId))
+            .map((p) => p.id),
+        );
+      }
       const status = typeof args.status === "string" ? args.status : undefined;
       const assignee =
         typeof args.assignee === "string" ? args.assignee : undefined;
@@ -244,7 +337,9 @@ export const TOOLS: McpTool[] = [
           (f) =>
             (!status || f.status === status) &&
             (!assignee || f.assigneeId === assignee) &&
-            (!productId || f.productId === productId),
+            (!productId || f.productId === productId) &&
+            (!groupProductIds ||
+              (f.productId !== null && groupProductIds.has(f.productId))),
         )
         .map((f) => ({
           specId: f.specId,

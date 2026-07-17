@@ -31,7 +31,10 @@ const INSTRUCTIONS =
   "DB-native card you no longer need with delete_item (spec-backed items are " +
   "deleted in git, not here). Organize work into versions with list_releases " +
   "and create_release (owner-only), then schedule an item into one via " +
-  "update_item(releaseId).";
+  "update_item(releaseId). Products can be collected into product groups " +
+  "(nested management roll-ups): list_product_groups shows them, " +
+  "list_items(group) scopes to a group's subtree, and group_summary returns " +
+  "per-product status and release roll-ups for a group.";
 
 export type McpAuth =
   | { ok: true; ctx: McpContext }

@@ -4,6 +4,7 @@ import { InvalidPatchError } from "@/lib/features-service";
 import {
   getStore,
   type CreateProductGroupInput,
+  type GroupSummary,
   type ProductGroupPatch,
   type ProductGroupRecord,
   type WorkspaceScope,
@@ -130,4 +131,13 @@ export async function deleteProductGroup(
 ): Promise<void> {
   const store = await getStore();
   await store.deleteProductGroup(id, scope);
+}
+
+/** A group's roll-up over the readable products in its subtree. */
+export async function getGroupSummary(
+  id: string,
+  scope?: WorkspaceScope,
+): Promise<GroupSummary> {
+  const store = await getStore();
+  return store.getGroupSummary(id, scope);
 }
