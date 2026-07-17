@@ -1185,6 +1185,36 @@ export async function deleteProduct(id: string): Promise<void> {
   }
 }
 
+/** A repo's product links (see /api/v1/repositories/:id/products). */
+export interface RepoProductLinksPayload {
+  repoId: string;
+  productIds: string[];
+  defaultProductId: string | null;
+}
+
+/** Replace a repo's product links + default product (org-admin only). */
+export async function setRepositoryProducts(
+  repoId: string,
+  input: { productIds: string[]; defaultProductId: string | null },
+): Promise<RepoProductLinksPayload> {
+  const res = await apiFetch(
+    `/api/v1/repositories/${encodeURIComponent(repoId)}/products`,
+    {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  );
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as
+    | (RepoProductLinksPayload & { error?: string })
+    | null;
+  if (!res.ok || !body || body.error) {
+    throw new Error(body?.error ?? `Updating repo products failed with ${res.status}`);
+  }
+  return body;
+}
+
 // ── Product groups ──────────────────────────────────────────────────────
 
 /** List the workspace's product groups. */

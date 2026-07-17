@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDb, type Database } from "@specboard/db";
 
 import { resolveRepoDefaultProduct } from "./github-sync";
+import { RepoLinkError, setRepoProducts } from "./repo-links-service";
 
 /**
  * Repo default-product resolution (track B): sync assigns a repo's newly
@@ -69,5 +70,51 @@ describe.skipIf(!OWNER_URL)("resolveRepoDefaultProduct", () => {
     await owner`delete from features where product_id = ${productId.payments}`;
     await owner`delete from products where id = ${productId.payments}`;
     expect(await resolveRepoDefaultProduct(db, repo)).toBe(productId.def);
+  });
+
+  it("replaces links transactionally via setRepoProducts", async () => {
+    const cards = randomUUID();
+    await owner`insert into products (id, workspace_id, key, name) values
+      (${cards}, ${wsId}, 'cards', 'Cards')`;
+
+    const set = await setRepoProducts(db, wsId, repoId, {
+      productIds: [productId.def, cards],
+      defaultProductId: cards,
+    });
+    expect(new Set(set.productIds)).toEqual(new Set([productId.def, cards]));
+    expect(await resolveRepoDefaultProduct(db, repo)).toBe(cards);
+
+    // Replace flips the default without tripping the one-default index.
+    await setRepoProducts(db, wsId, repoId, {
+      productIds: [productId.def, cards],
+      defaultProductId: productId.def,
+    });
+    expect(await resolveRepoDefaultProduct(db, repo)).toBe(productId.def);
+
+    // Clearing all links falls back to the workspace default.
+    await setRepoProducts(db, wsId, repoId, {
+      productIds: [],
+      defaultProductId: null,
+    });
+    expect(await resolveRepoDefaultProduct(db, repo)).toBe(productId.def);
+  });
+
+  it("rejects links to products outside the workspace", async () => {
+    const otherWs = randomUUID();
+    const otherProduct = randomUUID();
+    await owner`insert into workspaces (id, name, slug) values
+      (${otherWs}, 'Other', ${"repolinks-other-" + suffix})`;
+    await owner`insert into products (id, workspace_id, key, name) values
+      (${otherProduct}, ${otherWs}, 'other', 'Other')`;
+    try {
+      await expect(
+        setRepoProducts(db, wsId, repoId, {
+          productIds: [otherProduct],
+          defaultProductId: otherProduct,
+        }),
+      ).rejects.toThrow(RepoLinkError);
+    } finally {
+      await owner`delete from workspaces where id = ${otherWs}`;
+    }
   });
 });

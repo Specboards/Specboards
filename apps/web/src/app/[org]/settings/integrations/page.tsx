@@ -21,6 +21,7 @@ import { getDb } from "@/lib/db";
 import { isGithubConfigured } from "@/lib/github-app";
 import { loadWorkspaceInstallations, NO_INSTALLATIONS } from "@/lib/github-connect";
 import { listProducts } from "@/lib/products-service";
+import { listRepoProductLinks } from "@/lib/repo-links-service";
 import { isSingleTenant } from "@/lib/tenancy";
 import { listWebhookEndpoints } from "@/lib/webhooks-service";
 import { requireWorkspaceAccess } from "@/lib/workspace-access";
@@ -105,12 +106,12 @@ export default async function IntegrationsSettingsPage({
   }));
 
   const isAdmin = access.role === "owner";
-  const [endpoints, products] = isAdmin
-    ? await Promise.all([
-        listWebhookEndpoints(db, access.workspaceId),
-        listProducts(access),
-      ])
-    : [[], []];
+  // Products feed the webhook product filter (admin) and the per-repo product
+  // link chips (any member); the list is already visibility-filtered.
+  const products = await listProducts(access);
+  const endpoints = isAdmin
+    ? await listWebhookEndpoints(db, access.workspaceId)
+    : [];
 
   // Repository management: any member sees the connected list; only admins get
   // the GitHub setup/connect controls (matching the API authorization).
@@ -127,6 +128,11 @@ export default async function IntegrationsSettingsPage({
     .where(eq(repositories.workspaceId, access.workspaceId));
 
   const configured = await isGithubConfigured(db);
+
+  // Each repo's product links (chips + default product in the repo list).
+  const repoLinks = Object.fromEntries(
+    await listRepoProductLinks(db, access.workspaceId),
+  );
 
   // Prefetch the connect picker's repo list so it renders with the initial
   // HTML instead of popping in after a client fetch. Costs one GitHub call per
@@ -170,6 +176,8 @@ export default async function IntegrationsSettingsPage({
           installUrl={configured ? `/api/v1/github/install-start?org=${encodeURIComponent(access.orgSlug)}` : null}
           notice={noticeFor(params)}
           installations={installations}
+          products={products.map((p) => ({ id: p.id, name: p.name }))}
+          links={repoLinks}
         />
       }
     />

@@ -12,10 +12,12 @@ import {
   importWorkspaceSpecs,
   listInstallationRepositories,
   scanWorkspaceSpecs,
+  setRepositoryProducts,
   type CreatedSpecRepo,
   type ImportResult,
   type InstallationConnectState,
   type InstallationRepo,
+  type RepoProductLinksPayload,
   type RepoScan,
   type StarterSpecResult,
   type SyncResult,
@@ -45,6 +47,12 @@ export interface ConnectedRepo {
 
 export type SetupNotice = { kind: "ok" | "error"; message: string } | null;
 
+/** A product option for the per-repo link editor. */
+export interface RepoProductOption {
+  id: string;
+  name: string;
+}
+
 interface RepositoriesManagerProps {
   repos: ConnectedRepo[];
   /** Whether the viewer (admin) may set up / connect / re-sync repositories. */
@@ -60,6 +68,10 @@ interface RepositoriesManagerProps {
   notice: SetupNotice;
   /** Server-prefetched connect-picker state, so it renders without a pop-in. */
   installations: InstallationConnectState;
+  /** The workspace's products (viewer-readable), for the repo link editor. */
+  products?: RepoProductOption[];
+  /** Each repo's product links, keyed by repo id (absent repo = link-less). */
+  links?: Record<string, RepoProductLinksPayload>;
 }
 
 /** The workspace's organization installation to target for repo creation. */
@@ -85,6 +97,8 @@ export function RepositoriesManager({
   installUrl,
   notice,
   installations,
+  products = [],
+  links = {},
 }: RepositoriesManagerProps) {
   // Bumped after a repo is connected so the import panel re-scans for new specs.
   const [scanNonce, setScanNonce] = useState(0);
@@ -112,7 +126,13 @@ export function RepositoriesManager({
         </p>
       ) : null}
 
-      <RepoList repos={repos} canResync={canConnect && configured} canManage={canConnect} />
+      <RepoList
+        repos={repos}
+        canResync={canConnect && configured}
+        canManage={canConnect}
+        products={products}
+        links={links}
+      />
 
       {canConnect && configured && repos.length > 0 ? (
         <SpecImportPanel
@@ -697,10 +717,14 @@ function RepoList({
   repos,
   canResync,
   canManage,
+  products,
+  links,
 }: {
   repos: ConnectedRepo[];
   canResync: boolean;
   canManage: boolean;
+  products: RepoProductOption[];
+  links: Record<string, RepoProductLinksPayload>;
 }) {
   if (repos.length === 0) {
     return (
@@ -714,7 +738,14 @@ function RepoList({
   return (
     <div className="space-y-3">
       {repos.map((repo) => (
-        <RepoRow key={repo.id} repo={repo} canResync={canResync} canManage={canManage} />
+        <RepoRow
+          key={repo.id}
+          repo={repo}
+          canResync={canResync}
+          canManage={canManage}
+          products={products}
+          links={links[repo.id] ?? null}
+        />
       ))}
     </div>
   );
@@ -724,15 +755,21 @@ function RepoRow({
   repo,
   canResync,
   canManage,
+  products,
+  links: initialLinks,
 }: {
   repo: ConnectedRepo;
   canResync: boolean;
   canManage: boolean;
+  products: RepoProductOption[];
+  links: RepoProductLinksPayload | null;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [status, setStatus] = useState<Status>(null);
   const [confirming, setConfirming] = useState(false);
+  const [editingProducts, setEditingProducts] = useState(false);
+  const [links, setLinks] = useState(initialLinks);
 
   function resync() {
     startTransition(async () => {
@@ -768,65 +805,224 @@ function RepoRow({
     });
   }
 
+  const nameById = new Map(products.map((p) => [p.id, p.name]));
+  const linkedNames = (links?.productIds ?? [])
+    .map((id) => ({
+      id,
+      name: nameById.get(id) ?? "Unknown product",
+      isDefault: id === links?.defaultProductId,
+    }))
+    .sort((a, b) => Number(b.isDefault) - Number(a.isDefault) || a.name.localeCompare(b.name));
+
   return (
     <Card>
-      <CardContent className="flex items-center justify-between gap-4 py-4">
-        <div className="min-w-0">
-          <p className="truncate text-sm font-medium">
-            {repo.owner}/{repo.name}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            Branch <code>{repo.defaultBranch}</code>
-            {status ? (
-              <>
-                {" · "}
-                <span className={status.kind === "error" ? "text-destructive" : ""}>
-                  {status.message}
-                </span>
-              </>
-            ) : null}
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {confirming ? (
-            <>
-              <span className="text-xs text-muted-foreground">
-                Stop syncing? Imported items stay on the board.
-              </span>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setConfirming(false)}
-                disabled={pending}
-              >
-                Cancel
-              </Button>
-              <Button size="sm" variant="destructive" onClick={disconnect} disabled={pending}>
-                {pending ? "…" : "Disconnect"}
-              </Button>
-            </>
-          ) : (
-            <>
-              {canResync ? (
-                <Button size="sm" variant="outline" onClick={resync} disabled={pending}>
-                  {pending ? "…" : "Re-sync"}
-                </Button>
+      <CardContent className="space-y-3 py-4">
+        <div className="flex items-center justify-between gap-4">
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium">
+              {repo.owner}/{repo.name}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Branch <code>{repo.defaultBranch}</code>
+              {status ? (
+                <>
+                  {" · "}
+                  <span className={status.kind === "error" ? "text-destructive" : ""}>
+                    {status.message}
+                  </span>
+                </>
               ) : null}
-              {canManage ? (
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {confirming ? (
+              <>
+                <span className="text-xs text-muted-foreground">
+                  Stop syncing? Imported items stay on the board.
+                </span>
                 <Button
                   size="sm"
-                  variant="ghost"
-                  onClick={() => setConfirming(true)}
+                  variant="outline"
+                  onClick={() => setConfirming(false)}
                   disabled={pending}
                 >
-                  Disconnect
+                  Cancel
                 </Button>
-              ) : null}
-            </>
-          )}
+                <Button size="sm" variant="destructive" onClick={disconnect} disabled={pending}>
+                  {pending ? "…" : "Disconnect"}
+                </Button>
+              </>
+            ) : (
+              <>
+                {canManage && products.length > 0 ? (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setEditingProducts((v) => !v)}
+                    disabled={pending}
+                  >
+                    Products
+                  </Button>
+                ) : null}
+                {canResync ? (
+                  <Button size="sm" variant="outline" onClick={resync} disabled={pending}>
+                    {pending ? "…" : "Re-sync"}
+                  </Button>
+                ) : null}
+                {canManage ? (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setConfirming(true)}
+                    disabled={pending}
+                  >
+                    Disconnect
+                  </Button>
+                ) : null}
+              </>
+            )}
+          </div>
         </div>
+        {linkedNames.length > 0 ? (
+          <p className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+            {linkedNames.map((p) => (
+              <span key={p.id} className="rounded-full border px-2 py-0.5">
+                {p.name}
+                {p.isDefault ? " ★" : ""}
+              </span>
+            ))}
+            <span>★ = new specs land here</span>
+          </p>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            Unassigned: new specs land in the workspace&apos;s default product.
+          </p>
+        )}
+        {editingProducts && canManage ? (
+          <RepoProductsEditor
+            repoId={repo.id}
+            products={products}
+            links={links}
+            onSaved={(next) => {
+              setLinks(next);
+              setEditingProducts(false);
+            }}
+            onCancel={() => setEditingProducts(false)}
+          />
+        ) : null}
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * Inline editor for a repo's product links: check the products this repo
+ * feeds, pick the default (where sync puts newly discovered specs). Clearing
+ * every product is allowed; the repo then falls back to the workspace's
+ * default product.
+ */
+function RepoProductsEditor({
+  repoId,
+  products,
+  links,
+  onSaved,
+  onCancel,
+}: {
+  repoId: string;
+  products: RepoProductOption[];
+  links: RepoProductLinksPayload | null;
+  onSaved: (links: RepoProductLinksPayload) => void;
+  onCancel: () => void;
+}) {
+  const router = useRouter();
+  const [selected, setSelected] = useState<Set<string>>(
+    new Set(links?.productIds ?? []),
+  );
+  const [defaultId, setDefaultId] = useState<string | null>(
+    links?.defaultProductId ?? null,
+  );
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  function toggle(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+        // The default must stay one of the linked products.
+        if (defaultId === id) {
+          setDefaultId([...next][0] ?? null);
+        }
+      } else {
+        next.add(id);
+        if (!defaultId) setDefaultId(id);
+      }
+      return next;
+    });
+  }
+
+  function onSave() {
+    startTransition(async () => {
+      setError(null);
+      try {
+        const next = await setRepositoryProducts(repoId, {
+          productIds: [...selected],
+          defaultProductId: selected.size > 0 ? defaultId : null,
+        });
+        onSaved(next);
+        router.refresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Save failed.");
+      }
+    });
+  }
+
+  return (
+    <div className="space-y-2 rounded-md border p-3">
+      <p className="text-xs font-medium text-muted-foreground">
+        Products this repo feeds; the default is where its new specs land.
+      </p>
+      <ul className="space-y-1">
+        {products.map((p) => {
+          const checked = selected.has(p.id);
+          return (
+            <li key={p.id} className="flex items-center gap-3 text-sm">
+              <label className="flex flex-1 items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => toggle(p.id)}
+                />
+                {p.name}
+              </label>
+              <label
+                className={`flex items-center gap-1 text-xs ${
+                  checked ? "text-muted-foreground" : "text-muted-foreground/40"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name={`default-${repoId}`}
+                  checked={defaultId === p.id}
+                  disabled={!checked}
+                  onChange={() => setDefaultId(p.id)}
+                />
+                default
+              </label>
+            </li>
+          );
+        })}
+      </ul>
+      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+      <div className="flex gap-2">
+        <Button size="sm" onClick={onSave} disabled={pending}>
+          {pending ? "Saving…" : "Save"}
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onCancel} disabled={pending}>
+          Cancel
+        </Button>
+      </div>
+    </div>
   );
 }
 
