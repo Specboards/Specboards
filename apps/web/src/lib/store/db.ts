@@ -41,7 +41,9 @@ import {
   ideaVotes,
   ideas,
   inArray,
+  isNull,
   members,
+  ne,
   or,
   outboxEvents,
   productGroups,
@@ -1081,10 +1083,12 @@ export class DbStore implements FeatureStore {
       if (typeof rest.assigneeId === "string" && rest.assigneeId) {
         await this.assertWorkspaceMember(tx, ws, rest.assigneeId);
       }
-      // A release assignment must point at a release in this workspace.
+      // A release assignment must point at a release in this workspace that is
+      // either a portfolio release (no product) or one scoped to this item's
+      // own product. Items can't be scheduled into another product's release.
       if (typeof rest.releaseId === "string" && rest.releaseId) {
         const release = await tx
-          .select({ id: releases.id })
+          .select({ id: releases.id, productId: releases.productId })
           .from(releases)
           .where(
             and(eq(releases.id, rest.releaseId), eq(releases.workspaceId, ws)),
@@ -1092,6 +1096,14 @@ export class DbStore implements FeatureStore {
           .limit(1);
         if (!release[0]) {
           throw new RelationError(`Unknown release: ${rest.releaseId}`);
+        }
+        if (
+          release[0].productId !== null &&
+          release[0].productId !== current[0].productId
+        ) {
+          throw new RelationError(
+            "Release belongs to a different product.",
+          );
         }
       }
       const set: Record<string, unknown> = { ...rest, updatedAt: new Date() };
@@ -1917,20 +1929,52 @@ export class DbStore implements FeatureStore {
       const ws = scope!.workspaceId;
       const name = input.name.trim();
       if (!name) throw new ReleaseError("Release name is required.");
+      const productId = input.productId ?? null;
+      const access = await this.accessIn(tx, scope!);
+      // Product releases need write access to that product; portfolio
+      // (null-product) releases are owner-only (canWriteProductId handles both).
+      if (!canWriteProductId(access, productId)) {
+        throw new ReleaseError(
+          productId === null
+            ? "Only the workspace owner can create portfolio releases."
+            : "Your role does not permit creating releases for this product.",
+        );
+      }
+      if (productId !== null) {
+        await this.requireProductId(tx, ws, productId);
+      }
+      // Names are unique within a product (and within the portfolio scope).
+      // Pre-check rather than ON CONFLICT: the partial unique indexes can't be
+      // named as an arbiter without their predicate, which drizzle omits.
+      const clash = await tx
+        .select({ id: releases.id })
+        .from(releases)
+        .where(
+          and(
+            eq(releases.workspaceId, ws),
+            eq(releases.name, name),
+            productId === null
+              ? isNull(releases.productId)
+              : eq(releases.productId, productId),
+          ),
+        )
+        .limit(1);
+      if (clash[0]) {
+        throw new ReleaseError(`A release named "${name}" already exists.`);
+      }
       const [row] = await tx
         .insert(releases)
         .values({
           workspaceId: ws,
+          productId,
           name,
           status: normalizeReleaseStatus(input.status),
           startDate: input.startDate ?? null,
           targetDate: input.targetDate ?? null,
           notes: input.notes ?? null,
         })
-        .onConflictDoNothing({ target: [releases.workspaceId, releases.name] })
         .returning();
-      if (!row)
-        throw new ReleaseError(`A release named "${name}" already exists.`);
+      if (!row) throw new ReleaseError(`A release named "${name}" already exists.`);
       return toReleaseRecord(row, 0);
     });
   }
@@ -1943,6 +1987,24 @@ export class DbStore implements FeatureStore {
   ): Promise<ReleaseRecord> {
     return this.scoped(scope, async (tx) => {
       const ws = scope!.workspaceId;
+      const current = await tx
+        .select({
+          productId: releases.productId,
+          name: releases.name,
+        })
+        .from(releases)
+        .where(and(eq(releases.id, id), eq(releases.workspaceId, ws)))
+        .limit(1);
+      if (!current[0]) throw new ReleaseError(`Unknown release: ${id}`);
+      const access = await this.accessIn(tx, scope!);
+      if (!canWriteProductId(access, current[0].productId)) {
+        throw new ReleaseError(
+          current[0].productId === null
+            ? "Only the workspace owner can edit portfolio releases."
+            : "Your role does not permit editing releases for this product.",
+        );
+      }
+
       const set: Record<string, unknown> = { updatedAt: new Date() };
       if (patch.name !== undefined) {
         const name = patch.name.trim();
@@ -1955,12 +2017,72 @@ export class DbStore implements FeatureStore {
       if (patch.startDate !== undefined) set.startDate = patch.startDate;
       if (patch.targetDate !== undefined) set.targetDate = patch.targetDate;
       if (patch.notes !== undefined) set.notes = patch.notes;
+
+      // Reassigning to a different product (or to portfolio) also needs write
+      // access to the destination, and unschedules items that no longer match.
+      let targetProductId = current[0].productId;
+      if (
+        patch.productId !== undefined &&
+        patch.productId !== current[0].productId
+      ) {
+        targetProductId = patch.productId;
+        if (!canWriteProductId(access, targetProductId)) {
+          throw new ReleaseError(
+            targetProductId === null
+              ? "Only the workspace owner can move a release to the portfolio."
+              : "Your role does not permit moving a release to that product.",
+          );
+        }
+        if (targetProductId !== null) {
+          await this.requireProductId(tx, ws, targetProductId);
+        }
+        set.productId = targetProductId;
+      }
+
+      // Guard the scoped unique name (a rename or product move can collide).
+      if (set.name !== undefined || set.productId !== undefined) {
+        const effectiveName = (set.name as string | undefined) ?? current[0].name;
+        const clash = await tx
+          .select({ id: releases.id })
+          .from(releases)
+          .where(
+            and(
+              eq(releases.workspaceId, ws),
+              eq(releases.name, effectiveName),
+              targetProductId === null
+                ? isNull(releases.productId)
+                : eq(releases.productId, targetProductId),
+              ne(releases.id, id),
+            ),
+          )
+          .limit(1);
+        if (clash[0]) {
+          throw new ReleaseError(
+            `A release named "${effectiveName}" already exists.`,
+          );
+        }
+      }
+
       const [row] = await tx
         .update(releases)
         .set(set)
         .where(and(eq(releases.id, id), eq(releases.workspaceId, ws)))
         .returning();
       if (!row) throw new ReleaseError(`Unknown release: ${id}`);
+      // Moving to a specific product drops items that belong to other products,
+      // preserving the invariant that a scheduled item shares the release's product.
+      if (set.productId !== undefined && targetProductId !== null) {
+        await tx
+          .update(features)
+          .set({ releaseId: null, updatedAt: new Date() })
+          .where(
+            and(
+              eq(features.workspaceId, ws),
+              eq(features.releaseId, id),
+              ne(features.productId, targetProductId),
+            ),
+          );
+      }
       const items = await tx
         .select({ n: count() })
         .from(features)
@@ -1972,17 +2094,23 @@ export class DbStore implements FeatureStore {
 
   async deleteRelease(id: string, scope?: WorkspaceScope): Promise<void> {
     await this.scoped(scope, async (tx) => {
+      const ws = scope!.workspaceId;
+      const current = await tx
+        .select({ productId: releases.productId })
+        .from(releases)
+        .where(and(eq(releases.id, id), eq(releases.workspaceId, ws)))
+        .limit(1);
+      if (!current[0]) throw new ReleaseError(`Unknown release: ${id}`);
+      const access = await this.accessIn(tx, scope!);
+      if (!canWriteProductId(access, current[0].productId)) {
+        throw new ReleaseError(
+          current[0].productId === null
+            ? "Only the workspace owner can delete portfolio releases."
+            : "Your role does not permit deleting releases for this product.",
+        );
+      }
       // features.release_id is ON DELETE SET NULL, so items are unscheduled.
-      const deleted = await tx
-        .delete(releases)
-        .where(
-          and(
-            eq(releases.id, id),
-            eq(releases.workspaceId, scope!.workspaceId),
-          ),
-        )
-        .returning({ id: releases.id });
-      if (!deleted[0]) throw new ReleaseError(`Unknown release: ${id}`);
+      await tx.delete(releases).where(and(eq(releases.id, id), eq(releases.workspaceId, ws)));
     });
   }
 
@@ -3536,6 +3664,7 @@ function toReleaseRecord(
   row: {
     id: string;
     name: string;
+    productId: string | null;
     status: string;
     startDate: string | null;
     targetDate: string | null;
@@ -3546,6 +3675,7 @@ function toReleaseRecord(
   return {
     id: row.id,
     name: row.name,
+    productId: row.productId,
     status: row.status as ReleaseStatus,
     startDate: row.startDate,
     targetDate: row.targetDate,

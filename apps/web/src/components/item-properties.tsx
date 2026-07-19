@@ -27,10 +27,11 @@ import { Select } from "@/components/ui/select";
 import { isFieldAvailable } from "@/lib/card-fields";
 import { statusLabel, statusOptions } from "@/lib/feature-helpers";
 import { cn } from "@/lib/utils";
-import type {
-  CustomFieldValue,
-  FeatureDetail,
-  ReleaseRecord,
+import {
+  releasesForProduct,
+  type CustomFieldValue,
+  type FeatureDetail,
+  type ReleaseRecord,
 } from "@/lib/store/types";
 import type { WorkspaceMember } from "@/lib/workspace";
 
@@ -75,6 +76,11 @@ export function ItemProperties({
   availableFields?: string[] | null;
 }) {
   const router = useRouter();
+  // An item can only be scheduled into a release from its own product, or a
+  // workspace-wide portfolio release. Scope the picker to those.
+  const productReleases = feature.productId
+    ? releasesForProduct(releases, feature.productId)
+    : releases.filter((r) => r.productId === null);
   const formRef = useRef<HTMLFormElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inFlightRef = useRef(false);
@@ -117,7 +123,7 @@ export function ItemProperties({
     try {
       await patchFeature(feature.specId, {
         status: String(data.get("status") ?? feature.status),
-        ...(releases.length > 0
+        ...(productReleases.length > 0
           ? { releaseId: String(data.get("releaseId") ?? "") || null }
           : {}),
         ...(show("tags")
@@ -226,7 +232,7 @@ export function ItemProperties({
         </PropertyRow>
       ) : null}
 
-      {releases.length > 0 ? (
+      {productReleases.length > 0 ? (
         <PropertyRow icon={Rocket} label="Release">
           <Select
             name="releaseId"
@@ -234,7 +240,7 @@ export function ItemProperties({
             className={INLINE_SELECT}
           >
             <option value="">None</option>
-            {releases.map((r) => (
+            {productReleases.map((r) => (
               <option key={r.id} value={r.id}>
                 {r.name}
               </option>

@@ -30,8 +30,13 @@ const INSTRUCTIONS =
   "write a summary into the parent card with update_item(details). Remove a " +
   "DB-native card you no longer need with delete_item (spec-backed items are " +
   "deleted in git, not here). Organize work into versions with list_releases " +
-  "and create_release (owner-only), then schedule an item into one via " +
-  "update_item(releaseId). Products can be collected into product groups " +
+  "and create_release; revise a release's dates, status, name, notes, or " +
+  "product with update_release. A release belongs to a product (managed by that " +
+  "product's admins/contributors) or is a workspace-wide portfolio release (set " +
+  "productId to null; owner-only). Schedule an item into a release via " +
+  "update_item(releaseId); the item must belong to the release's product, or " +
+  "the release must be a portfolio release. Products can be collected into " +
+  "product groups " +
   "(nested management roll-ups): list_product_groups shows them, " +
   "list_items(group) scopes to a group's subtree, and group_summary returns " +
   "per-product status and release roll-ups for a group.";

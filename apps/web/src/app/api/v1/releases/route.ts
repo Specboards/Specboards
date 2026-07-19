@@ -1,4 +1,4 @@
-import { authorizeOrgAdmin, resolveReadScope } from "@/lib/auth-session";
+import { authorizeWrite, resolveReadScope } from "@/lib/auth-session";
 import {
   InvalidPatchError,
   createRelease,
@@ -20,11 +20,13 @@ export async function GET(req: Request) {
 }
 
 /**
- * POST /api/v1/releases — create a release. Body: { name, status?,
- * targetDate? }. Admin-only; local file mode is ungated.
+ * POST /api/v1/releases — create a release. Body: { name, productId?, status?,
+ * startDate?, targetDate?, notes? }. Per-product authorization is enforced by
+ * the store: admin/contributor for a product release, owner for a portfolio
+ * (null-product) release. Local file mode is ungated.
  */
 export async function POST(req: Request) {
-  const authz = await authorizeOrgAdmin(req);
+  const authz = await authorizeWrite(req);
   if (!authz.ok) return authz.response;
 
   let body: unknown;

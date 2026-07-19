@@ -11,7 +11,9 @@ import {
   parseCreateFeatureInput,
   parseFeaturePatch,
   parseReleaseInput,
+  parseReleasePatch,
   patchFeature,
+  updateRelease,
 } from "@/lib/features-service";
 import { createSpec, updateSpecContent } from "@/lib/spec-content";
 import { getStore, type WorkspaceScope } from "@/lib/store";
@@ -630,9 +632,12 @@ export const TOOLS: McpTool[] = [
     name: "list_releases",
     description:
       "List the workspace's releases (ship vehicles / versions) with their " +
-      "id, name, status (planned/in_progress/shipped), start/target dates, " +
-      "notes, and the count of items scheduled into each. Pass a release `id` " +
-      "to update_item's `releaseId` to schedule an item into it. Dated " +
+      "id, name, `productId` (the product the release belongs to, or null for " +
+      "a workspace-wide portfolio release), status " +
+      "(planned/in_progress/shipped), start/target dates, notes, and the count " +
+      "of items scheduled into each. Pass a release `id` to update_item's " +
+      "`releaseId` to schedule an item into it (the item must belong to the " +
+      "release's product, or the release must be a portfolio release). Dated " +
       "releases come first (ascending target date), undated last.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     write: false,
@@ -641,6 +646,7 @@ export const TOOLS: McpTool[] = [
       return releases.map((r) => ({
         id: r.id,
         name: r.name,
+        productId: r.productId,
         status: r.status,
         startDate: r.startDate,
         targetDate: r.targetDate,
@@ -652,18 +658,27 @@ export const TOOLS: McpTool[] = [
   {
     name: "create_release",
     description:
-      'Create a release (a ship vehicle / version like "v0.18.0") in the ' +
-      "workspace. Owner-only. Provide a unique `name`; optionally `status` " +
-      "(planned/in_progress/shipped, default planned), `startDate` and " +
-      "`targetDate` (YYYY-MM-DD), and `notes` (Markdown). Returns the new " +
-      "release id, which you pass to update_item's `releaseId` to schedule " +
+      'Create a release (a ship vehicle / version like "v0.18.0"). Provide a ' +
+      "`name` (unique within its product); optionally `productId` to scope it " +
+      "to a product (omit or pass null for a workspace-wide portfolio release " +
+      "spanning every product), `status` (planned/in_progress/shipped, default " +
+      "planned), `startDate` and `targetDate` (YYYY-MM-DD), and `notes` " +
+      "(Markdown). A product release requires admin/contributor access to that " +
+      "product; a portfolio release requires the workspace owner. Returns the " +
+      "new release id, which you pass to update_item's `releaseId` to schedule " +
       "items into it.",
     inputSchema: {
       type: "object",
       properties: {
         name: {
           type: "string",
-          description: 'Unique release name, e.g. "v0.18.0".',
+          description: "Release name, unique within its product.",
+        },
+        productId: {
+          type: ["string", "null"],
+          description:
+            "Product to scope the release to (from list_products); null or " +
+            "omitted for a workspace-wide portfolio release.",
         },
         status: {
           type: "string",
@@ -687,16 +702,87 @@ export const TOOLS: McpTool[] = [
     },
     write: true,
     run: async (args, ctx) => {
-      // Release creation is a workspace-level admin action (mirrors the
-      // owner-only POST /api/v1/releases route), not a per-product write, so
-      // gate it here rather than leaving it to the store's product checks.
-      if (!ctx.isLocal && ctx.role !== "owner") {
-        throw new Error("Only the workspace owner can create releases.");
-      }
+      // Per-product authorization is enforced in the store via
+      // canWriteProductId: admin/contributor for a product release, owner for a
+      // portfolio (null-product) release. No special owner-only gate here.
       const release = await createRelease(parseReleaseInput(args), ctx.scope);
       return {
         id: release.id,
         name: release.name,
+        productId: release.productId,
+        status: release.status,
+        startDate: release.startDate,
+        targetDate: release.targetDate,
+        notes: release.notes,
+        itemCount: release.itemCount,
+      };
+    },
+  },
+  {
+    name: "update_release",
+    description:
+      "Update a release's metadata (change its ship dates, rename it, mark " +
+      "it in_progress/shipped, edit its notes, or move it to another product). " +
+      "Pass the release `id` (from list_releases) plus any of `name`, " +
+      "`productId` (move to a product, or null for a workspace-wide portfolio " +
+      "release), `status` (planned/in_progress/shipped), " +
+      "`startDate`/`targetDate` (YYYY-MM-DD, or null to clear), and `notes` " +
+      "(Markdown, or null to clear). Requires admin/contributor access to the " +
+      "release's product (owner for a portfolio release). At least one field " +
+      "must change. Returns the updated release.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: {
+          type: "string",
+          description: "Release id to update (from list_releases).",
+        },
+        name: {
+          type: "string",
+          description: "Release name, unique within its product.",
+        },
+        productId: {
+          type: ["string", "null"],
+          description:
+            "Move the release to this product; null for a workspace-wide " +
+            "portfolio release. Items no longer matching are unscheduled.",
+        },
+        status: {
+          type: "string",
+          description: "planned | in_progress | shipped.",
+        },
+        startDate: {
+          type: ["string", "null"],
+          description: "Planned start date, YYYY-MM-DD, or null to clear.",
+        },
+        targetDate: {
+          type: ["string", "null"],
+          description: "Target ship date, YYYY-MM-DD, or null to clear.",
+        },
+        notes: {
+          type: ["string", "null"],
+          description: "Free-form release notes (Markdown), or null to clear.",
+        },
+      },
+      required: ["id"],
+      additionalProperties: false,
+    },
+    write: true,
+    run: async (args, ctx) => {
+      // Per-product authorization is enforced in the store via
+      // canWriteProductId against the release's product (owner for portfolio).
+      if (typeof args.id !== "string" || args.id.trim() === "") {
+        throw new Error("id must be a non-empty string.");
+      }
+      const release = await updateRelease(
+        args.id,
+        parseReleasePatch(args),
+        ctx.scope,
+      );
+      return {
+        id: release.id,
+        name: release.name,
+        productId: release.productId,
         status: release.status,
         startDate: release.startDate,
         targetDate: release.targetDate,

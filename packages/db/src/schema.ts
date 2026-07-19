@@ -1,4 +1,4 @@
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
@@ -11,6 +11,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
@@ -763,6 +764,13 @@ export const releases = pgTable(
     workspaceId: uuid("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
+    /** Product this release belongs to, or null for a workspace-wide
+     * ("portfolio") release that spans every product. Product releases are
+     * managed by that product's admins/contributors; portfolio releases are
+     * owner-only. */
+    productId: uuid("product_id").references(() => products.id, {
+      onDelete: "cascade",
+    }),
     name: text("name").notNull(),
     /** planned / in_progress / shipped. */
     status: text("status").notNull().default("planned"),
@@ -781,8 +789,16 @@ export const releases = pgTable(
       .defaultNow(),
   },
   (t) => [
-    unique("releases_ws_name_uq").on(t.workspaceId, t.name),
+    // Names are unique within a product, and independently within the
+    // portfolio (null-product) scope, so two products can both have "v1.0".
+    uniqueIndex("releases_product_name_uq")
+      .on(t.productId, t.name)
+      .where(sql`${t.productId} is not null`),
+    uniqueIndex("releases_ws_portfolio_name_uq")
+      .on(t.workspaceId, t.name)
+      .where(sql`${t.productId} is null`),
     index("releases_ws_idx").on(t.workspaceId),
+    index("releases_product_idx").on(t.productId),
   ],
 );
 

@@ -443,6 +443,9 @@ export const RELEASE_STATUSES: readonly ReleaseStatus[] = [
 export interface ReleaseRecord {
   id: string;
   name: string;
+  /** Product this release belongs to, or null for a workspace-wide
+   * ("portfolio") release spanning every product. */
+  productId: string | null;
   status: ReleaseStatus;
   /** Planned start date as YYYY-MM-DD, or null when unset. */
   startDate: string | null;
@@ -456,6 +459,8 @@ export interface ReleaseRecord {
 
 export interface ReleaseInput {
   name: string;
+  /** Product to scope the release to, or null/omitted for a portfolio release. */
+  productId?: string | null;
   status?: ReleaseStatus;
   startDate?: string | null;
   targetDate?: string | null;
@@ -464,6 +469,7 @@ export interface ReleaseInput {
 
 export type ReleasePatch = Partial<{
   name: string;
+  productId: string | null;
   status: ReleaseStatus;
   startDate: string | null;
   targetDate: string | null;
@@ -472,6 +478,17 @@ export type ReleasePatch = Partial<{
 
 /** Raised when a release can't be created/updated/deleted. */
 export class ReleaseError extends Error {}
+
+/** The releases a single product's roadmap should show: that product's own
+ * releases plus workspace-wide (portfolio) releases, which apply everywhere. */
+export function releasesForProduct(
+  releases: ReleaseRecord[],
+  productId: string,
+): ReleaseRecord[] {
+  return releases.filter(
+    (r) => r.productId === null || r.productId === productId,
+  );
+}
 
 /** Dated releases first (ascending target date), undated last, then by name. */
 export function compareReleases(
@@ -813,7 +830,10 @@ export interface FeatureStore {
     templates: Record<string, string | null>,
     scope?: WorkspaceScope,
   ): Promise<WorkspaceLevel[]>;
-  /** The workspace's releases, dated first (ascending), undated last. */
+  /** The workspace's releases, dated first (ascending), undated last. Each
+   * record carries its `productId` (null for a workspace-wide portfolio
+   * release); callers that want a single product's roadmap filter to that
+   * product plus portfolio releases. */
   listReleases(scope?: WorkspaceScope): Promise<ReleaseRecord[]>;
   /** Create a release; returns the new record. */
   createRelease(

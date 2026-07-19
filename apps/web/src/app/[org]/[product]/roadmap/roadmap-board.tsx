@@ -77,7 +77,8 @@ export function RoadmapBoard({
   memberNames,
   releaseNames,
   allowDrag,
-  isAdmin,
+  editableReleaseIds,
+  productNamesById,
 }: {
   columns: RoadmapColumn[];
   features: FeatureRecord[];
@@ -90,7 +91,10 @@ export function RoadmapBoard({
   releaseNames: Record<string, string>;
   /** Whether items can be re-scheduled by dragging (editors, active view). */
   allowDrag: boolean;
-  isAdmin: boolean;
+  /** Ids of releases the viewer may edit (per-product / owner-for-portfolio). */
+  editableReleaseIds: string[];
+  /** Product name by id, for the detail panel's product label. */
+  productNamesById: Record<string, string>;
 }) {
   const router = useRouter();
   const maps: CardFieldMaps = { customFieldLabels, memberNames, releaseNames };
@@ -202,7 +206,12 @@ export function RoadmapBoard({
       </DndContext>
       <ReleaseDetailSheet
         release={detailRelease}
-        isAdmin={isAdmin}
+        canEdit={detailRelease ? editableReleaseIds.includes(detailRelease.id) : false}
+        productName={
+          detailRelease?.productId
+            ? (productNamesById[detailRelease.productId] ?? null)
+            : null
+        }
         onClose={() => setDetailReleaseId(null)}
       />
       <FeatureEditSheet

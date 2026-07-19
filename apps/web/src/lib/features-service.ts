@@ -698,7 +698,9 @@ export async function updateRelease(
   if (before && before.status !== "shipped" && patch.status === "shipped") {
     emit = {
       type: "release.shipped",
-      productId: null, // releases are workspace-level
+      // A product release scopes its event to that product; a portfolio
+      // release (null productId) stays workspace-level.
+      productId: patch.productId !== undefined ? patch.productId : before.productId,
       data: {
         releaseId: before.id,
         name: patch.name?.trim() || before.name,
@@ -873,6 +875,7 @@ export function parseReleaseInput(body: unknown): ReleaseInput {
     throw new InvalidPatchError("name is required.");
   }
   const input: ReleaseInput = { name: raw.name.trim() };
+  if ("productId" in raw) input.productId = parseProductId(raw.productId);
   if ("status" in raw) input.status = parseReleaseStatus(raw.status);
   if ("startDate" in raw) input.startDate = parseDate(raw.startDate, "startDate");
   if ("targetDate" in raw) input.targetDate = parseDate(raw.targetDate, "targetDate");
@@ -893,16 +896,27 @@ export function parseReleasePatch(body: unknown): ReleasePatch {
     }
     patch.name = raw.name.trim();
   }
+  if ("productId" in raw) patch.productId = parseProductId(raw.productId);
   if ("status" in raw) patch.status = parseReleaseStatus(raw.status);
   if ("startDate" in raw) patch.startDate = parseDate(raw.startDate, "startDate");
   if ("targetDate" in raw) patch.targetDate = parseDate(raw.targetDate, "targetDate");
   if ("notes" in raw) patch.notes = parseReleaseNotes(raw.notes);
   if (Object.keys(patch).length === 0) {
     throw new InvalidPatchError(
-      "Patch must set at least one of: name, status, startDate, targetDate, notes.",
+      "Patch must set at least one of: name, productId, status, " +
+        "startDate, targetDate, notes.",
     );
   }
   return patch;
+}
+
+/** Validate a productId: a non-empty string (product uuid) or null (portfolio). */
+function parseProductId(value: unknown): string | null {
+  if (value === null || value === undefined || value === "") return null;
+  if (typeof value !== "string") {
+    throw new InvalidPatchError("productId must be a string or null.");
+  }
+  return value;
 }
 
 /** Validate release notes: a string (trimmed; empty becomes null) or null. */

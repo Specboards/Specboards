@@ -142,7 +142,8 @@ the workspace you pick.
 
 Tools: `whoami`, `list_products`, `list_items`, `read_item`, `get_relations`,
 `create_item`, `update_item`, `delete_item`, `update_spec_content` and
-`create_spec` (both commit to git), and `list_releases` / `create_release`.
+`create_spec` (both commit to git), and `list_releases` / `create_release` /
+`update_release`.
 
 **Local stdio server (self-host / offline).**
 

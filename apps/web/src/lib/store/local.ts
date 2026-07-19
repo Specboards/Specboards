@@ -116,6 +116,8 @@ interface LocalItem {
 interface LocalRelease {
   id: string;
   name: string;
+  /** Product this release belongs to, or null for a portfolio release. */
+  productId?: string | null;
   status: "planned" | "in_progress" | "shipped";
   startDate: string | null;
   targetDate: string | null;
@@ -1310,6 +1312,7 @@ export class LocalFileStore implements FeatureStore {
     return rows
       .map((r) => ({
         ...r,
+        productId: r.productId ?? null,
         notes: r.notes ?? null,
         itemCount: counts.get(r.id) ?? 0,
       }))
@@ -1322,8 +1325,10 @@ export class LocalFileStore implements FeatureStore {
   ): Promise<ReleaseRecord> {
     const name = input.name.trim();
     if (!name) throw new ReleaseError("Release name is required.");
+    const productId = input.productId ?? null;
     const rows = await this.readReleases();
-    if (rows.some((r) => r.name === name)) {
+    // Names are unique within a product (and within the portfolio scope).
+    if (rows.some((r) => r.name === name && (r.productId ?? null) === productId)) {
       throw new ReleaseError(`A release named "${name}" already exists.`);
     }
     const status = input.status ?? "planned";
@@ -1333,13 +1338,19 @@ export class LocalFileStore implements FeatureStore {
     const release: LocalRelease = {
       id: randomUUID(),
       name,
+      productId,
       status,
       startDate: input.startDate ?? null,
       targetDate: input.targetDate ?? null,
       notes: input.notes ?? null,
     };
     await this.writeReleases([...rows, release]);
-    return { ...release, notes: release.notes ?? null, itemCount: 0 };
+    return {
+      ...release,
+      productId,
+      notes: release.notes ?? null,
+      itemCount: 0,
+    };
   }
 
   async updateRelease(
@@ -1365,10 +1376,27 @@ export class LocalFileStore implements FeatureStore {
     if (patch.startDate !== undefined) release.startDate = patch.startDate;
     if (patch.targetDate !== undefined) release.targetDate = patch.targetDate;
     if (patch.notes !== undefined) release.notes = patch.notes;
+    if (patch.productId !== undefined) {
+      const targetProductId = patch.productId;
+      if (
+        rows.some(
+          (r) =>
+            r.id !== id &&
+            r.name === release.name &&
+            (r.productId ?? null) === targetProductId,
+        )
+      ) {
+        throw new ReleaseError(
+          `A release named "${release.name}" already exists.`,
+        );
+      }
+      release.productId = targetProductId;
+    }
     await this.writeReleases(rows);
     const all = await this.loadAll();
     return {
       ...release,
+      productId: release.productId ?? null,
       notes: release.notes ?? null,
       itemCount: all.filter((f) => f.releaseId === id).length,
     };

@@ -16,13 +16,14 @@ import { Textarea } from "@/components/ui/textarea";
 import { AuthRequiredError, createRelease } from "@/lib/api-client";
 
 /**
- * "New release" button + drawer on the Roadmap. Releases are workspace-wide
- * ship vehicles; items are scheduled into one by dragging their card into the
- * release column (or from an item's detail page). Editing, shipping, and
- * deleting a release all live in its detail panel (open it from the column
- * heading), not here.
+ * "New release" button + drawer on the Roadmap. A release belongs to a product
+ * (the roadmap's product, passed as `productId`) or, on the aggregate roadmap,
+ * is a workspace-wide portfolio release (`productId` null). Items are scheduled
+ * into one by dragging their card into the release column (or from an item's
+ * detail page). Editing, shipping, and deleting a release all live in its detail
+ * panel (open it from the column heading), not here.
  */
-export function ReleaseCreate() {
+export function ReleaseCreate({ productId }: { productId: string | null }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,7 +43,7 @@ export function ReleaseCreate() {
     startTransition(async () => {
       setError(null);
       try {
-        await createRelease({ name, startDate, targetDate, notes });
+        await createRelease({ name, productId, startDate, targetDate, notes });
         toast.success("Release created");
         setOpen(false);
         router.refresh();

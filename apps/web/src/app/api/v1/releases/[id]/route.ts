@@ -1,4 +1,4 @@
-import { authorizeOrgAdmin } from "@/lib/auth-session";
+import { authorizeWrite } from "@/lib/auth-session";
 import {
   InvalidPatchError,
   deleteRelease,
@@ -12,9 +12,11 @@ export const dynamic = "force-dynamic";
 
 type Params = { params: Promise<{ id: string }> };
 
-/** PATCH /api/v1/releases/:id — update a release's name/status/target date. Admin-only. */
+/** PATCH /api/v1/releases/:id — update a release's metadata (name, product,
+ * status, dates, notes). Per-product authorization enforced by the store
+ * (admin/contributor for a product release, owner for a portfolio release). */
 export async function PATCH(req: Request, { params }: Params) {
-  const authz = await authorizeOrgAdmin(req);
+  const authz = await authorizeWrite(req);
   if (!authz.ok) return authz.response;
 
   const { id } = await params;
@@ -43,10 +45,11 @@ export async function PATCH(req: Request, { params }: Params) {
 
 /**
  * DELETE /api/v1/releases/:id — remove a release. Its items are unscheduled
- * (release cleared), not deleted. Admin-only.
+ * (release cleared), not deleted. Per-product authorization enforced by the
+ * store (admin/contributor for a product release, owner for a portfolio one).
  */
 export async function DELETE(req: Request, { params }: Params) {
-  const authz = await authorizeOrgAdmin(req);
+  const authz = await authorizeWrite(req);
   if (!authz.ok) return authz.response;
 
   const { id } = await params;

@@ -58,20 +58,24 @@ function formatReleaseDates(
  * Release detail panel, opened from a column heading on the Roadmap. Shows the
  * release's dates, status, item count, and Markdown notes.
  *
- * For admins the fields edit in place: click into name / status / dates / notes
+ * For editors the fields edit in place: click into name / status / dates / notes
  * and the change autosaves on blur, the same click-to-edit pattern as work-item
  * properties. The high-consequence transitions (ship, reopen, delete) stay as
  * explicit footer buttons with a confirm, so they can't happen by an accidental
- * click. Non-admins get a read-only rendering.
+ * click. Viewers without write access get a read-only rendering.
  */
 export function ReleaseDetailSheet({
   release,
-  isAdmin,
+  canEdit,
+  productName,
   onClose,
 }: {
   /** The release to show, or null when the panel is closed. */
   release: ReleaseRecord | null;
-  isAdmin: boolean;
+  /** Whether the viewer may edit this release (per-product / owner-for-portfolio). */
+  canEdit: boolean;
+  /** The release's product name, or null for a workspace-wide portfolio release. */
+  productName: string | null;
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -174,10 +178,13 @@ export function ReleaseDetailSheet({
             the two don't collide on the header's bottom border. */}
         <SheetHeader className="border-b px-5 py-3 pr-12">
           <SheetTitle className="truncate">{current.name}</SheetTitle>
+          <span className="text-xs text-muted-foreground">
+            {productName ?? "Portfolio release"}
+          </span>
         </SheetHeader>
 
         <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
-          {isAdmin ? (
+          {canEdit ? (
             // key on the release id so switching releases reseeds the
             // uncontrolled defaults; a background refresh can't clobber a field
             // being edited because we only read values on blur/change.
@@ -319,7 +326,7 @@ export function ReleaseDetailSheet({
           )}
         </div>
 
-        {isAdmin ? (
+        {canEdit ? (
           <div className="flex items-center gap-2 border-t px-5 py-3">
             {shipped ? (
               <Button

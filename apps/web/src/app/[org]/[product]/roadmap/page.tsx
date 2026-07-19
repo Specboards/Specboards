@@ -42,8 +42,9 @@ export default async function RoadmapPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const access = await requireWorkspaceAccess();
-  // Releases are workspace-wide, so creating them stays owner-only (`isAdmin`);
-  // editing items is per-product (`canEdit`, computed once products load).
+  // Portfolio (no-product) releases are owner-only (`isAdmin`); product releases
+  // are managed by that product's admins/contributors (per-release `canEdit`
+  // computed once products load).
   const isAdmin = !access || access.role === "owner";
   const org = access?.orgSlug ?? LOCAL_ORG_SLUG;
   const { product: productSlug } = await params;
@@ -135,12 +136,36 @@ export default async function RoadmapPage({
     detailTemplates.find((t) => t.id === activeLevel.detailTemplateId)?.body ??
     "";
 
+  // Releases are per-product: a product roadmap shows that product's releases
+  // plus workspace-wide (portfolio) releases; a group scope shows its products'
+  // releases plus portfolio; the "all" scope shows every release.
+  const scopedReleases = releases.filter((r) => {
+    if (r.productId === null) return true; // portfolio releases apply everywhere
+    if (scope.kind === "product") return r.productId === scope.product.id;
+    if (scope.kind === "group") return scope.productIds.has(r.productId);
+    return true;
+  });
+
+  // Per-release edit permission: a portfolio release needs the workspace owner;
+  // a product release needs admin/contributor on that product. The store
+  // enforces the same rule; this just decides which controls to render.
+  const editableReleaseIds = scopedReleases
+    .filter((r) =>
+      r.productId === null
+        ? isAdmin
+        : canEditProducts(access, products, r.productId),
+    )
+    .map((r) => r.id);
+  const productNamesById = Object.fromEntries(
+    products.map((p) => [p.id, p.name]),
+  );
+
   // Shipped releases (and their items) leave the active roadmap and live under a
   // separate "Shipped releases" view (?view=shipped). Split the set so each view
   // only builds its own columns.
   const showShipped = sp.view === "shipped";
-  const activeReleases = releases.filter((r) => r.status !== "shipped");
-  const shippedReleases = releases.filter((r) => r.status === "shipped");
+  const activeReleases = scopedReleases.filter((r) => r.status !== "shipped");
+  const shippedReleases = scopedReleases.filter((r) => r.status === "shipped");
   const visibleReleases = showShipped ? shippedReleases : activeReleases;
 
   // One column per release (already ordered: dated first), Unscheduled last.
@@ -177,8 +202,15 @@ export default async function RoadmapPage({
   // the toolbar hides its twin so each affordance renders exactly once.
   const itemCtaInEmptyState =
     features.length === 0 && !activeLevel.isLeaf && !showShipped;
-  const releaseCtaInEmptyState = itemCtaInEmptyState && releases.length === 0;
-  const newReleaseButton = isAdmin && !showShipped ? <ReleaseCreate /> : null;
+  const releaseCtaInEmptyState =
+    itemCtaInEmptyState && scopedReleases.length === 0;
+  // A product roadmap creates a release for that product (admins/contributors);
+  // the aggregate roadmap creates a portfolio release (owner only).
+  const canCreateRelease = activeProduct ? canEdit : isAdmin;
+  const newReleaseButton =
+    canCreateRelease && !showShipped ? (
+      <ReleaseCreate productId={activeProduct?.id ?? null} />
+    ) : null;
   const newItemButton =
     canEdit && !activeLevel.isLeaf ? (
       <WorkItemCreate
@@ -213,7 +245,8 @@ export default async function RoadmapPage({
       memberNames={memberNames}
       releaseNames={releaseNames}
       allowDrag={canEdit && !showShipped}
-      isAdmin={isAdmin}
+      editableReleaseIds={editableReleaseIds}
+      productNamesById={productNamesById}
     />
   );
 
@@ -261,7 +294,7 @@ export default async function RoadmapPage({
             ) : null}
           </div>
         </div>
-        {features.length === 0 && releases.length === 0 ? (
+        {features.length === 0 && scopedReleases.length === 0 ? (
           // Nothing at all yet: no items at this level and no releases.
           activeLevel.isLeaf ? (
             <NoSpecsEmptyState canConnect={canConnectRepos(access)} />
