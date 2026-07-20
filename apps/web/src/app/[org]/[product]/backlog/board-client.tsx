@@ -29,10 +29,12 @@ import { StatusDot } from "@/components/status-dot";
 import { Badge } from "@/components/ui/badge";
 import { AuthRequiredError, patchFeature } from "@/lib/api-client";
 import {
+  compareByRiceScore,
   rankBetween,
   sortBoardCards,
   statusLabel,
   statusOptions,
+  type SortMode,
 } from "@/lib/feature-helpers";
 import type { FeatureRecord, ReleaseRecord } from "@/lib/store/types";
 import { cn } from "@/lib/utils";
@@ -57,10 +59,13 @@ export function BoardClient({
   releases,
   productsById,
   bulkOptions,
+  sortMode = "default",
 }: {
   features: FeatureRecord[];
   columns: string[];
   workflow: StatusWorkflow;
+  /** How to order cards within each column: manual rank, or by RICE score. */
+  sortMode?: SortMode;
   customFieldLabels: Record<string, string>;
   memberNames: Record<string, string>;
   /** The workspace's releases (for the release badge). */
@@ -78,7 +83,7 @@ export function BoardClient({
     Object.fromEntries(features.map((f) => [f.specId, f])),
   );
   const [lists, setLists] = useState<Record<string, string[]>>(() =>
-    groupIntoColumns(features, columns),
+    groupIntoColumns(features, columns, sortMode),
   );
   const [activeId, setActiveId] = useState<string | null>(null);
   const [editingSpecId, setEditingSpecId] = useState<string | null>(null);
@@ -114,8 +119,8 @@ export function BoardClient({
   // server truth never clobbers an in-flight optimistic drag.
   useEffect(() => {
     setRecords(Object.fromEntries(features.map((f) => [f.specId, f])));
-    setLists(groupIntoColumns(features, columns));
-  }, [features, columns]);
+    setLists(groupIntoColumns(features, columns, sortMode));
+  }, [features, columns, sortMode]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -387,17 +392,24 @@ function arraysEqual(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((v, i) => v === b[i]);
 }
 
-/** Group features into per-status ordered specId lists (board order). */
+/** Group features into per-status ordered specId lists (board order). Cards sort
+ * by manual rank by default, or by RICE score (highest first) when requested. */
 function groupIntoColumns(
   features: FeatureRecord[],
   columns: string[],
+  sortMode: SortMode = "default",
 ): Record<string, string[]> {
   const byStatus = new Map<string, FeatureRecord[]>();
   for (const c of columns) byStatus.set(c, []);
   for (const f of features) byStatus.get(f.status)?.push(f);
   const out: Record<string, string[]> = {};
   for (const c of columns) {
-    out[c] = sortBoardCards(byStatus.get(c) ?? []).map((f) => f.specId);
+    const cards = byStatus.get(c) ?? [];
+    const ordered =
+      sortMode === "rice"
+        ? [...cards].sort(compareByRiceScore)
+        : sortBoardCards(cards);
+    out[c] = ordered.map((f) => f.specId);
   }
   return out;
 }

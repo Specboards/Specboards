@@ -25,6 +25,8 @@ import {
   hasActiveFilters,
   parseFeatureFilters,
 } from "@/lib/feature-filters";
+import { parseSortMode } from "@/lib/feature-helpers";
+import { SortControl } from "./sort-control";
 import { getDb } from "@/lib/db";
 import { resolveWorkflowFor } from "@/lib/repo-config";
 import { getStore } from "@/lib/store";
@@ -50,6 +52,7 @@ export async function BoardView({
   const { product: productSlug } = await params;
   const sp = await searchParams;
   const filters = parseFeatureFilters(sp);
+  const sort = parseSortMode(sp.sort);
   // Board columns are the workflow statuses. A `status` filter narrows the
   // board to just that one column rather than emptying every other one.
   const allColumns = workflow.statuses.filter((s) => s !== "archived");
@@ -194,6 +197,7 @@ export async function BoardView({
             {/* On an empty board the empty state carries this button instead,
                 so the affordance renders exactly once. */}
             {featuresForLevel.length === 0 ? null : newItemButton}
+            {featuresForLevel.length > 0 ? <SortControl sort={sort} /> : null}
             {featuresForLevel.length > 0 && canEdit ? (
               <CardFieldsMenu
                 catalog={catalog}
@@ -244,10 +248,11 @@ export async function BoardView({
                 : scope.kind === "group"
                   ? `group:${scope.group.id}`
                   : ALL_PRODUCTS
-            }:${activeLevel.key}:${filtersToQuery(filters)}`}
+            }:${activeLevel.key}:${filtersToQuery(filters)}:${sort}`}
             features={features}
             columns={columns}
             workflow={workflow}
+            sortMode={sort}
             customFieldLabels={customFieldLabels}
             memberNames={memberNames}
             releases={releases}

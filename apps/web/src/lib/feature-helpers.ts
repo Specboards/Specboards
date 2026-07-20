@@ -53,6 +53,34 @@ export function riceFields(i: RiceInputs): RiceInputs & { riceScore: number | nu
   return { ...i, riceScore: computeRiceScore(i) };
 }
 
+/** A RICE score as a compact display string ("—" when unscored). */
+export function formatRiceScore(score: number | null): string {
+  if (score == null) return "—";
+  return score.toLocaleString(undefined, { maximumFractionDigits: 1 });
+}
+
+/** Order features by RICE score, highest first; unscored last, then by title. */
+export function compareByRiceScore(
+  a: Pick<FeatureRecord, "riceScore" | "title">,
+  b: Pick<FeatureRecord, "riceScore" | "title">,
+): number {
+  if (a.riceScore !== b.riceScore) {
+    if (a.riceScore == null) return 1;
+    if (b.riceScore == null) return -1;
+    return b.riceScore - a.riceScore;
+  }
+  return a.title.localeCompare(b.title);
+}
+
+/** The backlog sort modes selectable in the UI. */
+export type SortMode = "default" | "rice";
+
+/** Parse an untrusted `sort` search-param value. */
+export function parseSortMode(value: string | string[] | undefined): SortMode {
+  const v = Array.isArray(value) ? value[0] : value;
+  return v === "rice" ? "rice" : "default";
+}
+
 /**
  * Per-status accent for the small dot next to status text (default workflow).
  * Hues track Primer's semantic labels: cool gray for open/neutral, accent blue
