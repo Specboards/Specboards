@@ -479,6 +479,61 @@ export type ReleasePatch = Partial<{
 /** Raised when a release can't be created/updated/deleted. */
 export class ReleaseError extends Error {}
 
+/** A comment on a feature, with its author resolved for display. */
+export interface CommentRecord {
+  id: string;
+  /** The parent feature's internal id (not its stable specId). */
+  featureId: string;
+  authorId: string;
+  /** Author's display name, or null if the user record is gone/unknown. */
+  authorName: string | null;
+  /** Author's avatar URL, or null. */
+  authorImage: string | null;
+  body: string;
+  /** ISO-8601 creation timestamp. */
+  createdAt: string;
+}
+
+/** Fields to create a comment (id/author/createdAt are assigned by the store). */
+export interface CommentInput {
+  body: string;
+  /**
+   * User ids named via @mention in the body. Accepted by the write path now;
+   * validating them and fanning out notifications lands in a later slice. The
+   * store persists only the comment itself for the moment.
+   */
+  mentionedUserIds?: string[];
+}
+
+/** Raised when a comment can't be created/read/deleted. */
+export class CommentError extends Error {}
+
+/** A notification as the inbox renders it, actor + target resolved. */
+export interface NotificationRecord {
+  id: string;
+  /** Kind of notification; currently only "mention". */
+  type: string;
+  actorId: string | null;
+  actorName: string | null;
+  /** Stable spec id of the item the source comment lives on (for deep-linking). */
+  specId: string;
+  /** The item's level key and product slug, to build its permalink. */
+  featureLevel: string;
+  productSlug: string;
+  featureTitle: string;
+  commentId: string;
+  snippet: string;
+  /** True once the recipient has read it. */
+  read: boolean;
+  createdAt: string;
+}
+
+/** The inbox payload: the recipient's notifications plus their unread total. */
+export interface NotificationList {
+  items: NotificationRecord[];
+  unreadCount: number;
+}
+
 /** The releases a single product's roadmap should show: that product's own
  * releases plus workspace-wide (portfolio) releases, which apply everywhere. */
 export function releasesForProduct(
@@ -850,6 +905,27 @@ export interface FeatureStore {
   ): Promise<ReleaseRecord>;
   /** Delete a release; its items are unscheduled, not deleted. */
   deleteRelease(id: string, scope?: WorkspaceScope): Promise<void>;
+  /** Comments on a feature (by stable specId), oldest first, author resolved.
+   * Requires read access to the feature's product. */
+  listComments(
+    specId: string,
+    scope?: WorkspaceScope,
+  ): Promise<CommentRecord[]>;
+  /** Add a comment authored by the caller to a feature (by stable specId).
+   * Requires read access to the feature's product. */
+  createComment(
+    specId: string,
+    input: CommentInput,
+    scope?: WorkspaceScope,
+  ): Promise<CommentRecord>;
+  /** Delete a comment; the author or the workspace owner only. */
+  deleteComment(commentId: string, scope?: WorkspaceScope): Promise<void>;
+  /** The caller's notifications (newest first) plus their unread total. */
+  listNotifications(scope?: WorkspaceScope): Promise<NotificationList>;
+  /** Mark one of the caller's notifications read (no-op if already read/gone). */
+  markNotificationRead(id: string, scope?: WorkspaceScope): Promise<void>;
+  /** Mark all of the caller's notifications read. */
+  markAllNotificationsRead(scope?: WorkspaceScope): Promise<void>;
   /** The acting user's effective product access (org-admin flag + per-product
    * grants), used for read-filtering and write authorization. */
   getProductAccess(scope?: WorkspaceScope): Promise<ProductAccess>;

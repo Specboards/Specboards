@@ -36,6 +36,10 @@ import {
   RelationError,
   ReleaseError,
   RELEASE_STATUSES,
+  CommentError,
+  type CommentInput,
+  type CommentRecord,
+  type NotificationList,
   type BoardKey,
   type BoardPreferences,
   type CreateFeatureInput,
@@ -122,6 +126,17 @@ interface LocalRelease {
   startDate: string | null;
   targetDate: string | null;
   notes?: string | null;
+}
+
+/** A comment persisted in local file mode. Keyed to the feature's stable
+ * specId (local mode has no separate internal id) and authored by LOCAL_USER,
+ * since file mode has no user records. */
+interface LocalComment {
+  id: string;
+  specId: string;
+  authorId: string;
+  body: string;
+  createdAt: string;
 }
 
 /** An idea / feature request persisted in local file mode. */
@@ -301,6 +316,10 @@ export class LocalFileStore implements FeatureStore {
 
   private get releasesPath() {
     return path.join(this.root, ".specboard", "local-releases.json");
+  }
+
+  private get commentsPath() {
+    return path.join(this.root, ".specboard", "local-comments.json");
   }
 
   private get statusesPath() {
@@ -1427,6 +1446,96 @@ export class LocalFileStore implements FeatureStore {
     }
     if (metaChanged) await this.writeMetadata(meta);
   }
+
+  // ── Comments ──────────────────────────────────────────────────────────
+  // Persisted to `.specboard/local-comments.json`. File mode has no user
+  // records, so every comment is authored by LOCAL_USER with a null name.
+
+  private async readComments(): Promise<LocalComment[]> {
+    return this.readJsonFile<LocalComment>(this.commentsPath);
+  }
+
+  private async assertItemExists(specId: string): Promise<void> {
+    const all = await this.loadAll();
+    if (!all.some((f) => f.specId === specId)) {
+      throw new CommentError(`Unknown item: ${specId}`);
+    }
+  }
+
+  async listComments(
+    specId: string,
+    _scope?: WorkspaceScope,
+  ): Promise<CommentRecord[]> {
+    await this.assertItemExists(specId);
+    const rows = await this.readComments();
+    return rows
+      .filter((c) => c.specId === specId)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      .map((c) => ({
+        id: c.id,
+        featureId: c.specId,
+        authorId: c.authorId,
+        authorName: null,
+        authorImage: null,
+        body: c.body,
+        createdAt: c.createdAt,
+      }));
+  }
+
+  async createComment(
+    specId: string,
+    input: CommentInput,
+    _scope?: WorkspaceScope,
+  ): Promise<CommentRecord> {
+    const body = input.body.trim();
+    if (!body) throw new CommentError("Comment body is required.");
+    await this.assertItemExists(specId);
+    const rows = await this.readComments();
+    const comment: LocalComment = {
+      id: randomUUID(),
+      specId,
+      authorId: LOCAL_USER,
+      body,
+      createdAt: new Date().toISOString(),
+    };
+    await this.writeJsonFile(this.commentsPath, [...rows, comment]);
+    return {
+      id: comment.id,
+      featureId: specId,
+      authorId: comment.authorId,
+      authorName: null,
+      authorImage: null,
+      body: comment.body,
+      createdAt: comment.createdAt,
+    };
+  }
+
+  async deleteComment(
+    commentId: string,
+    _scope?: WorkspaceScope,
+  ): Promise<void> {
+    const rows = await this.readComments();
+    if (!rows.some((c) => c.id === commentId)) {
+      throw new CommentError(`Unknown comment: ${commentId}`);
+    }
+    await this.writeJsonFile(
+      this.commentsPath,
+      rows.filter((c) => c.id !== commentId),
+    );
+  }
+
+  // Notifications are a multi-user, @mention-driven concept; local file mode is
+  // a single user with no members to mention, so the inbox is always empty.
+  async listNotifications(_scope?: WorkspaceScope): Promise<NotificationList> {
+    return { items: [], unreadCount: 0 };
+  }
+
+  async markNotificationRead(
+    _id: string,
+    _scope?: WorkspaceScope,
+  ): Promise<void> {}
+
+  async markAllNotificationsRead(_scope?: WorkspaceScope): Promise<void> {}
 
   // Products. Local file mode is a single all-powerful user (see core
   // LOCAL_PRODUCT_ACCESS), so visibility/permissions aren't enforced; products

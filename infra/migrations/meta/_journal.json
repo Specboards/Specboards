@@ -295,6 +295,13 @@
       "when": 1784471975699,
       "tag": "0041_fast_spectrum",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1784556443648,
+      "tag": "0042_fair_pride",
+      "breakpoints": true
     }
   ]
 }

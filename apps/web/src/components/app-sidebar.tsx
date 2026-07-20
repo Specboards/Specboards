@@ -20,6 +20,7 @@ import { useEffect, useState } from "react";
 
 import { OrgSwitcher } from "@/components/org-switcher";
 import { ProductSwitcher } from "@/components/product-switcher";
+import { NotificationBell } from "@/components/notification-bell";
 import { SidebarProfile } from "@/components/sidebar-profile";
 import { GROUP_SLUG_PREFIX } from "@/lib/active-product";
 import type { ProductGroupRecord, ProductRecord } from "@/lib/store";
@@ -215,7 +216,8 @@ export function AppSidebar({
           </div>
         ))}
       </nav>
-      <div className="border-t p-2">
+      <div className="space-y-1 border-t p-2">
+        <NotificationBell collapsed={collapsed} />
         <SidebarProfile collapsed={collapsed} />
       </div>
     </aside>

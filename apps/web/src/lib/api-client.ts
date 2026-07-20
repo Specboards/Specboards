@@ -4,6 +4,9 @@ import type { ItemDetailData } from "@/lib/item-detail";
 import type {
   BoardKey,
   BoardPreferences,
+  CommentInput,
+  CommentRecord,
+  NotificationList,
   CreatableRelationDirection,
   CreateFeatureInput,
   CreateProductGroupInput,
@@ -159,6 +162,95 @@ export async function patchFeature(
     } | null;
     throw new Error(body?.error ?? `PATCH failed with ${res.status}`);
   }
+}
+
+/** List a feature's comments (oldest first). */
+export async function listComments(specId: string): Promise<CommentRecord[]> {
+  const res = await apiFetch(
+    `/api/v1/features/${encodeURIComponent(specId)}/comments`,
+  );
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as {
+    comments?: CommentRecord[];
+    error?: string;
+  } | null;
+  if (!res.ok || !body?.comments) {
+    throw new Error(body?.error ?? `Failed to load comments (${res.status}).`);
+  }
+  return body.comments;
+}
+
+/** Post a comment to a feature; returns the created record. */
+export async function createComment(
+  specId: string,
+  input: CommentInput,
+): Promise<CommentRecord> {
+  const res = await apiFetch(
+    `/api/v1/features/${encodeURIComponent(specId)}/comments`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  );
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as {
+    comment?: CommentRecord;
+    error?: string;
+  } | null;
+  if (!res.ok || !body?.comment) {
+    throw new Error(body?.error ?? `Failed to post comment (${res.status}).`);
+  }
+  return body.comment;
+}
+
+/** Delete a comment (author or workspace owner only). */
+export async function deleteComment(commentId: string): Promise<void> {
+  const res = await apiFetch(
+    `/api/v1/comments/${encodeURIComponent(commentId)}`,
+    { method: "DELETE" },
+  );
+  if (res.status === 401) throw new AuthRequiredError();
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(body?.error ?? `Failed to delete comment (${res.status}).`);
+  }
+}
+
+/** The caller's notification inbox (items + unread count). */
+export async function listNotifications(): Promise<NotificationList> {
+  const res = await apiFetch("/api/v1/notifications");
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as
+    | (NotificationList & { error?: string })
+    | null;
+  if (!res.ok || !body?.items) {
+    throw new Error(
+      body?.error ?? `Failed to load notifications (${res.status}).`,
+    );
+  }
+  return { items: body.items, unreadCount: body.unreadCount };
+}
+
+/** Mark one notification read. */
+export async function markNotificationRead(id: string): Promise<void> {
+  const res = await apiFetch(
+    `/api/v1/notifications/${encodeURIComponent(id)}/read`,
+    { method: "POST" },
+  );
+  if (res.status === 401) throw new AuthRequiredError();
+  if (!res.ok) throw new Error(`Failed to mark read (${res.status}).`);
+}
+
+/** Mark all of the caller's notifications read. */
+export async function markAllNotificationsRead(): Promise<void> {
+  const res = await apiFetch("/api/v1/notifications/read-all", {
+    method: "POST",
+  });
+  if (res.status === 401) throw new AuthRequiredError();
+  if (!res.ok) throw new Error(`Failed to mark all read (${res.status}).`);
 }
 
 /** Create a DB-native work item (initiative/epic); returns the new record. */

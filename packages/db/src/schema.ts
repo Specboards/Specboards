@@ -966,6 +966,49 @@ export const comments = pgTable("comments", {
 });
 
 /**
+ * A personal, in-app notification for one recipient — currently only
+ * "@mention in a comment". Fanned out in the same transaction as the triggering
+ * comment: one row per mentioned member. `readAt` null = unread, which drives
+ * the inbox unread badge. `actorId` is a historical snapshot (no FK, like
+ * `outbox_events`), so deleting the actor never rewrites someone's inbox; the
+ * source `comment`/`feature` carry FKs so deleting an item clears its notices.
+ */
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    /** The mentioned user who should see this notification. */
+    recipientId: uuid("recipient_id").notNull(),
+    /** Who triggered it (comment author); snapshot, no FK. */
+    actorId: uuid("actor_id"),
+    /** Kind of notification; only "mention" today, room for more. */
+    type: text("type").notNull().default("mention"),
+    /** The item the comment lives on, for deep-linking the inbox row. */
+    featureId: uuid("feature_id")
+      .notNull()
+      .references(() => features.id, { onDelete: "cascade" }),
+    /** The source comment; deleting it clears the notification. */
+    commentId: uuid("comment_id")
+      .notNull()
+      .references(() => comments.id, { onDelete: "cascade" }),
+    /** Short rendered preview of the comment for the inbox list. */
+    snippet: text("snippet").notNull(),
+    /** Null = unread; set when the recipient reads it. */
+    readAt: timestamp("read_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("notifications_recipient_idx").on(t.recipientId, t.readAt),
+    index("notifications_comment_idx").on(t.commentId),
+  ],
+);
+
+/**
  * A user's saved backlog filter ("custom view"): a named bundle of filter
  * params they can re-apply. Personal — scoped to the creating user within their
  * workspace, so each member curates their own list.
