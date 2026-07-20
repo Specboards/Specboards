@@ -45,6 +45,7 @@ import {
   isNull,
   members,
   ne,
+  notifications,
   or,
   outboxEvents,
   productGroups,
@@ -2186,8 +2187,7 @@ export class DbStore implements FeatureStore {
         this.accessIn(tx, scope!),
         this.productVisibilityIn(tx, ws),
       ]);
-      // You can comment on any item you can read. (Mention fan-out from
-      // input.mentionedUserIds is handled in a later slice.)
+      // You can comment on any item you can read.
       if (!canReadProductId(access, productById, feat.productId)) {
         throw new CommentError("You do not have access to this item.");
       }
@@ -2201,6 +2201,54 @@ export class DbStore implements FeatureStore {
         })
         .returning();
       if (!row) throw new CommentError("Failed to create the comment.");
+
+      // Fan out @mention notifications in the SAME transaction as the comment,
+      // so a crash can't leave a comment without its notices (or vice-versa).
+      // Recipients are the mentioned users that are active workspace members,
+      // minus the author, de-duped. A `comment.mentioned` outbox event lets
+      // future delivery channels (email/Slack) hook in without touching this.
+      const mentioned = [...new Set(input.mentionedUserIds ?? [])].filter(
+        (id) => id !== scope!.userId,
+      );
+      if (mentioned.length > 0) {
+        const activeRows = await tx
+          .select({ userId: members.userId })
+          .from(members)
+          .where(
+            and(
+              eq(members.workspaceId, ws),
+              inArray(members.userId, mentioned),
+              isNull(members.deactivatedAt),
+            ),
+          );
+        const recipients = activeRows.map((r) => r.userId);
+        if (recipients.length > 0) {
+          const snippet = commentSnippet(body);
+          await tx.insert(notifications).values(
+            recipients.map((recipientId) => ({
+              workspaceId: ws,
+              recipientId,
+              actorId: scope!.userId,
+              type: "mention",
+              featureId: feat.id,
+              commentId: row.id,
+              snippet,
+            })),
+          );
+          await this.writeOutbox(tx, scope!, {
+            type: "comment.mentioned",
+            productId: feat.productId,
+            data: {
+              commentId: row.id,
+              featureId: feat.id,
+              specId,
+              recipientIds: recipients,
+              snippet,
+            },
+          });
+        }
+      }
+
       // The author is the acting user; resolve their display fields so the
       // created row renders without a follow-up fetch.
       const author = await tx.query.users.findFirst({
@@ -3803,6 +3851,12 @@ function toReleaseRecord(
     notes: row.notes,
     itemCount,
   };
+}
+
+/** A short single-line preview of a comment body for the notification inbox. */
+function commentSnippet(body: string): string {
+  const flat = body.replace(/\s+/g, " ").trim();
+  return flat.length > 140 ? flat.slice(0, 139) + "…" : flat;
 }
 
 function toCommentRecord(row: {

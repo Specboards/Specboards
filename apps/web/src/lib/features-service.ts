@@ -777,7 +777,11 @@ export async function createComment(
   scope?: WorkspaceScope,
 ): Promise<CommentRecord> {
   const store = await getStore();
-  return store.createComment(specId, input, scope);
+  const comment = await store.createComment(specId, input, scope);
+  // A comment with mentions writes a `comment.mentioned` outbox event; nudge the
+  // relay so any delivery channels fire promptly (no-op when nothing was queued).
+  if (input.mentionedUserIds && input.mentionedUserIds.length > 0) notifyOutbox();
+  return comment;
 }
 
 /** Delete a comment; author or workspace owner only. */

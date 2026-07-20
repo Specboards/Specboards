@@ -122,6 +122,45 @@ describe.skipIf(!OWNER_URL)("comments (store + RLS)", () => {
     ).rejects.toThrow(CommentError);
   });
 
+  it("fans out one notification per valid mention, skipping self and non-members", async () => {
+    const stranger = randomUUID(); // not a workspace member
+    await store.createComment(
+      specId,
+      { body: "hey @Bob and @Alice", mentionedUserIds: [user.bob, user.alice] },
+      asAlice, // Alice authors and also mentions herself
+    );
+
+    // Bob gets one; Alice (the author) does not; the stranger does not.
+    const [bob] = await owner`select count(*)::int as n from notifications
+      where recipient_id = ${user.bob} and actor_id = ${user.alice}`;
+    const [alice] = await owner`select count(*)::int as n from notifications
+      where recipient_id = ${user.alice} and actor_id = ${user.alice}`;
+    const [none] = await owner`select count(*)::int as n from notifications
+      where recipient_id = ${stranger}`;
+    expect(bob!.n).toBe(1);
+    expect(alice!.n).toBe(0);
+    expect(none!.n).toBe(0);
+
+    // The notification carries a snippet and points at the source comment.
+    const [row] = await owner`select snippet, type, feature_id, comment_id
+      from notifications where recipient_id = ${user.bob} and actor_id = ${user.alice} limit 1`;
+    expect(row!.type).toBe("mention");
+    expect(String(row!.snippet)).toContain("hey @Bob");
+  });
+
+  it("de-dupes a repeated mention into a single notification", async () => {
+    const before = await owner`select count(*)::int as n from notifications
+      where recipient_id = ${user.bob}`;
+    await store.createComment(
+      specId,
+      { body: "@Bob @Bob @Bob", mentionedUserIds: [user.bob, user.bob, user.bob] },
+      asAlice,
+    );
+    const after = await owner`select count(*)::int as n from notifications
+      where recipient_id = ${user.bob}`;
+    expect((after[0] as { n: number }).n - (before[0] as { n: number }).n).toBe(1);
+  });
+
   it("lets only the author or the owner delete a comment", async () => {
     const c = await store.createComment(specId, { body: "delete me" }, asAlice);
 
