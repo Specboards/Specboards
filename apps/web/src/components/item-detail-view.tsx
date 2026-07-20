@@ -4,6 +4,7 @@ import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 
 import { DetailSection } from "@/components/detail-section";
+import { FeatureComments } from "@/components/feature-comments";
 import { FeatureDetailsEditor } from "@/components/feature-details-editor";
 import { FeatureGithubLinks } from "@/components/feature-github-links";
 import { FeatureParentSelect } from "@/components/feature-parent-select";
@@ -42,6 +43,7 @@ export function ItemDetailView({
     stageGates,
     completedGateIds,
     canEdit,
+    currentUserId,
     availableFields,
     levelLabel,
     parentKey,
@@ -202,6 +204,13 @@ export function ItemDetailView({
           specId={feature.specId}
           links={feature.githubLinks}
           canEdit={canEdit}
+        />
+      </DetailSection>
+
+      <DetailSection id="comments" title="Comments">
+        <FeatureComments
+          specId={feature.specId}
+          currentUserId={currentUserId}
         />
       </DetailSection>
 

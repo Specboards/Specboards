@@ -55,6 +55,9 @@ export interface ItemDetailData {
   /** Which of `stageGates` are checked off for this item. */
   completedGateIds: string[];
   canEdit: boolean;
+  /** The acting user's id (for author-only affordances like deleting a
+   * comment); null in local file mode where there is no authenticated user. */
+  currentUserId: string | null;
   /** Built-in field keys available at this level; null = all. */
   availableFields: string[] | null;
   levelLabel: string;
@@ -145,6 +148,7 @@ export async function getItemDetailData(
     stageGates,
     completedGateIds,
     canEdit,
+    currentUserId: access?.userId ?? null,
     availableFields,
     levelLabel,
     productSlug,
