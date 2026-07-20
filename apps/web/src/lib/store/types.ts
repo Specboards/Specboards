@@ -56,6 +56,16 @@ export interface FeatureRecord {
   assigneeId: string | null;
   /** Values keyed by custom-property key (see PropertyDef). */
   customFields: Record<string, CustomFieldValue>;
+  /** RICE reach input, or null when unset. */
+  riceReach: number | null;
+  /** RICE impact multiplier (3/2/1/0.5/0.25), or null when unset. */
+  riceImpact: number | null;
+  /** RICE confidence as a whole percentage (0-100), or null when unset. */
+  riceConfidence: number | null;
+  /** RICE effort in person-months (> 0), or null when unset. */
+  riceEffort: number | null;
+  /** Derived RICE score; null until all four inputs are set. Read-only. */
+  riceScore: number | null;
   /** Spec path relative to the repo root. */
   path: string;
   /** Number of features that block this one (drives the "blocked" badge). */
@@ -188,6 +198,10 @@ export type FeaturePatch = Partial<
     | "assigneeId"
     | "customFields"
     | "parentSpecId"
+    | "riceReach"
+    | "riceImpact"
+    | "riceConfidence"
+    | "riceEffort"
   >
 > & {
   /** Markdown body for a DB-native item; ignored for spec-backed items. */

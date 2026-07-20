@@ -8,6 +8,7 @@ import {
   type PropertyDef,
 } from "@specboard/core";
 
+import { RICE_IMPACT_VALUES } from "@/lib/feature-helpers";
 import { resolveWorkflowFor } from "@/lib/repo-config";
 import { notifyOutbox } from "@/lib/webhooks/events";
 import {
@@ -113,6 +114,27 @@ export function parseFeaturePatch(body: unknown): FeaturePatch {
   if ("customFields" in raw) {
     patch.customFields = parseCustomFields(raw.customFields);
   }
+  if ("riceReach" in raw) {
+    patch.riceReach = parseRiceNumber(raw.riceReach, "riceReach", { min: 0 });
+  }
+  if ("riceImpact" in raw) {
+    if (raw.riceImpact !== null && !RICE_IMPACT_VALUES.includes(raw.riceImpact as number)) {
+      throw new InvalidPatchError(
+        `riceImpact must be one of ${RICE_IMPACT_VALUES.join(", ")}, or null.`,
+      );
+    }
+    patch.riceImpact = raw.riceImpact as number | null;
+  }
+  if ("riceConfidence" in raw) {
+    const c = parseRiceNumber(raw.riceConfidence, "riceConfidence", { min: 0, max: 100 });
+    if (c !== null && !Number.isInteger(c)) {
+      throw new InvalidPatchError("riceConfidence must be a whole number 0-100, or null.");
+    }
+    patch.riceConfidence = c;
+  }
+  if ("riceEffort" in raw) {
+    patch.riceEffort = parseRiceNumber(raw.riceEffort, "riceEffort", { exclusiveMin: 0 });
+  }
   if ("parentSpecId" in raw) {
     if (raw.parentSpecId !== null && !isUuid(raw.parentSpecId)) {
       throw new InvalidPatchError("parentSpecId must be a UUID or null.");
@@ -141,6 +163,28 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 function isUuid(value: unknown): value is string {
   return typeof value === "string" && UUID_RE.test(value);
+}
+
+/** Validate a RICE numeric input: a finite number within bounds, or null. */
+function parseRiceNumber(
+  value: unknown,
+  field: string,
+  bounds: { min?: number; max?: number; exclusiveMin?: number },
+): number | null {
+  if (value === null) return null;
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new InvalidPatchError(`${field} must be a number or null.`);
+  }
+  if (bounds.min !== undefined && value < bounds.min) {
+    throw new InvalidPatchError(`${field} must be at least ${bounds.min}.`);
+  }
+  if (bounds.exclusiveMin !== undefined && value <= bounds.exclusiveMin) {
+    throw new InvalidPatchError(`${field} must be greater than ${bounds.exclusiveMin}.`);
+  }
+  if (bounds.max !== undefined && value > bounds.max) {
+    throw new InvalidPatchError(`${field} must be at most ${bounds.max}.`);
+  }
+  return value;
 }
 
 /** Validate an untrusted custom-fields map: a flat object of scalar/string[] values. */

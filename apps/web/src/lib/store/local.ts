@@ -25,6 +25,7 @@ import {
   type WorkspaceLevel,
 } from "@specboard/core";
 
+import { riceFields } from "@/lib/feature-helpers";
 import {
   compareReleases,
   DetailTemplateError,
@@ -114,6 +115,11 @@ interface LocalItem {
   productId?: string | null;
   /** Markdown details body, or null/absent for a blank body. */
   details?: string | null;
+  /** RICE prioritization inputs (see RiceInputs). */
+  riceReach?: number | null;
+  riceImpact?: number | null;
+  riceConfidence?: number | null;
+  riceEffort?: number | null;
 }
 
 /** A release persisted in local file mode. */
@@ -220,6 +226,11 @@ interface LocalMetadata {
   releaseId?: string | null;
   assigneeId?: string | null;
   customFields?: Record<string, CustomFieldValue>;
+  /** RICE prioritization inputs (see RiceInputs). */
+  riceReach?: number | null;
+  riceImpact?: number | null;
+  riceConfidence?: number | null;
+  riceEffort?: number | null;
   /** Outgoing relations from this spec (see ./types FeatureRelation). */
   links?: LocalLink[];
   /** Parent feature (epic) spec id, or null when top-level. */
@@ -516,6 +527,12 @@ export class LocalFileStore implements FeatureStore {
         assigneeId: m.assigneeId ?? null,
         assigneeName: null, // no user records in local file mode
         customFields: m.customFields ?? {},
+        ...riceFields({
+          riceReach: m.riceReach ?? null,
+          riceImpact: m.riceImpact ?? null,
+          riceConfidence: m.riceConfidence ?? null,
+          riceEffort: m.riceEffort ?? null,
+        }),
         path: path.relative(this.root, file),
         content: parsed.content,
         sections: parsed.sections,
@@ -547,6 +564,12 @@ export class LocalFileStore implements FeatureStore {
         assigneeId: item.assigneeId,
         assigneeName: null,
         customFields: {},
+        ...riceFields({
+          riceReach: item.riceReach ?? null,
+          riceImpact: item.riceImpact ?? null,
+          riceConfidence: item.riceConfidence ?? null,
+          riceEffort: item.riceEffort ?? null,
+        }),
         path: "",
         content: item.details ?? "",
         sections: [],
@@ -654,6 +677,11 @@ export class LocalFileStore implements FeatureStore {
         it.parentSpecId = patch.parentSpecId;
       if (patch.details !== undefined)
         it.details = patch.details?.trim() ? patch.details : null;
+      if (patch.riceReach !== undefined) it.riceReach = patch.riceReach;
+      if (patch.riceImpact !== undefined) it.riceImpact = patch.riceImpact;
+      if (patch.riceConfidence !== undefined)
+        it.riceConfidence = patch.riceConfidence;
+      if (patch.riceEffort !== undefined) it.riceEffort = patch.riceEffort;
       await this.writeItems(items);
       return;
     }
@@ -768,6 +796,12 @@ export class LocalFileStore implements FeatureStore {
       releaseId: null,
       assigneeId: item.assigneeId,
       customFields: {},
+      ...riceFields({
+        riceReach: null,
+        riceImpact: null,
+        riceConfidence: null,
+        riceEffort: null,
+      }),
       path: "",
       blocksCount: 0,
       blockedByCount: 0,

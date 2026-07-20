@@ -22,6 +22,8 @@ import {
   type PropertyDef,
   type WorkspaceLevel,
 } from "@specboard/core";
+
+import { riceFields } from "@/lib/feature-helpers";
 import {
   and,
   asc,
@@ -363,6 +365,12 @@ export class DbStore implements FeatureStore {
         releaseId: row.releaseId,
         assigneeId: row.assigneeId,
         customFields: toCustomFields(row.customFields),
+        ...riceFields({
+          riceReach: row.riceReach,
+          riceImpact: row.riceImpact,
+          riceConfidence: row.riceConfidence,
+          riceEffort: row.riceEffort,
+        }),
         path: row.index?.path ?? "",
         blocksCount: blocks.get(row.id) ?? 0,
         blockedByCount: blockedBy.get(row.id) ?? 0,
@@ -602,6 +610,12 @@ export class DbStore implements FeatureStore {
         assigneeId: row.assigneeId,
         assigneeName,
         customFields: toCustomFields(row.customFields),
+        ...riceFields({
+          riceReach: row.riceReach,
+          riceImpact: row.riceImpact,
+          riceConfidence: row.riceConfidence,
+          riceEffort: row.riceEffort,
+        }),
         path: row.index?.path ?? "",
         content,
         sections: extractSections(content),
@@ -1016,6 +1030,12 @@ export class DbStore implements FeatureStore {
         releaseId: row.releaseId,
         assigneeId: row.assigneeId,
         customFields: toCustomFields(row.customFields),
+        ...riceFields({
+          riceReach: row.riceReach,
+          riceImpact: row.riceImpact,
+          riceConfidence: row.riceConfidence,
+          riceEffort: row.riceEffort,
+        }),
         path: "",
         blocksCount: 0,
         blockedByCount: 0,
@@ -2776,6 +2796,12 @@ export class DbStore implements FeatureStore {
         releaseId: featureRow.releaseId,
         assigneeId: featureRow.assigneeId,
         customFields: toCustomFields(featureRow.customFields),
+        ...riceFields({
+          riceReach: featureRow.riceReach,
+          riceImpact: featureRow.riceImpact,
+          riceConfidence: featureRow.riceConfidence,
+          riceEffort: featureRow.riceEffort,
+        }),
         path: "",
         blocksCount: 0,
         blockedByCount: 0,
