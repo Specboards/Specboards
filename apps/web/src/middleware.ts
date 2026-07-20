@@ -11,12 +11,15 @@ const GITHUB_SETUP_PATH = "/api/v1/github/setup";
  *
  * `style-src` (which governs `<style>` elements and `<link>` stylesheets) also
  * drops `'unsafe-inline'`: our stylesheets are bundled and served from 'self',
- * Next nonce-tags any `<style>` it injects, and sonner's runtime injection is
- * patched out in favour of a static CSS import (see layout.tsx). So an injected
- * `<style>` block is refused. `style-src-attr` keeps `'unsafe-inline'` for the
- * inline `style="..."` attributes React and Radix legitimately set (dynamic
- * widths, tree indentation, scroll-lock): those are element-scoped CSSOM
- * mutations, not a script-injection or CSS-exfiltration vector.
+ * Next nonce-tags any `<style>` it injects, sonner's runtime injection is
+ * patched out in favour of a static CSS import (see layout.tsx), and Radix's
+ * scroll-lock `<style>` (react-remove-scroll → react-style-singleton) is
+ * nonce-tagged by seeding webpack's runtime nonce (see components/webpack-nonce
+ * mounted in layout.tsx). So an injected `<style>` block is refused unless it
+ * carries the nonce. `style-src-attr` keeps `'unsafe-inline'` for the inline
+ * `style="..."` attributes React and Radix legitimately set (dynamic widths,
+ * tree indentation): those are element-scoped CSSOM mutations, not a
+ * script-injection or CSS-exfiltration vector.
  */
 function contentSecurityPolicy(nonce: string): string {
   return [

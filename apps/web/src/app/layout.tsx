@@ -4,6 +4,7 @@ import { Toaster } from "sonner";
 
 import { AppSidebar } from "@/components/app-sidebar";
 import { ThemeProvider } from "@/components/theme-provider";
+import { WebpackNonce } from "@/components/webpack-nonce";
 import {
   listSidebarGroups,
   listSidebarOrgs,
@@ -38,6 +39,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   return (
     <html lang="en" suppressHydrationWarning>
       <body className="min-h-screen antialiased">
+        <WebpackNonce nonce={nonce} />
         <ThemeProvider nonce={nonce}>
           <div className="flex min-h-screen">
             <AppSidebar orgs={orgs} products={products} groups={groups} />
