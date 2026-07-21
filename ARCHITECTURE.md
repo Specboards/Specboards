@@ -124,9 +124,10 @@ Next.js web app  ── apps/web           MCP server ── apps/mcp
 3. **Edit spec in UI**: save → `packages/git` writes a commit or opens a PR
    (`writeMode`) → webhook confirms → index updates.
 4. **Edit metadata in UI**: writes straight to DB (no git churn), real-time to boards.
-5. **Agent via MCP**: `list_features` / `read_spec` / `update_status` /
-   `get_relations`: agents act on assigned, status-aware specs, and
-   respect dependency sequencing (a feature's `blocks` / `blockedBy`).
+5. **Agent via MCP**: `list_items` / `read_item` / `update_item` /
+   `get_relations` (over `/api/mcp`): agents act on assigned, status-aware
+   specs, and respect dependency sequencing (a feature's `blocks` /
+   `blockedBy`).
 
 ## Multi-tenancy
 

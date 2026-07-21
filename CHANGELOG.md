@@ -7,6 +7,73 @@ for how and when the version is bumped.
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-07-21
+
+Dogfood loop & public API: make the PR -> work-item-status loop consumable by
+external customers and close the gaps in the public REST surface.
+
+### Added
+
+- **Auto-advance the sync loop past multi-step transitions.** The CLI's
+  `specboard status <spec> <target> --advance` walks a spec through the shortest
+  legal chain of intermediate statuses (e.g. `backlog -> defining -> ready ->
+  in_progress`) instead of stopping at the first illegal jump. `GET
+  /api/v1/statuses` now also returns the fully-resolved workflow (ordered
+  statuses + legal transitions) so any client can compute a path;
+  `scripts/specboard/sync-pr.sh` uses `--advance`.
+- **Service (bot) accounts and resource-scoped API keys** (migration 0045). A
+  new `service` member role models a machine account: a real user with no login
+  plus a `service` membership, so automated activity is attributed to a labelled
+  identity instead of a human. An owner creates one via the session-only `POST
+  /api/v1/org/service-accounts`, which mints a scoped key. API keys now carry
+  `<resource>:<action>` scopes (`api_keys.scopes`); an empty scope list stays
+  full-access, so existing keys are unaffected. Scope enforcement is centralized
+  in the API authorization layer, with per-key rate limiting on `/api/v1`.
+- **Public REST API completeness.** Filled the missing CRUD verbs (`GET
+  /products/:id`, `GET` + `PATCH /repositories/:id`, `PATCH /views/:id`); added
+  opt-in, order-preserving cursor pagination (`?limit` / `?cursor`, exposing
+  `nextCursor`) on the features, releases, ideas, and org-members lists; and an
+  OpenAPI 3 document at `GET /api/v1/openapi.json`.
+- **CLI distribution.** `@specboard/cli` is now publishable to npm (public,
+  self-contained) via a `cli-v*` tag-triggered workflow, with a Homebrew formula
+  source under `packaging/homebrew/`.
+- **Reusable Specboard-sync workflow.**
+  `.github/workflows/specboard-sync-reusable.yml` lets any repo enable the loop
+  with a ~5-line caller that runs the published CLI, instead of copying the
+  workflow plus `scripts/specboard/*`.
+
+Migration 0045 (`member_role += service`, `api_keys.scopes`), applied to test
+and production.
+
+## [0.20.0] - 2026-07-20
+
+Backlog grooming UX plus a release-management addition.
+
+### Added
+
+- **RICE prioritization scoring** (migration 0044). Features carry dedicated
+  Reach / Impact / Confidence / Effort inputs with an app-computed RICE score,
+  an item-detail editor with a live score, a `?sort=rice` order on the list and
+  board, and a score badge on board cards.
+- **Bulk operations on the backlog.** An opt-in multi-select mode (a "Select"
+  toggle) on the board and list applies one change (status, assignee, release,
+  add or clear tags) across many items via `POST /api/v1/features/bulk`, each
+  item in its own transaction with per-item results.
+- **Command palette (Cmd/Ctrl-K).** Keyboard-driven navigation built on a shared
+  nav model the sidebar also consumes. Navigation-only in this release; item
+  search and quick actions are a follow-on.
+- **Filter bar on the board view** (#50). The list view's URL-driven filters now
+  render on the board too; a status filter collapses the board to that column.
+- **Actual ship dates on releases** (migration 0043). A release stamps its real
+  ship date when first shipped (existing shipped releases backfilled from their
+  target date) and clears it on reopen; the Shipped roadmap view orders
+  newest-shipped first.
+
+Migrations 0043 (release shipped date) and 0044 (RICE columns), applied to test
+and production.
+
+## [0.19.0] - 2026-07-16
+
 ### Added
 
 - **Product groups.** A workspace can now collect products into nested groups
@@ -34,11 +101,6 @@ for how and when the version is bumped.
   behavior is unchanged until links are edited. Deployments using the
   `specboard_worker` role must re-run `infra/worker-role.sql` (new SELECT
   grant) per the role-cutover runbook.
-
-## [0.19.0] - 2026-07-16
-
-### Added
-
 - **Configurable cards on the Roadmap.** The Roadmap gets the same "Card fields"
   menu as the Backlog board, so you can choose which fields (assignee, tags,
   custom properties, etc.) show on release cards and which custom field is
