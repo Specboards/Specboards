@@ -2,7 +2,7 @@ import { load } from "js-yaml";
 import { z } from "zod";
 
 /**
- * Schema for `.specboards/config.yml`, the per-repo file that tells Specboard
+ * Schema for `.specboards/config.yml`, the per-repo file that tells Specboards
  * where specs live and how this team's workflow is shaped. Kept in the repo so
  * the configuration is versioned with the code, while the resulting metadata
  * still lives in the DB. Custom item properties are NOT configured here: admins

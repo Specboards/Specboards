@@ -7,7 +7,7 @@ import { SetupForm } from "@/components/setup-form";
 import { ensureMembership, getActiveWorkspace, getMembership } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Set up · Specboard" };
+export const metadata = { title: "Set up · Specboards" };
 
 /**
  * Org onboarding.

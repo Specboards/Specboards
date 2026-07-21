@@ -2,7 +2,7 @@
  * GitHub user-identity verification for the App install flow.
  *
  * A GitHub App's post-install callback only proves that a browser finished an
- * install flow, not that the signed-in Specboard user controls the GitHub
+ * install flow, not that the signed-in Specboards user controls the GitHub
  * account the returned `installation_id` belongs to (the id is guessable and
  * swappable). These helpers close that gap: exchange the App's OAuth `code`
  * for a user access token, then check that user's relationship to the
@@ -20,7 +20,7 @@ const GITHUB_API = "https://api.github.com";
 
 const API_HEADERS = {
   accept: "application/vnd.github+json",
-  "user-agent": "Specboard",
+  "user-agent": "Specboards",
   "x-github-api-version": "2022-11-28",
 };
 

@@ -1,9 +1,9 @@
-# Specboard
+# Specboards
 
 **Product management that lives in your repo specs.**
 
 Your specs stay canonical in the repo (versioned with your code, read by AI
-coding agents). Specboard layers the product-management work *on top* of them:
+coding agents). Specboards layers the product-management work *on top* of them:
 status, priority, assignment, backlog order, roadmap, releases, dependencies,
 and epic/feature hierarchy. PM, UX, and engineering plan together without
 editing files in a terminal, and without copying every spec into Jira or Aha.
@@ -14,7 +14,7 @@ editing files in a terminal, and without copying every spec into Jira or Aha.
 - **Agent-ready.** An MCP server gives coding agents the same prioritized plan
   your team works from.
 
-Specboard is a member of the [Studio Palouse](https://www.studiopalouse.com)
+Specboards is a member of the [Studio Palouse](https://www.studiopalouse.com)
 family of apps.
 
 > **Status: active build (pre-release).** Working today: the web UI (Backlog ·
@@ -23,7 +23,7 @@ family of apps.
 > GitHub sync, and the MCP server for agents. The hosted service is currently
 > **invite-only** ([request access](https://www.specboards.ai/request-access)).
 
-## Why Specboard
+## Why Specboards
 
 You already write specs. What you're missing is the layer on top of them.
 
@@ -39,7 +39,7 @@ You already write specs. What you're missing is the layer on top of them.
 ## Features
 
 - **Git-native specs.** Your `specs/**/spec.md` files stay the source of truth.
-  Specboard parses each spec, injects a stable UUID when one is missing, and
+  Specboards parses each spec, injects a stable UUID when one is missing, and
   keeps a live, sha-tracked index. Renames and moves never orphan your data,
   because every spec is keyed by its id, not its path.
 - **Ideas & intake.** Capture raw ideas and requests, then promote the ones
@@ -52,7 +52,7 @@ You already write specs. What you're missing is the layer on top of them.
 - **Roadmap & releases.** Group work into initiatives and epics, lay it out by
   release and quarter, and track what ships when.
 - **One-click GitHub sync.** Connect a repo with a GitHub App (no secrets to
-  paste). Specboard imports specs, reconciles on every push, and links live PR,
+  paste). Specboards imports specs, reconciles on every push, and links live PR,
   issue, and branch state to your work.
 - **MCP for AI agents.** An MCP server exposes your prioritized, status-aware
   backlog to coding agents. They can list products and items, read specs, follow
@@ -114,7 +114,7 @@ Specs are **work items**: the spec-backed leaf of the hierarchy. They live under
 
 ```yaml
 ---
-id: <uuid> # stable link to Specboard metadata (survives renames)
+id: <uuid> # stable link to Specboards metadata (survives renames)
 title: My Feature
 kind: feature
 feature: checkout # optional: groups this spec under a named Feature (else its folder is used)
@@ -131,7 +131,7 @@ are admin-defined in the app (Settings → Cards), not in the repo config.
 
 ## MCP for AI agents
 
-Specboard speaks the Model Context Protocol so coding agents (Claude Code and
+Specboards speaks the Model Context Protocol so coding agents (Claude Code and
 others) can read and drive the backlog. Two ways to connect:
 
 **Hosted endpoint (recommended).** Every deployment serves an authenticated MCP
@@ -199,7 +199,7 @@ infra/
 ```
 
 - **Design:** [`ARCHITECTURE.md`](./ARCHITECTURE.md)
-- **Backlog:** [`docs/BACKLOG.md`](./docs/BACKLOG.md) (tracked in Specboard)
+- **Backlog:** [`docs/BACKLOG.md`](./docs/BACKLOG.md) (tracked in Specboards)
 - **Original build plan:** [`docs/archive/PLAN.md`](./docs/archive/PLAN.md)
 
 ## Develop
@@ -219,7 +219,7 @@ pnpm db:migrate                         # apply against $DATABASE_URL (incl. RLS
 
 ## License
 
-Specboard is **open-core**. The core product, which includes the web app,
+Specboards is **open-core**. The core product, which includes the web app,
 shared packages, MCP server, and single-org (`N=1`) self-hosting, is licensed
 under the [Apache License 2.0](./LICENSE). You may run, modify, and self-host it
 for any purpose, including commercially.
@@ -229,7 +229,7 @@ hosting (`N>1`), SSO/SAML/SCIM, advanced analytics, premium integrations, and
 audit logs. See [LICENSING.md](./LICENSING.md) for the full breakdown, or contact
 **contact@specboard.net** for a commercial license.
 
-The Specboard **brand** (name, logos, visual identity) and the marketing site
+The Specboards **brand** (name, logos, visual identity) and the marketing site
 are **not** open source. They live in the separate
 [Website](https://github.com/Specboards/Website) repo under a proprietary
 license. Apache-2.0 does not grant trademark rights; see

@@ -17,7 +17,7 @@ import { boundWorkspaceSlug } from "./workspace-binding";
 const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"] as const;
 const SERVER_INFO = { name: "specboard", version: "0.1.0" } as const;
 const INSTRUCTIONS =
-  "Specboard exposes your product backlog: initiatives, epics, and " +
+  "Specboards exposes your product backlog: initiatives, epics, and " +
   "git-backed feature specs, grouped into products. Call whoami first to " +
   "learn your role and the hierarchy levels. Use list_items / read_item to " +
   "review work, list_statuses (or read_item's allowedTransitions) to learn " +
@@ -117,7 +117,7 @@ export async function resolveMcpAuth(req: Request): Promise<McpAuth> {
     unauthenticated: true,
     message:
       "Authentication required. Connect via OAuth (your MCP client will " +
-      "prompt you to sign in) or provide a Specboard API key as a bearer " +
+      "prompt you to sign in) or provide a Specboards API key as a bearer " +
       "token (Authorization: Bearer sb_...).",
   };
 }

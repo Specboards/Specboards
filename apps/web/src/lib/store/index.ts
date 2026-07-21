@@ -14,7 +14,7 @@ let store: FeatureStore | undefined;
  * Resolve the feature store once per process: Postgres when `DATABASE_URL`
  * is set, otherwise the zero-setup local file store.
  *
- * Tenant data uses `DATABASE_URL_APP`, the non-owner `specboard_app` role
+ * Tenant data uses `DATABASE_URL_APP`, the non-owner `specboards_app` role
  * that RLS enforces against. In multi-tenant (hosted) mode that connection is
  * REQUIRED: falling back to `DATABASE_URL` would silently connect as the
  * table owner, which bypasses RLS and reduces tenant isolation to hoping no

@@ -2,7 +2,7 @@ import { load } from "js-yaml";
 import { z } from "zod";
 
 /**
- * Frontmatter that Specboard expects at the top of a `spec.md`. `id` is the
+ * Frontmatter that Specboards expects at the top of a `spec.md`. `id` is the
  * stable link between the git-native spec content and the DB metadata row. It
  * survives file renames/moves, so metadata is never orphaned. `title` is the
  * human-facing name shown on boards.
@@ -155,7 +155,7 @@ export function rewriteSpecBody(
 }
 
 /**
- * Returns true if the raw file already carries a Specboard `id`. Used by the
+ * Returns true if the raw file already carries a Specboards `id`. Used by the
  * git integration to decide whether it must inject one on first import.
  */
 export function hasSpecId(raw: string): boolean {

@@ -1,1 +1,1 @@
-Specboard: spec-based product management over git-native specs
+Specboards: spec-based product management over git-native specs

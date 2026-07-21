@@ -75,10 +75,10 @@ export function AppSidebar({
         <div className={cn("flex items-center", collapsed ? "justify-center" : "justify-between")}>
           <Link
             href={orgHref("/")}
-            aria-label="Specboard home"
+            aria-label="Specboards home"
             className="flex items-center gap-2 text-sm font-semibold tracking-tight"
           >
-            <img src="/brand/specboard-mark.png" alt="" className="h-6 w-6" />
+            <img src="/brand/specboards-mark.png" alt="" className="h-6 w-6" />
             {/* Two-tone wordmark: "Spec" foreground + "board" muted. */}
             {!collapsed ? (
               <span>

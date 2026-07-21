@@ -213,7 +213,7 @@ export async function sendTestEvent(
     product: null,
     data: {
       test: true,
-      message: "This is a test delivery from Specboard.",
+      message: "This is a test delivery from Specboards.",
     },
   };
 

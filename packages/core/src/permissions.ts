@@ -1,6 +1,6 @@
 /**
  * Product permission rules — the TypeScript source of truth that mirrors the
- * Postgres RLS functions (`specboard_can_read_product` / `_write_ / _manage_`,
+ * Postgres RLS functions (`specboards_can_read_product` / `_write_ / _manage_`,
  * see migration 0012). The DB store relies on RLS; the local file store and the
  * UI use these helpers so all three agree on who can do what.
  *

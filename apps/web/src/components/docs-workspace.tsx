@@ -26,7 +26,7 @@ import type { DocArea, DocPageRecord } from "@/lib/store/types";
 import { cn } from "@/lib/utils";
 
 /**
- * Folder-and-page workspace for a Specboard-held doc area (Strategy, and
+ * Folder-and-page workspace for a Specboards-held doc area (Strategy, and
  * Research / Architecture in `local` mode): a page tree on the left, a
  * rich-text Markdown editor on the right. Content autosaves with the same
  * debounce pattern as the item Details editor. The component owns its page

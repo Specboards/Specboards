@@ -5,9 +5,9 @@ tenant-isolation guarantee then rests solely on hand-written `workspaceId`
 filters in app code. This runbook activates two dedicated **non-owner** roles so
 the database is a live backstop:
 
-- **`specboard_app`** - the RLS-enforced connection for per-user tenant data
+- **`specboards_app`** - the RLS-enforced connection for per-user tenant data
   (`DATABASE_URL_APP`). Covers backlog card "RLS non-owner role cutover".
-- **`specboard_worker`** - a narrow connection for background / ingestion work:
+- **`specboards_worker`** - a narrow connection for background / ingestion work:
   the outbox delivery drainer + relay and the incoming GitHub webhook sink
   (`DATABASE_URL_WORKER`). Covers backlog card "Dedicated DB roles for
   outbox/webhook workers".
@@ -24,15 +24,48 @@ the scoped roles are intentionally not granted.
 
 ---
 
-## Part 1 - `specboard_app` (RLS non-owner cutover)
+## Part 0 - rebrand role rename (existing databases only)
+
+The scripts and this runbook now use the `specboards_*` role names. Databases
+provisioned before the Specboard -> Specboards rebrand already have the roles
+under the **old** names (`specboard_app`, `specboard_worker`). On those clusters,
+rename in place before anything else. `ALTER ROLE ... RENAME` preserves every
+grant, default privilege, and role-targeted policy (policies track roles by OID),
+so no re-granting is needed:
+
+```sql
+-- As a superuser / the table owner, on test first, then prod:
+ALTER ROLE specboard_app    RENAME TO specboards_app;
+ALTER ROLE specboard_worker RENAME TO specboards_worker;
+```
+
+Then update the connection secrets to use the new role name in the URL and
+restart so pooled connections reconnect:
+
+```bash
+fly secrets set DATABASE_URL_APP='postgres://specboards_app:<pw>@<host>:5432/<db>'    -a specboard-test
+fly secrets set DATABASE_URL_WORKER='postgres://specboards_worker:<pw>@<host>:5432/<db>' -a specboard-test
+```
+
+Re-running `infra/rls-role.sql` / `infra/worker-role.sql` afterward is safe
+(idempotent) and reconciles the grants under the new name. Fresh databases skip
+this part: the scripts create the roles under the new names directly.
+
+The RLS helper functions (`specboards_is_member`, ...) are renamed by the drizzle
+migration `0046_rebrand_specboard_to_specboards.sql`, applied via `pnpm db:migrate`
+as usual; that is independent of this role rename.
+
+---
+
+## Part 1 - `specboards_app` (RLS non-owner cutover)
 
 ### Preconditions
 
 - Every tenant table has RLS enabled **and** at least one policy (migrations
   0002 / 0012 and later). No enabled-but-unpolicied table (which would deny all
   rows to a non-owner).
-- The RLS helper functions (`specboard_is_member`,
-  `specboard_can_read_product`, ...) are `SECURITY DEFINER`, so the role needs
+- The RLS helper functions (`specboards_is_member`,
+  `specboards_can_read_product`, ...) are `SECURITY DEFINER`, so the role needs
   only `EXECUTE`.
 - `getStore()` already uses `DATABASE_URL_APP` when set and `DbStore.scoped()`
   sets the transaction-local `app.user_id` the policies key on.
@@ -45,11 +78,11 @@ the scoped roles are intentionally not granted.
    ```
 2. **Set a login + password** (kept out of git):
    ```sql
-   alter role specboard_app with login password '<generated-strong-password>';
+   alter role specboards_app with login password '<generated-strong-password>';
    ```
 3. **Point the app at it**, then redeploy. Leave the owner `DATABASE_URL` as-is:
    ```sh
-   fly secrets set DATABASE_URL_APP='postgres://specboard_app:<pw>@<host>:5432/<db>' -a specboard-test
+   fly secrets set DATABASE_URL_APP='postgres://specboards_app:<pw>@<host>:5432/<db>' -a specboard-test
    ```
 4. **Smoke-test on test** (see the shared checklist below) before prod.
 5. **Repeat for prod** (`app specboard`) once test is green.
@@ -61,7 +94,7 @@ owner connection. No data or schema change is involved.
 
 ---
 
-## Part 2 - `specboard_worker` (background / ingestion role)
+## Part 2 - `specboards_worker` (background / ingestion role)
 
 The outbox drainer/relay and the incoming GitHub webhook sink span **every**
 workspace and run with no `app.user_id`, so they cannot use the RLS-scoped app
@@ -85,9 +118,9 @@ other table, so a bug in a worker path cannot reach them.
 - Read-only context: `workspaces` (S), `users` (S).
 
 Cross-workspace access on the RLS-enabled tables above comes from role-targeted
-policies (`<table>_worker_all ... FOR ALL TO specboard_worker USING (true)`).
-Because they are targeted `TO specboard_worker`, they do **not** loosen RLS for
-`specboard_app` or any other role. (Verified against Postgres 16: the worker
+policies (`<table>_worker_all ... FOR ALL TO specboards_worker USING (true)`).
+Because they are targeted `TO specboards_worker`, they do **not** loosen RLS for
+`specboards_app` or any other role. (Verified against Postgres 16: the worker
 role sees rows across all workspaces, the app role still sees only its member
 workspace, and the worker role is denied on ungranted tables.)
 
@@ -99,19 +132,19 @@ workspace, and the worker role is denied on ungranted tables.)
    ```
 2. **Set a login + password** (kept out of git):
    ```sql
-   alter role specboard_worker with login password '<generated-strong-password>';
+   alter role specboards_worker with login password '<generated-strong-password>';
    ```
 3. **Point the workers at it**, then redeploy. Leave `DATABASE_URL` and
    `DATABASE_URL_APP` as-is:
    ```sh
-   fly secrets set DATABASE_URL_WORKER='postgres://specboard_worker:<pw>@<host>:5432/<db>' -a specboard-test
+   fly secrets set DATABASE_URL_WORKER='postgres://specboards_worker:<pw>@<host>:5432/<db>' -a specboard-test
    ```
 4. **Smoke-test on test** (checklist below) before prod.
 5. **Repeat for prod** (`app specboard`) once test is green.
 
 ### If a delivery or sync fails with `permission denied for table X`
 
-The worker surface is deliberately fixed (unlike `specboard_app`, new tables are
+The worker surface is deliberately fixed (unlike `specboards_app`, new tables are
 not auto-granted). If a legitimate worker path touches a table not in the list
 above, the test smoke-test will surface a `permission denied` error before prod.
 Add the needed grant (and, if the table has RLS, a `_worker_all` policy) to
@@ -127,7 +160,7 @@ the owner connection. No data or schema change is involved.
 
 ## Smoke-test checklists
 
-### After the `specboard_app` cutover (test, then prod)
+### After the `specboards_app` cutover (test, then prod)
 
 - Sign in; the board loads (reads go through the RLS role).
 - Create / edit / move a work item; change its status (writes pass RLS).
@@ -138,7 +171,7 @@ the owner connection. No data or schema change is involved.
 If any read returns empty or a write 500s with a permission error, unset
 `DATABASE_URL_APP` to fall back instantly, and investigate before retrying.
 
-### After the `specboard_worker` cutover (test, then prod)
+### After the `specboards_worker` cutover (test, then prod)
 
 - **Outbound delivery:** register a webhook endpoint, make a change that emits an
   event (create/move an item), and confirm the delivery is sent (a `delivered`
@@ -159,7 +192,7 @@ Watch the logs for `permission denied for table ...`; if one appears, follow the
 
 ## Follow-ups
 
-- Rotate the `specboard_app` / `specboard_worker` passwords on the normal secret
+- Rotate the `specboards_app` / `specboards_worker` passwords on the normal secret
   cadence.
 - Consider `ALTER TABLE ... FORCE ROW LEVEL SECURITY` only if either role ever
   ends up owning a table (they should not).

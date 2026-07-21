@@ -22,12 +22,12 @@ interface SampleFeature {
 const SAMPLE_FEATURES: SampleFeature[] = [
   {
     specId: "a0000000-0000-4000-8000-000000000001",
-    title: "Welcome to Specboard",
+    title: "Welcome to Specboards",
     status: "ready",
     tags: ["welcome"],
     path: "specs/welcome/spec.md",
     content:
-      "## What this is\n\nSpecboard manages product work as **git-native specs**. Each feature is a `spec.md` in your repo; the board adds status, assignee, and release metadata on top.\n\n## Try it\n\nChange this card's status with the dropdown. The edit lands in the database, while the spec content stays canonical in git.",
+      "## What this is\n\nSpecboards manages product work as **git-native specs**. Each feature is a `spec.md` in your repo; the board adds status, assignee, and release metadata on top.\n\n## Try it\n\nChange this card's status with the dropdown. The edit lands in the database, while the spec content stays canonical in git.",
   },
   {
     specId: "a0000000-0000-4000-8000-000000000002",
@@ -36,7 +36,7 @@ const SAMPLE_FEATURES: SampleFeature[] = [
     tags: ["setup", "git-sync"],
     path: "specs/connect-repo/spec.md",
     content:
-      "## Goal\n\nConnect the GitHub repo where your specs live. Specboard installs a GitHub App, imports every `specs/**/spec.md`, and keeps the board in sync on every push.\n\n## Next\n\nAn admin connects the repo; once specs import, this sample board can be cleared.",
+      "## Goal\n\nConnect the GitHub repo where your specs live. Specboards installs a GitHub App, imports every `specs/**/spec.md`, and keeps the board in sync on every push.\n\n## Next\n\nAn admin connects the repo; once specs import, this sample board can be cleared.",
   },
   {
     specId: "a0000000-0000-4000-8000-000000000003",
@@ -45,7 +45,7 @@ const SAMPLE_FEATURES: SampleFeature[] = [
     tags: ["specs"],
     path: "specs/first-spec/spec.md",
     content:
-      "## Format\n\nA spec is markdown with `id` and `title` frontmatter. Specboard injects a stable `id` automatically on first import, so you only write the `title`.\n\n## Sections\n\nUse `##` headings. They're parsed into structured sections shown on the feature page.",
+      "## Format\n\nA spec is markdown with `id` and `title` frontmatter. Specboards injects a stable `id` automatically on first import, so you only write the `title`.\n\n## Sections\n\nUse `##` headings. They're parsed into structured sections shown on the feature page.",
   },
   {
     specId: "a0000000-0000-4000-8000-000000000004",

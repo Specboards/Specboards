@@ -36,8 +36,8 @@ end.
 - Two GitHub accounts / orgs:
   - **Account A** - owns/administers a GitHub org where the App will be
     installed (the *victim* installation account).
-  - **Account B** - a Specboard user who is **not** an admin of Account A's org.
-- A Specboard workspace controlled by Account B.
+  - **Account B** - a Specboards user who is **not** an admin of Account A's org.
+- A Specboards workspace controlled by Account B.
 
 ## The attack path to prove is blocked
 
@@ -66,7 +66,7 @@ end.
 
 ### Also confirm the legitimate path still works (no false-block)
 
-- As **Account A**, install + bind to Account A's own Specboard workspace: the
+- As **Account A**, install + bind to Account A's own Specboards workspace: the
   bind succeeds, repos list, and a push reconciles specs (regression guard that
   the ownership check doesn't block legitimate installs).
 

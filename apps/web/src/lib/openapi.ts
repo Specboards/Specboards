@@ -66,10 +66,10 @@ export function buildOpenApiDocument(baseUrl: string): Record<string, unknown> {
   return {
     openapi: "3.0.3",
     info: {
-      title: "Specboard API",
+      title: "Specboards API",
       version: "1",
       description:
-        "The Specboard `/api/v1` REST surface. Authenticate with an API key " +
+        "The Specboards `/api/v1` REST surface. Authenticate with an API key " +
         "(`x-api-key: sb_…` or `Authorization: Bearer sb_…`). Keys may be " +
         "scoped: a key carries `<resource>:read` / `<resource>:write` grants " +
         "(or none, meaning full access). Multi-org callers name the org with " +

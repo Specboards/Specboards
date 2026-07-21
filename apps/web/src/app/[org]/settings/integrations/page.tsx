@@ -62,14 +62,14 @@ function noticeFor(params: Record<string, string | string[] | undefined>): Setup
       "GitHub connections are temporarily unavailable: the app is missing its OAuth client credentials. Contact your administrator.",
     "install-denied":
       "We couldn't verify that you're an owner or admin of that GitHub account, so the installation wasn't connected.",
-    hosted: "GitHub is managed by Specboard on the hosted plan. Just install the app below.",
+    hosted: "GitHub is managed by Specboards on the hosted plan. Just install the app below.",
   };
   const err = typeof params.error === "string" ? errors[params.error] : undefined;
   return err ? { kind: "error", message: err } : null;
 }
 
 /**
- * Integrations: everything that connects Specboard to the outside world in one
+ * Integrations: everything that connects Specboards to the outside world in one
  * place - the MCP endpoint for coding agents, personal API keys, outbound
  * webhooks, and connected GitHub repositories. API keys are per-user (any role);
  * webhooks and repository setup are admin-only. All are unavailable in local

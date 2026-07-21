@@ -1,6 +1,6 @@
-# Specboard CLI
+# Specboards CLI
 
-`specboard` manages your Specboard work items (status, assignment, and GitHub
+`specboard` manages your Specboards work items (status, assignment, and GitHub
 links) from the terminal. It talks to the same `/api/v1` surface the web app
 uses, authenticating with a personal API key.
 
@@ -81,14 +81,14 @@ specboard status "$SPEC_ID" in_progress --advance
 specboard link "$SPEC_ID" --pr "$PR_NUMBER"
 ```
 
-## CI: sync PRs to Specboard automatically
+## CI: sync PRs to Specboards automatically
 
 To keep work items in step with your PRs (opened -> `in_progress` + PR link,
 merged -> `done`), call the reusable workflow from your repo. Add
 `.github/workflows/specboard-sync.yml`:
 
 ```yaml
-name: Specboard Sync
+name: Specboards Sync
 on:
   pull_request:
     types: [opened, reopened, synchronize, closed]
@@ -105,5 +105,5 @@ Set the two repo secrets: `SPECBOARDS_URL` (e.g. `https://app.specboards.ai`) an
 `features:write` and `statuses:read`).
 
 One hard rule: the repo running this workflow must be the same repo whose specs
-were imported into the target Specboard workspace, since spec ids resolve from
+were imported into the target Specboards workspace, since spec ids resolve from
 that repo's `specs/**/spec.md` frontmatter.

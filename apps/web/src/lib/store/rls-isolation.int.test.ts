@@ -13,7 +13,7 @@ import { DbStore } from "./db";
  * "make database tenant isolation fail closed").
  *
  * Setup mirrors production: tables owned by the migration role, a non-owner
- * application role (like `specboard_app`) granted DML but constrained by the
+ * application role (like `specboards_app`) granted DML but constrained by the
  * RLS policies from migrations 0002/0012+, and `DbStore` connecting as that
  * role. Two workspaces with one member each; every assertion tries to reach
  * across the boundary and must come back empty-handed.

@@ -53,7 +53,7 @@ async function updateLinksFromEntityEvent(
  * reconciles its specs into `features` + `spec_index`.
  *
  * Writes go through the dedicated worker connection (`getWorkerDb()`), the
- * narrow non-owner `specboard_worker` role: this is cross-workspace ingestion
+ * narrow non-owner `specboards_worker` role: this is cross-workspace ingestion
  * with no per-user scope, but it no longer needs the broad owner connection.
  * Non-actionable deliveries (ping, other branches, no matching spec changes)
  * return 2xx so GitHub marks them handled.

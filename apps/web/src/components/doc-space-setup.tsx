@@ -30,8 +30,8 @@ export interface GithubSetupState {
 
 /**
  * First-run chooser for where an area's docs live: link out to an external
- * repository (SharePoint, Box, ...), keep pages in Specboard, or create a
- * GitHub repo of Markdown that Specboard edits and commits back. Rendered
+ * repository (SharePoint, Box, ...), keep pages in Specboards, or create a
+ * GitHub repo of Markdown that Specboards edits and commits back. Rendered
  * until the team picks, and again when they choose "Change source".
  */
 export function DocSpaceSetup({
@@ -150,7 +150,7 @@ export function DocSpaceSetup({
                 <p className="text-sm font-medium">Connect an external repository</p>
                 <p className="text-sm text-muted-foreground">
                   Your team already keeps {areaLabel.toLowerCase()} in SharePoint, Box,
-                  Confluence, or similar. Specboard links out to it.
+                  Confluence, or similar. Specboards links out to it.
                 </p>
               </div>
               <div className="flex gap-2">
@@ -176,7 +176,7 @@ export function DocSpaceSetup({
             <FileText className="mt-0.5 h-5 w-5 text-muted-foreground" aria-hidden />
             <div className="flex-1 space-y-2">
               <div>
-                <p className="text-sm font-medium">Keep it in Specboard</p>
+                <p className="text-sm font-medium">Keep it in Specboards</p>
                 <p className="text-sm text-muted-foreground">
                   Write and organize pages right here, with folders and rich text
                   editing.
@@ -187,7 +187,7 @@ export function DocSpaceSetup({
                 onClick={() => void choose("local")}
                 disabled={busy !== null}
               >
-                {busy === "local" ? "Setting up…" : "Use Specboard"}
+                {busy === "local" ? "Setting up…" : "Use Specboards"}
               </Button>
             </div>
           </div>

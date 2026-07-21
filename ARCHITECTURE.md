@@ -1,8 +1,8 @@
-# Specboard Architecture
+# Specboards Architecture
 
-Specboard is a lightweight, spec-based product-management layer for teams doing
+Specboards is a lightweight, spec-based product-management layer for teams doing
 **spec-driven development**. Specs live as markdown in your git repo (canonical,
-versioned with code, read by AI coding agents). Specboard layers the _product_
+versioned with code, read by AI coding agents). Specboards layers the _product_
 metadata **on top** of those specs (status, assignment, backlog order, releases,
 admin-defined custom properties, and a rich-text details body) so PM, UX, and
 engineering can collaborate without editing files in a terminal and without
@@ -17,7 +17,7 @@ Think of it as a spec-native, lightweight ProductBoard / JIRA / Aha!.
 - **JIRA / Aha / ProductBoard** are heavyweight and disconnected from the actual specs,
   forcing duplicate authoring and brittle syncs.
 
-Specboard keeps **spec content in git** and **metadata in a database**, joined by a
+Specboards keeps **spec content in git** and **metadata in a database**, joined by a
 stable spec id.
 
 ## System of record
@@ -132,7 +132,7 @@ Next.js web app  ── apps/web           MCP server ── apps/mcp
 ## Multi-tenancy
 
 `workspace` is the tenant root; every tenant row carries `workspace_id` and Postgres
-**RLS** isolates tenants (`specboard_is_member(workspace_id)` via the
+**RLS** isolates tenants (`specboards_is_member(workspace_id)` via the
 `app.user_id` transaction-local session variable set by the app).
 SaaS = many workspaces on shared infra; self-host = a single workspace.
 
@@ -172,7 +172,7 @@ When `DATABASE_URL` is unset, `apps/web` swaps its store implementation
 (`apps/web/src/lib/store`) for a filesystem-backed one: specs are read directly
 from this repo's `specs/` directory and metadata persists to
 `.specboards/local-metadata.json`. Same UI, zero infrastructure, useful for UI
-testing and for dogfooding Specboard on its own specs. Postgres mode is the
+testing and for dogfooding Specboards on its own specs. Postgres mode is the
 deployment shape.
 
 ## Status
@@ -194,4 +194,4 @@ feature linking: attach a PR/issue/branch to a feature, rolled up to parents,
 with live state refresh via the webhook. Still
 stubbed: editing spec content from the UI (PR write-back), spec **deletion**
 handling. See `docs/archive/PLAN.md` for the original build plan, `docs/BACKLOG.md`
-for where the backlog now lives (in Specboard), and `docs/RUNBOOK-github-sync.md` for setup.
+for where the backlog now lives (in Specboards), and `docs/RUNBOOK-github-sync.md` for setup.

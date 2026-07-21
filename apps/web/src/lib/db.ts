@@ -23,7 +23,7 @@ let workerDb: Database | null | undefined;
  * workspace with no per-user scope, so they can't use the RLS-scoped app
  * connection (`getStore()`); historically they ran on the owner connection,
  * which bypasses RLS. They now connect as the dedicated non-owner
- * `specboard_worker` role via `DATABASE_URL_WORKER`, which is granted only the
+ * `specboards_worker` role via `DATABASE_URL_WORKER`, which is granted only the
  * handful of tables those paths touch and carries role-targeted RLS policies
  * for the cross-workspace access they need (see `infra/worker-role.sql`).
  *

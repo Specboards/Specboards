@@ -323,6 +323,13 @@
       "when": 1784604426149,
       "tag": "0045_real_vertigo",
       "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1784651254711,
+      "tag": "0046_rebrand_specboard_to_specboards",
+      "breakpoints": true
     }
   ]
 }

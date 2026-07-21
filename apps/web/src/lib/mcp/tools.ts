@@ -20,7 +20,7 @@ import { getStore, type WorkspaceScope } from "@/lib/store";
 import { type MemberRole } from "@/lib/workspace";
 
 /**
- * The MCP tools Specboard exposes to coding agents. Each tool is a thin adapter
+ * The MCP tools Specboards exposes to coding agents. Each tool is a thin adapter
  * over the same service layer the REST API uses (`features-service`, the
  * `store`), so authorization, the status workflow, stage gates, and webhook
  * emission all behave identically to the web app - no logic is duplicated here.

@@ -18,7 +18,7 @@ import {
 } from "drizzle-orm/pg-core";
 
 /**
- * Specboard data model. Spec *content* is canonical in git; this DB holds the
+ * Specboards data model. Spec *content* is canonical in git; this DB holds the
  * *metadata* (status/assignment/priority/ordering) plus a cached index of spec
  * content for fast boards and querying. Every tenant-scoped row carries
  * `workspaceId` so Postgres RLS can isolate tenants (see migrations).
@@ -391,7 +391,7 @@ export const operationLimits = pgTable("operation_limits", {
 /**
  * A pending GitHub App install flow, created when an owner clicks "Connect
  * GitHub" and consumed by the OAuth identity callback that completes the bind.
- * This is the server-side source of truth tying the CSRF nonce, the Specboard
+ * This is the server-side source of truth tying the CSRF nonce, the Specboards
  * session, the workspace, and (after the setup callback) the returned
  * installation together; possession of the nonce alone never binds anything.
  * Rows are short-lived (expiresAt) and single-use. Flow state, not tenant
@@ -407,7 +407,7 @@ export const githubInstallStates = pgTable(
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
     /**
-     * The Specboard user who started the flow; only they may complete it.
+     * The Specboards user who started the flow; only they may complete it.
      * No FK for the same reason as `members.user_id` (auth-disabled self-host).
      */
     userId: uuid("user_id").notNull(),
@@ -1583,7 +1583,7 @@ export const outboxEvents = pgTable(
 /**
  * Where a product keeps the docs for one Plan-section area ("strategy",
  * "research", or "architecture"): one row per (product, area). `mode` is the
- * team's choice for that area: `local` (pages live in Specboard, see
+ * team's choice for that area: `local` (pages live in Specboards, see
  * `doc_pages`), `external` (an outside repository like SharePoint or Box that
  * we only link out to via `externalUrl`), or `github` (a GitHub repo of
  * Markdown files, `repoId`; edit-and-commit is a later slice). Absent row =

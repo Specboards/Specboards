@@ -31,7 +31,7 @@ function createRepoErrorMessage(err: unknown, name: string, org: string): string
   }
   if (status === 403 || status === 404) {
     return (
-      "The Specboard GitHub App isn't allowed to create repositories yet. " +
+      "The Specboards GitHub App isn't allowed to create repositories yet. " +
       "Approve its updated permissions (repository Administration) on GitHub, then try again."
     );
   }
@@ -167,7 +167,7 @@ export async function POST(req: Request) {
       created = await createInstallationOrgRepository(app, installation.installationId, {
         org: account.login,
         name,
-        description: `${area === "architecture" ? "Architecture" : "Research"} docs, edited in Specboard`,
+        description: `${area === "architecture" ? "Architecture" : "Research"} docs, edited in Specboards`,
       });
     } catch (err) {
       console.error(`[github] failed to create repository ${account.login}/${name}:`, err);

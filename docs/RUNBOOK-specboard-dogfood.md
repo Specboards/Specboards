@@ -1,6 +1,6 @@
-# Runbook: Specboard for Specboard (dogfooding)
+# Runbook: Specboards for Specboards (dogfooding)
 
-We track Specboard's own development in Specboard, driven from the CLI so status
+We track Specboards' own development in Specboards, driven from the CLI so status
 follows the actual work instead of being updated by hand.
 
 ## The loop

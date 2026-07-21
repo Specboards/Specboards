@@ -107,7 +107,7 @@ export function ApiKeysCard({ initialKeys }: { initialKeys: ApiKeyView[] }) {
       <CardHeader>
         <CardTitle>API keys</CardTitle>
         <CardDescription>
-          Personal keys for the Specboard CLI and programmatic access. Each key
+          Personal keys for the Specboards CLI and programmatic access. Each key
           acts as you and inherits your workspace role. The full key is shown
           once, at creation. Send it as the <code>x-api-key</code> header.
         </CardDescription>
@@ -205,7 +205,7 @@ export function ApiKeysCard({ initialKeys }: { initialKeys: ApiKeyView[] }) {
             <EmptyState
               variant="inline"
               title="No API keys yet"
-              description="API keys let the Specboard CLI and scripts act as you, with your workspace role. The full key is shown once, at creation."
+              description="API keys let the Specboards CLI and scripts act as you, with your workspace role. The full key is shown once, at creation."
               action={
                 <Button
                   size="sm"

@@ -8,7 +8,7 @@
 
 ## 1. Goal & non-goals
 
-**Goal.** Extend Specboard's onboarding so a new workspace can choose how it wants specs
+**Goal.** Extend Specboards' onboarding so a new workspace can choose how it wants specs
 organized. If it wants the **Spec Hub** model (one repo holds specs + a manifest
 pointing at service repos), it should get there with as little manual setup as possible. The flow
 should: (a) ask the user what **setup style** they want, (b) **detect** whether they
@@ -16,7 +16,7 @@ already have a spec hub, and (c) if not, **offer to create one** by scaffolding 
 into an existing connected repo.
 
 **Non-goals (this iteration).**
-- **Creating a brand-new GitHub repo** from inside Specboard. Our GitHub App today only
+- **Creating a brand-new GitHub repo** from inside Specboards. Our GitHub App today only
   has `contents: write`, `pull_requests: write`, `metadata: read`
   (`apps/web/src/app/api/v1/github/app/create/route.ts`). Creating a repo needs
   `Administration: write`, a permission bump that triggers re-consent for every existing
@@ -224,7 +224,7 @@ this is out of scope here. See the memo's "recommendation" and "open questions" 
 - **Manifest schema:** `ref` pinning, optional `path`, and how/whether to validate that
   referenced repos are also connected to the workspace.
 - **Deferred: create-new-repo.** Revisit the `Administration: write` permission bump if
-  users want Specboard to stand up the hub repo itself.
+  users want Specboards to stand up the hub repo itself.
 
 ---
 

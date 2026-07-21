@@ -5,9 +5,9 @@ import { getRepoFiles, resetFixture, setRepoFiles } from "./helpers/github";
 
 /**
  * The Plan section: the restructured Plan / Build / Ship sidebar plus the new
- * doc areas. Strategy holds Specboard pages with autosaving rich-text editing;
+ * doc areas. Strategy holds Specboards pages with autosaving rich-text editing;
  * Research (and Architecture) first choose a doc source: an external
- * repository we link out to, or pages held in Specboard. The workspace has the
+ * repository we link out to, or pages held in Specboards. The workspace has the
  * single default product, so the `all` product segment resolves to it.
  */
 test.describe("plan section: nav, strategy pages, research source", () => {
@@ -68,7 +68,7 @@ test.describe("plan section: nav, strategy pages, research source", () => {
     await expect(page.getByRole("button", { name: "Archive" })).toBeVisible();
   });
 
-  test("research: connect external, link out, then switch to Specboard", async ({
+  test("research: connect external, link out, then switch to Specboards", async ({
     page,
   }) => {
     const ws = await getWorkspace();
@@ -89,9 +89,9 @@ test.describe("plan section: nav, strategy pages, research source", () => {
       "https://example.sharepoint.com/sites/research",
     );
 
-    // Switch the source to Specboard-held pages and create the first page.
+    // Switch the source to Specboards-held pages and create the first page.
     await page.getByRole("button", { name: "Change source" }).click();
-    await page.getByRole("button", { name: "Use Specboard" }).click();
+    await page.getByRole("button", { name: "Use Specboards" }).click();
     await page.getByRole("button", { name: "New page" }).click();
     await page.getByLabel("New page title").fill("User interviews");
     await page.keyboard.press("Enter");
@@ -202,6 +202,6 @@ test.describe("plan section: nav, strategy pages, research source", () => {
     await expect(
       page.getByText("Where does your architecture live?"),
     ).toBeVisible();
-    await expect(page.getByRole("button", { name: "Use Specboard" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Use Specboards" })).toBeVisible();
   });
 });

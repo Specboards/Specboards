@@ -104,7 +104,7 @@ export async function GET(req: Request) {
   }
 
   // One installation serving several workspaces can be legitimate (the same
-  // GitHub org backing two Specboard orgs), but it is also what a takeover
+  // GitHub org backing two Specboards orgs), but it is also what a takeover
   // would look like, so make it loud. Authorization is the check above, not
   // this signal.
   const elsewhere = await db

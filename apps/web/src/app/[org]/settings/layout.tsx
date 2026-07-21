@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 
 import { SettingsNav } from "@/components/settings-nav";
 
-export const metadata = { title: "Settings · Specboard" };
+export const metadata = { title: "Settings · Specboards" };
 
 /** Shell for the Settings section: a heading plus the sub-nav and content. */
 export default function SettingsLayout({ children }: { children: ReactNode }) {

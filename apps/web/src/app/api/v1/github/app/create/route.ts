@@ -49,8 +49,8 @@ export async function GET(req: Request) {
   }
 
   // On the hosted (multi-tenant) deployment, GitHub is a single shared App that
-  // Specboard owns and configures via env — tenants install it, never create
-  // one. Creating here would both hit GitHub's reserved-name wall ("Specboard"
+  // Specboards owns and configures via env — tenants install it, never create
+  // one. Creating here would both hit GitHub's reserved-name wall ("Specboards"
   // is reserved for @specboard) and overwrite the deployment-wide singleton
   // credentials. The manifest flow is self-host only.
   if (isMultiTenant()) {
@@ -66,11 +66,11 @@ export async function GET(req: Request) {
   const nonce = newSetupNonce();
 
   // GitHub App names are globally unique and GitHub reserves the bare name
-  // "Specboard" for the @specboard account, so every self-host App must carry a
+  // "Specboards" for the @specboard account, so every self-host App must carry a
   // distinguishing suffix. Prefer the admin-supplied org name, falling back to
   // this workspace's slug.
   const manifest = {
-    name: `Specboard (${org || slug})`,
+    name: `Specboards (${org || slug})`,
     url: origin,
     hook_attributes: { url: `${origin}/api/webhooks/github`, active: true },
     redirect_url: `${origin}/api/v1/github/app/callback`,
@@ -110,7 +110,7 @@ export async function GET(req: Request) {
 <html>
   <head><meta charset="utf-8"><title>Setting up GitHub…</title></head>
   <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;padding:40px;text-align:center;color:#444;">
-    <p>Redirecting you to GitHub to create the Specboard app…</p>
+    <p>Redirecting you to GitHub to create the Specboards app…</p>
     <form id="f" method="post" action="${action}?state=${nonce}">
       <input type="hidden" name="manifest" id="m">
       <noscript><button type="submit">Continue to GitHub</button></noscript>

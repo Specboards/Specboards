@@ -14,7 +14,7 @@ const MAX_BATCH = 50;
  *  - OAuth: an unauthenticated request gets 401 + WWW-Authenticate, the
  *    client discovers the authorization server (Better Auth mcp plugin),
  *    registers itself, and sends the user through sign-in + consent.
- *  - A personal Specboard API key: Authorization: Bearer sb_...
+ *  - A personal Specboards API key: Authorization: Bearer sb_...
  *
  * One endpoint serves both self-host and SaaS. Tools call the same service
  * layer as /api/v1, so auth, the status workflow, and webhooks all match the
@@ -99,7 +99,7 @@ export async function POST(req: Request) {
 /** SSE server-to-client streaming is unused; the endpoint is POST-only. */
 export function GET() {
   return new Response(
-    "This is a Specboard MCP endpoint. Connect with an MCP client over POST " +
+    "This is a Specboards MCP endpoint. Connect with an MCP client over POST " +
       "(Streamable HTTP); authenticate via OAuth (the client prompts you to " +
       "sign in) or an Authorization: Bearer sb_... API key.",
     { status: 405, headers: { Allow: "POST" } },
