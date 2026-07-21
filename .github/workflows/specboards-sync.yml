@@ -1,4 +1,4 @@
-# Dogfooding loop: keep Specboard work items in sync with this repo's PRs.
+# Dogfooding loop: keep Specboards work items in sync with this repo's PRs.
 #   - PR opened / updated  -> touched specs go in_progress and the PR is linked
 #   - PR merged            -> touched specs go done
 # "Touched specs" = changed specs/**/spec.md, plus any `Spec: <id>` trailer in
@@ -7,9 +7,9 @@
 #
 # This is the monorepo-native version (builds the CLI from source). Once
 # @specboards/cli is published to npm, switch this to a thin caller of
-# .github/workflows/specboard-sync-reusable.yml (which runs the published CLI
+# .github/workflows/specboards-sync-reusable.yml (which runs the published CLI
 # via npx), to dogfood the same reusable workflow customers use.
-name: Specboard Sync
+name: Specboards Sync
 
 on:
   pull_request:
@@ -17,7 +17,7 @@ on:
 
 # Latest event per PR wins; cancel a superseded run.
 concurrency:
-  group: specboard-sync-${{ github.event.pull_request.number }}
+  group: specboards-sync-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:

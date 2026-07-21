@@ -8,7 +8,7 @@ follows the actual work instead of being updated by hand.
 | Trigger | Effect |
 | --- | --- |
 | Push a feature branch (local `pre-push` hook) | Touched specs go `in_progress` |
-| Open / update a PR (CI: `specboard-sync.yml`) | Touched specs go `in_progress`, the PR is linked |
+| Open / update a PR (CI: `specboards-sync.yml`) | Touched specs go `in_progress`, the PR is linked |
 | Merge the PR (CI) | Touched specs go `done` |
 
 "Touched specs" = any changed `specs/**/spec.md` (resolved by its frontmatter
@@ -48,7 +48,7 @@ In the GitHub repo settings, add:
   `https://test.specboards.ai` while validating).
 - `SPECBOARDS_TOKEN` - the `sb_…` API key.
 
-Without both, `specboard-sync.yml` no-ops, so forks and outside contributors are
+Without both, `specboards-sync.yml` no-ops, so forks and outside contributors are
 unaffected.
 
 ### 3. Local hooks (per clone, optional)
@@ -69,8 +69,8 @@ git push`.
 - `apps/cli/` - the `specboards` CLI.
 - `scripts/specboards/resolve-spec-ids.sh` - maps a diff / PR body to spec ids.
 - `scripts/specboards/sync-pr.sh` - the CI sync logic (in_progress/link/done).
-- `.github/workflows/specboard-sync.yml` - runs sync-pr.sh on PR events.
-- `.github/workflows/specboard-sync-reusable.yml` - the reusable (`workflow_call`)
+- `.github/workflows/specboards-sync.yml` - runs sync-pr.sh on PR events.
+- `.github/workflows/specboards-sync-reusable.yml` - the reusable (`workflow_call`)
   version other repos enable with a ~5-line caller (runs the published CLI via
   `npx`); see `apps/cli/README.md`.
 - `.githooks/pre-push` + `scripts/specboards/install-hooks.sh` - the local hook.

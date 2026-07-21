@@ -1,7 +1,7 @@
 # Publish @specboards/cli to npm when a `cli-v*` tag is pushed (e.g. cli-v0.21.0).
 # A dedicated tag prefix keeps the CLI's release cadence independent of the app's
 # `v*` release tags. Requires the NPM_TOKEN repo secret (an npm automation token
-# with publish rights to the @specboard scope).
+# with publish rights to the @specboards scope).
 name: Publish CLI
 
 on:

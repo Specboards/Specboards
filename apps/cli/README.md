@@ -85,7 +85,7 @@ specboards link "$SPEC_ID" --pr "$PR_NUMBER"
 
 To keep work items in step with your PRs (opened -> `in_progress` + PR link,
 merged -> `done`), call the reusable workflow from your repo. Add
-`.github/workflows/specboard-sync.yml`:
+`.github/workflows/specboards-sync.yml`:
 
 ```yaml
 name: Specboard Sync
@@ -94,7 +94,7 @@ on:
     types: [opened, reopened, synchronize, closed]
 jobs:
   sync:
-    uses: Specboards/Specboards/.github/workflows/specboard-sync-reusable.yml@main
+    uses: Specboards/Specboards/.github/workflows/specboards-sync-reusable.yml@main
     secrets:
       SPECBOARDS_URL: ${{ secrets.SPECBOARDS_URL }}
       SPECBOARDS_TOKEN: ${{ secrets.SPECBOARDS_TOKEN }}

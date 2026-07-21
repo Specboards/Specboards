@@ -9,7 +9,7 @@ import type { ProductRole, WorkspaceScope } from "@/lib/store/types";
 
 /**
  * Service (bot) accounts: non-human workspace members for automation like the
- * `specboard-sync` CI loop. A service account is a real `users` row with no
+ * `specboards-sync` CI loop. A service account is a real `users` row with no
  * login credentials (so it can never sign in) plus a `members` row with the
  * `service` role, so its activity (status changes, PR links, comments) is
  * attributed to a clearly-labelled identity instead of a human admin.
