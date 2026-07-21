@@ -6,6 +6,8 @@ uses, authenticating with a personal API key.
 
 ## Install
 
+Once the package is published to npm (and the Homebrew tap is set up):
+
 ```bash
 # npm (run without installing)
 npx @specboard/cli whoami
@@ -18,7 +20,7 @@ specboard help
 brew install specboard/tap/specboard
 ```
 
-### From the monorepo (development)
+### From the monorepo (development, works today)
 
 ```bash
 pnpm --filter @specboard/cli build

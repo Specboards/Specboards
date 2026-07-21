@@ -42,3 +42,13 @@ one gets its own version. Before shipping to `app.specboard.ai`:
 
 Keep the tag, the `CHANGELOG.md` heading, and the `package.json` version
 identical for a given release.
+
+## Publishing the CLI to npm
+
+`@specboard/cli` shares the single monorepo version but publishes to npm on its
+own trigger: pushing a `cli-v<version>` tag (e.g. `cli-v0.21.0`) runs
+`.github/workflows/cli-release.yml`, which verifies the tag matches
+`apps/cli/package.json`, builds, tests, and `pnpm publish`es. Publishing is
+therefore decoupled from a production deploy - tag `cli-v*` only when you want a
+new npm release of the CLI, using the same version number as the rest of the
+monorepo. See `packaging/homebrew/README.md` for the matching Homebrew step.

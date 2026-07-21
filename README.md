@@ -168,9 +168,15 @@ node apps/cli/dist/index.js help
 specboard auth login --url https://app.specboard.ai   # paste an sb_… key
 specboard whoami
 specboard features --mine --status in_progress
-specboard status <specId> in_review
+specboard status <specId> in_review --advance         # walk intermediate stages
 specboard link <specId> --pr 42
 ```
+
+Once published, the CLI installs without the monorepo via `npx @specboard/cli`,
+`npm i -g @specboard/cli`, or `brew install specboard/tap/specboard`. The full
+REST surface it drives is described by an OpenAPI document at
+`/api/v1/openapi.json`, and API keys can be scoped (`<resource>:read` /
+`<resource>:write`).
 
 See [`apps/cli/README.md`](./apps/cli/README.md) for the full command list.
 
