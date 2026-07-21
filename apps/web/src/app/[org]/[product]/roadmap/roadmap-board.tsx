@@ -56,6 +56,8 @@ export type RoadmapColumn = {
   name: string;
   startDate: string | null;
   targetDate: string | null;
+  /** Actual ship date (YYYY-MM-DD) for shipped releases; null otherwise. */
+  shippedDate: string | null;
   status: string | null;
   /** The full release record (for the detail panel); null for Unscheduled. */
   release: ReleaseRecord | null;
@@ -244,9 +246,16 @@ function Column({
   const { setNodeRef, isOver } = useDroppable({
     id: `${COL_PREFIX}${column.releaseId ?? UNSCHEDULED}`,
   });
-  const dates = formatReleaseDates(column.startDate, column.targetDate);
+  // Shipped columns lead with the actual ship date ("Shipped 2026-07-20"); the
+  // planned range stays available in the detail panel. Everything else shows its
+  // planned start → target range plus any non-default status.
+  const shipped = column.status === "shipped";
+  const dates =
+    shipped && column.shippedDate
+      ? `Shipped ${column.shippedDate}`
+      : formatReleaseDates(column.startDate, column.targetDate);
   const statusLabelText =
-    column.status && column.status !== "planned"
+    column.status && column.status !== "planned" && !(shipped && column.shippedDate)
       ? (RELEASE_STATUS_LABELS[column.status] ?? column.status)
       : null;
 

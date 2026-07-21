@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -19,6 +19,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { ListChecks } from "lucide-react";
 import { toast } from "sonner";
 
 import type { StatusWorkflow } from "@specboard/core";
@@ -27,16 +28,21 @@ import { FeatureCard, type ProductTag } from "@/components/feature-card";
 import { FeatureEditSheet } from "@/components/feature-edit-sheet";
 import { StatusDot } from "@/components/status-dot";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { AuthRequiredError, patchFeature } from "@/lib/api-client";
 import {
+  compareByRiceScore,
   rankBetween,
   sortBoardCards,
   statusLabel,
   statusOptions,
+  type SortMode,
 } from "@/lib/feature-helpers";
 import type { FeatureRecord, ReleaseRecord } from "@/lib/store/types";
+import { cn } from "@/lib/utils";
 
 import { useBoardPrefs } from "./board-prefs";
+import { BulkActionBar, type BulkOptions } from "./bulk-action-bar";
 
 const COL_PREFIX = "col:";
 
@@ -54,10 +60,14 @@ export function BoardClient({
   memberNames,
   releases,
   productsById,
+  bulkOptions,
+  sortMode = "default",
 }: {
   features: FeatureRecord[];
   columns: string[];
   workflow: StatusWorkflow;
+  /** How to order cards within each column: manual rank, or by RICE score. */
+  sortMode?: SortMode;
   customFieldLabels: Record<string, string>;
   memberNames: Record<string, string>;
   /** The workspace's releases (for the release badge). */
@@ -65,6 +75,9 @@ export function BoardClient({
   /** Product identity by id, for the per-card attribution badge in the
    * cross-product view. Omitted when the board is scoped to one product. */
   productsById?: Record<string, ProductTag>;
+  /** Option lists for the bulk action bar; enables card multi-select when
+   * provided (editors only). */
+  bulkOptions?: BulkOptions;
 }) {
   const router = useRouter();
   const { cardFields, featured } = useBoardPrefs();
@@ -72,10 +85,39 @@ export function BoardClient({
     Object.fromEntries(features.map((f) => [f.specId, f])),
   );
   const [lists, setLists] = useState<Record<string, string[]>>(() =>
-    groupIntoColumns(features, columns),
+    groupIntoColumns(features, columns, sortMode),
   );
   const [activeId, setActiveId] = useState<string | null>(null);
   const [editingSpecId, setEditingSpecId] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Multi-select is opt-in: checkboxes only appear once the user turns it on, so
+  // they never crowd a card's product tag or title in normal use.
+  const [selectMode, setSelectMode] = useState(false);
+  const canSelect = !!bulkOptions;
+
+  const toggleSelect = useCallback((specId: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(specId)) next.delete(specId);
+      else next.add(specId);
+      return next;
+    });
+  }, []);
+  const clearSelection = useCallback(() => setSelected(new Set()), []);
+  const exitSelect = useCallback(() => {
+    setSelectMode(false);
+    setSelected(new Set());
+  }, []);
+
+  // Esc leaves multi-select entirely.
+  useEffect(() => {
+    if (!selectMode) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") exitSelect();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectMode, exitSelect]);
 
   // Re-seed from the server whenever the data set changes. Every mutation (a
   // field edit in the drawer, a newly created item, a drag we just persisted)
@@ -86,8 +128,8 @@ export function BoardClient({
   // server truth never clobbers an in-flight optimistic drag.
   useEffect(() => {
     setRecords(Object.fromEntries(features.map((f) => [f.specId, f])));
-    setLists(groupIntoColumns(features, columns));
-  }, [features, columns]);
+    setLists(groupIntoColumns(features, columns, sortMode));
+  }, [features, columns, sortMode]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -179,6 +221,20 @@ export function BoardClient({
 
   return (
     <>
+      {canSelect ? (
+        <div className="mb-2 flex justify-end">
+          <Button
+            type="button"
+            size="sm"
+            variant={selectMode ? "secondary" : "outline"}
+            onClick={() => (selectMode ? exitSelect() : setSelectMode(true))}
+            className="h-8 gap-1.5"
+          >
+            <ListChecks className="h-4 w-4" />
+            {selectMode ? "Done" : "Select"}
+          </Button>
+        </div>
+      ) : null}
       <DndContext
         sensors={sensors}
         collisionDetection={closestCorners}
@@ -200,6 +256,9 @@ export function BoardClient({
               releaseNames={releaseNames}
               onOpen={setEditingSpecId}
               productsById={productsById}
+              selectMode={selectMode}
+              selected={selected}
+              onToggleSelect={toggleSelect}
             />
           ))}
         </div>
@@ -226,6 +285,14 @@ export function BoardClient({
         specId={editingSpecId}
         onClose={() => setEditingSpecId(null)}
       />
+      {selectMode && bulkOptions ? (
+        <BulkActionBar
+          selectedIds={[...selected]}
+          options={bulkOptions}
+          onClear={clearSelection}
+          onExit={exitSelect}
+        />
+      ) : null}
     </>
   );
 }
@@ -242,6 +309,9 @@ function Column({
   releaseNames,
   onOpen,
   productsById,
+  selectMode,
+  selected,
+  onToggleSelect,
 }: {
   status: string;
   workflow: StatusWorkflow;
@@ -254,6 +324,9 @@ function Column({
   releaseNames: Record<string, string>;
   onOpen: (specId: string) => void;
   productsById?: Record<string, ProductTag>;
+  selectMode: boolean;
+  selected: Set<string>;
+  onToggleSelect: (specId: string) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `${COL_PREFIX}${status}` });
   return (
@@ -275,18 +348,42 @@ function Column({
             if (!record) return null;
             return (
               <SortableCard key={id} id={id}>
-                <FeatureCard
-                  feature={record}
-                  fields={cardFields}
-                  featured={featured}
-                  customFieldLabels={customFieldLabels}
-                  memberNames={memberNames}
-                  releaseNames={releaseNames}
-                  onOpen={() => onOpen(id)}
-                  product={
-                    record.productId ? productsById?.[record.productId] : undefined
-                  }
-                />
+                {/* In select mode the checkbox sits in a left gutter beside the
+                    card (not over it), so it never overlaps the product tag or
+                    title. stopPropagation keeps a checkbox click from starting a
+                    drag or opening the card. */}
+                <div className="flex items-start gap-1.5">
+                  {selectMode ? (
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${record.title}`}
+                      className="mt-3 h-4 w-4 shrink-0 cursor-pointer accent-primary"
+                      checked={selected.has(id)}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={() => onToggleSelect(id)}
+                    />
+                  ) : null}
+                  <div
+                    className={cn(
+                      "min-w-0 flex-1 rounded-md",
+                      selected.has(id) && "ring-2 ring-primary",
+                    )}
+                  >
+                    <FeatureCard
+                      feature={record}
+                      fields={cardFields}
+                      featured={featured}
+                      customFieldLabels={customFieldLabels}
+                      memberNames={memberNames}
+                      releaseNames={releaseNames}
+                      onOpen={() => onOpen(id)}
+                      product={
+                        record.productId ? productsById?.[record.productId] : undefined
+                      }
+                    />
+                  </div>
+                </div>
               </SortableCard>
             );
           })}
@@ -322,17 +419,24 @@ function arraysEqual(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((v, i) => v === b[i]);
 }
 
-/** Group features into per-status ordered specId lists (board order). */
+/** Group features into per-status ordered specId lists (board order). Cards sort
+ * by manual rank by default, or by RICE score (highest first) when requested. */
 function groupIntoColumns(
   features: FeatureRecord[],
   columns: string[],
+  sortMode: SortMode = "default",
 ): Record<string, string[]> {
   const byStatus = new Map<string, FeatureRecord[]>();
   for (const c of columns) byStatus.set(c, []);
   for (const f of features) byStatus.get(f.status)?.push(f);
   const out: Record<string, string[]> = {};
   for (const c of columns) {
-    out[c] = sortBoardCards(byStatus.get(c) ?? []).map((f) => f.specId);
+    const cards = byStatus.get(c) ?? [];
+    const ordered =
+      sortMode === "rice"
+        ? [...cards].sort(compareByRiceScore)
+        : sortBoardCards(cards);
+    out[c] = ordered.map((f) => f.specId);
   }
   return out;
 }

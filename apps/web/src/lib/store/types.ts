@@ -56,6 +56,16 @@ export interface FeatureRecord {
   assigneeId: string | null;
   /** Values keyed by custom-property key (see PropertyDef). */
   customFields: Record<string, CustomFieldValue>;
+  /** RICE reach input, or null when unset. */
+  riceReach: number | null;
+  /** RICE impact multiplier (3/2/1/0.5/0.25), or null when unset. */
+  riceImpact: number | null;
+  /** RICE confidence as a whole percentage (0-100), or null when unset. */
+  riceConfidence: number | null;
+  /** RICE effort in person-months (> 0), or null when unset. */
+  riceEffort: number | null;
+  /** Derived RICE score; null until all four inputs are set. Read-only. */
+  riceScore: number | null;
   /** Spec path relative to the repo root. */
   path: string;
   /** Number of features that block this one (drives the "blocked" badge). */
@@ -188,6 +198,10 @@ export type FeaturePatch = Partial<
     | "assigneeId"
     | "customFields"
     | "parentSpecId"
+    | "riceReach"
+    | "riceImpact"
+    | "riceConfidence"
+    | "riceEffort"
   >
 > & {
   /** Markdown body for a DB-native item; ignored for spec-backed items. */
@@ -451,6 +465,9 @@ export interface ReleaseRecord {
   startDate: string | null;
   /** Target ship date as YYYY-MM-DD, or null when undated. */
   targetDate: string | null;
+  /** The date the release actually shipped (YYYY-MM-DD), stamped when it first
+   * transitions to `shipped` and cleared on reopen. Null while unshipped. */
+  shippedDate: string | null;
   /** Free-form release notes (Markdown), or null. */
   notes: string | null;
   /** Count of items scheduled into this release. */
@@ -554,6 +571,27 @@ export function compareReleases(
     if (a.targetDate === null) return 1;
     if (b.targetDate === null) return -1;
     return a.targetDate < b.targetDate ? -1 : 1;
+  }
+  return a.name.localeCompare(b.name);
+}
+
+/**
+ * Order shipped releases newest-first (most recently shipped on the left), the
+ * inverse of the planned ordering: the latest release users shipped is what they
+ * most want to reach, so it shouldn't sit at the far end of a long history. Sorts
+ * by the actual ship date (falling back to the planned target date for older
+ * releases with no stamp), most recent first; undated last, then by name.
+ */
+export function compareShippedReleases(
+  a: Pick<ReleaseRecord, "shippedDate" | "targetDate" | "name">,
+  b: Pick<ReleaseRecord, "shippedDate" | "targetDate" | "name">,
+): number {
+  const da = a.shippedDate ?? a.targetDate;
+  const db = b.shippedDate ?? b.targetDate;
+  if (da !== db) {
+    if (da === null) return 1;
+    if (db === null) return -1;
+    return da > db ? -1 : 1;
   }
   return a.name.localeCompare(b.name);
 }

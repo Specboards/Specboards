@@ -650,6 +650,7 @@ export const TOOLS: McpTool[] = [
         status: r.status,
         startDate: r.startDate,
         targetDate: r.targetDate,
+        shippedDate: r.shippedDate,
         notes: r.notes,
         itemCount: r.itemCount,
       }));
@@ -713,6 +714,7 @@ export const TOOLS: McpTool[] = [
         status: release.status,
         startDate: release.startDate,
         targetDate: release.targetDate,
+        shippedDate: release.shippedDate,
         notes: release.notes,
         itemCount: release.itemCount,
       };
@@ -786,6 +788,7 @@ export const TOOLS: McpTool[] = [
         status: release.status,
         startDate: release.startDate,
         targetDate: release.targetDate,
+        shippedDate: release.shippedDate,
         notes: release.notes,
         itemCount: release.itemCount,
       };

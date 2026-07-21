@@ -1,18 +1,8 @@
 "use client";
 
 import {
-  Compass,
-  DraftingCompass,
-  Gauge,
-  KanbanSquare,
-  Lightbulb,
-  Map,
-  Microscope,
   PanelLeftClose,
   PanelLeftOpen,
-  Settings,
-  TrendingUp,
-  type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -22,71 +12,14 @@ import { OrgSwitcher } from "@/components/org-switcher";
 import { ProductSwitcher } from "@/components/product-switcher";
 import { NotificationBell } from "@/components/notification-bell";
 import { SidebarProfile } from "@/components/sidebar-profile";
-import { GROUP_SLUG_PREFIX } from "@/lib/active-product";
+import {
+  buildNavGroups,
+  HIDDEN_PREFIXES,
+  type NavItem,
+} from "@/lib/nav-model";
 import type { ProductGroupRecord, ProductRecord } from "@/lib/store";
 import { useOrgPath, useOrgProductPath, useProductSlug } from "@/lib/use-org";
 import { cn } from "@/lib/utils";
-
-/**
- * Routes reached while signed out (auth + onboarding). The app's content pages
- * redirect signed-out visitors to /sign-in server-side, so the rail never
- * paints for them there; we only need to hide it on these public pages.
- */
-const HIDDEN_PREFIXES = [
-  "/sign-in",
-  "/sign-up",
-  "/setup",
-  "/forgot-password",
-  "/reset-password",
-];
-
-interface NavItem {
-  href?: string;
-  label: string;
-  icon: LucideIcon;
-  /** Renders the item disabled with a "Soon" badge (no route yet). */
-  soon?: boolean;
-  /** Product-scoped area (href is under `/{org}/{product}/…`, not just `/{org}/…`). */
-  productScoped?: boolean;
-}
-
-interface NavGroup {
-  label?: string;
-  items: NavItem[];
-}
-
-const GROUPS: NavGroup[] = [
-  {
-    label: "Plan",
-    items: [
-      { href: "/strategy", label: "Strategy", icon: Compass, productScoped: true },
-      { href: "/research", label: "Research", icon: Microscope, productScoped: true },
-      {
-        href: "/architecture",
-        label: "Architecture",
-        icon: DraftingCompass,
-        productScoped: true,
-      },
-    ],
-  },
-  {
-    label: "Build",
-    items: [
-      { href: "/ideas", label: "Ideas", icon: Lightbulb, productScoped: true },
-      { href: "/backlog", label: "Backlog", icon: KanbanSquare, productScoped: true },
-    ],
-  },
-  {
-    label: "Ship",
-    items: [
-      { href: "/roadmap", label: "Roadmap", icon: Map, productScoped: true },
-      { label: "Adoption", icon: TrendingUp, soon: true },
-    ],
-  },
-  {
-    items: [{ href: "/settings", label: "Settings", icon: Settings }],
-  },
-];
 
 /**
  * Left navigation rail. Renders on every app page so there's no first-paint
@@ -112,22 +45,7 @@ export function AppSidebar({
   // A group scope (`~key` product segment) gets a Dashboard area: the group's
   // management roll-up. Hidden otherwise (for a product or "all" the route
   // just redirects to the backlog).
-  const navGroups = productSlug.startsWith(GROUP_SLUG_PREFIX)
-    ? [
-        {
-          label: "Track",
-          items: [
-            {
-              href: "/dashboard",
-              label: "Dashboard",
-              icon: Gauge,
-              productScoped: true,
-            },
-          ],
-        },
-        ...GROUPS,
-      ]
-    : GROUPS;
+  const navGroups = buildNavGroups(productSlug);
 
   // Collapsed = icon rail (mark + area icons only). Persisted per browser;
   // starts expanded on first paint (matches SSR), then reflects the stored

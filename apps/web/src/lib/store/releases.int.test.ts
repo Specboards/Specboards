@@ -162,6 +162,42 @@ describe.skipIf(!OWNER_URL)("per-product releases (store + RLS)", () => {
     ).rejects.toThrow(ReleaseError);
   });
 
+  it("stamps the actual ship date on ship and clears it on reopen", async () => {
+    const rel = await store.createRelease(
+      { name: "v-ship", productId: product.alpha, targetDate: "2026-08-01" },
+      asAdmin,
+    );
+    expect(rel.shippedDate).toBeNull();
+
+    const shipped = await store.updateRelease(
+      rel.id,
+      { status: "shipped" },
+      asAdmin,
+    );
+    expect(shipped.status).toBe("shipped");
+    expect(shipped.shippedDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    // Planned target date is retained, distinct from the actual ship date.
+    expect(shipped.targetDate).toBe("2026-08-01");
+    const stampedOn = shipped.shippedDate;
+
+    // A later edit that doesn't change status leaves the stamp untouched.
+    const renamed = await store.updateRelease(
+      rel.id,
+      { notes: "shipped it" },
+      asAdmin,
+    );
+    expect(renamed.shippedDate).toBe(stampedOn);
+
+    // Reopening clears the stamp.
+    const reopened = await store.updateRelease(
+      rel.id,
+      { status: "planned" },
+      asAdmin,
+    );
+    expect(reopened.status).toBe("planned");
+    expect(reopened.shippedDate).toBeNull();
+  });
+
   it("only schedules an item into a release from its product or portfolio", async () => {
     const item = await store.createFeature(
       { title: "Alpha epic", level: "epic", productId: product.alpha },

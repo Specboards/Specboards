@@ -14,6 +14,7 @@ import {
   Loader,
   Rocket,
   Tags,
+  Target,
   Users,
   type LucideIcon,
 } from "lucide-react";
@@ -25,7 +26,13 @@ import { StatusDot } from "@/components/status-dot";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { isFieldAvailable } from "@/lib/card-fields";
-import { statusLabel, statusOptions } from "@/lib/feature-helpers";
+import {
+  computeRiceScore,
+  formatRiceScore,
+  RICE_IMPACT_OPTIONS,
+  statusLabel,
+  statusOptions,
+} from "@/lib/feature-helpers";
 import { cn } from "@/lib/utils";
 import {
   releasesForProduct,
@@ -94,11 +101,31 @@ export function ItemProperties({
   // transitions until the panel is closed and reopened.
   const [statusValue, setStatusValue] = useState(feature.status);
 
+  // RICE inputs are controlled (as strings) so the score can update live as you
+  // type; empty string means "unset". Seeded from the record and re-synced when
+  // it changes.
+  const [rice, setRice] = useState(() => riceStrings(feature));
+
   // Re-sync when the parent hands us a different item, or fresh server truth
   // for the same one (e.g. after a refresh following a save elsewhere).
   useEffect(() => {
     setStatusValue(feature.status);
   }, [feature.status]);
+  useEffect(() => {
+    setRice(riceStrings(feature));
+  }, [
+    feature.specId,
+    feature.riceReach,
+    feature.riceImpact,
+    feature.riceConfidence,
+    feature.riceEffort,
+  ]);
+  const liveScore = computeRiceScore({
+    riceReach: numOrNull(rice.reach),
+    riceImpact: numOrNull(rice.impact),
+    riceConfidence: numOrNull(rice.confidence),
+    riceEffort: numOrNull(rice.effort),
+  });
 
   useEffect(() => {
     return () => {
@@ -146,6 +173,10 @@ export function ItemProperties({
               ),
             }
           : {}),
+        riceReach: numOrNull(rice.reach),
+        riceImpact: numOrNull(rice.impact),
+        riceConfidence: numOrNull(rice.confidence),
+        riceEffort: numOrNull(rice.effort),
       });
       setStatus("saved");
       router.refresh();
@@ -273,6 +304,62 @@ export function ItemProperties({
           />
         </PropertyRow>
       ))}
+
+      <PropertyRow icon={Target} label="RICE">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <label className="flex items-center gap-1 text-xs text-muted-foreground">
+            <span className="sr-only">Reach</span>
+            <Input
+              type="number"
+              min={0}
+              aria-label="Reach"
+              placeholder="Reach"
+              value={rice.reach}
+              onChange={(e) => setRice((r) => ({ ...r, reach: e.target.value }))}
+              className="h-7 w-20 px-2"
+            />
+          </label>
+          <Select
+            aria-label="Impact"
+            value={rice.impact}
+            onChange={(e) => setRice((r) => ({ ...r, impact: e.target.value }))}
+            className="h-7 w-auto px-2"
+          >
+            <option value="">Impact</option>
+            {RICE_IMPACT_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </Select>
+          <Input
+            type="number"
+            min={0}
+            max={100}
+            aria-label="Confidence (%)"
+            placeholder="Conf %"
+            value={rice.confidence}
+            onChange={(e) => setRice((r) => ({ ...r, confidence: e.target.value }))}
+            className="h-7 w-20 px-2"
+          />
+          <Input
+            type="number"
+            min={0}
+            step="0.5"
+            aria-label="Effort (person-months)"
+            placeholder="Effort"
+            value={rice.effort}
+            onChange={(e) => setRice((r) => ({ ...r, effort: e.target.value }))}
+            className="h-7 w-20 px-2"
+          />
+          <span className="ml-1 whitespace-nowrap text-sm">
+            <span className="text-muted-foreground">= </span>
+            <span className="font-medium tabular-nums">
+              {formatRiceScore(liveScore)}
+            </span>
+          </span>
+        </div>
+      </PropertyRow>
 
       {error ? <p className="pt-1 text-xs text-destructive">{error}</p> : null}
       <p
@@ -454,6 +541,13 @@ function ReadOnlyProperties({
           <span className="px-2 py-1 text-sm">{feature.tags.join(", ")}</span>
         </PropertyRow>
       ) : null}
+      {feature.riceScore !== null ? (
+        <PropertyRow icon={Target} label="RICE">
+          <span className="px-2 py-1 text-sm font-medium tabular-nums">
+            {formatRiceScore(feature.riceScore)}
+          </span>
+        </PropertyRow>
+      ) : null}
       {properties.map((property) => {
         const raw = feature.customFields[property.key] ?? null;
         const text = Array.isArray(raw) ? raw.join(", ") : raw == null ? "" : String(raw);
@@ -488,6 +582,29 @@ function ReadOnlyProperties({
 
 function asString(value: CustomFieldValue): string {
   return typeof value === "string" ? value : "";
+}
+
+/** Seed the controlled RICE input strings from a feature's numeric values. */
+function riceStrings(feature: FeatureDetail): {
+  reach: string;
+  impact: string;
+  confidence: string;
+  effort: string;
+} {
+  const s = (n: number | null) => (n === null ? "" : String(n));
+  return {
+    reach: s(feature.riceReach),
+    impact: s(feature.riceImpact),
+    confidence: s(feature.riceConfidence),
+    effort: s(feature.riceEffort),
+  };
+}
+
+/** Parse a RICE input string to a number, or null when empty/invalid. */
+function numOrNull(value: string): number | null {
+  if (value.trim() === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
 }
 
 /**

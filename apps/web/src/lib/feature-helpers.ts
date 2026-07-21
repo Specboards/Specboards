@@ -15,6 +15,72 @@ export function statusLabel(status: string, workflow?: StatusWorkflow): string {
   return status.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
 }
 
+/** The fixed RICE impact scale, most to least impactful. */
+export const RICE_IMPACT_OPTIONS = [
+  { value: 3, label: "Massive (3×)" },
+  { value: 2, label: "High (2×)" },
+  { value: 1, label: "Medium (1×)" },
+  { value: 0.5, label: "Low (0.5×)" },
+  { value: 0.25, label: "Minimal (0.25×)" },
+] as const;
+
+/** Allowed impact multipliers (for validation). */
+export const RICE_IMPACT_VALUES: readonly number[] = RICE_IMPACT_OPTIONS.map(
+  (o) => o.value,
+);
+
+/** The four RICE inputs on a feature (any may be unset). */
+export interface RiceInputs {
+  riceReach: number | null;
+  riceImpact: number | null;
+  riceConfidence: number | null;
+  riceEffort: number | null;
+}
+
+/**
+ * RICE score = Reach × Impact × (Confidence / 100) ÷ Effort. Null unless every
+ * input is present and effort is positive, so a partially-filled feature shows
+ * no misleading score.
+ */
+export function computeRiceScore(i: RiceInputs): number | null {
+  const { riceReach: r, riceImpact: im, riceConfidence: c, riceEffort: e } = i;
+  if (r == null || im == null || c == null || e == null || e <= 0) return null;
+  return (r * im * (c / 100)) / e;
+}
+
+/** The four inputs plus the derived score, for building a FeatureRecord. */
+export function riceFields(i: RiceInputs): RiceInputs & { riceScore: number | null } {
+  return { ...i, riceScore: computeRiceScore(i) };
+}
+
+/** A RICE score as a compact display string ("—" when unscored). */
+export function formatRiceScore(score: number | null): string {
+  if (score == null) return "—";
+  return score.toLocaleString(undefined, { maximumFractionDigits: 1 });
+}
+
+/** Order features by RICE score, highest first; unscored last, then by title. */
+export function compareByRiceScore(
+  a: Pick<FeatureRecord, "riceScore" | "title">,
+  b: Pick<FeatureRecord, "riceScore" | "title">,
+): number {
+  if (a.riceScore !== b.riceScore) {
+    if (a.riceScore == null) return 1;
+    if (b.riceScore == null) return -1;
+    return b.riceScore - a.riceScore;
+  }
+  return a.title.localeCompare(b.title);
+}
+
+/** The backlog sort modes selectable in the UI. */
+export type SortMode = "default" | "rice";
+
+/** Parse an untrusted `sort` search-param value. */
+export function parseSortMode(value: string | string[] | undefined): SortMode {
+  const v = Array.isArray(value) ? value[0] : value;
+  return v === "rice" ? "rice" : "default";
+}
+
 /**
  * Per-status accent for the small dot next to status text (default workflow).
  * Hues track Primer's semantic labels: cool gray for open/neutral, accent blue

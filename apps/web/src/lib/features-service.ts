@@ -8,6 +8,7 @@ import {
   type PropertyDef,
 } from "@specboard/core";
 
+import { RICE_IMPACT_VALUES } from "@/lib/feature-helpers";
 import { resolveWorkflowFor } from "@/lib/repo-config";
 import { notifyOutbox } from "@/lib/webhooks/events";
 import {
@@ -23,6 +24,7 @@ import {
 import {
   RELATION_DIRECTIONS,
   RELEASE_STATUSES,
+  RelationError,
   type CommentInput,
   type CommentRecord,
   type NotificationList,
@@ -112,6 +114,27 @@ export function parseFeaturePatch(body: unknown): FeaturePatch {
   if ("customFields" in raw) {
     patch.customFields = parseCustomFields(raw.customFields);
   }
+  if ("riceReach" in raw) {
+    patch.riceReach = parseRiceNumber(raw.riceReach, "riceReach", { min: 0 });
+  }
+  if ("riceImpact" in raw) {
+    if (raw.riceImpact !== null && !RICE_IMPACT_VALUES.includes(raw.riceImpact as number)) {
+      throw new InvalidPatchError(
+        `riceImpact must be one of ${RICE_IMPACT_VALUES.join(", ")}, or null.`,
+      );
+    }
+    patch.riceImpact = raw.riceImpact as number | null;
+  }
+  if ("riceConfidence" in raw) {
+    const c = parseRiceNumber(raw.riceConfidence, "riceConfidence", { min: 0, max: 100 });
+    if (c !== null && !Number.isInteger(c)) {
+      throw new InvalidPatchError("riceConfidence must be a whole number 0-100, or null.");
+    }
+    patch.riceConfidence = c;
+  }
+  if ("riceEffort" in raw) {
+    patch.riceEffort = parseRiceNumber(raw.riceEffort, "riceEffort", { exclusiveMin: 0 });
+  }
   if ("parentSpecId" in raw) {
     if (raw.parentSpecId !== null && !isUuid(raw.parentSpecId)) {
       throw new InvalidPatchError("parentSpecId must be a UUID or null.");
@@ -140,6 +163,28 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 function isUuid(value: unknown): value is string {
   return typeof value === "string" && UUID_RE.test(value);
+}
+
+/** Validate a RICE numeric input: a finite number within bounds, or null. */
+function parseRiceNumber(
+  value: unknown,
+  field: string,
+  bounds: { min?: number; max?: number; exclusiveMin?: number },
+): number | null {
+  if (value === null) return null;
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new InvalidPatchError(`${field} must be a number or null.`);
+  }
+  if (bounds.min !== undefined && value < bounds.min) {
+    throw new InvalidPatchError(`${field} must be at least ${bounds.min}.`);
+  }
+  if (bounds.exclusiveMin !== undefined && value <= bounds.exclusiveMin) {
+    throw new InvalidPatchError(`${field} must be greater than ${bounds.exclusiveMin}.`);
+  }
+  if (bounds.max !== undefined && value > bounds.max) {
+    throw new InvalidPatchError(`${field} must be at most ${bounds.max}.`);
+  }
+  return value;
 }
 
 /** Validate an untrusted custom-fields map: a flat object of scalar/string[] values. */
@@ -237,6 +282,144 @@ export async function patchFeature(
   if (emit) notifyOutbox(); // nudge the relay so delivery isn't delayed a tick
 
   return updated ?? feature;
+}
+
+/** The fields a bulk edit may set directly. Tags are handled separately (add /
+ * clear) so a mixed selection isn't clobbered by a single replacement; other
+ * per-item concerns (title, rank, parent, details, customFields) are excluded. */
+const BULK_PATCH_KEYS = ["status", "assigneeId", "releaseId"] as const;
+
+/** Cap a single batch so one request can't fan out unbounded work. */
+const BULK_MAX_ITEMS = 200;
+
+/** Tag mutations applied per item as a merge (not a wholesale replace). */
+export interface BulkTagOps {
+  /** Tags to add to each item, deduped against its existing tags. */
+  addTags?: string[];
+  /** Remove every tag from each selected item. */
+  clearTags?: boolean;
+}
+
+export interface BulkPatchRequest {
+  specIds: string[];
+  patch: FeaturePatch;
+  tagOps: BulkTagOps;
+}
+
+/** Outcome for one item in a bulk edit. */
+export interface BulkPatchItemResult {
+  specId: string;
+  ok: boolean;
+  /** Failure reason when `ok` is false (e.g. an illegal status transition). */
+  error?: string;
+}
+
+export interface BulkPatchResult {
+  results: BulkPatchItemResult[];
+  okCount: number;
+  failCount: number;
+}
+
+/** Parse an untrusted bulk-PATCH body: `{ specIds, patch?, addTags?, clearTags? }`.
+ * The direct patch is validated like a single edit then restricted to the
+ * bulk-safe fields; tag ops are validated separately. At least one change must
+ * be requested. */
+export function parseBulkPatchRequest(body: unknown): BulkPatchRequest {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    throw new InvalidPatchError("Request body must be a JSON object.");
+  }
+  const raw = body as Record<string, unknown>;
+  if (!Array.isArray(raw.specIds) || raw.specIds.length === 0) {
+    throw new InvalidPatchError("specIds must be a non-empty array.");
+  }
+  if (raw.specIds.some((s) => typeof s !== "string" || s === "")) {
+    throw new InvalidPatchError("specIds must be non-empty strings.");
+  }
+  const specIds = [...new Set(raw.specIds as string[])];
+  if (specIds.length > BULK_MAX_ITEMS) {
+    throw new InvalidPatchError(
+      `A bulk edit can target at most ${BULK_MAX_ITEMS} items.`,
+    );
+  }
+
+  // The direct patch is optional (a request may be tag-only).
+  let patch: FeaturePatch = {};
+  const rawPatch = raw.patch;
+  if (rawPatch !== undefined && !(typeof rawPatch === "object" && rawPatch !== null && Object.keys(rawPatch).length === 0)) {
+    patch = parseFeaturePatch(rawPatch);
+    const disallowed = Object.keys(patch).filter(
+      (k) => !(BULK_PATCH_KEYS as readonly string[]).includes(k),
+    );
+    if (disallowed.length > 0) {
+      throw new InvalidPatchError(
+        `Bulk edits can only set ${BULK_PATCH_KEYS.join(", ")} (or add/clear tags); not ${disallowed.join(", ")}.`,
+      );
+    }
+  }
+
+  const tagOps: BulkTagOps = {};
+  if ("addTags" in raw && raw.addTags !== undefined) {
+    if (!Array.isArray(raw.addTags) || raw.addTags.some((t) => typeof t !== "string")) {
+      throw new InvalidPatchError("addTags must be an array of strings.");
+    }
+    const cleaned = [...new Set((raw.addTags as string[]).map((t) => t.trim()).filter(Boolean))];
+    if (cleaned.length > 0) tagOps.addTags = cleaned;
+  }
+  if (raw.clearTags === true) tagOps.clearTags = true;
+
+  if (Object.keys(patch).length === 0 && !tagOps.addTags && !tagOps.clearTags) {
+    throw new InvalidPatchError(
+      "A bulk edit must change at least one of: status, assigneeId, releaseId, addTags, clearTags.",
+    );
+  }
+  if (tagOps.clearTags && tagOps.addTags) {
+    throw new InvalidPatchError("clearTags and addTags can't be combined.");
+  }
+  return { specIds, patch, tagOps };
+}
+
+/**
+ * Apply the same change to many items, each in its own transaction (via
+ * {@link patchFeature}) so a rejection on one - an illegal status transition, an
+ * unmet stage gate, a cross-product release - doesn't roll back the others.
+ * Tag ops merge per item (add is deduped against existing tags; clear empties
+ * them). Reuses every single-item guard and outbox emission, and returns a
+ * per-item result so the caller can report exactly what changed.
+ */
+export async function bulkPatchFeatures(
+  specIds: string[],
+  patch: FeaturePatch,
+  tagOps: BulkTagOps,
+  scope?: WorkspaceScope,
+): Promise<BulkPatchResult> {
+  const store = await getStore();
+  const results: BulkPatchItemResult[] = [];
+  for (const specId of specIds) {
+    try {
+      const itemPatch: FeaturePatch = { ...patch };
+      if (tagOps.clearTags) {
+        itemPatch.tags = [];
+      } else if (tagOps.addTags) {
+        const feature = await store.getFeature(specId, scope);
+        if (!feature) throw new FeatureNotFoundError(specId);
+        itemPatch.tags = [...new Set([...feature.tags, ...tagOps.addTags])];
+      }
+      await patchFeature(specId, itemPatch, scope);
+      results.push({ specId, ok: true });
+    } catch (err) {
+      if (
+        err instanceof InvalidPatchError ||
+        err instanceof FeatureNotFoundError ||
+        err instanceof RelationError
+      ) {
+        results.push({ specId, ok: false, error: err.message });
+      } else {
+        throw err; // unexpected: let it surface rather than swallow it per item
+      }
+    }
+  }
+  const okCount = results.filter((r) => r.ok).length;
+  return { results, okCount, failCount: results.length - okCount };
 }
 
 /**

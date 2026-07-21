@@ -15,7 +15,11 @@ import {
   hasActiveFilters,
   parseFeatureFilters,
 } from "@/lib/feature-filters";
-import { sortFeatures } from "@/lib/feature-helpers";
+import {
+  compareByRiceScore,
+  parseSortMode,
+  sortFeatures,
+} from "@/lib/feature-helpers";
 import { resolveWorkflowFor } from "@/lib/repo-config";
 import { getStore } from "@/lib/store";
 import { listWorkspaceMembers } from "@/lib/workspace";
@@ -27,6 +31,7 @@ import {
 import { BacklogFilters, type FilterOptions } from "./backlog-filters";
 import { BacklogTable } from "./backlog-table";
 import { SavedViews } from "./saved-views";
+import { SortControl } from "./sort-control";
 
 /**
  * List view of the backlog: a prioritized table of features. Status edits here
@@ -44,7 +49,9 @@ export async function ListView({
 }) {
   const access = await requireWorkspaceAccess();
   const workflow = await resolveWorkflowFor(access);
-  const filters = parseFeatureFilters(await searchParams);
+  const sp = await searchParams;
+  const filters = parseFeatureFilters(sp);
+  const sort = parseSortMode(sp.sort);
   const store = await getStore();
 
   // Scope to the segment in the URL: a product, a group (`~key`), or `all`.
@@ -111,14 +118,17 @@ export async function ListView({
   };
 
   const filtering = hasActiveFilters(filters);
-  const rows = filtering
-    ? // Filtering flattens the view, so the hierarchy grouping no longer holds
-      // once arbitrary rows are excluded.
-      applyFeatureFilters(features, filters).map((feature) => ({
-        feature,
-        depth: 0,
-      }))
-    : buildHierarchyRows(features);
+  // Filtering or RICE-sorting flattens the view: excluding arbitrary rows, or
+  // ranking by score, both break the parent→child hierarchy grouping.
+  const base = filtering ? applyFeatureFilters(features, filters) : features;
+  const rows =
+    sort === "rice"
+      ? [...base]
+          .sort(compareByRiceScore)
+          .map((feature) => ({ feature, depth: 0 }))
+      : filtering
+        ? base.map((feature) => ({ feature, depth: 0 }))
+        : buildHierarchyRows(features);
 
   return (
     <section className="space-y-4">
@@ -133,7 +143,10 @@ export async function ListView({
         <NoSpecsEmptyState canConnect={canConnectRepos(access)} />
       ) : (
         <>
-          <BacklogFilters filters={filters} options={options} />
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <BacklogFilters filters={filters} options={options} />
+            <SortControl sort={sort} />
+          </div>
           <SavedViews
             views={savedViews}
             currentFilters={filters}
@@ -169,6 +182,11 @@ export async function ListView({
                 workflow={workflow}
                 productsById={productsById}
                 releaseNames={releaseNames}
+                bulkOptions={{
+                  statuses: options.statuses,
+                  assignees: options.assignees,
+                  releases: options.releases,
+                }}
               />
             </Box>
           )}

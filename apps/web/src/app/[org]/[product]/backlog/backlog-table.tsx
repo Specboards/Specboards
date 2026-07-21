@@ -1,9 +1,11 @@
 "use client";
 
+import { ListChecks } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -21,6 +23,7 @@ import { productColorClasses } from "@/lib/product-color";
 import type { FeatureRecord } from "@/lib/store/types";
 import { useOrgProductPath } from "@/lib/use-org";
 import { cn } from "@/lib/utils";
+import { BulkActionBar, type BulkOptions } from "./bulk-action-bar";
 
 export interface BacklogRow {
   feature: FeatureRecord;
@@ -41,6 +44,7 @@ export function BacklogTable({
   workflow,
   productsById,
   releaseNames,
+  bulkOptions,
 }: {
   rows: BacklogRow[];
   canEdit: boolean;
@@ -50,9 +54,16 @@ export function BacklogTable({
   productsById?: Record<string, ProductTag>;
   /** Release name by id, for the Release column. */
   releaseNames: Record<string, string>;
+  /** Option lists for the bulk action bar; enables multi-select when provided
+   * (editors only). */
+  bulkOptions?: BulkOptions;
 }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Multi-select is opt-in: the checkbox column appears only once turned on.
+  const [selectMode, setSelectMode] = useState(false);
   const orgHref = useOrgProductPath();
+  const canSelect = canEdit && !!bulkOptions;
 
   // Hydrate persisted collapsed set after mount (avoids SSR/client mismatch).
   useEffect(() => {
@@ -83,10 +94,87 @@ export function BacklogTable({
       !feature.parentSpecId || !collapsed.has(feature.parentSpecId),
   );
 
+  const toggleSelect = useCallback((specId: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(specId)) next.delete(specId);
+      else next.add(specId);
+      return next;
+    });
+  }, []);
+  const clearSelection = useCallback(() => setSelected(new Set()), []);
+  const exitSelect = useCallback(() => {
+    setSelectMode(false);
+    setSelected(new Set());
+  }, []);
+
+  // Select-all toggles just the currently visible rows (collapsed epics' hidden
+  // children are left alone, matching what the user can see).
+  const visibleIds = useMemo(
+    () => visible.map(({ feature }) => feature.specId),
+    [visible],
+  );
+  const selectedVisibleCount = visibleIds.filter((id) => selected.has(id)).length;
+  const allVisibleSelected =
+    visibleIds.length > 0 && selectedVisibleCount === visibleIds.length;
+  const toggleSelectAll = useCallback(() => {
+    setSelected((prev) => {
+      const everySelected =
+        visibleIds.length > 0 && visibleIds.every((id) => prev.has(id));
+      if (everySelected) {
+        const next = new Set(prev);
+        for (const id of visibleIds) next.delete(id);
+        return next;
+      }
+      return new Set([...prev, ...visibleIds]);
+    });
+  }, [visibleIds]);
+
+  // Esc leaves multi-select entirely.
+  useEffect(() => {
+    if (!selectMode) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") exitSelect();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectMode, exitSelect]);
+
   return (
+    <>
+    {canSelect ? (
+      <div className="mb-2 flex justify-end">
+        <Button
+          type="button"
+          size="sm"
+          variant={selectMode ? "secondary" : "outline"}
+          onClick={() => (selectMode ? exitSelect() : setSelectMode(true))}
+          className="h-8 gap-1.5"
+        >
+          <ListChecks className="h-4 w-4" />
+          {selectMode ? "Done" : "Select"}
+        </Button>
+      </div>
+    ) : null}
     <Table>
       <TableHeader>
         <TableRow>
+          {selectMode ? (
+            <TableHead className="w-8">
+              <input
+                type="checkbox"
+                aria-label="Select all visible items"
+                className="h-4 w-4 cursor-pointer align-middle accent-primary"
+                checked={allVisibleSelected}
+                ref={(el) => {
+                  if (el)
+                    el.indeterminate =
+                      selectedVisibleCount > 0 && !allVisibleSelected;
+                }}
+                onChange={toggleSelectAll}
+              />
+            </TableHead>
+          ) : null}
           <TableHead>Feature</TableHead>
           {productsById ? <TableHead className="w-32">Product</TableHead> : null}
           <TableHead className="w-44">Status</TableHead>
@@ -99,7 +187,18 @@ export function BacklogTable({
           const isEpic = f.childCount > 0;
           const isCollapsed = collapsed.has(f.specId);
           return (
-            <TableRow key={f.specId}>
+            <TableRow key={f.specId} data-selected={selected.has(f.specId)}>
+              {selectMode ? (
+                <TableCell className="w-8">
+                  <input
+                    type="checkbox"
+                    aria-label={`Select ${f.title}`}
+                    className="h-4 w-4 cursor-pointer align-middle accent-primary"
+                    checked={selected.has(f.specId)}
+                    onChange={() => toggleSelect(f.specId)}
+                  />
+                </TableCell>
+              ) : null}
               <TableCell>
                 <span
                   className="flex items-center gap-2"
@@ -193,5 +292,14 @@ export function BacklogTable({
         })}
       </TableBody>
     </Table>
+    {selectMode && bulkOptions ? (
+      <BulkActionBar
+        selectedIds={[...selected]}
+        options={bulkOptions}
+        onClear={clearSelection}
+        onExit={exitSelect}
+      />
+    ) : null}
+    </>
   );
 }

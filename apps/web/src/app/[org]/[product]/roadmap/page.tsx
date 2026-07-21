@@ -23,6 +23,7 @@ import { sortFeatures } from "@/lib/feature-helpers";
 import { getDb } from "@/lib/db";
 import { resolveWorkflowFor } from "@/lib/repo-config";
 import { getStore } from "@/lib/store";
+import { compareShippedReleases } from "@/lib/store/types";
 import { listWorkspaceMembers, type WorkspaceMember } from "@/lib/workspace";
 import {
   canConnectRepos,
@@ -165,7 +166,12 @@ export default async function RoadmapPage({
   // only builds its own columns.
   const showShipped = sp.view === "shipped";
   const activeReleases = scopedReleases.filter((r) => r.status !== "shipped");
-  const shippedReleases = scopedReleases.filter((r) => r.status === "shipped");
+  // Shipped releases read newest-first (most recent on the left) so the latest
+  // ship isn't buried at the end of a long history; active releases keep the
+  // planned ascending order they arrive in.
+  const shippedReleases = scopedReleases
+    .filter((r) => r.status === "shipped")
+    .sort(compareShippedReleases);
   const visibleReleases = showShipped ? shippedReleases : activeReleases;
 
   // One column per release (already ordered: dated first), Unscheduled last.
@@ -180,6 +186,7 @@ export default async function RoadmapPage({
       name: r.name,
       startDate: r.startDate,
       targetDate: r.targetDate,
+      shippedDate: r.shippedDate,
       status: r.status as string | null,
       release: r,
     })),
@@ -190,6 +197,7 @@ export default async function RoadmapPage({
             name: "Unscheduled",
             startDate: null,
             targetDate: null,
+            shippedDate: null,
             status: null,
             release: null,
           },

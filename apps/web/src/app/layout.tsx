@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { Toaster } from "sonner";
 
 import { AppSidebar } from "@/components/app-sidebar";
+import { CommandPalette } from "@/components/command-palette";
 import { ThemeProvider } from "@/components/theme-provider";
 import { WebpackNonce } from "@/components/webpack-nonce";
 import {
@@ -47,6 +48,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
               <div className="mx-auto max-w-6xl px-6 py-8">{children}</div>
             </main>
           </div>
+          <CommandPalette />
           <Toaster position="bottom-right" richColors closeButton />
         </ThemeProvider>
       </body>

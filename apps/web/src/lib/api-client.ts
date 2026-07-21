@@ -164,6 +164,52 @@ export async function patchFeature(
   }
 }
 
+/** One item's outcome in a bulk edit (mirrors the server's BulkPatchItemResult). */
+export interface BulkPatchItemResult {
+  specId: string;
+  ok: boolean;
+  error?: string;
+}
+
+export interface BulkPatchResult {
+  results: BulkPatchItemResult[];
+  okCount: number;
+  failCount: number;
+}
+
+/** Tag mutations for a bulk edit (merged per item, not a wholesale replace). */
+export interface BulkTagOps {
+  addTags?: string[];
+  clearTags?: boolean;
+}
+
+/**
+ * Apply one change to many items via `PATCH /api/v1/features/bulk`. The direct
+ * patch accepts status / assigneeId / releaseId; tags are added or cleared via
+ * `tagOps` so a mixed selection isn't overwritten. Resolves with the per-item
+ * result (some may have failed); rejects only on auth or a request the server
+ * rejected outright.
+ */
+export async function bulkPatchFeatures(
+  specIds: string[],
+  patch: Pick<FeaturePatch, "status" | "assigneeId" | "releaseId">,
+  tagOps: BulkTagOps = {},
+): Promise<BulkPatchResult> {
+  const res = await apiFetch(`/api/v1/features/bulk`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ specIds, patch, ...tagOps }),
+  });
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as
+    | (BulkPatchResult & { error?: string })
+    | null;
+  if (!res.ok || !body || !Array.isArray(body.results)) {
+    throw new Error(body?.error ?? `Bulk edit failed with ${res.status}`);
+  }
+  return body;
+}
+
 /** List a feature's comments (oldest first). */
 export async function listComments(specId: string): Promise<CommentRecord[]> {
   const res = await apiFetch(

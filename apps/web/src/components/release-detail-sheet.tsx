@@ -240,7 +240,7 @@ export function ReleaseDetailSheet({
                     }
                   />
                 </Field>
-                <Field label="Ship date">
+                <Field label={shipped ? "Planned ship date" : "Ship date"}>
                   <Input
                     type="date"
                     defaultValue={current.targetDate ?? ""}
@@ -251,6 +251,16 @@ export function ReleaseDetailSheet({
                   />
                 </Field>
               </div>
+
+              {/* Actual ship date: read-only, stamped when the release shipped.
+                  The planned dates above are retained for comparison. */}
+              {shipped ? (
+                <Field label="Actual ship date">
+                  <div className="flex h-8 items-center px-2 text-sm">
+                    {current.shippedDate ?? "—"}
+                  </div>
+                </Field>
+              ) : null}
 
               <div className="space-y-1.5">
                 <span className="text-xs font-medium text-muted-foreground">
@@ -306,7 +316,11 @@ export function ReleaseDetailSheet({
                   <Badge variant="outline" className="text-[10px]">
                     {RELEASE_STATUS_LABELS[current.status]}
                   </Badge>
-                  {dates ? dates : "No dates set"}
+                  {shipped && current.shippedDate
+                    ? `Shipped ${current.shippedDate}`
+                    : dates
+                      ? dates
+                      : "No dates set"}
                 </span>
                 <span className="flex items-center gap-1.5">
                   <Badge variant="counter">{current.itemCount}</Badge>

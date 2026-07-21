@@ -37,6 +37,10 @@ test.describe("onboarding: guided first spec", () => {
     expect(Object.keys(files)).toContain("specs/payments-onboarding/spec.md");
 
     await page.getByRole("link", { name: /View your board/i }).click();
-    await expect(page.getByText("Payments Onboarding")).toBeVisible();
+    // Match the card link specifically — the board's parent-epic filter also
+    // lists this title as an <option>, so a plain getByText is ambiguous.
+    await expect(
+      page.getByRole("link", { name: "Payments Onboarding", exact: true }),
+    ).toBeVisible();
   });
 });

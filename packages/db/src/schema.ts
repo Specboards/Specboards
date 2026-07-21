@@ -2,6 +2,7 @@ import { relations, sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
+  doublePrecision,
   foreignKey,
   index,
   integer,
@@ -596,6 +597,19 @@ export const features = pgTable(
     /** Values for admin-defined custom properties (see workspace_properties). */
     customFields: jsonb("custom_fields").notNull().default({}),
     /**
+     * RICE prioritization inputs (all nullable until scored). The score itself
+     * (Reach × Impact × Confidence/100 ÷ Effort) is computed in the app from
+     * these, not stored, so it can't drift from its inputs. `float8`/`int`
+     * (not numeric) so Drizzle hands back real numbers, not strings.
+     */
+    riceReach: doublePrecision("rice_reach"),
+    /** Impact multiplier on the fixed RICE scale: 3, 2, 1, 0.5, or 0.25. */
+    riceImpact: doublePrecision("rice_impact"),
+    /** Confidence as a whole percentage, 0-100. */
+    riceConfidence: integer("rice_confidence"),
+    /** Effort in person-months (> 0). */
+    riceEffort: doublePrecision("rice_effort"),
+    /**
      * Markdown body for DB-native items (initiatives/epics), which have no
      * spec file. Spec-backed leaf items read their body from spec_index
      * instead; this stays null for them.
@@ -778,6 +792,10 @@ export const releases = pgTable(
     startDate: text("start_date"),
     /** Target ship date (date-only), or null when undated. */
     targetDate: text("target_date"),
+    /** The date the release actually shipped (date-only), stamped when it first
+     * transitions to `shipped` and cleared if it's reopened. Distinct from the
+     * planned `targetDate`, which is retained. Null while unshipped. */
+    shippedDate: text("shipped_date"),
     /** Free-form release notes (Markdown), or null. Shown in the release detail
      * panel on the Roadmap. */
     notes: text("notes"),

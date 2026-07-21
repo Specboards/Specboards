@@ -9,6 +9,7 @@ import {
 } from "@/components/card-field-badges";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
+import { formatRiceScore } from "@/lib/feature-helpers";
 import { productColorClasses } from "@/lib/product-color";
 import type { FeatureRecord } from "@/lib/store/types";
 import { useOrgProductPath } from "@/lib/use-org";
@@ -97,8 +98,19 @@ export function FeatureCard({
             {feature.title}
           </Link>
         </CardTitle>
-        {badges.length > 0 ? (
-          <div className="flex flex-wrap items-center gap-1">{badges}</div>
+        {badges.length > 0 || feature.riceScore !== null ? (
+          <div className="flex flex-wrap items-center gap-1">
+            {badges}
+            {feature.riceScore !== null ? (
+              <Badge
+                variant="outline"
+                className="text-[10px] tabular-nums"
+                title="RICE score"
+              >
+                RICE {formatRiceScore(feature.riceScore)}
+              </Badge>
+            ) : null}
+          </div>
         ) : null}
       </CardHeader>
     </Card>

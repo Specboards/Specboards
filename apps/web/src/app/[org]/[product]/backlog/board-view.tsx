@@ -4,6 +4,7 @@ import { parentLevelKey } from "@specboard/core";
 
 import { BoardClient } from "./board-client";
 import { BoardPrefsProvider } from "./board-prefs";
+import { BacklogFilters, type FilterOptions } from "./backlog-filters";
 import { CardFieldsMenu } from "@/components/card-fields-menu";
 import { EmptyState } from "@/components/empty-state";
 import { NoSpecsEmptyState } from "@/components/no-specs-empty-state";
@@ -18,6 +19,14 @@ import {
 } from "@/lib/active-product";
 import { getBoardPreferences } from "@/lib/board-preferences-service";
 import { cardFieldCatalog, resolveCardFields } from "@/lib/card-fields";
+import {
+  applyFeatureFilters,
+  filtersToQuery,
+  hasActiveFilters,
+  parseFeatureFilters,
+} from "@/lib/feature-filters";
+import { parseSortMode } from "@/lib/feature-helpers";
+import { SortControl } from "./sort-control";
 import { getDb } from "@/lib/db";
 import { resolveWorkflowFor } from "@/lib/repo-config";
 import { getStore } from "@/lib/store";
@@ -39,10 +48,17 @@ export async function BoardView({
   const access = await requireWorkspaceAccess();
 
   const workflow = await resolveWorkflowFor(access);
-  const columns = workflow.statuses.filter((s) => s !== "archived");
 
   const { product: productSlug } = await params;
   const sp = await searchParams;
+  const filters = parseFeatureFilters(sp);
+  const sort = parseSortMode(sp.sort);
+  // Board columns are the workflow statuses. A `status` filter narrows the
+  // board to just that one column rather than emptying every other one.
+  const allColumns = workflow.statuses.filter((s) => s !== "archived");
+  const columns = filters.status
+    ? allColumns.filter((s) => s === filters.status)
+    : allColumns;
   const store = await getStore();
   const [allFeatures, properties, releases, detailTemplates] =
     await Promise.all([
@@ -97,7 +113,14 @@ export async function BoardView({
 
   const levels = await store.listLevels(access ?? undefined);
   const activeLevel = resolveActiveLevel(levels, sp.level);
-  const features = scoped.filter((f) => f.level === activeLevel.key);
+  // Cards at the active level, then narrowed by the URL filters. `featuresForLevel`
+  // (pre-filter) drives the empty-state and toolbar decisions so the filter bar
+  // never disappears when a filter empties the board.
+  const featuresForLevel = scoped.filter((f) => f.level === activeLevel.key);
+  const filtering = hasActiveFilters(filters);
+  const features = filtering
+    ? applyFeatureFilters(featuresForLevel, filters)
+    : featuresForLevel;
   const parentKey = parentLevelKey(activeLevel.key, levels);
   const parents = parentKey
     ? scoped
@@ -122,6 +145,23 @@ export async function BoardView({
   const customFieldLabels = Object.fromEntries(
     properties.map((f) => [f.key, f.label]),
   );
+
+  // Filter-bar options mirror the list view: any status (minus archived),
+  // workspace assignees, and tags/epics drawn from every in-scope card so the
+  // choices don't shrink as you drill into a single level.
+  const filterableFeatures = scoped.filter((f) => f.status !== "archived");
+  const filterOptions: FilterOptions = {
+    statuses: allColumns,
+    assignees: members.map((m) => ({ userId: m.userId, name: m.name })),
+    tags: [...new Set(filterableFeatures.flatMap((f) => f.tags))].sort(),
+    epics: filterableFeatures
+      .filter((f) => f.childCount > 0)
+      .map((f) => ({ specId: f.specId, title: f.title })),
+    releases: releases.map((r) => ({ id: r.id, name: r.name })),
+    products: productsById
+      ? scopedProducts.map((p) => ({ id: p.id, name: p.name }))
+      : undefined,
+  };
 
   // The "New {level}" affordance, shared between the toolbar and the empty
   // state so a blank board offers the next step right where the user is
@@ -156,8 +196,9 @@ export async function BoardView({
           <div className="flex items-center gap-2">
             {/* On an empty board the empty state carries this button instead,
                 so the affordance renders exactly once. */}
-            {features.length === 0 ? null : newItemButton}
-            {features.length > 0 && canEdit ? (
+            {featuresForLevel.length === 0 ? null : newItemButton}
+            {featuresForLevel.length > 0 ? <SortControl sort={sort} /> : null}
+            {featuresForLevel.length > 0 && canEdit ? (
               <CardFieldsMenu
                 catalog={catalog}
                 customFields={properties.map((f) => ({
@@ -168,7 +209,13 @@ export async function BoardView({
             ) : null}
           </div>
         </div>
-        {features.length === 0 ? (
+        {/* Filter bar: shown whenever the level has cards, so a filter that
+            empties the board can still be cleared here. Same URL-driven bar as
+            the list view (it preserves the `view=board` param). */}
+        {featuresForLevel.length > 0 ? (
+          <BacklogFilters filters={filters} options={filterOptions} />
+        ) : null}
+        {featuresForLevel.length === 0 ? (
           activeLevel.isLeaf ? (
             <NoSpecsEmptyState canConnect={canConnectRepos(access)} />
           ) : (
@@ -183,25 +230,45 @@ export async function BoardView({
               action={newItemButton}
             />
           )
+        ) : features.length === 0 ? (
+          <EmptyState
+            variant="inline"
+            title="No items match these filters"
+            description={`All ${featuresForLevel.length} ${featuresForLevel.length === 1 ? "item is" : "items are"} hidden by the current filters. Adjust or clear the filters above.`}
+          />
         ) : (
           <BoardClient
-            // Remount when the board's data set changes (level or product scope).
-            // BoardClient seeds drag-and-drop state from `features` once on mount,
-            // so without a fresh key it would keep showing the prior level's cards.
+            // Remount when the board's data set changes (level, product scope,
+            // or active filters). BoardClient seeds drag-and-drop state from
+            // `features` once on mount, so without a fresh key it would keep
+            // showing the prior filter's cards.
             key={`${
               scope.kind === "product"
                 ? scope.product.id
                 : scope.kind === "group"
                   ? `group:${scope.group.id}`
                   : ALL_PRODUCTS
-            }:${activeLevel.key}`}
+            }:${activeLevel.key}:${filtersToQuery(filters)}:${sort}`}
             features={features}
             columns={columns}
             workflow={workflow}
+            sortMode={sort}
             customFieldLabels={customFieldLabels}
             memberNames={memberNames}
             releases={releases}
             productsById={productsById}
+            bulkOptions={
+              canEdit
+                ? {
+                    statuses: allColumns,
+                    assignees: members.map((m) => ({
+                      userId: m.userId,
+                      name: m.name,
+                    })),
+                    releases: releases.map((r) => ({ id: r.id, name: r.name })),
+                  }
+                : undefined
+            }
           />
         )}
       </section>

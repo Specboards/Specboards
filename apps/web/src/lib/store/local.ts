@@ -25,6 +25,7 @@ import {
   type WorkspaceLevel,
 } from "@specboard/core";
 
+import { riceFields } from "@/lib/feature-helpers";
 import {
   compareReleases,
   DetailTemplateError,
@@ -114,6 +115,11 @@ interface LocalItem {
   productId?: string | null;
   /** Markdown details body, or null/absent for a blank body. */
   details?: string | null;
+  /** RICE prioritization inputs (see RiceInputs). */
+  riceReach?: number | null;
+  riceImpact?: number | null;
+  riceConfidence?: number | null;
+  riceEffort?: number | null;
 }
 
 /** A release persisted in local file mode. */
@@ -125,6 +131,8 @@ interface LocalRelease {
   status: "planned" | "in_progress" | "shipped";
   startDate: string | null;
   targetDate: string | null;
+  /** Actual ship date (YYYY-MM-DD), stamped on ship and cleared on reopen. */
+  shippedDate?: string | null;
   notes?: string | null;
 }
 
@@ -218,6 +226,11 @@ interface LocalMetadata {
   releaseId?: string | null;
   assigneeId?: string | null;
   customFields?: Record<string, CustomFieldValue>;
+  /** RICE prioritization inputs (see RiceInputs). */
+  riceReach?: number | null;
+  riceImpact?: number | null;
+  riceConfidence?: number | null;
+  riceEffort?: number | null;
   /** Outgoing relations from this spec (see ./types FeatureRelation). */
   links?: LocalLink[];
   /** Parent feature (epic) spec id, or null when top-level. */
@@ -514,6 +527,12 @@ export class LocalFileStore implements FeatureStore {
         assigneeId: m.assigneeId ?? null,
         assigneeName: null, // no user records in local file mode
         customFields: m.customFields ?? {},
+        ...riceFields({
+          riceReach: m.riceReach ?? null,
+          riceImpact: m.riceImpact ?? null,
+          riceConfidence: m.riceConfidence ?? null,
+          riceEffort: m.riceEffort ?? null,
+        }),
         path: path.relative(this.root, file),
         content: parsed.content,
         sections: parsed.sections,
@@ -545,6 +564,12 @@ export class LocalFileStore implements FeatureStore {
         assigneeId: item.assigneeId,
         assigneeName: null,
         customFields: {},
+        ...riceFields({
+          riceReach: item.riceReach ?? null,
+          riceImpact: item.riceImpact ?? null,
+          riceConfidence: item.riceConfidence ?? null,
+          riceEffort: item.riceEffort ?? null,
+        }),
         path: "",
         content: item.details ?? "",
         sections: [],
@@ -652,6 +677,11 @@ export class LocalFileStore implements FeatureStore {
         it.parentSpecId = patch.parentSpecId;
       if (patch.details !== undefined)
         it.details = patch.details?.trim() ? patch.details : null;
+      if (patch.riceReach !== undefined) it.riceReach = patch.riceReach;
+      if (patch.riceImpact !== undefined) it.riceImpact = patch.riceImpact;
+      if (patch.riceConfidence !== undefined)
+        it.riceConfidence = patch.riceConfidence;
+      if (patch.riceEffort !== undefined) it.riceEffort = patch.riceEffort;
       await this.writeItems(items);
       return;
     }
@@ -766,6 +796,12 @@ export class LocalFileStore implements FeatureStore {
       releaseId: null,
       assigneeId: item.assigneeId,
       customFields: {},
+      ...riceFields({
+        riceReach: null,
+        riceImpact: null,
+        riceConfidence: null,
+        riceEffort: null,
+      }),
       path: "",
       blocksCount: 0,
       blockedByCount: 0,
@@ -1332,6 +1368,7 @@ export class LocalFileStore implements FeatureStore {
       .map((r) => ({
         ...r,
         productId: r.productId ?? null,
+        shippedDate: r.shippedDate ?? null,
         notes: r.notes ?? null,
         itemCount: counts.get(r.id) ?? 0,
       }))
@@ -1361,12 +1398,14 @@ export class LocalFileStore implements FeatureStore {
       status,
       startDate: input.startDate ?? null,
       targetDate: input.targetDate ?? null,
+      shippedDate: null,
       notes: input.notes ?? null,
     };
     await this.writeReleases([...rows, release]);
     return {
       ...release,
       productId,
+      shippedDate: release.shippedDate ?? null,
       notes: release.notes ?? null,
       itemCount: 0,
     };
@@ -1390,7 +1429,17 @@ export class LocalFileStore implements FeatureStore {
       if (!(RELEASE_STATUSES as readonly string[]).includes(patch.status)) {
         throw new ReleaseError(`Unknown release status: ${patch.status}`);
       }
+      const prevStatus = release.status;
       release.status = patch.status;
+      // Stamp the actual ship date on first ship; clear it on reopen. Planned
+      // dates are retained.
+      if (patch.status === "shipped" && prevStatus !== "shipped") {
+        if (!release.shippedDate) {
+          release.shippedDate = new Date().toISOString().slice(0, 10);
+        }
+      } else if (patch.status !== "shipped" && prevStatus === "shipped") {
+        release.shippedDate = null;
+      }
     }
     if (patch.startDate !== undefined) release.startDate = patch.startDate;
     if (patch.targetDate !== undefined) release.targetDate = patch.targetDate;
@@ -1416,6 +1465,7 @@ export class LocalFileStore implements FeatureStore {
     return {
       ...release,
       productId: release.productId ?? null,
+      shippedDate: release.shippedDate ?? null,
       notes: release.notes ?? null,
       itemCount: all.filter((f) => f.releaseId === id).length,
     };
