@@ -5,18 +5,36 @@ import {
   listIdeas,
   parseIdeaInput,
 } from "@/lib/features-service";
+import { InvalidPageError, paginate, parsePageRequest } from "@/lib/pagination";
 import { revalidateIdeaPages } from "@/lib/revalidate-cards";
 import { IdeaError } from "@/lib/store/types";
 
 export const dynamic = "force-dynamic";
 
-/** GET /api/v1/ideas - the workspace's ideas the caller can see, most-voted first. */
+/**
+ * GET /api/v1/ideas - the workspace's ideas the caller can see, most-voted
+ * first. Full list by default; pass `?limit` for opt-in cursor pagination
+ * (adds `nextCursor`, preserves the most-voted order).
+ */
 export async function GET(req: Request) {
   const authz = await resolveReadScope(req);
   if (!authz.ok) return authz.response;
 
+  let page;
+  try {
+    page = parsePageRequest(new URL(req.url));
+  } catch (err) {
+    if (err instanceof InvalidPageError) {
+      return Response.json({ error: err.message }, { status: 422 });
+    }
+    throw err;
+  }
+
   const ideas = await listIdeas(authz.scope ?? undefined);
-  return Response.json({ ideas });
+  if (page.limit === null) return Response.json({ ideas });
+
+  const { items, nextCursor } = paginate(ideas, (i) => i.id, page);
+  return Response.json({ ideas: items, nextCursor });
 }
 
 /**
