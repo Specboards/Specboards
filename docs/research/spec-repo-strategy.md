@@ -1,4 +1,4 @@
-# Specboard Repo & Spec Organization Strategy
+# Specboards Repo & Spec Organization Strategy
 
 **Status:** Research + recommendation (for discussion)
 **Date:** 2026-06-15
@@ -14,7 +14,7 @@ thing: it's much easier to keep **all of their specs in a single repo** that car
 and reason over the specs in that one repo, while the **code work executes against
 multiple repos/codebases** as needed.
 
-That maps to three candidate models for Specboard:
+That maps to three candidate models for Specboards:
 
 - **Attach:** connect to an existing repo that already has specs inside it.
 - **Create:** stand up a dedicated spec repo for a project/org.
@@ -22,7 +22,7 @@ That maps to three candidate models for Specboard:
 
 This memo reviews how the leading spec-driven tooling (GitHub **Spec Kit**, **BMAD**)
 and the broader agentic-development ecosystem recommend organizing repos and specs,
-then recommends a direction for Specboard.
+then recommends a direction for Specboards.
 
 > ⚠️ **This is a nascent space.** Where a practice is genuinely settled we say so;
 > where it is still emerging or contested we flag it. Treat "best practice" here as
@@ -30,9 +30,9 @@ then recommends a direction for Specboard.
 
 ---
 
-## 2. Where Specboard is today
+## 2. Where Specboards is today
 
-Specboard currently uses a **per-repo, co-located spec** model:
+Specboards currently uses a **per-repo, co-located spec** model:
 
 - A `workspace` is the tenant root and can aggregate **many** `repositories` into one
   unified backlog/board. (`packages/db/src/schema.ts`, `ARCHITECTURE.md`)
@@ -181,7 +181,7 @@ migration. Keep co-located specs as the zero-config on-ramp.
   weakness is divergence, pair it from day one with sync/validation and "living spec"
   checks (e.g. flag specs whose referenced services have moved past their pinned ref).
 
-### Why this is the right bet for Specboard
+### Why this is the right bet for Specboards
 
 - It **closes a gap Spec Kit and BMAD have publicly acknowledged but not shipped**. That's a
   genuine differentiator rather than catch-up.
@@ -192,7 +192,7 @@ migration. Keep co-located specs as the zero-config on-ramp.
 
 ---
 
-## 8. Why Specboard is well-positioned (reusable primitives)
+## 8. Why Specboards is well-positioned (reusable primitives)
 
 - **UUID spec identity** (`spec_id` in frontmatter) already separates a spec's identity
   from its location, which is the hard part of letting specs live in a different repo than code.
@@ -245,6 +245,6 @@ migration. Keep co-located specs as the zero-config on-ramp.
 - <https://www.kinde.com/learn/ai-for-software-engineering/ai-devops/spec-drift-the-hidden-problem-ai-can-help-fix/>
 - <https://www.oreilly.com/radar/how-to-write-a-good-spec-for-ai-agents/>
 
-**Specboard internal references**
+**Specboards internal references**
 - `packages/db/src/schema.ts` · `apps/mcp/src/server.ts` ·
   `apps/web/src/lib/github-sync.ts` · `.specboard/config.yml` · `ARCHITECTURE.md`

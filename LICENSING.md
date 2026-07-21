@@ -1,6 +1,6 @@
 # Licensing
 
-Specboard is **open-core**. The core product is free and open source under the
+Specboards is **open-core**. The core product is free and open source under the
 Apache License 2.0; a small set of commercial features are licensed separately.
 This document explains where the line is.
 
@@ -48,9 +48,9 @@ area, note that in your pull request so we can route it correctly.
 
 ## Brand and trademarks: all rights reserved
 
-The Specboard **software** is open source. The Specboard **brand** is not.
+The Specboards **software** is open source. The Specboards **brand** is not.
 
-"Specboard", the Specboard logos, the visual identity (colors, typography,
+"Specboards", the Specboards logos, the visual identity (colors, typography,
 look and feel), and the marketing content are proprietary to Studio Palouse and
 are **not** covered by the Apache-2.0 grant. The Apache-2.0 license explicitly
 does not grant trademark rights; see section 6 of the [LICENSE](./LICENSE).
@@ -62,13 +62,13 @@ under a proprietary license, not in this repository.
 What this means in practice:
 
 - You may run, modify, and self-host the open core, including commercially.
-- You may make nominative, factual references to Specboard (for example,
-  "integrates with Specboard") without implying endorsement or affiliation.
-- You may **not** use the Specboard name or logos to brand your own
+- You may make nominative, factual references to Specboards (for example,
+  "integrates with Specboards") without implying endorsement or affiliation.
+- You may **not** use the Specboards name or logos to brand your own
   distribution, fork, or service, or in a way that suggests it is the official
-  Specboard product, without written permission.
+  Specboards product, without written permission.
 
-To use the Specboard name or brand assets, email **contact@specboard.net**.
+To use the Specboards name or brand assets, email **contact@specboard.net**.
 
 ## Questions
 

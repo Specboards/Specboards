@@ -21,9 +21,9 @@ export type GithubDocsData =
 /**
  * Body of a choose-your-source doc area (Research / Architecture): shows the
  * source chooser until the team picks, then the external link-out card, the
- * in-Specboard page workspace, or the GitHub-backed file workspace. "Change
+ * in-Specboards page workspace, or the GitHub-backed file workspace. "Change
  * source" re-opens the chooser; changing away from a source keeps its content
- * (Specboard pages stay in the database, repo files stay in the repo).
+ * (Specboards pages stay in the database, repo files stay in the repo).
  */
 export function DocAreaBody({
   space,

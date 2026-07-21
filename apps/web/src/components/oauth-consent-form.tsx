@@ -61,12 +61,12 @@ export function NoWorkspaceNotice({ userEmail }: { userEmail: string }) {
   return (
     <Card className="mx-auto mt-16 w-full max-w-sm">
       <CardHeader>
-        <img src="/brand/specboard-mark.png" alt="Specboard" className="mb-2 h-8 w-8" />
+        <img src="/brand/specboards-mark.png" alt="Specboards" className="mb-2 h-8 w-8" />
         <CardTitle>No workspace to authorize</CardTitle>
         <CardDescription>
           You&rsquo;re signed in as{" "}
           <span className="font-medium text-foreground">{userEmail}</span>, which
-          isn&rsquo;t a member of any Specboard workspace. Sign in with the account
+          isn&rsquo;t a member of any Specboards workspace. Sign in with the account
           that has access, then reconnect from your MCP client.
         </CardDescription>
       </CardHeader>
@@ -145,11 +145,11 @@ export function OAuthConsentForm({
   return (
     <Card className="mx-auto mt-16 w-full max-w-sm">
       <CardHeader>
-        <img src="/brand/specboard-mark.png" alt="Specboard" className="mb-2 h-8 w-8" />
+        <img src="/brand/specboards-mark.png" alt="Specboards" className="mb-2 h-8 w-8" />
         <CardTitle>Authorize {clientName}</CardTitle>
         <CardDescription>
           <span className="font-medium text-foreground">{clientName}</span> wants to
-          access Specboard. It will act with your role and see the same products and
+          access Specboards. It will act with your role and see the same products and
           specs you can.
         </CardDescription>
       </CardHeader>

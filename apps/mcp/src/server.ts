@@ -34,7 +34,7 @@ import {
 } from "@specboard/db";
 
 /**
- * Specboard MCP server. Gives coding agents a status-aware view of specs:
+ * Specboards MCP server. Gives coding agents a status-aware view of specs:
  * they see not just the markdown (canonical in git) but the metadata
  * (status, assignee, tags) layered on top from the DB.
  *
@@ -48,7 +48,7 @@ function db(): Database {
     const url = process.env.DATABASE_URL;
     if (!url) {
       throw new Error(
-        "DATABASE_URL is not set. Point it at the Specboard Postgres (e.g. postgres://postgres:postgres@localhost:5432/specboard) and seed it with `pnpm --filter @specboard/db seed`.",
+        "DATABASE_URL is not set. Point it at the Specboards Postgres (e.g. postgres://postgres:postgres@localhost:5432/specboard) and seed it with `pnpm --filter @specboard/db seed`.",
       );
     }
     dbInstance = createDb(url);
@@ -70,7 +70,7 @@ async function mcpScope(): Promise<McpScope> {
   const userId = process.env.SPECBOARD_MCP_USER_ID;
   if (!userId) {
     throw new Error(
-      "SPECBOARD_MCP_USER_ID is required. Use a real Specboard user id so MCP access is scoped to that user's workspace and product roles.",
+      "SPECBOARD_MCP_USER_ID is required. Use a real Specboards user id so MCP access is scoped to that user's workspace and product roles.",
     );
   }
   const requestedWorkspace = process.env.SPECBOARD_MCP_WORKSPACE?.trim();

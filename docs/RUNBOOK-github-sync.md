@@ -1,21 +1,21 @@
 # Runbook: GitHub App + spec sync
 
-How to connect a repository so Specboard imports its `specs/**/spec.md` and keeps
+How to connect a repository so Specboards imports its `specs/**/spec.md` and keeps
 the board in sync on every push.
 
 ## Two deployment models: pick the right one
 
 A GitHub App registration hard-codes one webhook URL and one OAuth callback URL,
-so a single App can only ever serve one Specboard instance. That splits setup
+so a single App can only ever serve one Specboards instance. That splits setup
 into two paths, keyed off `SPECBOARD_MULTI_TENANT`:
 
 | Model | Flag | GitHub App | How tenants connect |
 | --- | --- | --- | --- |
-| **Hosted** (test, prod) | `SPECBOARD_MULTI_TENANT=true` | One **shared** App Specboard owns under `@specboard`, configured via env | Click **Install**, never create |
+| **Hosted** (test, prod) | `SPECBOARD_MULTI_TENANT=true` | One **shared** App Specboards owns under `@specboard`, configured via env | Click **Install**, never create |
 | **Self-host** | unset (default) | Each install creates its **own** App via the one-click manifest flow | One-click setup, then install |
 
 On the hosted deployment the in-app "create App" flow is **disabled**: it would
-hit GitHub's reserved-name wall (`Specboard` is reserved for `@specboard`) and
+hit GitHub's reserved-name wall (`Specboards` is reserved for `@specboard`) and
 overwrite the deployment-wide singleton credentials. Tenants only install the
 shared App. The one-click manifest flow below is the **self-host** path.
 
@@ -87,15 +87,15 @@ its own App because a GitHub App binds to a single host's webhook/callback URLs
 ## 1. Create the GitHub App (one click): self-host
 
 Sign in as a workspace **admin**, open **Repositories**, and under "Connect
-Specboard to GitHub" optionally enter your **GitHub organization** (e.g.
+Specboards to GitHub" optionally enter your **GitHub organization** (e.g.
 `Specboards`; leave blank for a personal account), then **Set up GitHub App**.
 
-Specboard sends you to GitHub with the App pre-defined: name; permissions
+Specboards sends you to GitHub with the App pre-defined: name; permissions
 Contents R/W, Pull requests R/W, Issues RO, Metadata RO; webhook; the **Push**,
 **Pull request**, and **Issues** events; and the post-install Setup URL. The
-name is suffixed with your org/workspace (e.g. `Specboard (acme)`) because App
-names are globally unique and the bare `Specboard` is reserved for `@specboard`.
-Review and **Create GitHub App**. GitHub redirects you back and Specboard stores the
+name is suffixed with your org/workspace (e.g. `Specboards (acme)`) because App
+names are globally unique and the bare `Specboards` is reserved for `@specboard`.
+Review and **Create GitHub App**. GitHub redirects you back and Specboards stores the
 App's id, slug, private key, and webhook secret, all **encrypted in the database**.
 No `.pem` download, no secrets to paste.
 
@@ -187,7 +187,7 @@ Repositories can also be registered via the API instead of the picker:
 curl -X POST https://test.specboard.ai/api/v1/repositories \
   -H 'content-type: application/json' \
   -H 'cookie: better-auth.session_token=<your-session-token>' \
-  -d '{ "installationId": "<INSTALLATION_ID>", "owner": "Specboards", "name": "Specboard" }'
+  -d '{ "installationId": "<INSTALLATION_ID>", "owner": "Specboards", "name": "Specboards" }'
 ```
 
 (or the **Advanced: connect by installation ID** form on the Repositories page).

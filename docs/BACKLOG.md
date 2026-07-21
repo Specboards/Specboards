@@ -1,11 +1,11 @@
 # Backlog
 
-The implementation backlog now lives in **Specboard itself** (we dogfood our own
+The implementation backlog now lives in **Specboards itself** (we dogfood our own
 product), not in this repo. This file is a pointer.
 
 ## Where the backlog is
 
-The connected Specboard workspace is **Specboard** (`app.specboard.ai`, workspace
+The connected Specboards workspace is **Specboard** (`app.specboard.ai`, workspace
 slug `specboard`). Work is organized as Initiative -> Epic -> Feature -> Work Item.
 
 To see the current state and the next items to pick up:
@@ -25,7 +25,7 @@ portal, UX & workflow, Work-tracking model. Each feature card carries its tier
 (`tier-1` = highest) and area, and links back to its original GitHub issue.
 
 **Initiative: Workspace & integrations administration** - the work of building
-Specboard itself. Epics:
+Specboards itself. Epics:
 
 - **Product & integrations polish** - auto-grant product admin, repos under
   Integrations.
@@ -39,7 +39,7 @@ Specboard itself. Epics:
 
 ## Historical planning docs
 
-The design and plan docs whose content shipped or was migrated into Specboard live
+The design and plan docs whose content shipped or was migrated into Specboards live
 in [`docs/archive/`](./archive/) for reference. Active operational runbooks stay in
 `docs/` (`RUNBOOK-github-sync.md`, `RUNBOOK-specboard-dogfood.md`), and
 architecture decisions stay in [`docs/adr/`](./adr/).

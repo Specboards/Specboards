@@ -1,5 +1,5 @@
 /**
- * Thin HTTP client for the Specboard `/api/v1` surface. Sends the API key as
+ * Thin HTTP client for the Specboards `/api/v1` surface. Sends the API key as
  * the `x-api-key` header (the same surface the web UI uses). Every method
  * unwraps the `{ resource }` envelope or throws `ApiError` carrying the
  * server's `{ error }` message and status.
@@ -57,7 +57,7 @@ export interface FeaturePatch {
   releaseId?: string | null;
 }
 
-export class SpecboardClient {
+export class SpecboardsClient {
   constructor(
     private readonly baseUrl: string,
     private readonly apiKey: string,

@@ -174,12 +174,12 @@ async function sendInviteEmail(email: string, rawToken: string): Promise<void> {
   const { textBody, htmlBody } = renderActionEmail({
     name: "there",
     intro:
-      "You've been invited to join a Specboard workspace. Click below to accept the invitation. You'll sign in (or create an account) with this email address to join.",
+      "You've been invited to join a Specboards workspace. Click below to accept the invitation. You'll sign in (or create an account) with this email address to join.",
     action: "Accept invitation",
     url: `${appOrigin()}/invite/${rawToken}`,
     footer: `This invitation expires in ${EXPIRY_DAYS} days. If you weren't expecting it, you can ignore this email.`,
   });
-  await sendEmail({ to: email, subject: "You're invited to Specboard", textBody, htmlBody });
+  await sendEmail({ to: email, subject: "You're invited to Specboards", textBody, htmlBody });
 }
 
 /** List an org's invitations, newest first (token never exposed). */

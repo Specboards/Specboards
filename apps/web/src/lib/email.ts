@@ -6,7 +6,7 @@
  *   sends become logged no-ops (sign-up still works, verification links
  *   are just never delivered).
  * - `EMAIL_FROM` — verified sender signature / domain address,
- *   e.g. `Specboard <no-reply@specboard.ai>`.
+ *   e.g. `Specboards <no-reply@specboard.ai>`.
  *
  * Uses Postmark's HTTP API directly — no SDK dependency.
  */
@@ -67,7 +67,7 @@ export function renderActionEmail(opts: {
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#ffffff;border-radius:12px;border:1px solid #e5e5e5;">
             <tr>
               <td style="padding:32px 32px 24px;">
-                <p style="margin:0 0 16px;font-size:16px;font-weight:600;">Specboard</p>
+                <p style="margin:0 0 16px;font-size:16px;font-weight:600;">Specboards</p>
                 <p style="margin:0 0 8px;font-size:15px;">Hi ${escapeHtml(name)},</p>
                 <p style="margin:0 0 24px;font-size:15px;line-height:1.5;color:#444;">${escapeHtml(intro)}</p>
                 <table role="presentation" cellpadding="0" cellspacing="0">
@@ -141,7 +141,7 @@ export function renderInfoEmail(opts: {
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#ffffff;border-radius:12px;border:1px solid #e5e5e5;">
             <tr>
               <td style="padding:32px 32px 24px;">
-                <p style="margin:0 0 16px;font-size:16px;font-weight:600;">Specboard</p>
+                <p style="margin:0 0 16px;font-size:16px;font-weight:600;">Specboards</p>
                 ${name ? `<p style="margin:0 0 8px;font-size:15px;">Hi ${escapeHtml(name)},</p>` : ""}
                 ${intros
                   .map(

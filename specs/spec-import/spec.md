@@ -12,7 +12,7 @@ where it is missing.
 
 ## Problem
 
-Teams adopting Specboard already have specs in their repo. Onboarding must not
+Teams adopting Specboards already have specs in their repo. Onboarding must not
 require renaming files or hand-editing frontmatter across dozens of specs.
 
 ## Requirements

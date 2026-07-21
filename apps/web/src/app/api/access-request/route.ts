@@ -100,7 +100,7 @@ export async function POST(req: Request) {
   if (!name) return json({ error: "Please tell us your name." }, 400);
   if (!EMAIL_RE.test(email)) return json({ error: "A valid email address is required." }, 400);
   if (!company) return json({ error: "Please tell us your company." }, 400);
-  if (!useCase) return json({ error: "Please tell us how you'd like to use Specboard." }, 400);
+  if (!useCase) return json({ error: "Please tell us how you'd like to use Specboards." }, 400);
 
   if (rateLimited(clientIp(req))) {
     return json(
@@ -111,7 +111,7 @@ export async function POST(req: Request) {
 
   // Notify the review inbox with everything the team needs to decide.
   const notify = renderInfoEmail({
-    intro: `New Specboard access request from ${name} (${company}).`,
+    intro: `New Specboards access request from ${name} (${company}).`,
     details: [
       { label: "Name", value: name },
       { label: "Email", value: email },
@@ -126,7 +126,7 @@ export async function POST(req: Request) {
   const confirm = renderInfoEmail({
     name,
     intro: [
-      "Thanks for requesting access to Specboard. We've received your request and our team will review it shortly.",
+      "Thanks for requesting access to Specboards. We've received your request and our team will review it shortly.",
       "We'll follow up at this address. If you have any questions in the meantime, just reply to contact@specboard.net.",
     ],
     footer: "You're receiving this because you requested access at specboard.ai.",
@@ -142,7 +142,7 @@ export async function POST(req: Request) {
       }),
       sendEmail({
         to: email,
-        subject: "We received your Specboard access request",
+        subject: "We received your Specboards access request",
         textBody: confirm.textBody,
         htmlBody: confirm.htmlBody,
       }),

@@ -667,7 +667,7 @@ export function isDocArea(v: unknown): v is DocArea {
 }
 
 /**
- * Where an area's docs live: `local` (pages held in Specboard), `external`
+ * Where an area's docs live: `local` (pages held in Specboards), `external`
  * (link out to an outside repository like SharePoint or Box), or `github`
  * (a GitHub repo of Markdown files; a later slice). `unset` = the team
  * hasn't chosen yet, so the area shows the setup chooser.

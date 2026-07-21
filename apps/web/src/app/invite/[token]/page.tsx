@@ -11,7 +11,7 @@ import { LOCAL_ORG_SLUG, orgProductPath } from "@/lib/org-path";
 import { getWorkspaceById } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Accept invitation · Specboard" };
+export const metadata = { title: "Accept invitation · Specboards" };
 
 /** A friendly card for the states where redemption can't proceed. */
 function InviteProblem({
@@ -29,7 +29,7 @@ function InviteProblem({
       <CardContent className="space-y-4">
         <p className="text-sm text-muted-foreground">{body}</p>
         <Link href="/" className={buttonVariants({ variant: "secondary", className: "w-full" })}>
-          Go to Specboard
+          Go to Specboards
         </Link>
       </CardContent>
     </Card>

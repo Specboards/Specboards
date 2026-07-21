@@ -21,7 +21,7 @@ const AREA_COPY: Record<
     blurb: string;
     starterTitles: string[];
     emptyHint: string;
-    /** Whether the team picks a doc source first (external / Specboard / GitHub). */
+    /** Whether the team picks a doc source first (external / Specboards / GitHub). */
     chooseSource: boolean;
   }
 > = {
@@ -54,7 +54,7 @@ const AREA_COPY: Record<
  * Shared server view for the Plan-section areas (Strategy / Research /
  * Architecture). Resolves the product from the URL; the cross-product "all"
  * segment prompts for a product since docs are per-product. Strategy is
- * always Specboard-held pages; the other areas choose a source first.
+ * always Specboards-held pages; the other areas choose a source first.
  */
 export async function PlanAreaView({
   area,

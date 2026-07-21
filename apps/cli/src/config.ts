@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 /**
- * CLI configuration: where the Specboard deployment lives and the API key to
+ * CLI configuration: where the Specboards deployment lives and the API key to
  * authenticate with. Stored at ~/.specboard/config.json (override the whole
  * path with SPECBOARD_CONFIG). Environment variables SPECBOARD_URL and
  * SPECBOARD_TOKEN take precedence over the file, so CI can run keyless of disk.

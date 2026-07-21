@@ -7,7 +7,7 @@ import { getServerSessionUser } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
 import { consentWorkspaceOptions } from "@/lib/mcp/workspace-binding";
 
-export const metadata = { title: "Authorize access · Specboard" };
+export const metadata = { title: "Authorize access · Specboards" };
 export const dynamic = "force-dynamic";
 
 /**

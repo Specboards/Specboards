@@ -146,7 +146,7 @@ function createAuth(url: string) {
         const { textBody, htmlBody } = renderActionEmail({
           name: user.name,
           intro:
-            "Someone (probably you) just tried to sign up for Specboard with this email address, but it already has an account. Sign in instead; if you have forgotten your password, use \"Forgot password?\" on the sign-in page.",
+            "Someone (probably you) just tried to sign up for Specboards with this email address, but it already has an account. Sign in instead; if you have forgotten your password, use \"Forgot password?\" on the sign-in page.",
           action: "Sign in",
           url: `${origin}/sign-in`,
           footer:
@@ -154,7 +154,7 @@ function createAuth(url: string) {
         });
         await sendEmail({
           to: user.email,
-          subject: "You already have a Specboard account",
+          subject: "You already have a Specboards account",
           textBody,
           htmlBody,
         });
@@ -162,14 +162,14 @@ function createAuth(url: string) {
       sendResetPassword: async ({ user, url }) => {
         const { textBody, htmlBody } = renderActionEmail({
           name: user.name,
-          intro: "We received a request to reset your Specboard password. Click the button below to choose a new one.",
+          intro: "We received a request to reset your Specboards password. Click the button below to choose a new one.",
           action: "Reset password",
           url,
           footer: "If you didn't request this, you can safely ignore this email.",
         });
         await sendEmail({
           to: user.email,
-          subject: "Reset your Specboard password",
+          subject: "Reset your Specboards password",
           textBody,
           htmlBody,
         });
@@ -198,14 +198,14 @@ function createAuth(url: string) {
         }) => {
           const { textBody, htmlBody } = renderActionEmail({
             name: user.name,
-            intro: `Confirm that you want to change your Specboard email address to ${newEmail}. The change takes effect once you click the button below.`,
+            intro: `Confirm that you want to change your Specboards email address to ${newEmail}. The change takes effect once you click the button below.`,
             action: "Confirm email change",
             url,
             footer: "If you didn't request this, you can safely ignore this email and your address stays the same.",
           });
           await sendEmail({
             to: user.email,
-            subject: "Confirm your Specboard email change",
+            subject: "Confirm your Specboards email change",
             textBody,
             htmlBody,
           });
@@ -223,13 +223,13 @@ function createAuth(url: string) {
       sendVerificationEmail: async ({ user, url }) => {
         const { textBody, htmlBody } = renderActionEmail({
           name: user.name,
-          intro: "Confirm your email address to finish setting up your Specboard account.",
+          intro: "Confirm your email address to finish setting up your Specboards account.",
           action: "Verify email",
           url,
         });
         await sendEmail({
           to: user.email,
-          subject: "Verify your Specboard email",
+          subject: "Verify your Specboards email",
           textBody,
           htmlBody,
         });
@@ -266,7 +266,7 @@ function createAuth(url: string) {
           if (!invited) {
             throw new APIError("FORBIDDEN", {
               message:
-                "Specboard is invite-only during the pre-release. Request access at https://www.specboard.ai/request-access and we'll be in touch.",
+                "Specboards is invite-only during the pre-release. Request access at https://www.specboard.ai/request-access and we'll be in touch.",
             });
           }
         }

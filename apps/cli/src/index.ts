@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
 
-import { ApiError, SpecboardClient, type Feature, type FeaturePatch } from "./client.js";
+import { ApiError, SpecboardsClient, type Feature, type FeaturePatch } from "./client.js";
 import { clearFileConfig, loadFileConfig, resolveConfig, saveFileConfig } from "./config.js";
 import { shortestTransitionPath } from "./workflow.js";
 
@@ -14,7 +14,7 @@ const { version: VERSION } = createRequire(import.meta.url)("../package.json") a
   version: string;
 };
 
-const HELP = `Specboard CLI
+const HELP = `Specboards CLI
 
 Usage: specboard <command> [options]
 
@@ -48,12 +48,12 @@ function fail(message: string): never {
 }
 
 /** Build an authenticated client from config, or exit with guidance. */
-function client(): SpecboardClient {
+function client(): SpecboardsClient {
   const { baseUrl, apiKey, orgSlug } = resolveConfig();
   if (!baseUrl || !apiKey) {
     fail("not logged in. Run `specboard auth login` first.");
   }
-  return new SpecboardClient(baseUrl, apiKey, orgSlug);
+  return new SpecboardsClient(baseUrl, apiKey, orgSlug);
 }
 
 async function ask(question: string, opts: { secret?: boolean } = {}): Promise<string> {
@@ -96,7 +96,7 @@ async function cmdLogin(argv: string[]): Promise<void> {
   if (!baseUrl || !apiKey) fail("a URL and an API key are required.");
 
   // Verify before saving so a bad key fails loudly here, not on first use.
-  const me = await new SpecboardClient(baseUrl, apiKey, orgSlug).me().catch((err) => {
+  const me = await new SpecboardsClient(baseUrl, apiKey, orgSlug).me().catch((err) => {
     if (err instanceof ApiError && err.status === 401) {
       fail("that API key was rejected (401). Check the key and try again.");
     }

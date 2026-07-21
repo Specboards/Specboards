@@ -13,7 +13,7 @@ describe("buildOpenApiDocument", () => {
 
   it("is an OpenAPI 3 document with the deployment origin as its server", () => {
     expect(doc.openapi).toMatch(/^3\./);
-    expect(doc.info.title).toBe("Specboard API");
+    expect(doc.info.title).toBe("Specboards API");
     expect(doc.servers[0]!.url).toBe("https://app.specboard.ai");
   });
 

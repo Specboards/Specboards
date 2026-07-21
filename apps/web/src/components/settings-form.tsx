@@ -95,7 +95,7 @@ export function ProfileCard({
     <Card>
       <CardHeader>
         <CardTitle>Profile</CardTitle>
-        <CardDescription>Your name, picture, and time zone across Specboard.</CardDescription>
+        <CardDescription>Your name, picture, and time zone across Specboards.</CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={onSubmit} className="space-y-4">
@@ -262,7 +262,7 @@ export function CompanyCard({ name, canEdit }: { name: string; canEdit: boolean 
         <CardTitle>Company</CardTitle>
         <CardDescription>
           {canEdit
-            ? "Your organization's name across Specboard."
+            ? "Your organization's name across Specboards."
             : "Your organization. Only the owner can change these details."}
         </CardDescription>
       </CardHeader>

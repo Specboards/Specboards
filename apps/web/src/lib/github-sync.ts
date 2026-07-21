@@ -264,7 +264,7 @@ kind: feature
 
 # ${title}
 
-This is your first Specboard spec. It lives in your repository as
+This is your first Specboards spec. It lives in your repository as
 \`specs/${featureSlug(title)}/spec.md\` and stays in sync with this card on every
 push. Edit it in git; the board follows.
 

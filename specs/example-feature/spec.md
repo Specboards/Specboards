@@ -7,9 +7,9 @@ feature: examples # optional: groups this work item under the named Feature
 
 # Example Feature
 
-A sample spec demonstrating the Specboard frontmatter + section conventions.
+A sample spec demonstrating the Specboards frontmatter + section conventions.
 A spec is a **work item** (the spec-backed leaf); the `id` is the stable link to
-its metadata in the Specboard database and survives file renames. The optional
+its metadata in the Specboards database and survives file renames. The optional
 `feature:` key groups it under a Feature (otherwise its folder is used).
 
 ## Problem

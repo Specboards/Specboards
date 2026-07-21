@@ -61,7 +61,7 @@ interface RepositoriesManagerProps {
   /** Whether the deployment has a GitHub App configured yet. */
   configured: boolean;
   /** Self-host (single-tenant) deployment: admins create their own GitHub App.
-   *  On hosted (multi-tenant), the App is shared and managed by Specboard. */
+   *  On hosted (multi-tenant), the App is shared and managed by Specboards. */
   selfHosted: boolean;
   /** GitHub App "install" URL once the App exists, else null. */
   installUrl: string | null;
@@ -120,7 +120,7 @@ export function RepositoriesManager({
       <div>
         <h1 className="text-lg font-semibold tracking-tight">Repositories</h1>
         <p className="text-sm text-muted-foreground">
-          Specboard imports <code>specs/**/spec.md</code> from connected
+          Specboards imports <code>specs/**/spec.md</code> from connected
           repositories and keeps the board in sync on every push.
         </p>
       </div>
@@ -159,7 +159,7 @@ export function RepositoriesManager({
         <p className="text-sm text-muted-foreground">
           {configured
             ? "Only the owner can connect repositories."
-            : "GitHub isn't set up yet. Ask an admin to connect Specboard to GitHub."}
+            : "GitHub isn't set up yet. Ask an admin to connect Specboards to GitHub."}
         </p>
       ) : configured ? (
         <ConnectSection
@@ -609,7 +609,7 @@ function CreateSpecRepoNudge({
 }) {
   const newRepoUrl =
     "https://github.com/new?name=specs&description=" +
-    encodeURIComponent("Product specs synced to Specboard");
+    encodeURIComponent("Product specs synced to Specboards");
   return (
     <details className="rounded-md border px-3 py-2">
       <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
@@ -649,10 +649,10 @@ function CreateSpecRepoNudge({
                 rel="noreferrer"
                 className="underline"
               >
-                Install Specboard
+                Install Specboards
               </a>
             ) : (
-              "Install the Specboard GitHub App"
+              "Install the Specboards GitHub App"
             )}{" "}
             on the new repo.
           </li>
@@ -664,7 +664,7 @@ function CreateSpecRepoNudge({
 }
 
 /**
- * One-click path of the spec-repo nudge: name the repo and Specboard creates a
+ * One-click path of the spec-repo nudge: name the repo and Specboards creates a
  * private repo in the installation's GitHub organization, connects it, and
  * hands off to the "create your first spec" walkthrough to seed it. Failures
  * (personal-account installation, missing Administration permission) surface
@@ -760,7 +760,7 @@ function SetupGitHubCard() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Connect Specboard to GitHub</CardTitle>
+        <CardTitle>Connect Specboards to GitHub</CardTitle>
         <CardDescription>
           We&apos;ll create a GitHub App on your account or organization in one
           click, and you confirm on GitHub. After that you can install it on
@@ -797,7 +797,7 @@ function SetupGitHubCard() {
 
 /**
  * Hosted (multi-tenant) deployment with no GitHub App credentials configured.
- * Tenants don't create their own App here — it's a shared App Specboard owns —
+ * Tenants don't create their own App here — it's a shared App Specboards owns —
  * so the right action is to reach support, not run the manifest flow.
  */
 function HostedNotConfiguredCard() {
@@ -806,7 +806,7 @@ function HostedNotConfiguredCard() {
       <CardHeader>
         <CardTitle>GitHub isn&apos;t available yet</CardTitle>
         <CardDescription>
-          GitHub is managed by Specboard on the hosted plan. If you don&apos;t
+          GitHub is managed by Specboards on the hosted plan. If you don&apos;t
           see the option to install it, please contact support and we&apos;ll
           get you connected.
         </CardDescription>
@@ -834,8 +834,8 @@ function RepoList({
         title="No repositories connected"
         description={
           canManage
-            ? "Specboard reads your specs from a connected GitHub repository. Connect one using the section below to import every spec and keep this list in sync on each push."
-            : "Specboard reads your specs from a connected GitHub repository. Once an admin connects one, it appears here."
+            ? "Specboards reads your specs from a connected GitHub repository. Connect one using the section below to import every spec and keep this list in sync on each push."
+            : "Specboards reads your specs from a connected GitHub repository. Once an admin connects one, it appears here."
         }
       />
     );
@@ -1210,7 +1210,7 @@ function ConnectSection({
       <CardHeader>
         <CardTitle>Connect a repository</CardTitle>
         <CardDescription>
-          Install the Specboard GitHub App on the repositories you want to sync,
+          Install the Specboards GitHub App on the repositories you want to sync,
           then connect them here. No copying ids by hand.
         </CardDescription>
       </CardHeader>
