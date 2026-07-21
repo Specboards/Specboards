@@ -78,3 +78,30 @@ specboard status "$SPEC_ID" in_progress --advance   # backlog -> defining -> rea
 specboard status "$SPEC_ID" in_progress --advance
 specboard link "$SPEC_ID" --pr "$PR_NUMBER"
 ```
+
+## CI: sync PRs to Specboard automatically
+
+To keep work items in step with your PRs (opened -> `in_progress` + PR link,
+merged -> `done`), call the reusable workflow from your repo. Add
+`.github/workflows/specboard-sync.yml`:
+
+```yaml
+name: Specboard Sync
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, closed]
+jobs:
+  sync:
+    uses: Specboards/Specboard/.github/workflows/specboard-sync-reusable.yml@main
+    secrets:
+      SPECBOARD_URL: ${{ secrets.SPECBOARD_URL }}
+      SPECBOARD_TOKEN: ${{ secrets.SPECBOARD_TOKEN }}
+```
+
+Set the two repo secrets: `SPECBOARD_URL` (e.g. `https://app.specboard.ai`) and
+`SPECBOARD_TOKEN` (an API key, ideally a `service`-account key scoped to
+`features:write` and `statuses:read`).
+
+One hard rule: the repo running this workflow must be the same repo whose specs
+were imported into the target Specboard workspace, since spec ids resolve from
+that repo's `specs/**/spec.md` frontmatter.

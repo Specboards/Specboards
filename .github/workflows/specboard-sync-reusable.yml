@@ -1,0 +1,114 @@
+# Reusable Specboard-sync workflow. A customer enables the PR -> work-item-status
+# loop by calling this from their repo with ~5 lines (see the snippet below),
+# instead of copying a workflow plus scripts/specboard/*. It consumes the
+# published `@specboard/cli` (no monorepo build), so the only prerequisites are
+# the two secrets and that the calling repo is the SAME repo whose specs were
+# imported into the target Specboard workspace (spec ids resolve from that
+# repo's specs/**/spec.md frontmatter).
+#
+# Caller snippet (.github/workflows/specboard-sync.yml in the customer's repo):
+#
+#   name: Specboard Sync
+#   on:
+#     pull_request:
+#       types: [opened, reopened, synchronize, closed]
+#   jobs:
+#     sync:
+#       uses: Specboards/Specboard/.github/workflows/specboard-sync-reusable.yml@main
+#       secrets:
+#         SPECBOARD_URL: ${{ secrets.SPECBOARD_URL }}
+#         SPECBOARD_TOKEN: ${{ secrets.SPECBOARD_TOKEN }}
+name: Specboard Sync (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      cli_version:
+        description: "Version of @specboard/cli to run (npm dist-tag or version)."
+        type: string
+        default: "latest"
+    secrets:
+      SPECBOARD_URL:
+        required: true
+      SPECBOARD_TOKEN:
+        required: true
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      # Full history so the PR base..head diff resolves touched specs.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Sync work items from the PR
+        env:
+          SPECBOARD_URL: ${{ secrets.SPECBOARD_URL }}
+          SPECBOARD_TOKEN: ${{ secrets.SPECBOARD_TOKEN }}
+          CLI_VERSION: ${{ inputs.cli_version }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          ACTION: ${{ github.event.action }}
+          MERGED: ${{ github.event.pull_request.merged }}
+        run: |
+          set -uo pipefail
+          if [ -z "${SPECBOARD_URL:-}" ] || [ -z "${SPECBOARD_TOKEN:-}" ]; then
+            echo "Specboard secrets not set; skipping sync."
+            exit 0
+          fi
+
+          npm install -g "@specboard/cli@${CLI_VERSION:-latest}"
+
+          # Resolve touched spec ids: frontmatter id of changed specs/**/spec.md,
+          # plus any `Spec: <id>` trailer in the PR body (code-only PRs).
+          base="${BASE_SHA:-origin/main}"
+          head="${HEAD_SHA:-HEAD}"
+          ids=""
+          if changed=$(git diff --name-only "$base" "$head" 2>/dev/null); then
+            while IFS= read -r f; do
+              case "$f" in
+                specs/*/spec.md)
+                  [ -f "$f" ] || continue
+                  id=$(grep -m1 '^id:' "$f" 2>/dev/null \
+                    | sed 's/^id:[[:space:]]*//; s/"//g; s/'\''//g; s/[[:space:]]*$//')
+                  [ -n "$id" ] && ids="$ids$id"$'\n'
+                  ;;
+              esac
+            done <<EOF
+          $changed
+          EOF
+          fi
+          if [ -n "${PR_BODY:-}" ]; then
+            while IFS= read -r id; do
+              id=$(printf '%s' "$id" | tr -d '\r' | sed 's/[[:space:]]*$//')
+              [ -n "$id" ] && ids="$ids$id"$'\n'
+            done < <(printf '%s\n' "$PR_BODY" | sed -n 's/^[Ss]pec:[[:space:]]*//p')
+          fi
+          ids=$(printf '%s' "$ids" | sed '/^$/d' | sort -u)
+          if [ -z "$ids" ]; then
+            echo "No spec ids resolved for this PR; nothing to sync."
+            exit 0
+          fi
+
+          # Drive status from the PR. --advance walks a spec several stages behind
+          # the target through the intermediate statuses. Best-effort per id.
+          while IFS= read -r id; do
+            [ -n "$id" ] || continue
+            if [ "${ACTION:-}" = "closed" ] && [ "${MERGED:-}" = "true" ]; then
+              echo "==> $id: done"
+              specboard status "$id" done --advance || echo "  (skip: no legal path to 'done')"
+            else
+              echo "==> $id: in_progress + link PR #${PR_NUMBER:-?}"
+              specboard status "$id" in_progress --advance || echo "  (skip: no legal path to 'in_progress')"
+              if [ -n "${PR_NUMBER:-}" ]; then
+                specboard link "$id" --pr "$PR_NUMBER" || echo "  (skip: link failed, maybe already linked)"
+              fi
+            fi
+          done <<EOF
+          $ids
+          EOF
