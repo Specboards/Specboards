@@ -11,6 +11,9 @@ on:
 
 jobs:
   publish:
+    # Only publish from the canonical repo. A fork that pushes a `cli-v*` tag
+    # (e.g. a self-hoster's clone) must never publish to the @specboards scope.
+    if: github.repository == 'Specboards/Specboards'
     runs-on: ubuntu-latest
     permissions:
       contents: read

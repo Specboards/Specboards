@@ -207,7 +207,7 @@ infra/
 
 - **Design:** [`ARCHITECTURE.md`](./ARCHITECTURE.md)
 - **Backlog:** [`docs/BACKLOG.md`](./docs/BACKLOG.md) (tracked in Specboards)
-- **Original build plan:** [`docs/archive/PLAN.md`](./docs/archive/PLAN.md)
+- **Archived plans:** [`docs/archive/`](./docs/archive/) (shipped work, kept for history)
 
 ## Develop
 

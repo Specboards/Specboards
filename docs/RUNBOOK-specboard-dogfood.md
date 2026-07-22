@@ -1,5 +1,9 @@
 # Runbook: Specboards for Specboards (dogfooding)
 
+> Internal: this documents how Studio Palouse runs Specboards on its own repo.
+> You do not need it to self-host. For wiring the PR -> status sync loop into
+> your own repo, see [`RUNBOOK-github-sync.md`](./RUNBOOK-github-sync.md).
+
 We track Specboards' own development in Specboards, driven from the CLI so status
 follows the actual work instead of being updated by hand.
 

@@ -5,10 +5,8 @@ not maintained and may not reflect the current code. Active plans live one level
 up in `docs/`.
 
 - `PLAN-e2e-playwright.md` - Playwright onboarding e2e harness (merged, PR #69).
-- `PLAN-fly-better-auth.md` - move auth to Better Auth on Fly (executed 2026-06-12).
 - `PLAN-org-move-to-specboards.md` - move the repo/org to the Specboards org (done).
 - `PLAN-webhooks.md` - outbound webhooks V1 (live in prod through v0.11.0).
-- `PLAN.md` - original architecture and monorepo scaffold plan (executed).
 - `BACKLOG.md` - PM table-stakes backlog + progress log; fully migrated into the
   Specboard workspace (see `docs/BACKLOG.md` for the pointer).
 - `DESIGN-github-native-reskin.md` - Primer/GitHub-native re-skin (slices 1-3 shipped).

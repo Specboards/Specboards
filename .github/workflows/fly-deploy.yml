@@ -22,7 +22,9 @@ on:
 
 jobs:
   deploy-test:
-    if: github.event_name == 'push' || github.event.inputs.environment == 'test'
+    # Only deploy from the canonical repo. Forks / self-hoster clones never push
+    # to Studio Palouse's Fly apps even if they enable Actions.
+    if: github.repository == 'Specboards/Specboards' && (github.event_name == 'push' || github.event.inputs.environment == 'test')
     runs-on: ubuntu-latest
     concurrency:
       group: fly-deploy-test
@@ -34,7 +36,7 @@ jobs:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN_TEST }}
 
   deploy-production:
-    if: github.event.inputs.environment == 'production'
+    if: github.repository == 'Specboards/Specboards' && github.event.inputs.environment == 'production'
     runs-on: ubuntu-latest
     concurrency:
       group: fly-deploy-production
