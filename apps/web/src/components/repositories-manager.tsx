@@ -1452,7 +1452,7 @@ function ManualConnectForm() {
             <span className="text-xs font-medium text-muted-foreground">
               Repository
             </span>
-            <Input name="name" placeholder="Specboard" required />
+            <Input name="name" placeholder="Specboards" required />
           </label>
         </div>
         <div className="grid grid-cols-2 gap-3">

@@ -11,11 +11,11 @@ into two paths, keyed off `SPECBOARDS_MULTI_TENANT`:
 
 | Model | Flag | GitHub App | How tenants connect |
 | --- | --- | --- | --- |
-| **Hosted** (test, prod) | `SPECBOARDS_MULTI_TENANT=true` | One **shared** App Specboards owns under `@specboard`, configured via env | Click **Install**, never create |
+| **Hosted** (test, prod) | `SPECBOARDS_MULTI_TENANT=true` | One **shared** App Specboards owns under `@specboards`, configured via env | Click **Install**, never create |
 | **Self-host** | unset (default) | Each install creates its **own** App via the one-click manifest flow | One-click setup, then install |
 
 On the hosted deployment the in-app "create App" flow is **disabled**: it would
-hit GitHub's reserved-name wall (`Specboards` is reserved for `@specboard`) and
+hit GitHub's reserved-name wall (`Specboards` is reserved for `@specboards`) and
 overwrite the deployment-wide singleton credentials. Tenants only install the
 shared App. The one-click manifest flow below is the **self-host** path.
 
@@ -94,7 +94,7 @@ Specboards sends you to GitHub with the App pre-defined: name; permissions
 Contents R/W, Pull requests R/W, Issues RO, Metadata RO; webhook; the **Push**,
 **Pull request**, and **Issues** events; and the post-install Setup URL. The
 name is suffixed with your org/workspace (e.g. `Specboards (acme)`) because App
-names are globally unique and the bare `Specboards` is reserved for `@specboard`.
+names are globally unique and the bare `Specboards` is reserved for `@specboards`.
 Review and **Create GitHub App**. GitHub redirects you back and Specboards stores the
 App's id, slug, private key, and webhook secret, all **encrypted in the database**.
 No `.pem` download, no secrets to paste.

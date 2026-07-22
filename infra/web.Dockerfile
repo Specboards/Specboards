@@ -1,4 +1,4 @@
-# Build and run the Specboard web app (self-host). Build context = repo root.
+# Build and run the Specboards web app (self-host). Build context = repo root.
 FROM node:22-alpine AS builder
 RUN corepack enable
 WORKDIR /app

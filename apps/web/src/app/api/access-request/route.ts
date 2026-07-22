@@ -5,14 +5,14 @@ export const dynamic = "force-dynamic";
 /**
  * Public "Request access" intake for the pre-v1 invite-only beta. The marketing
  * site (www.specboards.ai) posts here cross-origin; we email the review inbox
- * (contact@specboard.net) and send the requester a confirmation, both via the
- * app's existing Postmark service (from no-reply@specboard.ai). No account or
+ * (contact@specboard.ai) and send the requester a confirmation, both via the
+ * app's existing Postmark service (from no-reply@specboards.ai). No account or
  * DB row is created: the team approves by sending an org invitation, which is
  * what actually unlocks sign-up (see access-gate.ts).
  */
 
 /** Where review notifications land. Override with ACCESS_REQUEST_NOTIFY_EMAIL. */
-const NOTIFY_EMAIL = process.env.ACCESS_REQUEST_NOTIFY_EMAIL?.trim() || "contact@specboard.net";
+const NOTIFY_EMAIL = process.env.ACCESS_REQUEST_NOTIFY_EMAIL?.trim() || "contact@specboard.ai";
 
 /** Browser origins allowed to POST here (the marketing site + local dev). */
 function allowedOrigins(): string[] {
@@ -109,7 +109,7 @@ export async function POST(req: Request) {
 
   if (rateLimited(clientIp(req))) {
     return json(
-      { error: "Too many requests. Please try again later or email contact@specboard.net." },
+      { error: "Too many requests. Please try again later or email contact@specboard.ai." },
       429,
     );
   }
@@ -132,7 +132,7 @@ export async function POST(req: Request) {
     name,
     intro: [
       "Thanks for requesting access to Specboards. We've received your request and our team will review it shortly.",
-      "We'll follow up at this address. If you have any questions in the meantime, just reply to contact@specboard.net.",
+      "We'll follow up at this address. If you have any questions in the meantime, just reply to contact@specboard.ai.",
     ],
     footer: "You're receiving this because you requested access at specboards.ai.",
   });
@@ -155,7 +155,7 @@ export async function POST(req: Request) {
   } catch (err) {
     console.error("[access-request] send failed", err);
     return json(
-      { error: "We couldn't submit your request. Please email contact@specboard.net." },
+      { error: "We couldn't submit your request. Please email contact@specboard.ai." },
       502,
     );
   }
