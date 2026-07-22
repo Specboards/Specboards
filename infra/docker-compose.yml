@@ -1,4 +1,4 @@
-# Self-host stack: Specboard web + Postgres. The hosted SaaS runs the same
+# Self-host stack: Specboards web + Postgres. The hosted SaaS runs the same
 # image on Fly.io Machines + Fly Postgres; auth (Better Auth) runs
 # in-app against Postgres in both shapes. Migrations: infra/migrations/.
 services:
@@ -32,7 +32,7 @@ services:
       # Optional outbound email (verification / password reset) via Postmark.
       # Unset = emails are skipped with a logged warning.
       # POSTMARK_SERVER_TOKEN: ""
-      # EMAIL_FROM: "Specboard <no-reply@example.com>"
+      # EMAIL_FROM: "Specboards <no-reply@example.com>"
     ports:
       - "3000:3000"
     depends_on:

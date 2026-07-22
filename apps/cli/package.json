@@ -2,7 +2,7 @@
   "name": "@specboards/cli",
   "version": "0.21.0",
   "type": "module",
-  "description": "Command-line interface for Specboard (manage specs, status, and GitHub links from the terminal).",
+  "description": "Command-line interface for Specboards (manage specs, status, and GitHub links from the terminal).",
   "license": "Apache-2.0",
   "homepage": "https://specboards.ai",
   "repository": {

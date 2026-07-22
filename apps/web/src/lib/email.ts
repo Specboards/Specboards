@@ -6,7 +6,7 @@
  *   sends become logged no-ops (sign-up still works, verification links
  *   are just never delivered).
  * - `EMAIL_FROM` — verified sender signature / domain address,
- *   e.g. `Specboards <no-reply@specboard.ai>`.
+ *   e.g. `Specboards <no-reply@specboards.ai>`.
  *
  * Uses Postmark's HTTP API directly — no SDK dependency.
  */

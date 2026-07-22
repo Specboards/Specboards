@@ -51,7 +51,7 @@ export async function GET(req: Request) {
   // On the hosted (multi-tenant) deployment, GitHub is a single shared App that
   // Specboards owns and configures via env — tenants install it, never create
   // one. Creating here would both hit GitHub's reserved-name wall ("Specboards"
-  // is reserved for @specboard) and overwrite the deployment-wide singleton
+  // is reserved for @specboards) and overwrite the deployment-wide singleton
   // credentials. The manifest flow is self-host only.
   if (isMultiTenant()) {
     return htmlRedirect(repos("?error=hosted"));
@@ -66,7 +66,7 @@ export async function GET(req: Request) {
   const nonce = newSetupNonce();
 
   // GitHub App names are globally unique and GitHub reserves the bare name
-  // "Specboards" for the @specboard account, so every self-host App must carry a
+  // "Specboards" for the @specboards account, so every self-host App must carry a
   // distinguishing suffix. Prefer the admin-supplied org name, falling back to
   // this workspace's slug.
   const manifest = {

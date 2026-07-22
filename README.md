@@ -100,7 +100,7 @@ Optional environment flags for a hosted deployment:
 - `SPECBOARDS_INVITE_ONLY` - close public sign-up; only addresses with a pending
   org invitation can create an account (used for the pre-release beta).
 - `ACCESS_REQUEST_NOTIFY_EMAIL` - where `POST /api/access-request` submissions
-  are sent for review (default `contact@specboard.net`).
+  are sent for review (default `contact@specboard.ai`).
 - `ACCESS_REQUEST_ALLOWED_ORIGINS` - comma-separated CORS allow-list for that
   endpoint (default: the `specboards.ai` marketing origins + localhost).
 - `POSTMARK_SERVER_TOKEN` / `EMAIL_FROM` - transactional email (verification,
@@ -227,7 +227,7 @@ for any purpose, including commercially.
 A small set of SaaS-oriented features are licensed separately: multi-tenant
 hosting (`N>1`), SSO/SAML/SCIM, advanced analytics, premium integrations, and
 audit logs. See [LICENSING.md](./LICENSING.md) for the full breakdown, or contact
-**contact@specboard.net** for a commercial license.
+**contact@specboard.ai** for a commercial license.
 
 The Specboards **brand** (name, logos, visual identity) and the marketing site
 are **not** open source. They live in the separate

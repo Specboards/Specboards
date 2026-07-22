@@ -1,5 +1,5 @@
-# Specboard per-repo configuration (versioned with your code).
-# Tells Specboard where specs live and how this team's workflow/fields are shaped.
+# Specboards per-repo configuration (versioned with your code).
+# Tells Specboards where specs live and how this team's workflow/fields are shaped.
 version: 1
 
 # Globs (relative to repo root) that identify spec files.
