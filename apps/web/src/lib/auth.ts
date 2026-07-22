@@ -6,7 +6,12 @@ import { mcp } from "better-auth/plugins";
 import { isBlockedEmailDomain } from "@specboards/core";
 import { createDb, schema } from "@specboards/db";
 
-import { hasValidPendingInvitation, inviteOnlyEnabled } from "@/lib/access-gate";
+import {
+  hasValidPendingInvitation,
+  isFirstUserForDomain,
+  signUpCodeMatches,
+  signUpCodeRequired,
+} from "@/lib/access-gate";
 import { getDb } from "@/lib/db";
 import { isE2E } from "@/lib/e2e";
 import { renderActionEmail, sendEmail } from "@/lib/email";
@@ -256,18 +261,24 @@ function createAuth(url: string) {
               "Please sign up with your work email address. Personal email providers are not supported on the hosted service.",
           });
         }
-        // Pre-v1 invite-only gate: only emails with a live pending invitation may
-        // create an account. Invited users still flow through /sign-up normally
-        // (the invite email seeds a matching pending invitation); everyone else
-        // is directed to the marketing site's "Request access" form.
-        if (inviteOnlyEnabled()) {
+        // Pre-v1 sign-up-code gate: the first person from a company must present
+        // a valid sign-up code to start their team. Teammates who follow them on
+        // the same email domain (and anyone holding a live org invitation) sign
+        // up without a code, as basic members. The code arrives in the
+        // `x-specboards-signup-code` header (set by the sign-up form) so it never
+        // touches the auth body schema.
+        if (signUpCodeRequired()) {
           const db = getDb();
           const invited = db ? await hasValidPendingInvitation(db, email) : false;
-          if (!invited) {
-            throw new APIError("FORBIDDEN", {
-              message:
-                "Specboards is invite-only during the pre-release. Request access at https://www.specboards.ai/request-access and we'll be in touch.",
-            });
+          const firstForDomain = db ? await isFirstUserForDomain(db, email) : true;
+          if (firstForDomain && !invited) {
+            const code = ctx.headers?.get("x-specboards-signup-code") ?? "";
+            if (!signUpCodeMatches(code)) {
+              throw new APIError("FORBIDDEN", {
+                message:
+                  "A valid sign-up code is required to create the first Specboards account for your company. Check your code and try again, or request access at https://www.specboards.ai/request-access.",
+              });
+            }
           }
         }
       }),

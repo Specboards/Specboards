@@ -80,6 +80,9 @@ export function AuthForm({ mode }: { mode: Mode }) {
     const email = String(data.get("email") ?? "").trim();
     const password = String(data.get("password") ?? "");
     const name = String(data.get("name") ?? "").trim();
+    // Only the first person from a company needs this; teammates leave it blank
+    // and the server lets them through (see access-gate `isFirstUserForDomain`).
+    const signUpCode = String(data.get("signUpCode") ?? "").trim();
 
     if (mode === "sign-up" && password !== String(data.get("confirmPassword") ?? "")) {
       setError("Passwords don't match.");
@@ -89,7 +92,17 @@ export function AuthForm({ mode }: { mode: Mode }) {
     startTransition(async () => {
       setError(null);
       if (mode === "sign-up") {
-        const { error } = await signUp.email({ email, password, name, callbackURL: redirectTo });
+        // Send the code in a header rather than the body so it never touches
+        // Better Auth's sign-up schema; the auth before-hook reads it.
+        const { error } = await signUp.email({
+          email,
+          password,
+          name,
+          callbackURL: redirectTo,
+          fetchOptions: signUpCode
+            ? { headers: { "x-specboards-signup-code": signUpCode } }
+            : undefined,
+        });
         if (error) {
           setError(error.message ?? "Something went wrong. Please try again.");
           return;
@@ -149,6 +162,22 @@ export function AuthForm({ mode }: { mode: Mode }) {
       </CardHeader>
       <CardContent>
         <form onSubmit={onSubmit} className="space-y-4">
+          {mode === "sign-up" ? (
+            <label className="block space-y-1.5">
+              <span className="text-xs font-medium text-muted-foreground">Sign-up code</span>
+              <Input
+                name="signUpCode"
+                autoComplete="off"
+                autoCapitalize="off"
+                spellCheck={false}
+                placeholder="Required to start a new team"
+              />
+              <span className="block text-xs text-muted-foreground">
+                New teams need a sign-up code to get started. If a teammate is already on
+                Specboards, you can leave this blank.
+              </span>
+            </label>
+          ) : null}
           {mode === "sign-up" ? (
             <label className="block space-y-1.5">
               <span className="text-xs font-medium text-muted-foreground">Name</span>

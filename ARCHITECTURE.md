@@ -95,9 +95,11 @@ Next.js web app  ── apps/web           MCP server ── apps/mcp
 - **`packages/ui`**: shared design tokens / components.
 - **`apps/web`**: Next.js App Router UI; left sidebar nav with light/dark theme;
   in-app auth via Better Auth (`/api/auth/*`: sign-up/in, email verification,
-  password reset), with an optional invite-only sign-up gate
-  (`SPECBOARDS_INVITE_ONLY`) and a public `POST /api/access-request` intake for
-  the pre-release request-access flow; routes for Board + Backlog (two views of
+  password reset), with an optional sign-up-code gate
+  (`SPECBOARDS_SIGNUP_CODE_REQUIRED`: the first user on an email domain must
+  present a code to start a team; teammates after them join without one) and a
+  public `POST /api/access-request` intake for the pre-release request-access
+  flow; routes for Board + Backlog (two views of
   one nav entry, with a
   per-hierarchy-level switcher), Roadmap (grouped by release), Feature detail
   (spec content for leaf items; an editable rich-text Details body for DB-native

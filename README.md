@@ -97,8 +97,14 @@ Optional environment flags for a hosted deployment:
 
 - `SPECBOARDS_BLOCK_PUBLIC_EMAIL_DOMAINS` - reject sign-ups from consumer email
   providers (gmail.com, outlook.com, ...).
-- `SPECBOARDS_INVITE_ONLY` - close public sign-up; only addresses with a pending
-  org invitation can create an account (used for the pre-release beta).
+- `SPECBOARDS_SIGNUP_CODE_REQUIRED` - gate public sign-up behind a code (used for
+  the pre-release beta): the first user on a given email domain must present a
+  valid sign-up code to start a team; teammates who follow them on the same
+  domain, and anyone holding a live org invitation, sign up without one.
+- `SPECBOARDS_SIGNUP_CODE` - override the sign-up code (default `SPECBUILDER2026`).
+- `SPECBOARDS_INVITE_ONLY` - legacy gate: close public sign-up so only addresses
+  with a pending org invitation can create an account. Superseded by
+  `SPECBOARDS_SIGNUP_CODE_REQUIRED`; leave unset when the code gate is on.
 - `ACCESS_REQUEST_NOTIFY_EMAIL` - where `POST /api/access-request` submissions
   are sent for review (default `contact@specboard.ai`).
 - `ACCESS_REQUEST_ALLOWED_ORIGINS` - comma-separated CORS allow-list for that
