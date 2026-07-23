@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/sheet";
 import { AuthRequiredError, getItemDetail } from "@/lib/api-client";
 import type { ItemDetailData } from "@/lib/item-detail";
+import { useIsMobile } from "@/lib/use-media-query";
 import { useOrgProductPath } from "@/lib/use-org";
 
 const WIDTH_KEY = "specboard:item-flyout:width";
@@ -45,6 +46,10 @@ export function FeatureEditSheet({
   const [data, setData] = useState<ItemDetailData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [width, setWidth] = useState(DEFAULT_WIDTH);
+  // Below sm the drawer is full-screen and the stored width / drag-to-resize
+  // handle do not apply. (The drawer only opens on interaction, by which point
+  // this has resolved, so there is no first-paint flash.)
+  const isMobile = useIsMobile();
   const orgHref = useOrgProductPath();
 
   // Restore the last-used width once on mount (client-only).
@@ -115,17 +120,22 @@ export function FeatureEditSheet({
   return (
     <Sheet open={specId !== null} onOpenChange={(open) => !open && onClose()}>
       <SheetContent
-        style={{ width, maxWidth: "95vw" }}
-        className="max-w-[95vw] gap-0 p-0"
+        style={isMobile ? undefined : { width, maxWidth: "95vw" }}
+        className={
+          isMobile ? "w-full max-w-full gap-0 p-0" : "max-w-[95vw] gap-0 p-0"
+        }
       >
-        {/* Left-edge resize handle. */}
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize panel"
-          onPointerDown={onResizeStart}
-          className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize hover:bg-primary/30"
-        />
+        {/* Left-edge resize handle (pointer-only; off on the full-screen mobile
+            layout, where there is nothing to resize against). */}
+        {!isMobile ? (
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize panel"
+            onPointerDown={onResizeStart}
+            className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize hover:bg-primary/30"
+          />
+        ) : null}
         <SheetHeader className="flex-row items-center justify-between gap-2 border-b px-5 py-3">
           <SheetTitle className="sr-only">
             {data?.feature.title ?? "Item"}

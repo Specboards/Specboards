@@ -130,7 +130,7 @@ export function CommandPalette() {
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40 data-[state=open]:animate-in data-[state=open]:fade-in-0" />
         <Dialog.Content
-          className="fixed left-1/2 top-24 z-50 w-full max-w-lg -translate-x-1/2 overflow-hidden rounded-lg border bg-popover shadow-lg data-[state=open]:animate-in data-[state=open]:fade-in-0"
+          className="fixed left-1/2 top-16 z-50 w-[calc(100vw-2rem)] max-w-lg -translate-x-1/2 overflow-hidden rounded-lg border bg-popover shadow-lg data-[state=open]:animate-in data-[state=open]:fade-in-0 sm:top-24"
           aria-label="Command palette"
         >
           <Dialog.Title className="sr-only">Command palette</Dialog.Title>

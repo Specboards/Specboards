@@ -210,7 +210,7 @@ export function BacklogTable({
                       onClick={() => toggle(f.specId)}
                       aria-expanded={!isCollapsed}
                       aria-label={isCollapsed ? "Expand epic" : "Collapse epic"}
-                      className="-ml-1 w-4 text-muted-foreground hover:text-foreground"
+                      className="-ml-1 flex size-6 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground"
                     >
                       {isCollapsed ? "▸" : "▾"}
                     </button>

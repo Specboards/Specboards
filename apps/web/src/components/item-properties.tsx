@@ -375,9 +375,9 @@ export function ItemProperties({
 
 /** Inline (borderless-until-hover) control styling, Notion-like. */
 const INLINE_SELECT =
-  "h-7 w-full max-w-[16rem] border-transparent bg-transparent px-2 shadow-none hover:bg-muted focus-visible:bg-muted";
+  "h-7 w-full max-w-full border-transparent bg-transparent px-2 shadow-none hover:bg-muted focus-visible:bg-muted sm:max-w-[16rem]";
 const INLINE_INPUT =
-  "h-7 w-full max-w-[16rem] border-transparent bg-transparent px-2 shadow-none hover:bg-muted focus-visible:bg-muted";
+  "h-7 w-full max-w-full border-transparent bg-transparent px-2 shadow-none hover:bg-muted focus-visible:bg-muted sm:max-w-[16rem]";
 
 /** A single label/value row: fixed-width icon+label gutter, value on the right. */
 function PropertyRow({
