@@ -67,3 +67,60 @@ export async function assertTenantIsolation(): Promise<void> {
 
   console.log("[security] tenant-data connection verified RLS-safe.");
 }
+
+/**
+ * Same fail-closed contract for the background-worker connection. The worker
+ * paths (outbox drainer/relay, incoming GitHub webhook sink) span every
+ * workspace, so they run as the dedicated `specboards_worker` role whose
+ * cross-workspace reach is still bounded by grants and role-targeted policies
+ * (see infra/worker-role.sql). Without this guard a multi-tenant deployment
+ * that forgot to provision DATABASE_URL_WORKER would silently run those paths
+ * on the owner connection, which has no such bounds.
+ */
+export async function assertWorkerIsolation(): Promise<void> {
+  // Local file mode: no Postgres at all.
+  if (!process.env.DATABASE_URL) return;
+
+  const workerUrl = process.env.DATABASE_URL_WORKER;
+  if (!workerUrl) {
+    if (isMultiTenant()) {
+      throw new Error(
+        "[security] Refusing to start: SPECBOARDS_MULTI_TENANT is set but DATABASE_URL_WORKER " +
+          "is not. Background workers would fall back to the owner connection, which bypasses " +
+          "row-level security and every worker grant boundary. Provision the worker role " +
+          "(infra/worker-role.sql) and set DATABASE_URL_WORKER.",
+      );
+    }
+    console.warn(
+      "[security] DATABASE_URL_WORKER is not set: background workers use the owner connection. " +
+        "This is acceptable only for single-tenant self-host; see infra/worker-role.sql.",
+    );
+    return;
+  }
+
+  let violations: string[];
+  try {
+    violations = tenantIsolationViolations(await probeTenantConnection(workerUrl));
+  } catch (err) {
+    if (isMultiTenant()) {
+      throw new Error(
+        `[security] Refusing to start: could not verify the worker connection is RLS-safe: ${String(err)}`,
+      );
+    }
+    console.warn("[security] worker RLS probe failed (continuing, single-tenant):", err);
+    return;
+  }
+
+  if (violations.length > 0) {
+    const detail = violations.join("; ");
+    if (isMultiTenant()) {
+      throw new Error(
+        `[security] Refusing to start: the DATABASE_URL_WORKER connection bypasses row-level security: ${detail}.`,
+      );
+    }
+    console.warn(`[security] DATABASE_URL_WORKER connection is not RLS-safe: ${detail}.`);
+    return;
+  }
+
+  console.log("[security] worker connection verified RLS-safe.");
+}

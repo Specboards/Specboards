@@ -1,5 +1,7 @@
 import { createDb, type Database } from "@specboards/db";
 
+import { isMultiTenant } from "@/lib/tenancy";
+
 let db: Database | null | undefined;
 
 /**
@@ -27,14 +29,25 @@ let workerDb: Database | null | undefined;
  * handful of tables those paths touch and carries role-targeted RLS policies
  * for the cross-workspace access they need (see `infra/worker-role.sql`).
  *
- * When `DATABASE_URL_WORKER` is unset the workers fall back to the owner
- * connection, preserving today's behavior until the role is provisioned per
- * environment (see docs/RUNBOOK-db-role-cutover.md). Like `getDb()`, this is
+ * When `DATABASE_URL_WORKER` is unset, single-tenant self-host falls back to
+ * the owner connection (there is no co-tenant to leak into). Multi-tenant
+ * deployments refuse the fallback: the boot guard (`assertWorkerIsolation`)
+ * already fails startup in that case, and this throw is the defense-in-depth
+ * backstop should a worker path outlive the guard. Like `getDb()`, this is
  * `null` in local file mode where there is no Postgres.
  */
 export function getWorkerDb(): Database | null {
   if (workerDb === undefined) {
-    const url = process.env.DATABASE_URL_WORKER ?? process.env.DATABASE_URL;
+    let url = process.env.DATABASE_URL_WORKER;
+    if (!url) {
+      if (isMultiTenant() && process.env.DATABASE_URL) {
+        throw new Error(
+          "[security] getWorkerDb: DATABASE_URL_WORKER is required in multi-tenant mode; " +
+            "refusing the owner-connection fallback (see infra/worker-role.sql).",
+        );
+      }
+      url = process.env.DATABASE_URL;
+    }
     workerDb = url ? createDb(url) : null;
   }
   return workerDb;

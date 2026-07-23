@@ -148,13 +148,21 @@ The worker surface is deliberately fixed (unlike `specboards_app`, new tables ar
 not auto-granted). If a legitimate worker path touches a table not in the list
 above, the test smoke-test will surface a `permission denied` error before prod.
 Add the needed grant (and, if the table has RLS, a `_worker_all` policy) to
-`infra/worker-role.sql`, re-run it on both databases, and re-test. Until then,
-unset `DATABASE_URL_WORKER` to fall back to the owner connection.
+`infra/worker-role.sql`, re-run it on both databases, and re-test. On a
+single-tenant deployment you can unset `DATABASE_URL_WORKER` to fall back to
+the owner connection in the meantime; a multi-tenant deployment refuses to
+boot without a verified worker connection (see `assertWorkerIsolation` in
+`apps/web/src/lib/rls-guard.ts`), so there the grant fix is the only path.
 
 ### Rollback
 
-Unset `DATABASE_URL_WORKER` and redeploy: `getWorkerDb()` falls straight back to
-the owner connection. No data or schema change is involved.
+Single-tenant: unset `DATABASE_URL_WORKER` and redeploy; `getWorkerDb()` falls
+back to the owner connection. No data or schema change is involved.
+
+Multi-tenant (hosted): the owner fallback is refused by design, both at boot
+(`assertWorkerIsolation`) and in `getWorkerDb()`. Rolling back means fixing the
+worker role's grants or pointing `DATABASE_URL_WORKER` at a corrected non-owner
+role, not removing the variable.
 
 ---
 
@@ -186,7 +194,8 @@ If any read returns empty or a write 500s with a permission error, unset
   (`[webhooks] pruned N processed outbox events`).
 
 Watch the logs for `permission denied for table ...`; if one appears, follow the
-"permission denied" note above. Unset `DATABASE_URL_WORKER` to fall back.
+"permission denied" note above (single-tenant can unset `DATABASE_URL_WORKER`
+to fall back; multi-tenant must fix the grants).
 
 ---
 

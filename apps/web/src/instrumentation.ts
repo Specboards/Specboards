@@ -10,8 +10,9 @@
  */
 export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME === "nodejs") {
-    const { assertTenantIsolation } = await import("@/lib/rls-guard");
+    const { assertTenantIsolation, assertWorkerIsolation } = await import("@/lib/rls-guard");
     await assertTenantIsolation();
+    await assertWorkerIsolation();
 
     const { startDrainer } = await import("@/lib/webhooks/drainer");
     startDrainer();

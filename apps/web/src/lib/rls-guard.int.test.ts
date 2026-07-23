@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
-import { assertTenantIsolation } from "./rls-guard";
+import { assertTenantIsolation, assertWorkerIsolation } from "./rls-guard";
 
 /**
  * Boot-guard behavior against a real database: a hosted (multi-tenant)
@@ -23,7 +23,12 @@ function appUrl(): string {
   return url.toString();
 }
 
-const ENV_KEYS = ["DATABASE_URL", "DATABASE_URL_APP", "SPECBOARDS_MULTI_TENANT"] as const;
+const ENV_KEYS = [
+  "DATABASE_URL",
+  "DATABASE_URL_APP",
+  "DATABASE_URL_WORKER",
+  "SPECBOARDS_MULTI_TENANT",
+] as const;
 const saved: Record<string, string | undefined> = {};
 
 describe.skipIf(!OWNER_URL)("assertTenantIsolation boot guard", () => {
@@ -81,5 +86,36 @@ describe.skipIf(!OWNER_URL)("assertTenantIsolation boot guard", () => {
     delete process.env.DATABASE_URL_APP;
     delete process.env.SPECBOARDS_MULTI_TENANT;
     await expect(assertTenantIsolation()).resolves.toBeUndefined();
+  });
+
+  // Worker guard: same fail-closed contract for the background-worker
+  // connection. The probe checks role properties, not worker-specific grants,
+  // so the non-owner app role stands in for a provisioned worker role.
+  it("refuses multi-tenant boot without DATABASE_URL_WORKER", async () => {
+    process.env.DATABASE_URL = OWNER_URL;
+    delete process.env.DATABASE_URL_WORKER;
+    process.env.SPECBOARDS_MULTI_TENANT = "true";
+    await expect(assertWorkerIsolation()).rejects.toThrow(/DATABASE_URL_WORKER/);
+  });
+
+  it("refuses multi-tenant boot when DATABASE_URL_WORKER points at the owner", async () => {
+    process.env.DATABASE_URL = OWNER_URL;
+    process.env.DATABASE_URL_WORKER = OWNER_URL;
+    process.env.SPECBOARDS_MULTI_TENANT = "true";
+    await expect(assertWorkerIsolation()).rejects.toThrow(/bypasses row-level security/);
+  });
+
+  it("accepts multi-tenant boot with a non-owner worker role", async () => {
+    process.env.DATABASE_URL = OWNER_URL;
+    process.env.DATABASE_URL_WORKER = appUrl();
+    process.env.SPECBOARDS_MULTI_TENANT = "true";
+    await expect(assertWorkerIsolation()).resolves.toBeUndefined();
+  });
+
+  it("only warns for single-tenant self-host workers on the owner connection", async () => {
+    process.env.DATABASE_URL = OWNER_URL;
+    delete process.env.DATABASE_URL_WORKER;
+    delete process.env.SPECBOARDS_MULTI_TENANT;
+    await expect(assertWorkerIsolation()).resolves.toBeUndefined();
   });
 });
