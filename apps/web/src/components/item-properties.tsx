@@ -403,7 +403,7 @@ function PropertyRow({
 }
 
 /** Form control for one custom property, keyed `cf:<key>` in the submitted form. */
-function CustomFieldInput({
+export function CustomFieldInput({
   property,
   value,
   members,
@@ -614,7 +614,7 @@ function numOrNull(value: string): number | null {
  * map. The server replaces the whole map, so values for properties not shown
  * at this level are carried over from the current record untouched.
  */
-function collectCustomFields(
+export function collectCustomFields(
   visibleProperties: PropertyDef[],
   data: FormData,
   current: Record<string, CustomFieldValue>,

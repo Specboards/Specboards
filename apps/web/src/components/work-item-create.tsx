@@ -4,8 +4,12 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 
-import type { StatusWorkflow } from "@specboards/core";
+import type { PropertyDef, StatusWorkflow } from "@specboards/core";
 
+import {
+  CustomFieldInput,
+  collectCustomFields,
+} from "@/components/item-properties";
 import { MarkdownEditor } from "@/components/markdown-editor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,6 +37,9 @@ export function WorkItemCreate({
   parents,
   productId,
   products,
+  releases = [],
+  defaultReleaseId = null,
+  properties = [],
   workflow,
   members = [],
   templateBody = "",
@@ -47,6 +54,14 @@ export function WorkItemCreate({
   /** Products to choose from in the cross-product ("All products") view, where
    * no single product is in context. Omitted/empty when scoped to a product. */
   products?: { id: string; name: string }[];
+  /** Releases the new item may be scheduled into. Portfolio releases
+   * (productId null) and releases in the item's product are offered. */
+  releases?: { id: string; name: string; productId: string | null }[];
+  /** Pre-selected release (e.g. when adding from a roadmap column). */
+  defaultReleaseId?: string | null;
+  /** Workspace custom-property definitions; those applying to this level are
+   * offered on the create form. */
+  properties?: PropertyDef[];
   /** Workspace status workflow; the first status is the default for new items. */
   workflow: StatusWorkflow;
   /** Assignable workspace members. */
@@ -57,7 +72,13 @@ export function WorkItemCreate({
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showCustom, setShowCustom] = useState(false);
   const [pending, startTransition] = useTransition();
+
+  // Custom properties that apply at the level being created (null levels = all).
+  const levelProperties = properties.filter(
+    (p) => !p.levels || p.levels.includes(levelKey),
+  );
 
   const statuses = workflow.statuses;
   const defaultStatus = statuses[0] ?? "backlog";
@@ -75,6 +96,14 @@ export function WorkItemCreate({
     ? parents.filter((p) => p.productId === selectedProduct)
     : parents;
 
+  // The product this item will belong to, tracked reactively so the release
+  // list narrows with the product picker. Releases offered: portfolio releases
+  // (no product) plus releases scoped to this product.
+  const chosenProductId = showProductPicker ? selectedProduct : (productId ?? null);
+  const visibleReleases = releases.filter(
+    (r) => r.productId === null || r.productId === chosenProductId,
+  );
+
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const data = new FormData(e.currentTarget);
@@ -84,10 +113,20 @@ export function WorkItemCreate({
       return;
     }
     const parentSpecId = String(data.get("parentSpecId") ?? "") || null;
-    const chosenProductId = showProductPicker ? selectedProduct : productId;
     const status = String(data.get("status") ?? defaultStatus) || defaultStatus;
     const assigneeId = String(data.get("assigneeId") ?? "") || null;
+    const releaseId = String(data.get("releaseId") ?? "") || null;
     const details = String(data.get("details") ?? "").trim() || null;
+    // Only collect custom fields the user opted to fill in, and send just the
+    // values they actually set (drop empties so a blank field stays unset).
+    const collected = showCustom
+      ? collectCustomFields(levelProperties, data, {})
+      : {};
+    const customFields = Object.fromEntries(
+      Object.entries(collected).filter(
+        ([, v]) => v !== null && !(Array.isArray(v) && v.length === 0),
+      ),
+    );
     startTransition(async () => {
       setError(null);
       try {
@@ -98,6 +137,8 @@ export function WorkItemCreate({
           productId: chosenProductId,
           status,
           assigneeId,
+          releaseId,
+          ...(Object.keys(customFields).length > 0 ? { customFields } : {}),
           details,
         });
         toast.success(`${levelLabel} created`);
@@ -120,7 +161,13 @@ export function WorkItemCreate({
       <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
         New {levelLabel.toLowerCase()}
       </Button>
-      <Sheet open={open} onOpenChange={setOpen}>
+      <Sheet
+        open={open}
+        onOpenChange={(v) => {
+          setOpen(v);
+          if (!v) setShowCustom(false);
+        }}
+      >
         <SheetContent className="overflow-y-auto sm:max-w-lg">
           <SheetHeader>
             <SheetTitle>New {levelLabel.toLowerCase()}</SheetTitle>
@@ -156,6 +203,27 @@ export function WorkItemCreate({
                   {members.map((m) => (
                     <option key={m.userId} value={m.userId}>
                       {m.name}
+                    </option>
+                  ))}
+                </Select>
+              </label>
+            ) : null}
+            {visibleReleases.length > 0 ? (
+              <label className="block space-y-1.5">
+                <span className="text-xs font-medium text-muted-foreground">
+                  Release
+                </span>
+                {/* Remount on product change so a now-invalid release resets. */}
+                <Select
+                  key={chosenProductId ?? "all"}
+                  name="releaseId"
+                  defaultValue={defaultReleaseId ?? ""}
+                  className="h-8"
+                >
+                  <option value="">No release</option>
+                  {visibleReleases.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name}
                     </option>
                   ))}
                 </Select>
@@ -209,6 +277,37 @@ export function WorkItemCreate({
                   ))}
                 </Select>
               </label>
+            ) : null}
+            {levelProperties.length > 0 ? (
+              <div className="space-y-2">
+                {/* Custom fields start collapsed (an affordance, not an open
+                    form) so the drawer stays lean when they aren't needed. */}
+                <Button
+                  type="button"
+                  variant="link"
+                  size="inline"
+                  onClick={() => setShowCustom((v) => !v)}
+                  className="text-xs font-normal text-muted-foreground"
+                >
+                  {showCustom ? "Hide custom fields" : "Set custom fields"}
+                </Button>
+                {showCustom ? (
+                  <div className="space-y-3 rounded-md border border-input p-3">
+                    {levelProperties.map((p) => (
+                      <label key={p.key} className="block space-y-1">
+                        <span className="text-xs font-medium text-muted-foreground">
+                          {p.label}
+                        </span>
+                        <CustomFieldInput
+                          property={p}
+                          value={null}
+                          members={members}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
             ) : null}
             {error ? <p className="text-xs text-destructive">{error}</p> : null}
             <Button type="submit" size="sm" disabled={pending}>

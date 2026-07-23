@@ -535,6 +535,15 @@ export function parseCreateFeatureInput(body: unknown): CreateFeatureInput {
     }
     input.assigneeId = raw.assigneeId;
   }
+  if ("releaseId" in raw && raw.releaseId !== null) {
+    if (!isUuid(raw.releaseId)) {
+      throw new InvalidPatchError("releaseId must be a UUID or null.");
+    }
+    input.releaseId = raw.releaseId;
+  }
+  if ("customFields" in raw && raw.customFields !== null) {
+    input.customFields = parseCustomFields(raw.customFields);
+  }
   if ("tags" in raw) {
     if (!Array.isArray(raw.tags) || raw.tags.some((t) => typeof t !== "string")) {
       throw new InvalidPatchError("tags must be an array of strings.");

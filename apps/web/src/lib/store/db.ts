@@ -982,6 +982,23 @@ export class DbStore implements FeatureStore {
       if (input.assigneeId)
         await this.assertWorkspaceMember(tx, ws, input.assigneeId);
 
+      // A release assignment must point at a release in this workspace that is
+      // either a portfolio release (no product) or one scoped to the new item's
+      // own product. Mirrors the rule in updateFeature.
+      if (input.releaseId) {
+        const release = await tx
+          .select({ id: releases.id, productId: releases.productId })
+          .from(releases)
+          .where(and(eq(releases.id, input.releaseId), eq(releases.workspaceId, ws)))
+          .limit(1);
+        if (!release[0]) {
+          throw new FeatureError(`Unknown release: ${input.releaseId}`);
+        }
+        if (release[0].productId !== null && release[0].productId !== productId) {
+          throw new FeatureError("Release belongs to a different product.");
+        }
+      }
+
       // DB-native items have no repo/spec; spec_id mirrors the row id so every
       // row stays uniformly routable by specId.
       const id = randomUUID();
@@ -997,6 +1014,8 @@ export class DbStore implements FeatureStore {
           title,
           status: input.status ?? "backlog",
           assigneeId: input.assigneeId ?? null,
+          releaseId: input.releaseId ?? null,
+          customFields: input.customFields ?? {},
           tags: input.tags ?? [],
           details: input.details?.trim() ? input.details : null,
           parentId,
