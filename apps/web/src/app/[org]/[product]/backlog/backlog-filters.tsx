@@ -71,7 +71,7 @@ export function BacklogFilters({
       {options.products && options.products.length > 0 ? (
         <Select
           aria-label="Filter by product"
-          className="h-8 w-40"
+          className="h-8 max-sm:w-[calc(50%-0.25rem)] sm:w-40"
           value={filters.product ?? ""}
           onChange={(e) => set("product", e.target.value || undefined)}
         >
@@ -86,7 +86,7 @@ export function BacklogFilters({
 
       <Select
         aria-label="Filter by status"
-        className="h-8 w-auto"
+        className="h-8 max-sm:w-[calc(50%-0.25rem)] sm:w-auto"
         value={filters.status ?? ""}
         onChange={(e) => set("status", e.target.value || undefined)}
       >
@@ -101,7 +101,7 @@ export function BacklogFilters({
       {options.assignees.length > 0 ? (
         <Select
           aria-label="Filter by assignee"
-          className="h-8 w-40"
+          className="h-8 max-sm:w-[calc(50%-0.25rem)] sm:w-40"
           value={filters.assignee ?? ""}
           onChange={(e) => set("assignee", e.target.value || undefined)}
         >
@@ -118,7 +118,7 @@ export function BacklogFilters({
       {options.releases.length > 0 ? (
         <Select
           aria-label="Filter by release"
-          className="h-8 w-40"
+          className="h-8 max-sm:w-[calc(50%-0.25rem)] sm:w-40"
           value={filters.release ?? ""}
           onChange={(e) => set("release", e.target.value || undefined)}
         >
@@ -135,7 +135,7 @@ export function BacklogFilters({
       {options.tags.length > 0 ? (
         <Select
           aria-label="Filter by tag"
-          className="h-8 w-40"
+          className="h-8 max-sm:w-[calc(50%-0.25rem)] sm:w-40"
           value={filters.tag ?? ""}
           onChange={(e) => set("tag", e.target.value || undefined)}
         >
@@ -151,7 +151,7 @@ export function BacklogFilters({
       {options.epics.length > 0 ? (
         <Select
           aria-label="Filter by parent epic"
-          className="h-8 w-40"
+          className="h-8 max-sm:w-[calc(50%-0.25rem)] sm:w-40"
           value={filters.parent ?? ""}
           onChange={(e) => set("parent", e.target.value || undefined)}
         >

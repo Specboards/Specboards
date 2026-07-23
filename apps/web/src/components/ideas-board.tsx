@@ -123,12 +123,12 @@ export function IdeasBoard({
       ) : (
         <>
           <div className="flex flex-wrap items-center gap-2">
-            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground max-sm:w-full">
               Status
               <Select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
-                className="h-8 w-40"
+                className="h-8 w-full sm:w-40"
                 aria-label="Filter by status"
               >
                 <option value="all">All statuses</option>
@@ -139,12 +139,12 @@ export function IdeasBoard({
                 ))}
               </Select>
             </label>
-            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground max-sm:w-full">
               Sort
               <Select
                 value={sort}
                 onChange={(e) => setSort(e.target.value as SortKey)}
-                className="h-8 w-36"
+                className="h-8 w-full sm:w-36"
                 aria-label="Sort ideas"
               >
                 <option value="votes">Most votes</option>
@@ -152,7 +152,7 @@ export function IdeasBoard({
                 <option value="oldest">Oldest</option>
               </Select>
             </label>
-            <span className="ml-auto text-xs text-muted-foreground">
+            <span className="text-xs text-muted-foreground sm:ml-auto">
               {visible.length} of {ideas.length}
             </span>
           </div>

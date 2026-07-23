@@ -24,12 +24,15 @@ import { toast } from "sonner";
 
 import type { StatusWorkflow } from "@specboards/core";
 
+import { BoardColumnNav } from "@/components/board-column-nav";
 import { FeatureCard, type ProductTag } from "@/components/feature-card";
 import { FeatureEditSheet } from "@/components/feature-edit-sheet";
 import { StatusDot } from "@/components/status-dot";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AuthRequiredError, patchFeature } from "@/lib/api-client";
+import { useIsCoarsePointer, useIsMobile } from "@/lib/use-media-query";
+import { useSwipeColumns } from "@/lib/use-swipe-columns";
 import {
   compareByRiceScore,
   rankBetween,
@@ -131,8 +134,22 @@ export function BoardClient({
     setLists(groupIntoColumns(features, columns, sortMode));
   }, [features, columns, sortMode]);
 
+  // Below md the board is a swipe-column carousel: dragging is disabled (see
+  // SortableCard) and horizontal swipes scroll between columns. On coarse
+  // pointers wide enough to still drag (tablets), a short long-press lifts a
+  // card so a swipe scrolls instead of snatching one; a fine pointer keeps the
+  // instant 6px threshold.
+  const isMobile = useIsMobile();
+  const coarsePointer = useIsCoarsePointer();
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(PointerSensor, {
+      activationConstraint: coarsePointer
+        ? { delay: 250, tolerance: 8 }
+        : { distance: 6 },
+    }),
+  );
+  const { scrollRef, activeColumn, scrollToColumn } = useSwipeColumns(
+    columns.length,
   );
 
   function columnOf(id: string): string | undefined {
@@ -235,13 +252,27 @@ export function BoardClient({
           </Button>
         </div>
       ) : null}
+      <BoardColumnNav
+        label={
+          columns[activeColumn]
+            ? statusLabel(columns[activeColumn], workflow)
+            : ""
+        }
+        index={activeColumn}
+        count={columns.length}
+        onPrev={() => scrollToColumn(activeColumn - 1)}
+        onNext={() => scrollToColumn(activeColumn + 1)}
+      />
       <DndContext
         sensors={sensors}
         collisionDetection={closestCorners}
         onDragStart={onDragStart}
         onDragEnd={onDragEnd}
       >
-        <div className="flex gap-4 overflow-x-auto pb-4">
+        <div
+          ref={scrollRef}
+          className="relative flex gap-4 overflow-x-auto pb-4 max-md:-mx-4 max-md:snap-x max-md:snap-mandatory max-md:px-4 max-md:scroll-px-4"
+        >
           {columns.map((status) => (
             <Column
               key={status}
@@ -259,6 +290,7 @@ export function BoardClient({
               selectMode={selectMode}
               selected={selected}
               onToggleSelect={toggleSelect}
+              dragDisabled={isMobile}
             />
           ))}
         </div>
@@ -312,6 +344,7 @@ function Column({
   selectMode,
   selected,
   onToggleSelect,
+  dragDisabled,
 }: {
   status: string;
   workflow: StatusWorkflow;
@@ -327,10 +360,15 @@ function Column({
   selectMode: boolean;
   selected: Set<string>;
   onToggleSelect: (specId: string) => void;
+  /** Below md, drag is off and swiping scrolls between columns instead. */
+  dragDisabled: boolean;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `${COL_PREFIX}${status}` });
   return (
-    <div className="w-72 shrink-0 rounded-md bg-muted/35 p-2.5">
+    <div
+      data-board-column
+      className="w-72 shrink-0 rounded-md bg-muted/35 p-2.5 max-md:w-[calc(100vw-3rem)] max-md:snap-start"
+    >
       <div className="flex items-center gap-2 px-2 py-1.5">
         <StatusDot status={status} />
         <span className="text-sm font-medium">{statusLabel(status, workflow)}</span>
@@ -347,7 +385,7 @@ function Column({
             const record = records[id];
             if (!record) return null;
             return (
-              <SortableCard key={id} id={id}>
+              <SortableCard key={id} id={id} disabled={dragDisabled}>
                 {/* In select mode the checkbox sits in a left gutter beside the
                     card (not over it), so it never overlaps the product tag or
                     title. stopPropagation keeps a checkbox click from starting a
@@ -396,9 +434,17 @@ function Column({
   );
 }
 
-function SortableCard({ id, children }: { id: string; children: React.ReactNode }) {
+function SortableCard({
+  id,
+  disabled,
+  children,
+}: {
+  id: string;
+  disabled: boolean;
+  children: React.ReactNode;
+}) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({ id });
+    useSortable({ id, disabled });
   return (
     <div
       ref={setNodeRef}
