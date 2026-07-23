@@ -194,7 +194,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
               {mode === "sign-in" ? (
                 <Link
                   href="/forgot-password"
-                  className="font-normal text-link underline-offset-4 hover:underline"
+                  className="font-normal text-link underline underline-offset-4"
                 >
                   Forgot password?
                 </Link>
@@ -220,7 +220,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
         </form>
         <p className="mt-4 text-center text-xs text-muted-foreground">
           {t.altText}{" "}
-          <Link href={altHref} className="text-link underline-offset-4 hover:underline">
+          <Link href={altHref} className="text-link underline underline-offset-4">
             {t.altLabel}
           </Link>
         </p>
@@ -281,7 +281,7 @@ function VerifyEmailNotice({
           <button
             type="button"
             onClick={onBack}
-            className="text-link underline-offset-4 hover:underline"
+            className="text-link underline underline-offset-4"
           >
             Go back
           </button>

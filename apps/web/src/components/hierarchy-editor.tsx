@@ -153,7 +153,7 @@ export function HierarchyEditor({
 
       <p className="text-xs text-muted-foreground">
         Levels run top to bottom, broadest first. The bottom level holds your
-        git-synced specs and can't be removed. A level can only be removed once
+        git-synced specs and can&apos;t be removed. A level can only be removed once
         nothing uses it.
       </p>
 

@@ -51,6 +51,9 @@ jobs:
       # Build packages + web once; typecheck and E2E both need the output.
       - run: pnpm -w build
       - run: pnpm -w typecheck
+      # Lint gate: ESLint flat config with eslint-plugin-jsx-a11y guards the
+      # WCAG 2.2 AA work against regressions. Fails the build on any error.
+      - run: pnpm -w lint
       - run: pnpm -w test
 
       # E2E: apply migrations, install the browser, run the onboarding suite

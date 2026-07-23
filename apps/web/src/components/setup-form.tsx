@@ -76,7 +76,7 @@ export function SetupForm() {
       <CardHeader>
         <CardTitle>Set up your organization</CardTitle>
         <CardDescription>
-          You're the first member, so you'll be the admin. Name your
+          You&apos;re the first member, so you&apos;ll be the admin. Name your
           organization to get started.
         </CardDescription>
       </CardHeader>

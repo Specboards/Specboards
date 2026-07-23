@@ -241,7 +241,7 @@ export function WorkflowGatesEditor({
               {saving ? "Saving…" : "Save stage gates"}
             </Button>
             <p className="text-xs text-muted-foreground">
-              Removing a gate clears items' progress on it.
+              Removing a gate clears items&apos; progress on it.
             </p>
           </div>
           {error ? <p className="text-xs text-destructive">{error}</p> : null}

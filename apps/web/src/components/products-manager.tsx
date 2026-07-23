@@ -598,8 +598,12 @@ function GroupRow({
   onDelete: () => void;
   busy: boolean;
 }) {
+  // We intentionally do not spread dnd-kit's `attributes` onto the row: they set
+  // role="button" and tabindex on the <li>, which stops it being a valid list
+  // item and makes it an interactive control wrapping the Edit/Delete buttons
+  // (axe: list + nested-interactive). Drag is pointer-only here; the keyboard /
+  // screen-reader accessible "Move" alternative is added in a later stage.
   const {
-    attributes,
     listeners,
     setNodeRef: setDragRef,
     isDragging,
@@ -626,7 +630,6 @@ function GroupRow({
         marginLeft: `${depth * 1.25}rem`,
         opacity: isDragging ? 0.4 : 1,
       }}
-      {...attributes}
       {...listeners}
     >
       {canDrag ? (
@@ -697,7 +700,9 @@ function ProductRow({
   onDelete: () => void;
   busy: boolean;
 }) {
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+  // See GroupRow: the row deliberately omits dnd-kit's `attributes` so the <li>
+  // stays a valid, non-interactive list item. Pointer drag via `listeners`.
+  const { listeners, setNodeRef, isDragging } = useDraggable({
     id: `product:${product.id}`,
     disabled: !canDrag,
   });
@@ -712,7 +717,6 @@ function ProductRow({
         "flex items-center gap-2 rounded px-1 py-1 text-sm",
         canDrag && "cursor-grab active:cursor-grabbing",
       )}
-      {...attributes}
       {...listeners}
     >
       {canDrag ? (

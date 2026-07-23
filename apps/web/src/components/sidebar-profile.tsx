@@ -114,8 +114,8 @@ export function SidebarProfile({ collapsed = false }: { collapsed?: boolean }) {
 
 function Avatar({ name, image }: { name: string; image?: string | null }) {
   if (image) {
-    // eslint-disable-next-line @next/next/no-img-element
     return (
+      // eslint-disable-next-line @next/next/no-img-element
       <img
         src={image}
         alt=""

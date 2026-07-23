@@ -67,12 +67,17 @@ export function IdeaStatusSelect({
   }
 
   return (
-    <div className={cn("relative inline-flex items-center", className)} onClick={onClick}>
+    <div className={cn("relative inline-flex items-center", className)}>
       <span className="pointer-events-none absolute left-2.5 z-10">{dot}</span>
       <select
         value={status}
         disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
+        // The dot and chevron are pointer-events-none, so every click lands on
+        // the select. Attaching the parent's click interceptor here (rather than
+        // a non-interactive wrapper div) keeps the stop-propagation behavior
+        // without a static element handling click events.
+        onClick={onClick}
         aria-label={ariaLabel}
         className="h-7 cursor-pointer appearance-none rounded-full bg-muted pl-6 pr-7 text-xs font-medium text-foreground/90 transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
       >

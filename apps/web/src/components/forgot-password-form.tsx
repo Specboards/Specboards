@@ -44,7 +44,7 @@ export function ForgotPasswordForm() {
         </CardHeader>
         <CardContent>
           <p className="text-center text-xs text-muted-foreground">
-            <Link href="/sign-in" className="text-link underline-offset-4 hover:underline">
+            <Link href="/sign-in" className="text-link underline underline-offset-4">
               Back to sign in
             </Link>
           </p>
@@ -73,7 +73,7 @@ export function ForgotPasswordForm() {
         </form>
         <p className="mt-4 text-center text-xs text-muted-foreground">
           Remembered it?{" "}
-          <Link href="/sign-in" className="text-link underline-offset-4 hover:underline">
+          <Link href="/sign-in" className="text-link underline underline-offset-4">
             Sign in
           </Link>
         </p>

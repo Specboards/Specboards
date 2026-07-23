@@ -111,7 +111,7 @@ export function ResetPasswordForm() {
           </Button>
         </form>
         <p className="mt-4 text-center text-xs text-muted-foreground">
-          <Link href="/sign-in" className="text-link underline-offset-4 hover:underline">
+          <Link href="/sign-in" className="text-link underline underline-offset-4">
             Back to sign in
           </Link>
         </p>
