@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 
 import { OrgSwitcher } from "@/components/org-switcher";
 import { ProductSwitcher } from "@/components/product-switcher";
@@ -21,31 +21,28 @@ import type { ProductGroupRecord, ProductRecord } from "@/lib/store";
 import { useOrgPath, useOrgProductPath, useProductSlug } from "@/lib/use-org";
 import { cn } from "@/lib/utils";
 
-/**
- * Left navigation rail. Renders on every app page so there's no first-paint
- * layout shift; hidden only on the public auth/onboarding routes. The profile
- * footer handles its own signed-in / local-mode states.
- */
-export function AppSidebar({
-  orgs = [],
-  products = [],
-  groups = [],
-}: {
+export type SidebarData = {
   /** The signed-in user's orgs, for the switcher (empty hides it). */
   orgs?: { slug: string; name: string }[];
   /** The active org's products, for the switcher (≤1 hides it). */
   products?: ProductRecord[];
   /** The active org's product groups, for the switcher's group scopes. */
   groups?: ProductGroupRecord[];
-}) {
-  const pathname = usePathname();
-  const orgHref = useOrgPath();
-  const productSlug = useProductSlug();
+};
 
-  // A group scope (`~key` product segment) gets a Dashboard area: the group's
-  // management roll-up. Hidden otherwise (for a product or "all" the route
-  // just redirects to the backlog).
-  const navGroups = buildNavGroups(productSlug);
+/** True when the current route is a public auth/onboarding page with no shell. */
+export function useNavHidden(): boolean {
+  const pathname = usePathname();
+  return HIDDEN_PREFIXES.some((p) => pathname.startsWith(p));
+}
+
+/**
+ * Left navigation rail (desktop). Hidden below `lg`, where the mobile top bar
+ * and drawer take over (see MobileNav). Renders on every app page so there's no
+ * first-paint layout shift; hidden only on the public auth/onboarding routes.
+ */
+export function AppSidebar({ orgs = [], products = [], groups = [] }: SidebarData) {
+  const hidden = useNavHidden();
 
   // Collapsed = icon rail (mark + area icons only). Persisted per browser;
   // starts expanded on first paint (matches SSR), then reflects the stored
@@ -62,52 +59,106 @@ export function AppSidebar({
     });
   }
 
-  if (HIDDEN_PREFIXES.some((p) => pathname.startsWith(p))) return null;
+  if (hidden) return null;
 
   return (
     <aside
       className={cn(
-        "sticky top-0 flex h-screen shrink-0 flex-col border-r bg-background transition-[width]",
+        "sticky top-0 hidden h-screen shrink-0 flex-col border-r bg-background transition-[width] lg:flex",
         collapsed ? "w-16" : "w-60",
       )}
     >
-      <div className={cn("py-4", collapsed ? "space-y-2 px-2" : "space-y-3 px-4")}>
-        <div className={cn("flex items-center", collapsed ? "justify-center" : "justify-between")}>
-          <Link
-            href={orgHref("/")}
-            aria-label="Specboards home"
-            className="flex items-center gap-2 text-sm font-semibold tracking-tight"
-          >
-            <img src="/brand/specboards-mark.png" alt="" className="h-6 w-6" />
-            {/* Two-tone wordmark: "Spec" foreground + "board" muted. */}
+      <SidebarBody
+        orgs={orgs}
+        products={products}
+        groups={groups}
+        collapsed={collapsed}
+        header={
+          <div className={cn("flex items-center", collapsed ? "justify-center" : "justify-between")}>
+            <BrandMark showWord={!collapsed} />
             {!collapsed ? (
-              <span>
-                Spec<span className="text-muted-foreground">board</span>
-              </span>
+              <button
+                type="button"
+                onClick={toggleCollapsed}
+                aria-label="Collapse sidebar"
+                title="Collapse sidebar"
+                className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <PanelLeftClose className="h-4 w-4" aria-hidden />
+              </button>
             ) : null}
-          </Link>
-          {!collapsed ? (
+          </div>
+        }
+        preNav={
+          collapsed ? (
             <button
               type="button"
               onClick={toggleCollapsed}
-              aria-label="Collapse sidebar"
-              title="Collapse sidebar"
-              className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              aria-label="Expand sidebar"
+              title="Expand sidebar"
+              className="flex w-full justify-center rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             >
-              <PanelLeftClose className="h-4 w-4" aria-hidden />
+              <PanelLeftOpen className="h-4 w-4" aria-hidden />
             </button>
-          ) : null}
-        </div>
+          ) : null
+        }
+      />
+    </aside>
+  );
+}
+
+/** The Specboards home link + two-tone wordmark, shared by rail and drawer. */
+export function BrandMark({ showWord = true }: { showWord?: boolean }) {
+  const orgHref = useOrgPath();
+  return (
+    <Link
+      href={orgHref("/")}
+      aria-label="Specboards home"
+      className="flex items-center gap-2 text-sm font-semibold tracking-tight"
+    >
+      <img src="/brand/specboards-mark.png" alt="" className="h-6 w-6" />
+      {showWord ? (
+        <span>
+          Spec<span className="text-muted-foreground">board</span>
+        </span>
+      ) : null}
+    </Link>
+  );
+}
+
+/**
+ * The shared body of the navigation: org/product switchers, the nav groups, and
+ * the notification + profile footer. Rendered by both the desktop rail and the
+ * mobile drawer. `collapsed` only ever applies on the rail; the drawer passes
+ * false. `onNavigate` lets the drawer close itself when a link is followed.
+ */
+export function SidebarBody({
+  orgs = [],
+  products = [],
+  groups = [],
+  collapsed = false,
+  header,
+  preNav,
+  onNavigate,
+}: SidebarData & {
+  collapsed?: boolean;
+  header?: ReactNode;
+  preNav?: ReactNode;
+  onNavigate?: () => void;
+}) {
+  const pathname = usePathname();
+  const productSlug = useProductSlug();
+  // A group scope (`~key` product segment) gets a Dashboard area: the group's
+  // management roll-up. Hidden otherwise (for a product or "all" the route
+  // just redirects to the backlog).
+  const navGroups = buildNavGroups(productSlug);
+
+  return (
+    <>
+      <div className={cn("py-4", collapsed ? "space-y-2 px-2" : "space-y-3 px-4")}>
+        {header}
         {collapsed ? (
-          <button
-            type="button"
-            onClick={toggleCollapsed}
-            aria-label="Expand sidebar"
-            title="Expand sidebar"
-            className="flex w-full justify-center rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          >
-            <PanelLeftOpen className="h-4 w-4" aria-hidden />
-          </button>
+          preNav
         ) : (
           <>
             <OrgSwitcher orgs={orgs} />
@@ -129,6 +180,7 @@ export function AppSidebar({
                 item={item}
                 pathname={pathname}
                 collapsed={collapsed}
+                onNavigate={onNavigate}
               />
             ))}
           </div>
@@ -138,7 +190,7 @@ export function AppSidebar({
         <NotificationBell collapsed={collapsed} />
         <SidebarProfile collapsed={collapsed} />
       </div>
-    </aside>
+    </>
   );
 }
 
@@ -146,10 +198,12 @@ function NavLink({
   item,
   pathname,
   collapsed,
+  onNavigate,
 }: {
   item: NavItem;
   pathname: string;
   collapsed: boolean;
+  onNavigate?: () => void;
 }) {
   const orgHref = useOrgPath();
   const orgProductHref = useOrgProductPath();
@@ -187,6 +241,7 @@ function NavLink({
       title={collapsed ? item.label : undefined}
       aria-label={collapsed ? item.label : undefined}
       aria-current={active ? "page" : undefined}
+      onClick={onNavigate}
       className={cn(
         base,
         active
