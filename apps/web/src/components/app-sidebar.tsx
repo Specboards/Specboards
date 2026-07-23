@@ -115,7 +115,7 @@ export function AppSidebar({
           </>
         )}
       </div>
-      <nav className="flex-1 space-y-5 overflow-y-auto px-2 py-2">
+      <nav aria-label="Primary" className="flex-1 space-y-5 overflow-y-auto px-2 py-2">
         {navGroups.map((group, i) => (
           <div key={group.label ?? i} className="space-y-1">
             {group.label && !collapsed ? (
@@ -186,6 +186,7 @@ function NavLink({
       href={href}
       title={collapsed ? item.label : undefined}
       aria-label={collapsed ? item.label : undefined}
+      aria-current={active ? "page" : undefined}
       className={cn(
         base,
         active

@@ -1,3 +1,4 @@
+import type { Viewport } from "next";
 import { headers } from "next/headers";
 import type { ReactNode } from "react";
 import { Toaster } from "sonner";
@@ -30,6 +31,14 @@ export const metadata = {
   description: "Spec-based product management over git-native specs.",
 };
 
+// Next 15 wants the viewport as its own export, not a metadata key. Without
+// `width=device-width` mobile browsers render the page at a desktop width and
+// scale it down, which is why the app has felt unusable on phones.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+};
+
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const [orgs, products, groups, nonce] = await Promise.all([
     listSidebarOrgs(),
@@ -41,11 +50,19 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
     <html lang="en" suppressHydrationWarning>
       <body className="min-h-screen antialiased">
         <WebpackNonce nonce={nonce} />
+        {/* Skip link: first focusable element, visually hidden until focused
+            so keyboard users can jump past the nav straight to page content. */}
+        <a
+          href="#main"
+          className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-md focus:bg-background focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:shadow-md focus:outline-none focus:ring-2 focus:ring-ring"
+        >
+          Skip to main content
+        </a>
         <ThemeProvider nonce={nonce}>
           <div className="flex min-h-screen">
             <AppSidebar orgs={orgs} products={products} groups={groups} />
-            <main className="min-w-0 flex-1">
-              <div className="mx-auto max-w-6xl px-6 py-8">{children}</div>
+            <main id="main" tabIndex={-1} className="min-w-0 flex-1 focus:outline-none">
+              <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">{children}</div>
             </main>
           </div>
           <CommandPalette />

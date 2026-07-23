@@ -22,7 +22,7 @@ export function SettingsNav() {
   const pathname = usePathname();
   const orgHref = useOrgPath();
   return (
-    <nav className="flex gap-1 overflow-x-auto border-b pb-px sm:w-48 sm:flex-col sm:border-b-0 sm:border-r sm:pb-0 sm:pr-4">
+    <nav aria-label="Settings" className="flex gap-1 overflow-x-auto border-b pb-px sm:w-48 sm:flex-col sm:border-b-0 sm:border-r sm:pb-0 sm:pr-4">
       {ITEMS.map((item) => {
         const href = orgHref(item.href);
         const active = pathname === href || pathname.startsWith(href + "/");
@@ -30,6 +30,7 @@ export function SettingsNav() {
           <Link
             key={item.href}
             href={href}
+            aria-current={active ? "page" : undefined}
             className={cn(
               "shrink-0 rounded-md px-3 py-1.5 text-sm transition-colors",
               active

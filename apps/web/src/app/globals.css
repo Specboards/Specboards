@@ -94,11 +94,32 @@
   * {
     @apply border-border outline-ring/50;
   }
+  html {
+    /* Keep focused elements clear of the sticky top bar / sidebar when the
+       browser scrolls them into view (WCAG 2.2 SC 2.4.11 Focus Not Obscured).
+       The mobile top app bar is h-14 (3.5rem); round up for breathing room. */
+    scroll-padding-top: 4rem;
+  }
   body {
     @apply bg-background text-foreground font-sans;
     /* GitHub sizes body at 14px with a 1.5 rhythm. */
     font-size: 0.875rem;
     line-height: 1.5;
+  }
+}
+
+/* Honor the OS "reduce motion" setting globally (WCAG 2.2 SC 2.3.3). This
+   neutralizes Tailwind's animate-* utilities, Radix data-state transitions,
+   and any future animated component without per-usage motion-safe: guards.
+   JS-driven smooth scrolling is gated separately via usePrefersReducedMotion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
 
