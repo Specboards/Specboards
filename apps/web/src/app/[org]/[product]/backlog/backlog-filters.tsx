@@ -62,12 +62,16 @@ export function BacklogFilters({
 
   const active = hasActiveFilters(filters);
 
+  // Every filter select is a fixed `w-40` rather than `w-auto`: a native
+  // <select> sizes to its widest option, so a long option (e.g. an epic title
+  // under "Any parent") would otherwise stretch that control far wider than the
+  // rest. A uniform width keeps the row even; long selected values truncate.
   return (
     <div className="flex flex-wrap items-center gap-2" data-pending={pending}>
       {options.products && options.products.length > 0 ? (
         <Select
           aria-label="Filter by product"
-          className="h-8 w-auto"
+          className="h-8 w-40"
           value={filters.product ?? ""}
           onChange={(e) => set("product", e.target.value || undefined)}
         >
@@ -97,7 +101,7 @@ export function BacklogFilters({
       {options.assignees.length > 0 ? (
         <Select
           aria-label="Filter by assignee"
-          className="h-8 w-auto"
+          className="h-8 w-40"
           value={filters.assignee ?? ""}
           onChange={(e) => set("assignee", e.target.value || undefined)}
         >
@@ -114,7 +118,7 @@ export function BacklogFilters({
       {options.releases.length > 0 ? (
         <Select
           aria-label="Filter by release"
-          className="h-8 w-auto"
+          className="h-8 w-40"
           value={filters.release ?? ""}
           onChange={(e) => set("release", e.target.value || undefined)}
         >
@@ -131,7 +135,7 @@ export function BacklogFilters({
       {options.tags.length > 0 ? (
         <Select
           aria-label="Filter by tag"
-          className="h-8 w-auto"
+          className="h-8 w-40"
           value={filters.tag ?? ""}
           onChange={(e) => set("tag", e.target.value || undefined)}
         >
@@ -147,7 +151,7 @@ export function BacklogFilters({
       {options.epics.length > 0 ? (
         <Select
           aria-label="Filter by parent epic"
-          className="h-8 w-auto"
+          className="h-8 w-40"
           value={filters.parent ?? ""}
           onChange={(e) => set("parent", e.target.value || undefined)}
         >

@@ -31,7 +31,7 @@ export function SortControl({ sort }: { sort: SortMode }) {
   return (
     <Select
       aria-label="Sort by"
-      className="h-8 w-auto"
+      className="h-8 w-40"
       value={sort}
       disabled={pending}
       onChange={(e) => set(e.target.value as SortMode)}

@@ -197,7 +197,6 @@ export async function BoardView({
             {/* On an empty board the empty state carries this button instead,
                 so the affordance renders exactly once. */}
             {featuresForLevel.length === 0 ? null : newItemButton}
-            {featuresForLevel.length > 0 ? <SortControl sort={sort} /> : null}
             {featuresForLevel.length > 0 && canEdit ? (
               <CardFieldsMenu
                 catalog={catalog}
@@ -211,9 +210,14 @@ export async function BoardView({
         </div>
         {/* Filter bar: shown whenever the level has cards, so a filter that
             empties the board can still be cleared here. Same URL-driven bar as
-            the list view (it preserves the `view=board` param). */}
+            the list view (it preserves the `view=board` param). Sort sits at the
+            row's right end, grouped with the filters rather than in the button
+            toolbar, so it lines up with the other view controls. */}
         {featuresForLevel.length > 0 ? (
-          <BacklogFilters filters={filters} options={filterOptions} />
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <BacklogFilters filters={filters} options={filterOptions} />
+            <SortControl sort={sort} />
+          </div>
         ) : null}
         {featuresForLevel.length === 0 ? (
           activeLevel.isLeaf ? (
