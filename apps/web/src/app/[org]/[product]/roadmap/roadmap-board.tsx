@@ -27,6 +27,7 @@ import {
 } from "@/components/card-field-badges";
 import { FeatureEditSheet } from "@/components/feature-edit-sheet";
 import type { ProductTag } from "@/components/feature-card";
+import { MoveMenu, type MoveOption } from "@/components/move-menu";
 import { ReleaseDetailSheet } from "@/components/release-detail-sheet";
 import { StatusDot } from "@/components/status-dot";
 import { Badge } from "@/components/ui/badge";
@@ -40,6 +41,7 @@ import { AuthRequiredError, patchFeature } from "@/lib/api-client";
 import { statusLabel } from "@/lib/feature-helpers";
 import { productColorClasses } from "@/lib/product-color";
 import type { FeatureRecord, ReleaseRecord } from "@/lib/store/types";
+import { useAnnouncer } from "@/lib/use-announcer";
 import { useIsCoarsePointer, useIsMobile } from "@/lib/use-media-query";
 import { useSwipeColumns } from "@/lib/use-swipe-columns";
 import { cn } from "@/lib/utils";
@@ -102,6 +104,7 @@ export function RoadmapBoard({
   productNamesById: Record<string, string>;
 }) {
   const router = useRouter();
+  const announce = useAnnouncer();
   const maps: CardFieldMaps = { customFieldLabels, memberNames, releaseNames };
   const [placement, setPlacement] = useState<Record<string, string | null>>({});
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -180,6 +183,42 @@ export function RoadmapBoard({
       });
   }
 
+  // Non-drag "Move to <release>": the keyboard/menu counterpart to dragging a
+  // card into another release column. Optimistically re-places it, persists the
+  // new releaseId, and announces the outcome.
+  function moveToRelease(specId: string, targetKey: string) {
+    const feature = features.find((f) => f.specId === specId);
+    if (!feature) return;
+    const targetReleaseId = targetKey === UNSCHEDULED ? null : targetKey;
+    if (releaseOf(feature) === targetReleaseId) return;
+    const columnName =
+      columns.find((c) => (c.releaseId ?? UNSCHEDULED) === targetKey)?.name ??
+      "Unscheduled";
+    const prev = placement;
+    setPlacement({ ...placement, [specId]: targetReleaseId });
+    patchFeature(specId, { releaseId: targetReleaseId })
+      .then(() => {
+        router.refresh();
+        announce(`Moved ${feature.title} to ${columnName}`);
+      })
+      .catch((err) => {
+        setPlacement(prev);
+        if (err instanceof AuthRequiredError) {
+          router.push(
+            `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
+          );
+          return;
+        }
+        toast.error(err instanceof Error ? err.message : "Move failed.");
+      });
+  }
+
+  // Destination options for the per-card Move menu (one per release column).
+  const moveDestinations: MoveOption[] = columns.map((c) => ({
+    key: c.releaseId ?? UNSCHEDULED,
+    label: c.name,
+  }));
+
   const activeFeature = activeId
     ? (features.find((f) => f.specId === activeId) ?? null)
     : null;
@@ -214,6 +253,9 @@ export function RoadmapBoard({
               productsById={productsById}
               maps={maps}
               allowDrag={allowDrag && !isMobile}
+              canMove={allowDrag}
+              moveDestinations={moveDestinations}
+              onMoveToRelease={moveToRelease}
               onOpenDetail={setDetailReleaseId}
               onOpenItem={setEditingSpecId}
             />
@@ -256,6 +298,9 @@ function Column({
   productsById,
   maps,
   allowDrag,
+  canMove,
+  moveDestinations,
+  onMoveToRelease,
   onOpenDetail,
   onOpenItem,
 }: {
@@ -265,11 +310,17 @@ function Column({
   productsById?: Record<string, ProductTag>;
   maps: CardFieldMaps;
   allowDrag: boolean;
+  /** Editor + active view: whether to offer the non-drag Move menu (not gated on
+   *  viewport, unlike allowDrag, so it stays available on mobile). */
+  canMove: boolean;
+  moveDestinations: MoveOption[];
+  onMoveToRelease: (specId: string, targetKey: string) => void;
   onOpenDetail: (releaseId: string) => void;
   onOpenItem: (specId: string) => void;
 }) {
+  const columnKey = column.releaseId ?? UNSCHEDULED;
   const { setNodeRef, isOver } = useDroppable({
-    id: `${COL_PREFIX}${column.releaseId ?? UNSCHEDULED}`,
+    id: `${COL_PREFIX}${columnKey}`,
   });
   // Shipped columns lead with the actual ship date ("Shipped 2026-07-20"); the
   // planned range stays available in the detail panel. Everything else shows its
@@ -341,6 +392,19 @@ function Column({
             maps={maps}
             allowDrag={allowDrag}
             onOpenItem={onOpenItem}
+            moveMenu={
+              canMove ? (
+                <MoveMenu
+                  triggerLabel={`Move ${f.title}`}
+                  destinationsLabel="Move to release"
+                  destinations={moveDestinations.map((d) => ({
+                    ...d,
+                    current: d.key === columnKey,
+                  }))}
+                  onSelect={(key) => onMoveToRelease(f.specId, key)}
+                />
+              ) : null
+            }
           />
         ))}
         {items.length === 0 ? (
@@ -358,6 +422,7 @@ function DraggableCard({
   maps,
   allowDrag,
   onOpenItem,
+  moveMenu,
 }: {
   feature: FeatureRecord;
   workflow: StatusWorkflow;
@@ -365,6 +430,8 @@ function DraggableCard({
   maps: CardFieldMaps;
   allowDrag: boolean;
   onOpenItem: (specId: string) => void;
+  /** The non-drag Move menu, or null for viewers. */
+  moveMenu?: React.ReactNode;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: feature.specId,
@@ -374,7 +441,10 @@ function DraggableCard({
     <div
       ref={setNodeRef}
       style={{ opacity: isDragging ? 0.4 : 1 }}
-      className={allowDrag ? "cursor-grab active:cursor-grabbing" : ""}
+      className={cn(
+        "group relative",
+        allowDrag ? "cursor-grab active:cursor-grabbing" : "",
+      )}
       {...(allowDrag ? attributes : {})}
       {...(allowDrag ? listeners : {})}
     >
@@ -385,6 +455,11 @@ function DraggableCard({
         maps={maps}
         onOpenItem={onOpenItem}
       />
+      {moveMenu ? (
+        <div className="absolute right-1 top-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 max-md:opacity-100 has-[[data-state=open]]:opacity-100">
+          {moveMenu}
+        </div>
+      ) : null}
     </div>
   );
 }

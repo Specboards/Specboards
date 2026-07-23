@@ -18,6 +18,7 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@radix-ui/react-dialog": "^1.1.21",
+    "@radix-ui/react-dropdown-menu": "^2.1.22",
     "@specboards/core": "workspace:*",
     "@specboards/db": "workspace:*",
     "@specboards/git": "workspace:*",

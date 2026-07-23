@@ -27,6 +27,7 @@ import {
   type ProductColor,
 } from "@specboards/core";
 
+import { MoveMenu, type MoveOption } from "@/components/move-menu";
 import { ProductMembers } from "@/components/product-members";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -374,6 +375,78 @@ export function ProductsManager({
     }
   }
 
+  // Keys for the non-group destinations in the Move menus (distinct from any
+  // real group id).
+  const UNGROUPED_KEY = "__ungrouped__";
+  const ROOT_KEY = "__root__";
+
+  // The keyboard/pointer alternative to dragging a product between groups
+  // (SC 2.1.1, 2.5.7). Only org admins can re-home products, and only once
+  // there is a group to move between.
+  function productMoveMenu(p: ProductRecord): React.ReactNode {
+    if (!isOrgAdmin || groups.length === 0) return null;
+    const current = p.groupId ?? UNGROUPED_KEY;
+    const destinations: MoveOption[] = [
+      { key: UNGROUPED_KEY, label: "Ungrouped", current: current === UNGROUPED_KEY },
+      ...groups.map((g) => ({
+        key: g.id,
+        label: g.name,
+        current: g.id === current,
+      })),
+    ];
+    return (
+      <MoveMenu
+        triggerLabel={`Move ${p.name}`}
+        destinationsLabel="Move to group"
+        destinations={destinations}
+        onSelect={(key) =>
+          moveProduct(p, key === UNGROUPED_KEY ? null : key)
+        }
+      />
+    );
+  }
+
+  // The non-drag alternative for a group: nest it under another group (or the
+  // top level) and reorder it among its siblings. moveGroup validates cycles and
+  // depth; here we pre-filter destinations that would violate them.
+  function groupMoveMenu(
+    group: ProductGroupRecord,
+    parent: string | null,
+    index: number,
+    siblingCount: number,
+  ): React.ReactNode {
+    if (!isOrgAdmin) return null;
+    const destinations: MoveOption[] = [
+      { key: ROOT_KEY, label: "Top level", current: parent === null },
+      ...groups
+        .filter(
+          (g) =>
+            g.id !== group.id &&
+            !wouldCreateCycle(groups, group.id, g.id) &&
+            !wouldExceedDepth(groups, group.id, g.id),
+        )
+        .map((g) => ({ key: g.id, label: g.name, current: g.id === parent })),
+    ];
+    return (
+      <MoveMenu
+        triggerLabel={`Move ${group.name}`}
+        destinationsLabel="Move into"
+        destinations={destinations}
+        onSelect={(key) =>
+          moveGroup(group, key === ROOT_KEY ? null : key, null)
+        }
+        reorder={{
+          // Slot indexes count the dragged row itself, so "down" targets
+          // index+2 (past the next sibling); see moveGroup's compensation.
+          onUp: () => moveGroup(group, parent, index - 1),
+          onDown: () => moveGroup(group, parent, index + 2),
+          canUp: index > 0,
+          canDown: index < siblingCount - 1,
+        }}
+      />
+    );
+  }
+
   /** One tree level: sibling groups (with reorder slots), then leaf products. */
   const renderLevel = (
     parent: string | null,
@@ -398,6 +471,7 @@ export function ProductsManager({
               subgroupCount={childGroupsOf(group.id).length}
               onEdit={() => setEditingGroupId(group.id)}
               onDelete={() => onDeleteGroup(group)}
+              moveMenu={groupMoveMenu(group, parent, i, siblings.length)}
               busy={pending}
             />
             {renderLevel(group.id, depth + 1)}
@@ -410,6 +484,7 @@ export function ProductsManager({
                 canDrag={isOrgAdmin}
                 onEdit={() => setEditingProductId(p.id)}
                 onDelete={() => onDeleteProduct(p)}
+                moveMenu={productMoveMenu(p)}
                 busy={pending}
               />
             ))}
@@ -489,6 +564,7 @@ export function ProductsManager({
               canDrag={isOrgAdmin && groups.length > 0}
               onEdit={() => setEditingProductId(p.id)}
               onDelete={() => onDeleteProduct(p)}
+              moveMenu={productMoveMenu(p)}
               busy={pending}
             />
           ))}
@@ -586,6 +662,7 @@ function GroupRow({
   subgroupCount,
   onEdit,
   onDelete,
+  moveMenu,
   busy,
 }: {
   group: ProductGroupRecord;
@@ -596,13 +673,15 @@ function GroupRow({
   subgroupCount: number;
   onEdit: () => void;
   onDelete: () => void;
+  /** The non-drag Move menu (nest + reorder), or null for non-admins. */
+  moveMenu?: React.ReactNode;
   busy: boolean;
 }) {
   // We intentionally do not spread dnd-kit's `attributes` onto the row: they set
   // role="button" and tabindex on the <li>, which stops it being a valid list
   // item and makes it an interactive control wrapping the Edit/Delete buttons
-  // (axe: list + nested-interactive). Drag is pointer-only here; the keyboard /
-  // screen-reader accessible "Move" alternative is added in a later stage.
+  // (axe: list + nested-interactive). Drag is pointer-only; the keyboard /
+  // screen-reader accessible alternative is the `moveMenu` in the actions row.
   const {
     listeners,
     setNodeRef: setDragRef,
@@ -656,6 +735,7 @@ function GroupRow({
       </span>
       {canManage ? (
         <span className="ml-auto flex items-center gap-1">
+          {moveMenu}
           <Button type="button" size="sm" variant="ghost" onClick={onEdit}>
             Edit
           </Button>
@@ -690,6 +770,7 @@ function ProductRow({
   canDrag,
   onEdit,
   onDelete,
+  moveMenu,
   busy,
 }: {
   product: ProductRecord;
@@ -698,10 +779,13 @@ function ProductRow({
   canDrag: boolean;
   onEdit: () => void;
   onDelete: () => void;
+  /** The non-drag "Move to group" menu, or null for non-admins. */
+  moveMenu?: React.ReactNode;
   busy: boolean;
 }) {
   // See GroupRow: the row deliberately omits dnd-kit's `attributes` so the <li>
-  // stays a valid, non-interactive list item. Pointer drag via `listeners`.
+  // stays a valid, non-interactive list item. Pointer drag via `listeners`; the
+  // keyboard-accessible alternative is the `moveMenu` in the actions row.
   const { listeners, setNodeRef, isDragging } = useDraggable({
     id: `product:${product.id}`,
     disabled: !canDrag,
@@ -743,6 +827,7 @@ function ProductRow({
       </span>
       {canManage ? (
         <span className="ml-auto flex items-center gap-1">
+          {moveMenu}
           <Button type="button" size="sm" variant="ghost" onClick={onEdit}>
             Edit
           </Button>

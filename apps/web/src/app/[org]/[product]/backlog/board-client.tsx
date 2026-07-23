@@ -27,10 +27,12 @@ import type { StatusWorkflow } from "@specboards/core";
 import { BoardColumnNav } from "@/components/board-column-nav";
 import { FeatureCard, type ProductTag } from "@/components/feature-card";
 import { FeatureEditSheet } from "@/components/feature-edit-sheet";
+import { MoveMenu, type MoveOption } from "@/components/move-menu";
 import { StatusDot } from "@/components/status-dot";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AuthRequiredError, patchFeature } from "@/lib/api-client";
+import { useAnnouncer } from "@/lib/use-announcer";
 import { useIsCoarsePointer, useIsMobile } from "@/lib/use-media-query";
 import { useSwipeColumns } from "@/lib/use-swipe-columns";
 import {
@@ -83,6 +85,7 @@ export function BoardClient({
   bulkOptions?: BulkOptions;
 }) {
   const router = useRouter();
+  const announce = useAnnouncer();
   const { cardFields, featured } = useBoardPrefs();
   const [records, setRecords] = useState<Record<string, FeatureRecord>>(() =>
     Object.fromEntries(features.map((f) => [f.specId, f])),
@@ -233,6 +236,103 @@ export function BoardClient({
       });
   }
 
+  // Persist a card at a new (status, rank) with an optimistic update, rollback on
+  // failure, and a live-region announcement. Shared by the two non-drag moves
+  // below so the keyboard/menu path commits identically to a drop.
+  function commitMove(
+    specId: string,
+    toStatus: string,
+    nextLists: Record<string, string[]>,
+    newRank: string | null,
+    message: string,
+  ) {
+    const current = records[specId];
+    if (!current) return;
+    const prevLists = lists;
+    const prevRecords = records;
+    setLists(nextLists);
+    setRecords({
+      ...records,
+      [specId]: { ...current, rank: newRank, status: toStatus },
+    });
+    patchFeature(specId, { status: toStatus, rank: newRank })
+      .then(() => {
+        router.refresh();
+        announce(message);
+      })
+      .catch((err) => {
+        setLists(prevLists);
+        setRecords(prevRecords);
+        if (err instanceof AuthRequiredError) {
+          router.push(
+            `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
+          );
+          return;
+        }
+        toast.error(err instanceof Error ? err.message : "Move failed.");
+      });
+  }
+
+  // Non-drag "Move to <column>": relocate a card to the end of another column,
+  // if the workflow allows the transition. The keyboard/menu counterpart to
+  // dragging across columns.
+  function moveToStatus(specId: string, toStatus: string) {
+    const current = records[specId];
+    const from = current?.status;
+    if (!current || !from || from === toStatus) return;
+    if (!statusOptions(from, workflow).includes(toStatus)) {
+      toast.error(
+        `Can't move ${statusLabel(from, workflow)} → ${statusLabel(toStatus, workflow)} (not an allowed transition).`,
+      );
+      return;
+    }
+    const targetIds = lists[toStatus] ?? [];
+    const lastId = targetIds[targetIds.length - 1] ?? null;
+    const lastRank = lastId ? (records[lastId]?.rank ?? null) : null;
+    const newRank = rankBetween(lastRank, null);
+    const nextLists = {
+      ...lists,
+      [from]: (lists[from] ?? []).filter((id) => id !== specId),
+      [toStatus]: [...targetIds, specId],
+    };
+    commitMove(
+      specId,
+      toStatus,
+      nextLists,
+      newRank,
+      `Moved ${current.title} to ${statusLabel(toStatus, workflow)}`,
+    );
+  }
+
+  // Non-drag reorder: nudge a card one slot up or down within its column and
+  // re-rank it between its new neighbors. The keyboard/menu counterpart to
+  // dragging within a column.
+  function moveWithinColumn(specId: string, dir: -1 | 1) {
+    const current = records[specId];
+    const status = current?.status;
+    if (!current || !status) return;
+    const col = lists[status] ?? [];
+    const i = col.indexOf(specId);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= col.length) return;
+    const next = [...col];
+    next.splice(i, 1);
+    next.splice(j, 0, specId);
+    const prevId = j > 0 ? next[j - 1] : null;
+    const nextId = j < next.length - 1 ? next[j + 1] : null;
+    const prevRank = prevId ? (records[prevId]?.rank ?? null) : null;
+    let nextRank = nextId ? (records[nextId]?.rank ?? null) : null;
+    if (prevRank && nextRank && !(prevRank < nextRank)) nextRank = null;
+    const newRank = rankBetween(prevRank, nextRank);
+    commitMove(
+      specId,
+      status,
+      { ...lists, [status]: next },
+      newRank,
+      `Moved ${current.title} ${dir < 0 ? "up" : "down"}`,
+    );
+  }
+
   const activeRecord = activeId ? records[activeId] : null;
   const releaseNames = Object.fromEntries(releases.map((r) => [r.id, r.name]));
 
@@ -291,6 +391,8 @@ export function BoardClient({
               selected={selected}
               onToggleSelect={toggleSelect}
               dragDisabled={isMobile}
+              onMoveToStatus={moveToStatus}
+              onMoveWithinColumn={moveWithinColumn}
             />
           ))}
         </div>
@@ -345,6 +447,8 @@ function Column({
   selected,
   onToggleSelect,
   dragDisabled,
+  onMoveToStatus,
+  onMoveWithinColumn,
 }: {
   status: string;
   workflow: StatusWorkflow;
@@ -362,8 +466,21 @@ function Column({
   onToggleSelect: (specId: string) => void;
   /** Below md, drag is off and swiping scrolls between columns instead. */
   dragDisabled: boolean;
+  /** Non-drag "Move to <column>" (workflow-validated). */
+  onMoveToStatus: (specId: string, toStatus: string) => void;
+  /** Non-drag reorder within this column (-1 up, +1 down). */
+  onMoveWithinColumn: (specId: string, dir: -1 | 1) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `${COL_PREFIX}${status}` });
+  // Destinations for a card's Move menu: this column (checked, current) plus the
+  // transitions the workflow permits out of it.
+  const moveDestinations: MoveOption[] = [
+    { key: status, label: statusLabel(status, workflow), current: true },
+    ...statusOptions(status, workflow).map((s) => ({
+      key: s,
+      label: statusLabel(s, workflow),
+    })),
+  ];
   return (
     <div
       data-board-column
@@ -381,7 +498,7 @@ function Column({
           ref={setNodeRef}
           className={`min-h-12 space-y-2 rounded-md transition-colors ${isOver ? "bg-muted" : ""}`}
         >
-          {cardIds.map((id) => {
+          {cardIds.map((id, index) => {
             const record = records[id];
             if (!record) return null;
             return (
@@ -404,7 +521,7 @@ function Column({
                   ) : null}
                   <div
                     className={cn(
-                      "min-w-0 flex-1 rounded-md",
+                      "group relative min-w-0 flex-1 rounded-md",
                       selected.has(id) && "ring-2 ring-primary",
                     )}
                   >
@@ -420,6 +537,25 @@ function Column({
                         record.productId ? productsById?.[record.productId] : undefined
                       }
                     />
+                    {/* The keyboard/pointer alternative to dragging (SC 2.1.1,
+                        2.5.7). Revealed on hover/focus on desktop where drag is
+                        primary; always visible below md where drag is off. */}
+                    {!selectMode ? (
+                      <div className="absolute right-1 top-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 max-md:opacity-100 has-[[data-state=open]]:opacity-100">
+                        <MoveMenu
+                          triggerLabel={`Move ${record.title}`}
+                          destinationsLabel="Move to column"
+                          destinations={moveDestinations}
+                          onSelect={(toStatus) => onMoveToStatus(id, toStatus)}
+                          reorder={{
+                            onUp: () => onMoveWithinColumn(id, -1),
+                            onDown: () => onMoveWithinColumn(id, 1),
+                            canUp: index > 0,
+                            canDown: index < cardIds.length - 1,
+                          }}
+                        />
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               </SortableCard>
