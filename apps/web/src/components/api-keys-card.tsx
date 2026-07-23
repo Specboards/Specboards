@@ -181,6 +181,7 @@ export function ApiKeysCard({ initialKeys }: { initialKeys: ApiKeyView[] }) {
             </div>
             {status && (
               <p
+                role={status.kind === "error" ? "alert" : "status"}
                 className={`text-xs ${status.kind === "ok" ? "text-muted-foreground" : "text-destructive"}`}
               >
                 {status.message}

@@ -17,6 +17,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { FormError, FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 
 /** First-user onboarding: name the organization. Creates it via /api/v1. */
@@ -82,20 +83,19 @@ export function SetupForm() {
       </CardHeader>
       <CardContent>
         <form onSubmit={onSubmit} className="space-y-4">
-          <label className="block space-y-1.5">
-            <span className="text-xs font-medium text-muted-foreground">
-              Organization name
-            </span>
-            <Input
-              name="name"
-              placeholder="Acme Inc."
-              maxLength={80}
-              required
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
+          <div className="space-y-1.5">
+            <FormField label="Organization name">
+              <Input
+                name="name"
+                placeholder="Acme Inc."
+                maxLength={80}
+                required
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </FormField>
             {previewSlug && !showSlugField ? (
-              <span className="block text-xs text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 Your URL: <code>/{previewSlug}</code>{" "}
                 <button
                   type="button"
@@ -104,15 +104,19 @@ export function SetupForm() {
                 >
                   Customize
                 </button>
-              </span>
+              </p>
             ) : null}
-          </label>
+          </div>
 
           {showSlugField ? (
-            <label className="block space-y-1.5">
-              <span className="text-xs font-medium text-muted-foreground">
-                Organization URL
-              </span>
+            <FormField
+              label="Organization URL"
+              hint={
+                <>
+                  This is your space at <code>/{slug || "…"}</code>.
+                </>
+              }
+            >
               <Input
                 ref={slugInputRef}
                 name="slug"
@@ -123,14 +127,14 @@ export function SetupForm() {
                 value={slug ?? ""}
                 onChange={(e) => setSlug(slugifyOrg(e.target.value))}
               />
-              <span className="block text-xs text-muted-foreground">
-                This is your space at <code>/{slug || "…"}</code>.
-              </span>
-            </label>
+            </FormField>
           ) : null}
 
           {warning ? (
-            <p className="rounded-md border border-amber-500/40 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+            <p
+              role="alert"
+              className="rounded-md border border-amber-500/40 px-3 py-2 text-xs text-amber-700 dark:text-amber-400"
+            >
               {warning}
             </p>
           ) : null}
@@ -164,7 +168,7 @@ export function SetupForm() {
               </span>
             </label>
           </fieldset>
-          {error ? <p className="text-xs text-destructive">{error}</p> : null}
+          <FormError>{error}</FormError>
           <Button type="submit" className="w-full" disabled={pending}>
             {pending ? "…" : "Create organization"}
           </Button>

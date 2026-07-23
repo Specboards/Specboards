@@ -8,6 +8,7 @@ import { CommandPalette } from "@/components/command-palette";
 import { MobileNav } from "@/components/mobile-nav";
 import { ThemeProvider } from "@/components/theme-provider";
 import { WebpackNonce } from "@/components/webpack-nonce";
+import { AnnouncerProvider } from "@/lib/use-announcer";
 import {
   listSidebarGroups,
   listSidebarOrgs,
@@ -60,16 +61,18 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
           Skip to main content
         </a>
         <ThemeProvider nonce={nonce}>
-          <div className="flex min-h-screen">
-            <AppSidebar orgs={orgs} products={products} groups={groups} />
-            <div className="flex min-w-0 flex-1 flex-col">
-              <MobileNav orgs={orgs} products={products} groups={groups} />
-              <main id="main" tabIndex={-1} className="min-w-0 flex-1 focus:outline-none">
-                <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">{children}</div>
-              </main>
+          <AnnouncerProvider>
+            <div className="flex min-h-screen">
+              <AppSidebar orgs={orgs} products={products} groups={groups} />
+              <div className="flex min-w-0 flex-1 flex-col">
+                <MobileNav orgs={orgs} products={products} groups={groups} />
+                <main id="main" tabIndex={-1} className="min-w-0 flex-1 focus:outline-none">
+                  <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">{children}</div>
+                </main>
+              </div>
             </div>
-          </div>
-          <CommandPalette />
+            <CommandPalette />
+          </AnnouncerProvider>
           <Toaster position="bottom-right" richColors closeButton />
         </ThemeProvider>
       </body>

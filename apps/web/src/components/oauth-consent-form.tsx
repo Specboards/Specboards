@@ -10,6 +10,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { FormError, FormField } from "@/components/ui/form-field";
 import { Select } from "@/components/ui/select";
 import { signOut } from "@/lib/auth-client";
 
@@ -163,8 +164,7 @@ export function OAuthConsentForm({
         </div>
 
         {multiWorkspace ? (
-          <label className="block space-y-1.5 text-sm">
-            <span className="text-muted-foreground">Workspace to connect</span>
+          <FormField label="Workspace to connect">
             <Select
               value={workspaceId}
               onChange={(e) => setWorkspaceId(e.target.value)}
@@ -176,7 +176,7 @@ export function OAuthConsentForm({
                 </option>
               ))}
             </Select>
-          </label>
+          </FormField>
         ) : (
           <div className="text-sm text-muted-foreground">
             Workspace:{" "}
@@ -196,7 +196,7 @@ export function OAuthConsentForm({
             ))}
           </ul>
         ) : null}
-        {error ? <p className="text-xs text-destructive">{error}</p> : null}
+        <FormError>{error}</FormError>
         <div className="flex gap-2">
           <Button
             type="button"

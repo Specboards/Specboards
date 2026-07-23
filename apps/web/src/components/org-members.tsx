@@ -327,6 +327,7 @@ function InviteForm({
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="teammate@example.com"
                 className="h-9 w-64"
+                aria-label="Teammate email"
                 autoFocus
               />
               <Select

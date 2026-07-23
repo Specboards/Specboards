@@ -14,6 +14,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { FormError, FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 
 type Mode = "sign-in" | "sign-up";
@@ -163,8 +164,10 @@ export function AuthForm({ mode }: { mode: Mode }) {
       <CardContent>
         <form onSubmit={onSubmit} className="space-y-4">
           {mode === "sign-up" ? (
-            <label className="block space-y-1.5">
-              <span className="text-xs font-medium text-muted-foreground">Sign-up code</span>
+            <FormField
+              label="Sign-up code"
+              hint="New teams need a sign-up code to get started. If a teammate is already on Specboards, you can leave this blank."
+            >
               <Input
                 name="signUpCode"
                 autoComplete="off"
@@ -172,48 +175,42 @@ export function AuthForm({ mode }: { mode: Mode }) {
                 spellCheck={false}
                 placeholder="Required to start a new team"
               />
-              <span className="block text-xs text-muted-foreground">
-                New teams need a sign-up code to get started. If a teammate is already on
-                Specboards, you can leave this blank.
-              </span>
-            </label>
+            </FormField>
           ) : null}
           {mode === "sign-up" ? (
-            <label className="block space-y-1.5">
-              <span className="text-xs font-medium text-muted-foreground">Name</span>
+            <FormField label="Name">
               <Input name="name" autoComplete="name" required />
-            </label>
+            </FormField>
           ) : null}
-          <label className="block space-y-1.5">
-            <span className="text-xs font-medium text-muted-foreground">Email</span>
+          <FormField label="Email">
             <Input name="email" type="email" autoComplete="email" required />
-          </label>
-          <label className="block space-y-1.5">
-            <span className="flex items-center justify-between text-xs font-medium text-muted-foreground">
-              Password
-              {mode === "sign-in" ? (
+          </FormField>
+          <FormField
+            label="Password"
+            labelAside={
+              mode === "sign-in" ? (
                 <Link
                   href="/forgot-password"
-                  className="font-normal text-link underline underline-offset-4"
+                  className="text-xs font-normal text-link underline underline-offset-4"
                 >
                   Forgot password?
                 </Link>
-              ) : null}
-            </span>
+              ) : null
+            }
+          >
             <Input
               name="password"
               type="password"
               autoComplete={mode === "sign-up" ? "new-password" : "current-password"}
               required
             />
-          </label>
+          </FormField>
           {mode === "sign-up" ? (
-            <label className="block space-y-1.5">
-              <span className="text-xs font-medium text-muted-foreground">Confirm password</span>
+            <FormField label="Confirm password">
               <Input name="confirmPassword" type="password" autoComplete="new-password" required />
-            </label>
+            </FormField>
           ) : null}
-          {error ? <p className="text-xs text-destructive">{error}</p> : null}
+          <FormError>{error}</FormError>
           <Button type="submit" className="w-full" disabled={pending}>
             {pending ? "…" : t.submit}
           </Button>

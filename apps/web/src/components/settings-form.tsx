@@ -15,14 +15,21 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 
 type Status = { kind: "ok" | "error"; message: string } | null;
 
+/**
+ * Async save result. Announced when it appears: an error interrupts (role=alert,
+ * assertive), a success is polite (role=status). The success/error text pairs
+ * with the visible styling so it never relies on color alone (SC 1.4.1).
+ */
 function StatusLine({ status }: { status: Status }) {
   if (!status) return null;
   return (
     <p
+      role={status.kind === "error" ? "alert" : "status"}
       className={`text-xs ${status.kind === "ok" ? "text-muted-foreground" : "text-destructive"}`}
     >
       {status.message}
@@ -101,24 +108,19 @@ export function ProfileCard({
         <form onSubmit={onSubmit} className="space-y-4">
           <div className="flex items-center gap-4">
             <Avatar name={name} image={image} />
-            <label className="flex-1 space-y-1.5">
-              <span className="text-xs font-medium text-muted-foreground">
-                Profile picture URL
-              </span>
+            <FormField label="Profile picture URL" className="flex-1">
               <Input
                 name="image"
                 type="url"
                 defaultValue={image ?? ""}
                 placeholder="https://…"
               />
-            </label>
+            </FormField>
           </div>
-          <label className="block space-y-1.5">
-            <span className="text-xs font-medium text-muted-foreground">Name</span>
+          <FormField label="Name">
             <Input name="name" defaultValue={name} autoComplete="name" required />
-          </label>
-          <label className="block space-y-1.5">
-            <span className="text-xs font-medium text-muted-foreground">Time zone</span>
+          </FormField>
+          <FormField label="Time zone">
             <select
               name="timezone"
               defaultValue={timezone ?? browserZone}
@@ -130,7 +132,7 @@ export function ProfileCard({
                 </option>
               ))}
             </select>
-          </label>
+          </FormField>
           <StatusLine status={status} />
           <Button type="submit" disabled={pending}>
             {pending ? "…" : "Save profile"}
@@ -215,10 +217,9 @@ export function EmailCard({ email }: { email: string }) {
       </CardHeader>
       <CardContent>
         <form onSubmit={onSubmit} className="space-y-4">
-          <label className="block space-y-1.5">
-            <span className="text-xs font-medium text-muted-foreground">New email</span>
+          <FormField label="New email">
             <Input name="email" type="email" autoComplete="email" required />
-          </label>
+          </FormField>
           <StatusLine status={status} />
           <Button type="submit" disabled={pending}>
             {pending ? "…" : "Change email"}
@@ -268,10 +269,9 @@ export function CompanyCard({ name, canEdit }: { name: string; canEdit: boolean 
       </CardHeader>
       <CardContent>
         <form onSubmit={onSubmit} className="space-y-4">
-          <label className="block space-y-1.5">
-            <span className="text-xs font-medium text-muted-foreground">Company name</span>
+          <FormField label="Company name">
             <Input name="name" defaultValue={name} disabled={!canEdit} required />
-          </label>
+          </FormField>
           {canEdit ? (
             <>
               <StatusLine status={status} />

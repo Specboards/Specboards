@@ -363,6 +363,7 @@ export function WebhooksCard({
               </Button>
               {status && (
                 <p
+                  role={status.kind === "error" ? "alert" : "status"}
                   className={`text-xs ${
                     status.kind === "ok"
                       ? "text-muted-foreground"

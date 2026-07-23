@@ -12,6 +12,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 
 /**
@@ -63,10 +64,9 @@ export function ForgotPasswordForm() {
       </CardHeader>
       <CardContent>
         <form onSubmit={onSubmit} className="space-y-4">
-          <label className="block space-y-1.5">
-            <span className="text-xs font-medium text-muted-foreground">Email</span>
+          <FormField label="Email">
             <Input name="email" type="email" autoComplete="email" required />
-          </label>
+          </FormField>
           <Button type="submit" className="w-full" disabled={pending}>
             {pending ? "…" : "Send reset link"}
           </Button>

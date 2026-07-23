@@ -5,6 +5,7 @@ import { useState, useTransition } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { AuthRequiredError, updateIdeaSettings } from "@/lib/api-client";
 import type { IdeaSettings } from "@/lib/store/types";
@@ -76,18 +77,15 @@ export function IdeaPortalSettings({
         </span>
       </label>
 
-      <label className="block space-y-1.5">
-        <span className="text-xs font-medium text-muted-foreground">
-          Portal heading
-        </span>
+      <FormField label="Portal heading" className="max-w-sm">
         <Input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           disabled={!canEdit || saving}
           placeholder="Defaults to your organization name"
-          className="h-8 max-w-sm"
+          className="h-8"
         />
-      </label>
+      </FormField>
 
       {canEdit ? (
         <div className="flex items-center gap-3">
@@ -99,7 +97,11 @@ export function IdeaPortalSettings({
           >
             {saving ? "Saving…" : "Save settings"}
           </Button>
-          {error ? <p className="text-xs text-destructive">{error}</p> : null}
+          {error ? (
+            <p role="alert" className="text-xs text-destructive">
+              {error}
+            </p>
+          ) : null}
         </div>
       ) : null}
     </div>

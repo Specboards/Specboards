@@ -13,6 +13,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { FormError, FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 
 /**
@@ -97,15 +98,13 @@ export function ResetPasswordForm() {
       </CardHeader>
       <CardContent>
         <form onSubmit={onSubmit} className="space-y-4">
-          <label className="block space-y-1.5">
-            <span className="text-xs font-medium text-muted-foreground">New password</span>
+          <FormField label="New password">
             <Input name="password" type="password" autoComplete="new-password" required />
-          </label>
-          <label className="block space-y-1.5">
-            <span className="text-xs font-medium text-muted-foreground">Confirm password</span>
+          </FormField>
+          <FormField label="Confirm password">
             <Input name="confirmPassword" type="password" autoComplete="new-password" required />
-          </label>
-          {error ? <p className="text-xs text-destructive">{error}</p> : null}
+          </FormField>
+          <FormError>{error}</FormError>
           <Button type="submit" className="w-full" disabled={pending}>
             {pending ? "…" : "Reset password"}
           </Button>
