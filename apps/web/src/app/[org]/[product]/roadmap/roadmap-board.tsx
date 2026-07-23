@@ -19,6 +19,7 @@ import { toast } from "sonner";
 import type { StatusWorkflow } from "@specboards/core";
 
 import { useBoardPrefs } from "@/app/[org]/[product]/backlog/board-prefs";
+import { BoardColumnNav } from "@/components/board-column-nav";
 import {
   cardFieldBadges,
   featuredBadge,
@@ -39,6 +40,8 @@ import { AuthRequiredError, patchFeature } from "@/lib/api-client";
 import { statusLabel } from "@/lib/feature-helpers";
 import { productColorClasses } from "@/lib/product-color";
 import type { FeatureRecord, ReleaseRecord } from "@/lib/store/types";
+import { useIsCoarsePointer, useIsMobile } from "@/lib/use-media-query";
+import { useSwipeColumns } from "@/lib/use-swipe-columns";
 import { cn } from "@/lib/utils";
 
 const COL_PREFIX = "rel:";
@@ -112,8 +115,20 @@ export function RoadmapBoard({
     setPlacement({});
   }, [features]);
 
+  // Below md the roadmap is a swipe-column carousel: drag is off (columns pass
+  // allowDrag && !isMobile) and horizontal swipes scroll between releases. On
+  // coarse pointers wide enough to still drag, a short long-press lifts a card.
+  const isMobile = useIsMobile();
+  const coarsePointer = useIsCoarsePointer();
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(PointerSensor, {
+      activationConstraint: coarsePointer
+        ? { delay: 250, tolerance: 8 }
+        : { distance: 6 },
+    }),
+  );
+  const { scrollRef, activeColumn, scrollToColumn } = useSwipeColumns(
+    columns.length,
   );
 
   const releaseOf = (f: FeatureRecord): string | null =>
@@ -173,13 +188,23 @@ export function RoadmapBoard({
 
   return (
     <>
+      <BoardColumnNav
+        label={(columns[activeColumn] ?? columns[0])?.name}
+        index={activeColumn}
+        count={columns.length}
+        onPrev={() => scrollToColumn(activeColumn - 1)}
+        onNext={() => scrollToColumn(activeColumn + 1)}
+      />
       <DndContext
         sensors={sensors}
         collisionDetection={pointerWithin}
         onDragStart={onDragStart}
         onDragEnd={onDragEnd}
       >
-        <div className="flex gap-4 overflow-x-auto pb-4">
+        <div
+          ref={scrollRef}
+          className="relative flex gap-4 overflow-x-auto pb-4 max-md:-mx-4 max-md:snap-x max-md:snap-mandatory max-md:px-4 max-md:scroll-px-4"
+        >
           {columns.map((column) => (
             <Column
               key={column.releaseId ?? UNSCHEDULED}
@@ -188,7 +213,7 @@ export function RoadmapBoard({
               workflow={workflow}
               productsById={productsById}
               maps={maps}
-              allowDrag={allowDrag}
+              allowDrag={allowDrag && !isMobile}
               onOpenDetail={setDetailReleaseId}
               onOpenItem={setEditingSpecId}
             />
@@ -260,7 +285,10 @@ function Column({
       : null;
 
   return (
-    <div className="w-72 shrink-0 space-y-2 rounded-md bg-muted/35 p-2.5">
+    <div
+      data-board-column
+      className="w-72 shrink-0 space-y-2 rounded-md bg-muted/35 p-2.5 max-md:w-[calc(100vw-3rem)] max-md:snap-start"
+    >
       {/* Heading: release name on top, dates (and non-default status) beneath. */}
       <div className="space-y-0.5 px-1">
         <div className="flex items-baseline justify-between gap-2">
