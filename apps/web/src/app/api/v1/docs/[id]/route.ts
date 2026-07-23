@@ -1,3 +1,4 @@
+import { readJsonBody } from "@/lib/api/body";
 import { authorizeWrite } from "@/lib/auth-session";
 import {
   deleteDocPage,
@@ -19,15 +20,16 @@ export async function PATCH(req: Request, { params }: Params) {
   if (!authz.ok) return authz.response;
 
   const { id } = await params;
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return Response.json({ error: "Request body must be JSON." }, { status: 400 });
-  }
+  const parsed = await readJsonBody(req);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.body;
 
   try {
-    const page = await updateDocPage(id, parseDocPagePatch(body), authz.scope ?? undefined);
+    const page = await updateDocPage(
+      id,
+      parseDocPagePatch(body),
+      authz.scope ?? undefined,
+    );
     return Response.json({ page });
   } catch (err) {
     if (err instanceof DocError || err instanceof ProductError) {

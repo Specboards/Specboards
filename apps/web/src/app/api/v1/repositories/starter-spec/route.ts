@@ -1,5 +1,6 @@
 import { and, eq, repositories } from "@specboards/db";
 
+import { readJsonBody } from "@/lib/api/body";
 import { getDb } from "@/lib/db";
 import { authorizeOrgAdmin } from "@/lib/auth-session";
 import { createStarterSpec } from "@/lib/github-sync";
@@ -25,30 +26,49 @@ export async function POST(req: Request) {
     );
   }
 
-  const limited = await enforceQuota(db, QUOTAS.starterSpec, authz.scope.workspaceId);
+  const limited = await enforceQuota(
+    db,
+    QUOTAS.starterSpec,
+    authz.scope.workspaceId,
+  );
   if (limited) return limited;
 
-  const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+  const parsedBody = await readJsonBody(req);
+  if (!parsedBody.ok) return parsedBody.response;
+  const body = parsedBody.body as Record<string, unknown> | null;
   const repoId = typeof body?.repoId === "string" ? body.repoId.trim() : "";
-  const featureName = typeof body?.featureName === "string" ? body.featureName.trim() : "";
+  const featureName =
+    typeof body?.featureName === "string" ? body.featureName.trim() : "";
   if (!repoId || !featureName) {
-    return Response.json({ error: "repoId and featureName are required." }, { status: 400 });
+    return Response.json(
+      { error: "repoId and featureName are required." },
+      { status: 400 },
+    );
   }
 
   const [repo] = await db
     .select()
     .from(repositories)
-    .where(and(eq(repositories.id, repoId), eq(repositories.workspaceId, authz.scope.workspaceId)))
+    .where(
+      and(
+        eq(repositories.id, repoId),
+        eq(repositories.workspaceId, authz.scope.workspaceId),
+      ),
+    )
     .limit(1);
   if (!repo) {
-    return Response.json({ error: "Repository not found in your workspace." }, { status: 404 });
+    return Response.json(
+      { error: "Repository not found in your workspace." },
+      { status: 404 },
+    );
   }
 
   try {
     const result = await createStarterSpec(db, repo, featureName);
     return Response.json(result, { status: 201 });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Couldn't create the starter spec.";
+    const message =
+      err instanceof Error ? err.message : "Couldn't create the starter spec.";
     return Response.json({ error: message }, { status: 400 });
   }
 }

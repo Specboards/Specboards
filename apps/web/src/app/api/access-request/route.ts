@@ -1,3 +1,4 @@
+import { readJsonBody } from "@/lib/api/body";
 import { renderInfoEmail, sendEmail } from "@/lib/email";
 
 export const dynamic = "force-dynamic";
@@ -12,12 +13,17 @@ export const dynamic = "force-dynamic";
  */
 
 /** Where review notifications land. Override with ACCESS_REQUEST_NOTIFY_EMAIL. */
-const NOTIFY_EMAIL = process.env.ACCESS_REQUEST_NOTIFY_EMAIL?.trim() || "contact@specboard.ai";
+const NOTIFY_EMAIL =
+  process.env.ACCESS_REQUEST_NOTIFY_EMAIL?.trim() || "contact@specboard.ai";
 
 /** Browser origins allowed to POST here (the marketing site + local dev). */
 function allowedOrigins(): string[] {
   const fromEnv = process.env.ACCESS_REQUEST_ALLOWED_ORIGINS?.trim();
-  if (fromEnv) return fromEnv.split(",").map((o) => o.trim()).filter(Boolean);
+  if (fromEnv)
+    return fromEnv
+      .split(",")
+      .map((o) => o.trim())
+      .filter(Boolean);
   return [
     "https://www.specboards.ai",
     "https://specboards.ai",
@@ -43,7 +49,10 @@ function corsHeaders(origin: string | null): Record<string, string> {
 }
 
 export function OPTIONS(req: Request) {
-  return new Response(null, { status: 204, headers: corsHeaders(req.headers.get("origin")) });
+  return new Response(null, {
+    status: 204,
+    headers: corsHeaders(req.headers.get("origin")),
+  });
 }
 
 /**
@@ -83,12 +92,21 @@ export async function POST(req: Request) {
   const json = (body: unknown, status: number) =>
     Response.json(body, { status, headers });
 
-  let body: Record<string, unknown>;
-  try {
-    body = (await req.json()) as Record<string, unknown>;
-  } catch {
-    return json({ error: "Request body must be JSON." }, 400);
+  // Re-emit any body-guard rejection through `json()` so the CORS headers this
+  // cross-origin form needs are preserved on the error response.
+  const parsed = await readJsonBody(req);
+  if (!parsed.ok) {
+    return json(
+      {
+        error:
+          parsed.response.status === 413
+            ? "Request body too large."
+            : "Request body must be JSON.",
+      },
+      parsed.response.status,
+    );
   }
+  const body = parsed.body as Record<string, unknown>;
 
   // Honeypot: bots fill hidden fields humans never see. Pretend success so the
   // bot learns nothing, but send nothing.
@@ -103,13 +121,21 @@ export async function POST(req: Request) {
   const useCase = clip(body.useCase, 4000);
 
   if (!name) return json({ error: "Please tell us your name." }, 400);
-  if (!EMAIL_RE.test(email)) return json({ error: "A valid email address is required." }, 400);
+  if (!EMAIL_RE.test(email))
+    return json({ error: "A valid email address is required." }, 400);
   if (!company) return json({ error: "Please tell us your company." }, 400);
-  if (!useCase) return json({ error: "Please tell us how you'd like to use Specboards." }, 400);
+  if (!useCase)
+    return json(
+      { error: "Please tell us how you'd like to use Specboards." },
+      400,
+    );
 
   if (rateLimited(clientIp(req))) {
     return json(
-      { error: "Too many requests. Please try again later or email contact@specboard.ai." },
+      {
+        error:
+          "Too many requests. Please try again later or email contact@specboard.ai.",
+      },
       429,
     );
   }
@@ -124,7 +150,8 @@ export async function POST(req: Request) {
       ...(teamSize ? [{ label: "Team size", value: teamSize }] : []),
       { label: "Use case", value: useCase },
     ],
-    footer: "Approve by sending an org invitation to this address from the app.",
+    footer:
+      "Approve by sending an org invitation to this address from the app.",
   });
 
   // Confirm to the requester so they know it went through.
@@ -134,7 +161,8 @@ export async function POST(req: Request) {
       "Thanks for requesting access to Specboards. We've received your request and our team will review it shortly.",
       "We'll follow up at this address. If you have any questions in the meantime, just reply to contact@specboard.ai.",
     ],
-    footer: "You're receiving this because you requested access at specboards.ai.",
+    footer:
+      "You're receiving this because you requested access at specboards.ai.",
   });
 
   try {
@@ -155,7 +183,10 @@ export async function POST(req: Request) {
   } catch (err) {
     console.error("[access-request] send failed", err);
     return json(
-      { error: "We couldn't submit your request. Please email contact@specboard.ai." },
+      {
+        error:
+          "We couldn't submit your request. Please email contact@specboard.ai.",
+      },
       502,
     );
   }

@@ -1,7 +1,13 @@
 import { revalidatePath } from "next/cache";
 
+import { readJsonBody } from "@/lib/api/body";
 import { authorizeOrgAdmin, resolveReadScope } from "@/lib/auth-session";
-import { InvalidPatchError, listLevels, parseLevelsUpdate, updateLevels } from "@/lib/features-service";
+import {
+  InvalidPatchError,
+  listLevels,
+  parseLevelsUpdate,
+  updateLevels,
+} from "@/lib/features-service";
 import { LevelError } from "@/lib/store/types";
 
 export const dynamic = "force-dynamic";
@@ -24,16 +30,17 @@ export async function PUT(req: Request) {
   if (!authz.ok) return authz.response;
   const scope = authz.scope ?? undefined;
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return Response.json({ error: "Request body must be JSON." }, { status: 400 });
-  }
+  const parsed = await readJsonBody(req);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.body;
 
   try {
     const levels = await updateLevels(parseLevelsUpdate(body), scope);
-    for (const path of ["/[org]/[product]/backlog", "/[org]/[product]/roadmap", "/[org]/settings/hierarchy"])
+    for (const path of [
+      "/[org]/[product]/backlog",
+      "/[org]/[product]/roadmap",
+      "/[org]/settings/hierarchy",
+    ])
       revalidatePath(path, "page");
     return Response.json({ levels });
   } catch (err) {

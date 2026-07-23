@@ -1,5 +1,6 @@
 import { revalidatePath } from "next/cache";
 
+import { readJsonBody } from "@/lib/api/body";
 import { authorizeOrgAdmin } from "@/lib/auth-session";
 import {
   InvalidPatchError,
@@ -21,12 +22,9 @@ export async function PUT(req: Request) {
   if (!authz.ok) return authz.response;
   const scope = authz.scope ?? undefined;
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return Response.json({ error: "Request body must be JSON." }, { status: 400 });
-  }
+  const parsed = await readJsonBody(req);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.body;
 
   try {
     const levels = await updateLevelFields(parseLevelFieldsUpdate(body), scope);

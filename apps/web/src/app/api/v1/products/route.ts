@@ -1,5 +1,6 @@
 import { revalidatePath } from "next/cache";
 
+import { readJsonBody } from "@/lib/api/body";
 import { authorizeOrgAdmin, resolveReadScope } from "@/lib/auth-session";
 import { InvalidPatchError } from "@/lib/features-service";
 import {
@@ -25,19 +26,20 @@ export async function POST(req: Request) {
   const authz = await authorizeOrgAdmin(req);
   if (!authz.ok) return authz.response;
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return Response.json({ error: "Request body must be JSON." }, { status: 400 });
-  }
+  const parsed = await readJsonBody(req);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.body;
 
   try {
     const product = await createProduct(
       parseCreateProductInput(body),
       authz.scope ?? undefined,
     );
-    for (const path of ["/[org]/[product]/backlog", "/[org]/[product]/roadmap", "/[org]/settings/products"])
+    for (const path of [
+      "/[org]/[product]/backlog",
+      "/[org]/[product]/roadmap",
+      "/[org]/settings/products",
+    ])
       revalidatePath(path, "page");
     return Response.json({ product }, { status: 201 });
   } catch (err) {

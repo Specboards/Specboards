@@ -1,3 +1,4 @@
+import { readJsonBody } from "@/lib/api/body";
 import { authorizeOrgAdmin, resolveReadScope } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
 import { getWorkspaceById, updateWorkspace } from "@/lib/workspace";
@@ -23,12 +24,9 @@ export async function PATCH(req: Request) {
     );
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return Response.json({ error: "Request body must be JSON." }, { status: 400 });
-  }
+  const parsed = await readJsonBody(req);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.body;
 
   const rawBody = (body ?? {}) as { name?: unknown };
   const name = typeof rawBody.name === "string" ? rawBody.name.trim() : "";
@@ -39,7 +37,9 @@ export async function PATCH(req: Request) {
     );
   }
 
-  const workspace = await updateWorkspace(db, authz.scope.workspaceId, { name });
+  const workspace = await updateWorkspace(db, authz.scope.workspaceId, {
+    name,
+  });
   if (!workspace) {
     return Response.json({ error: "Workspace not found." }, { status: 404 });
   }
@@ -56,7 +56,10 @@ export async function GET(req: Request) {
 
   const db = getDb();
   if (!authz.scope || !db) {
-    return Response.json({ error: "No workspace in local mode." }, { status: 404 });
+    return Response.json(
+      { error: "No workspace in local mode." },
+      { status: 404 },
+    );
   }
 
   const workspace = await getWorkspaceById(db, authz.scope.workspaceId);

@@ -1,6 +1,7 @@
 import { and, eq, repositories } from "@specboards/db";
 import { listInstallationRepositories } from "@specboards/git";
 
+import { readJsonBody } from "@/lib/api/body";
 import { getDb } from "@/lib/db";
 import { authorizeOrgAdmin, resolveReadScope } from "@/lib/auth-session";
 import { getGithubApp } from "@/lib/github-app";
@@ -91,7 +92,9 @@ export async function POST(req: Request) {
   const limited = await enforceQuota(db, QUOTAS.connectRepo, workspaceId);
   if (limited) return limited;
 
-  const parsed = parseRegisterBody(await req.json().catch(() => null));
+  const parsedBody = await readJsonBody(req);
+  if (!parsedBody.ok) return parsedBody.response;
+  const parsed = parseRegisterBody(parsedBody.body);
   if (!parsed) {
     return Response.json(
       { error: "Body must include installationId, owner, and name." },

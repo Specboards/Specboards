@@ -1,3 +1,4 @@
+import { readJsonBody } from "@/lib/api/body";
 import { authorizeOrgAdmin } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
 import {
@@ -28,27 +29,38 @@ export async function PATCH(req: Request, { params }: Params) {
   if (!authz.scope || !db) return FILE_MODE;
   const { userId } = await params;
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return Response.json({ error: "Request body must be JSON." }, { status: 400 });
-  }
+  const parsed = await readJsonBody(req);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.body;
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
-    return Response.json({ error: "Request body must be a JSON object." }, { status: 400 });
+    return Response.json(
+      { error: "Request body must be a JSON object." },
+      { status: 400 },
+    );
   }
   const raw = body as Record<string, unknown>;
   if (!("role" in raw) && !("active" in raw)) {
-    return Response.json({ error: "Provide `role` and/or `active`." }, { status: 400 });
+    return Response.json(
+      { error: "Provide `role` and/or `active`." },
+      { status: 400 },
+    );
   }
 
   try {
     if ("role" in raw) {
-      await setMemberRole(db, authz.scope.workspaceId, userId, parseRole(raw.role));
+      await setMemberRole(
+        db,
+        authz.scope.workspaceId,
+        userId,
+        parseRole(raw.role),
+      );
     }
     if ("active" in raw) {
       if (typeof raw.active !== "boolean") {
-        return Response.json({ error: "`active` must be a boolean." }, { status: 400 });
+        return Response.json(
+          { error: "`active` must be a boolean." },
+          { status: 400 },
+        );
       }
       await setMemberActive(db, authz.scope.workspaceId, userId, raw.active);
     }

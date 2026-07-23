@@ -1,3 +1,4 @@
+import { readJsonBody } from "@/lib/api/body";
 import { getSessionUser } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
 import { recordMcpWorkspaceBinding } from "@/lib/mcp/workspace-binding";
@@ -17,18 +18,19 @@ export async function POST(req: Request) {
   const db = getDb();
   const user = await getSessionUser(req);
   if (!db || !user) {
-    return Response.json({ error: "Authentication required." }, { status: 401 });
+    return Response.json(
+      { error: "Authentication required." },
+      { status: 401 },
+    );
   }
 
-  let body: { clientId?: unknown; workspaceId?: unknown };
-  try {
-    body = (await req.json()) as typeof body;
-  } catch {
-    return Response.json({ error: "Invalid JSON body." }, { status: 400 });
-  }
+  const parsed = await readJsonBody(req);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.body as { clientId?: unknown; workspaceId?: unknown };
 
   const clientId = typeof body.clientId === "string" ? body.clientId : "";
-  const workspaceId = typeof body.workspaceId === "string" ? body.workspaceId : "";
+  const workspaceId =
+    typeof body.workspaceId === "string" ? body.workspaceId : "";
   if (!clientId || !workspaceId) {
     return Response.json(
       { error: "clientId and workspaceId are required." },
@@ -44,6 +46,10 @@ export async function POST(req: Request) {
     );
   }
 
-  await recordMcpWorkspaceBinding(db, { userId: user.id, clientId, workspaceId });
+  await recordMcpWorkspaceBinding(db, {
+    userId: user.id,
+    clientId,
+    workspaceId,
+  });
   return Response.json({ ok: true });
 }

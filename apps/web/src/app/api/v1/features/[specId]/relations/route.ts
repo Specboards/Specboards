@@ -1,5 +1,6 @@
 import { revalidatePath } from "next/cache";
 
+import { readJsonBody } from "@/lib/api/body";
 import { authorizeWrite, resolveReadScope } from "@/lib/auth-session";
 import {
   addFeatureRelation,
@@ -23,7 +24,10 @@ export async function GET(req: Request, { params }: Params) {
   const store = await getStore();
   const feature = await store.getFeature(specId, authz.scope ?? undefined);
   if (!feature) {
-    return Response.json({ error: `Unknown feature: ${specId}` }, { status: 404 });
+    return Response.json(
+      { error: `Unknown feature: ${specId}` },
+      { status: 404 },
+    );
   }
   return Response.json({ relations: feature.relations });
 }
@@ -38,12 +42,9 @@ export async function POST(req: Request, { params }: Params) {
 
   const { specId } = await params;
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return Response.json({ error: "Request body must be JSON." }, { status: 400 });
-  }
+  const parsed = await readJsonBody(req);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.body;
 
   try {
     const relations = await addFeatureRelation(
@@ -51,7 +52,8 @@ export async function POST(req: Request, { params }: Params) {
       parseRelationInput(body),
       authz.scope ?? undefined,
     );
-    for (const path of ["/[org]/[product]/backlog", "/[org]/[product]/roadmap"]) revalidatePath(path, "page");
+    for (const path of ["/[org]/[product]/backlog", "/[org]/[product]/roadmap"])
+      revalidatePath(path, "page");
     revalidatePath("/[org]/[product]/backlog/[...slug]", "page");
     return Response.json({ relations });
   } catch (err) {

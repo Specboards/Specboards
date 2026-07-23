@@ -6,6 +6,7 @@ import {
   type CreatedRepo,
 } from "@specboards/git";
 
+import { readJsonBody } from "@/lib/api/body";
 import { authorizeOrgAdmin } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
 import { parseDocArea } from "@/lib/docs-service";
@@ -21,9 +22,16 @@ export const dynamic = "force-dynamic";
 const REPO_NAME_RE = /^[A-Za-z0-9._-]{1,100}$/;
 
 /** Turn a failed create-repo call into a message the admin can act on. */
-function createRepoErrorMessage(err: unknown, name: string, org: string): string {
+function createRepoErrorMessage(
+  err: unknown,
+  name: string,
+  org: string,
+): string {
   const status =
-    typeof err === "object" && err !== null && "status" in err && typeof err.status === "number"
+    typeof err === "object" &&
+    err !== null &&
+    "status" in err &&
+    typeof err.status === "number"
       ? err.status
       : null;
   if (status === 422) {
@@ -63,10 +71,13 @@ export async function POST(req: Request) {
   const userId = authz.scope.userId;
   const workspaceId = authz.scope.workspaceId;
 
-  const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+  const parsedBody = await readJsonBody(req);
+  if (!parsedBody.ok) return parsedBody.response;
+  const body = parsedBody.body as Record<string, unknown> | null;
   const productId = typeof body?.productId === "string" ? body.productId : "";
   const requestedInstallation =
-    typeof body?.installationId === "string" && body.installationId.trim() !== ""
+    typeof body?.installationId === "string" &&
+    body.installationId.trim() !== ""
       ? body.installationId.trim()
       : null;
   const existing =
@@ -74,9 +85,15 @@ export async function POST(req: Request) {
       ? (body.existing as Record<string, unknown>)
       : null;
   const name = typeof body?.name === "string" ? body.name.trim() : "";
-  if (!existing && (!REPO_NAME_RE.test(name) || name === "." || name === "..")) {
+  if (
+    !existing &&
+    (!REPO_NAME_RE.test(name) || name === "." || name === "..")
+  ) {
     return Response.json(
-      { error: "Repository names can use letters, numbers, dots, hyphens, and underscores." },
+      {
+        error:
+          "Repository names can use letters, numbers, dots, hyphens, and underscores.",
+      },
       { status: 400 },
     );
   }
@@ -141,7 +158,10 @@ export async function POST(req: Request) {
   } else {
     const app = await getGithubApp(db);
     if (!app) {
-      return Response.json({ error: "GitHub App is not configured." }, { status: 501 });
+      return Response.json(
+        { error: "GitHub App is not configured." },
+        { status: 501 },
+      );
     }
 
     // Live lookup rather than the stored login: survives org renames, and
@@ -152,25 +172,37 @@ export async function POST(req: Request) {
     } catch (err) {
       console.error("[github] failed to resolve installation account:", err);
       return Response.json(
-        { error: "Couldn't look up the GitHub installation. Please try again." },
+        {
+          error: "Couldn't look up the GitHub installation. Please try again.",
+        },
         { status: 502 },
       );
     }
     if (account.type !== "Organization") {
       return Response.json(
-        { error: "GitHub only lets the App create repositories in an organization." },
+        {
+          error:
+            "GitHub only lets the App create repositories in an organization.",
+        },
         { status: 400 },
       );
     }
 
     try {
-      created = await createInstallationOrgRepository(app, installation.installationId, {
-        org: account.login,
-        name,
-        description: `${area === "architecture" ? "Architecture" : "Research"} docs, edited in Specboards`,
-      });
+      created = await createInstallationOrgRepository(
+        app,
+        installation.installationId,
+        {
+          org: account.login,
+          name,
+          description: `${area === "architecture" ? "Architecture" : "Research"} docs, edited in Specboards`,
+        },
+      );
     } catch (err) {
-      console.error(`[github] failed to create repository ${account.login}/${name}:`, err);
+      console.error(
+        `[github] failed to create repository ${account.login}/${name}:`,
+        err,
+      );
       return Response.json(
         { error: createRepoErrorMessage(err, name, account.login) },
         { status: 502 },
@@ -207,32 +239,48 @@ async function connectExistingRepo(opts: {
 }): Promise<Response> {
   const { db, installation, owner, name } = opts;
   if (!owner || !name) {
-    return Response.json({ error: "Pick a repository to connect." }, { status: 400 });
+    return Response.json(
+      { error: "Pick a repository to connect." },
+      { status: 400 },
+    );
   }
 
   let match: { owner: string; name: string; defaultBranch: string } | undefined;
   if (isE2E()) {
     const { e2eInstallationRepos } = await import("@/lib/github-e2e");
     match = e2eInstallationRepos(installation.accountLogin).find(
-      (r) => r.owner.toLowerCase() === owner.toLowerCase() && r.name.toLowerCase() === name.toLowerCase(),
+      (r) =>
+        r.owner.toLowerCase() === owner.toLowerCase() &&
+        r.name.toLowerCase() === name.toLowerCase(),
     );
   } else {
     const app = await getGithubApp(db);
     if (!app) {
-      return Response.json({ error: "GitHub App is not configured." }, { status: 501 });
+      return Response.json(
+        { error: "GitHub App is not configured." },
+        { status: 501 },
+      );
     }
     let granted;
     try {
-      granted = await listInstallationRepositories(app, installation.installationId);
+      granted = await listInstallationRepositories(
+        app,
+        installation.installationId,
+      );
     } catch (err) {
       console.error("[github] failed to list installation repositories:", err);
       return Response.json(
-        { error: "Couldn't list the installation's repositories. Please try again." },
+        {
+          error:
+            "Couldn't list the installation's repositories. Please try again.",
+        },
         { status: 502 },
       );
     }
     match = granted.find(
-      (r) => r.owner.toLowerCase() === owner.toLowerCase() && r.name.toLowerCase() === name.toLowerCase(),
+      (r) =>
+        r.owner.toLowerCase() === owner.toLowerCase() &&
+        r.name.toLowerCase() === name.toLowerCase(),
     );
   }
   if (!match) {

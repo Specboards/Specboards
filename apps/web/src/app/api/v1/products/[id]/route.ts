@@ -1,5 +1,6 @@
 import { revalidatePath } from "next/cache";
 
+import { readJsonBody } from "@/lib/api/body";
 import { resolveReadScope } from "@/lib/auth-session";
 import { InvalidPatchError } from "@/lib/features-service";
 import {
@@ -44,12 +45,9 @@ export async function PATCH(req: Request, { params }: Params) {
   if (!(await canManageProductForScope(id, authz.scope ?? undefined)))
     return FORBIDDEN;
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return Response.json({ error: "Request body must be JSON." }, { status: 400 });
-  }
+  const parsed = await readJsonBody(req);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.body;
 
   try {
     const product = await updateProduct(
@@ -57,7 +55,11 @@ export async function PATCH(req: Request, { params }: Params) {
       parseProductPatch(body),
       authz.scope ?? undefined,
     );
-    for (const path of ["/[org]/[product]/backlog", "/[org]/[product]/roadmap", "/[org]/settings/products"])
+    for (const path of [
+      "/[org]/[product]/backlog",
+      "/[org]/[product]/roadmap",
+      "/[org]/settings/products",
+    ])
       revalidatePath(path, "page");
     return Response.json({ product });
   } catch (err) {
@@ -82,7 +84,11 @@ export async function DELETE(req: Request, { params }: Params) {
 
   try {
     await deleteProduct(id, authz.scope ?? undefined);
-    for (const path of ["/[org]/[product]/backlog", "/[org]/[product]/roadmap", "/[org]/settings/products"])
+    for (const path of [
+      "/[org]/[product]/backlog",
+      "/[org]/[product]/roadmap",
+      "/[org]/settings/products",
+    ])
       revalidatePath(path, "page");
     return new Response(null, { status: 204 });
   } catch (err) {

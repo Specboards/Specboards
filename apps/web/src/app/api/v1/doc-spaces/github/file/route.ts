@@ -1,6 +1,7 @@
 import { canWriteProduct } from "@specboards/core";
 import { GitWriteConflictError } from "@specboards/git";
 
+import { readJsonBody } from "@/lib/api/body";
 import { authorizeWrite } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
 import { parseDocArea } from "@/lib/docs-service";
@@ -32,7 +33,9 @@ interface FileRequestContext {
  * resolve the doc space with product-write access enforced. Returns a Response
  * on any failure so handlers can return it straight through.
  */
-async function resolveFileRequest(req: Request): Promise<FileRequestContext | Response> {
+async function resolveFileRequest(
+  req: Request,
+): Promise<FileRequestContext | Response> {
   const authz = await authorizeWrite(req);
   if (!authz.ok) return authz.response;
   const db = getDb();
@@ -43,12 +46,9 @@ async function resolveFileRequest(req: Request): Promise<FileRequestContext | Re
     );
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return Response.json({ error: "Request body must be JSON." }, { status: 400 });
-  }
+  const parsed = await readJsonBody(req);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.body;
   const b = (body ?? {}) as Record<string, unknown>;
   if (typeof b.productId !== "string") {
     return Response.json({ error: "productId is required." }, { status: 422 });
@@ -104,7 +104,9 @@ export async function PUT(req: Request) {
   }
   if (typeof body.blobSha !== "string" && body.blobSha !== null) {
     return Response.json(
-      { error: "blobSha is required (the loaded sha, or null for a new page)." },
+      {
+        error: "blobSha is required (the loaded sha, or null for a new page).",
+      },
       { status: 422 },
     );
   }

@@ -1,3 +1,4 @@
+import { readJsonBody } from "@/lib/api/body";
 import { extractApiKey } from "@/lib/api-keys";
 import { authorizeOrgAdmin } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
@@ -38,7 +39,10 @@ export async function POST(req: Request) {
   // revocable service key. Browser session only, mirroring /api/v1/api-keys.
   if (extractApiKey(req)) {
     return Response.json(
-      { error: "Service accounts must be created from a signed-in browser session." },
+      {
+        error:
+          "Service accounts must be created from a signed-in browser session.",
+      },
       { status: 403 },
     );
   }
@@ -48,12 +52,9 @@ export async function POST(req: Request) {
   const db = getDb();
   if (!authz.scope || !db) return FILE_MODE;
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return Response.json({ error: "Request body must be JSON." }, { status: 400 });
-  }
+  const parsed = await readJsonBody(req);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.body;
 
   try {
     const input = parseCreateServiceAccountInput(body);

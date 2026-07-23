@@ -5,11 +5,15 @@ import {
   type CreatedRepo,
 } from "@specboards/git";
 
+import { readJsonBody } from "@/lib/api/body";
 import { authorizeOrgAdmin } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
 import { isE2E } from "@/lib/e2e";
 import { getGithubApp } from "@/lib/github-app";
-import { loadWorkspaceInstallations, resolveWorkspaceInstallation } from "@/lib/github-connect";
+import {
+  loadWorkspaceInstallations,
+  resolveWorkspaceInstallation,
+} from "@/lib/github-connect";
 
 export const dynamic = "force-dynamic";
 
@@ -37,9 +41,16 @@ export async function GET(req: Request) {
 const REPO_NAME_RE = /^[A-Za-z0-9._-]{1,100}$/;
 
 /** Turn a failed create-repo call into a message the admin can act on. */
-function createRepoErrorMessage(err: unknown, name: string, org: string): string {
+function createRepoErrorMessage(
+  err: unknown,
+  name: string,
+  org: string,
+): string {
   const status =
-    typeof err === "object" && err !== null && "status" in err && typeof err.status === "number"
+    typeof err === "object" &&
+    err !== null &&
+    "status" in err &&
+    typeof err.status === "number"
       ? err.status
       : null;
   if (status === 422) {
@@ -80,15 +91,21 @@ export async function POST(req: Request) {
   }
   const workspaceId = authz.scope.workspaceId;
 
-  const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+  const parsedBody = await readJsonBody(req);
+  if (!parsedBody.ok) return parsedBody.response;
+  const body = parsedBody.body as Record<string, unknown> | null;
   const name = typeof body?.name === "string" ? body.name.trim() : "";
   const requestedInstallation =
-    typeof body?.installationId === "string" && body.installationId.trim() !== ""
+    typeof body?.installationId === "string" &&
+    body.installationId.trim() !== ""
       ? body.installationId.trim()
       : null;
   if (!REPO_NAME_RE.test(name) || name === "." || name === "..") {
     return Response.json(
-      { error: "Repository names can use letters, numbers, dots, hyphens, and underscores." },
+      {
+        error:
+          "Repository names can use letters, numbers, dots, hyphens, and underscores.",
+      },
       { status: 400 },
     );
   }
@@ -100,7 +117,9 @@ export async function POST(req: Request) {
   );
   if (!installation) {
     return Response.json(
-      { error: "Connect GitHub first, then come back here to create the repo." },
+      {
+        error: "Connect GitHub first, then come back here to create the repo.",
+      },
       { status: 403 },
     );
   }
@@ -129,7 +148,10 @@ export async function POST(req: Request) {
   } else {
     const app = await getGithubApp(db);
     if (!app) {
-      return Response.json({ error: "GitHub App is not configured." }, { status: 501 });
+      return Response.json(
+        { error: "GitHub App is not configured." },
+        { status: 501 },
+      );
     }
 
     // Live lookup rather than the stored login: survives org renames, and
@@ -140,25 +162,37 @@ export async function POST(req: Request) {
     } catch (err) {
       console.error("[github] failed to resolve installation account:", err);
       return Response.json(
-        { error: "Couldn't look up the GitHub installation. Please try again." },
+        {
+          error: "Couldn't look up the GitHub installation. Please try again.",
+        },
         { status: 502 },
       );
     }
     if (account.type !== "Organization") {
       return Response.json(
-        { error: "GitHub only lets the App create repositories in an organization." },
+        {
+          error:
+            "GitHub only lets the App create repositories in an organization.",
+        },
         { status: 400 },
       );
     }
 
     try {
-      created = await createInstallationOrgRepository(app, installation.installationId, {
-        org: account.login,
-        name,
-        description: "Product specs synced to Specboards",
-      });
+      created = await createInstallationOrgRepository(
+        app,
+        installation.installationId,
+        {
+          org: account.login,
+          name,
+          description: "Product specs synced to Specboards",
+        },
+      );
     } catch (err) {
-      console.error(`[github] failed to create repository ${account.login}/${name}:`, err);
+      console.error(
+        `[github] failed to create repository ${account.login}/${name}:`,
+        err,
+      );
       return Response.json(
         { error: createRepoErrorMessage(err, name, account.login) },
         { status: 502 },
@@ -189,7 +223,9 @@ export async function POST(req: Request) {
     .returning();
   if (!repo) {
     return Response.json(
-      { error: `Created ${created.owner}/${created.name} on GitHub but couldn't connect it. Connect it from the picker above.` },
+      {
+        error: `Created ${created.owner}/${created.name} on GitHub but couldn't connect it. Connect it from the picker above.`,
+      },
       { status: 500 },
     );
   }

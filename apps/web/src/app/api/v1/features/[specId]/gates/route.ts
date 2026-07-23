@@ -1,5 +1,6 @@
 import { revalidatePath } from "next/cache";
 
+import { readJsonBody } from "@/lib/api/body";
 import { authorizeWrite, resolveReadScope } from "@/lib/auth-session";
 import {
   FeatureNotFoundError,
@@ -22,7 +23,10 @@ export async function GET(req: Request, { params }: Params) {
   const store = await getStore();
   const feature = await store.getFeature(specId, authz.scope ?? undefined);
   if (!feature) {
-    return Response.json({ error: `Unknown feature: ${specId}` }, { status: 404 });
+    return Response.json(
+      { error: `Unknown feature: ${specId}` },
+      { status: 404 },
+    );
   }
   const completed = await listGateCompletions(specId, authz.scope ?? undefined);
   return Response.json({ completed });
@@ -38,18 +42,18 @@ export async function PUT(req: Request, { params }: Params) {
 
   const { specId } = await params;
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return Response.json({ error: "Request body must be JSON." }, { status: 400 });
-  }
+  const parsed = await readJsonBody(req);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.body;
   const raw = body as { gateId?: unknown; completed?: unknown };
   if (typeof raw.gateId !== "string" || !raw.gateId) {
     return Response.json({ error: "gateId is required." }, { status: 422 });
   }
   if (typeof raw.completed !== "boolean") {
-    return Response.json({ error: "completed must be a boolean." }, { status: 422 });
+    return Response.json(
+      { error: "completed must be a boolean." },
+      { status: 422 },
+    );
   }
 
   try {

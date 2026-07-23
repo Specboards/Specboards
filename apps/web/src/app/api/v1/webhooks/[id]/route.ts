@@ -1,3 +1,4 @@
+import { readJsonBody } from "@/lib/api/body";
 import { authorizeOrgAdmin } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
 import {
@@ -24,12 +25,9 @@ export async function PATCH(
   if (!db || !authz.scope) return NO_DB;
   const { id } = await params;
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return Response.json({ error: "Request body must be JSON." }, { status: 400 });
-  }
+  const parsed = await readJsonBody(req);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.body;
 
   try {
     const endpoint = await updateWebhookEndpoint(
@@ -62,6 +60,7 @@ export async function DELETE(
   const { id } = await params;
 
   const removed = await deleteWebhookEndpoint(db, authz.scope.workspaceId, id);
-  if (!removed) return Response.json({ error: "Endpoint not found." }, { status: 404 });
+  if (!removed)
+    return Response.json({ error: "Endpoint not found." }, { status: 404 });
   return new Response(null, { status: 204 });
 }

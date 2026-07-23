@@ -1,3 +1,4 @@
+import { readJsonBody } from "@/lib/api/body";
 import { createApiKey, listApiKeys } from "@/lib/api-keys";
 import { InvalidScopeError, parseApiScopes } from "@/lib/api-scopes";
 import { getAuth } from "@/lib/auth";
@@ -24,7 +25,10 @@ async function sessionUserId(req: Request): Promise<{ id: string } | Response> {
   }
   const session = await auth.api.getSession({ headers: req.headers });
   if (!session) {
-    return Response.json({ error: "Authentication required." }, { status: 401 });
+    return Response.json(
+      { error: "Authentication required." },
+      { status: 401 },
+    );
   }
   return { id: session.user.id };
 }
@@ -45,12 +49,9 @@ export async function POST(req: Request) {
   const who = await sessionUserId(req);
   if (who instanceof Response) return who;
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return Response.json({ error: "Request body must be JSON." }, { status: 400 });
-  }
+  const parsed = await readJsonBody(req);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.body;
 
   const record = (body ?? {}) as Record<string, unknown>;
   const name = typeof record.name === "string" ? record.name.trim() : "";

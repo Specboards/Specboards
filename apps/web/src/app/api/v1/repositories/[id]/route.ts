@@ -1,5 +1,6 @@
 import { and, eq, repositories } from "@specboards/db";
 
+import { readJsonBody } from "@/lib/api/body";
 import { authorizeOrgAdmin, resolveReadScope } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
 
@@ -23,7 +24,10 @@ export async function GET(req: Request, { params }: Params) {
     .select()
     .from(repositories)
     .where(
-      and(eq(repositories.id, id), eq(repositories.workspaceId, authz.scope.workspaceId)),
+      and(
+        eq(repositories.id, id),
+        eq(repositories.workspaceId, authz.scope.workspaceId),
+      ),
     );
   if (!repo) {
     return Response.json({ error: "Repository not found." }, { status: 404 });
@@ -49,7 +53,10 @@ function parseRepositoryPatch(body: unknown): RepositoryPatch | string {
   const patch: RepositoryPatch = {};
 
   if (raw.defaultBranch !== undefined) {
-    if (typeof raw.defaultBranch !== "string" || raw.defaultBranch.trim() === "") {
+    if (
+      typeof raw.defaultBranch !== "string" ||
+      raw.defaultBranch.trim() === ""
+    ) {
       return "defaultBranch must be a non-empty string.";
     }
     patch.defaultBranch = raw.defaultBranch.trim();
@@ -62,7 +69,9 @@ function parseRepositoryPatch(body: unknown): RepositoryPatch | string {
     ) {
       return "specGlobs must be an array of strings.";
     }
-    patch.specGlobs = (raw.specGlobs as string[]).map((g) => g.trim()).filter(Boolean);
+    patch.specGlobs = (raw.specGlobs as string[])
+      .map((g) => g.trim())
+      .filter(Boolean);
   }
 
   if (patch.defaultBranch === undefined && patch.specGlobs === undefined) {
@@ -88,13 +97,16 @@ export async function PATCH(req: Request, { params }: Params) {
     );
   }
 
-  const parsed = parseRepositoryPatch(await req.json().catch(() => null));
+  const parsedBody = await readJsonBody(req);
+  if (!parsedBody.ok) return parsedBody.response;
+  const parsed = parseRepositoryPatch(parsedBody.body);
   if (typeof parsed === "string") {
     return Response.json({ error: parsed }, { status: 422 });
   }
 
   const set: Partial<typeof repositories.$inferInsert> = {};
-  if (parsed.defaultBranch !== undefined) set.defaultBranch = parsed.defaultBranch;
+  if (parsed.defaultBranch !== undefined)
+    set.defaultBranch = parsed.defaultBranch;
   if (parsed.specGlobs !== undefined) {
     set.config = { version: 1, specGlobs: parsed.specGlobs };
   }
@@ -104,7 +116,10 @@ export async function PATCH(req: Request, { params }: Params) {
     .update(repositories)
     .set(set)
     .where(
-      and(eq(repositories.id, id), eq(repositories.workspaceId, authz.scope.workspaceId)),
+      and(
+        eq(repositories.id, id),
+        eq(repositories.workspaceId, authz.scope.workspaceId),
+      ),
     )
     .returning();
   if (!repo) {
@@ -136,7 +151,12 @@ export async function DELETE(req: Request, { params }: Params) {
   const { id } = await params;
   const [deleted] = await db
     .delete(repositories)
-    .where(and(eq(repositories.id, id), eq(repositories.workspaceId, authz.scope.workspaceId)))
+    .where(
+      and(
+        eq(repositories.id, id),
+        eq(repositories.workspaceId, authz.scope.workspaceId),
+      ),
+    )
     .returning();
   if (!deleted) {
     return Response.json({ error: "Repository not found." }, { status: 404 });

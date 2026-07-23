@@ -1,3 +1,4 @@
+import { readJsonBody } from "@/lib/api/body";
 import { getSessionUser } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
 import { seedSampleData } from "@/lib/sample-data";
@@ -21,7 +22,10 @@ export async function POST(req: Request) {
   const db = getDb();
   const user = await getSessionUser(req);
   if (!db || !user) {
-    return Response.json({ error: "Authentication required." }, { status: 401 });
+    return Response.json(
+      { error: "Authentication required." },
+      { status: 401 },
+    );
   }
 
   // A user who already belongs to a workspace can't create another.
@@ -33,12 +37,9 @@ export async function POST(req: Request) {
     );
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return Response.json({ error: "Request body must be JSON." }, { status: 400 });
-  }
+  const parsed = await readJsonBody(req);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.body;
 
   const rawBody = (body ?? {}) as {
     name?: unknown;
@@ -54,7 +55,8 @@ export async function POST(req: Request) {
   }
   // An explicit slug is optional — the user only sets one to override the slug
   // auto-derived from the name (e.g. after a collision warning).
-  const slug = typeof rawBody.slug === "string" ? rawBody.slug.trim() : undefined;
+  const slug =
+    typeof rawBody.slug === "string" ? rawBody.slug.trim() : undefined;
   const wantsSampleData = rawBody.seedSampleData === true;
 
   let workspace;

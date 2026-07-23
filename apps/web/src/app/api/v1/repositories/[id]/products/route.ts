@@ -1,3 +1,4 @@
+import { readJsonBody } from "@/lib/api/body";
 import { authorizeOrgAdmin, resolveReadScope } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
 import { InvalidPatchError } from "@/lib/features-service";
@@ -21,7 +22,11 @@ export async function GET(req: Request, { params }: Params) {
   const db = getDb();
   // Local file mode: repos aren't a concept, nothing to link.
   if (!db || !authz.scope) {
-    return Response.json({ repoId: id, productIds: [], defaultProductId: null });
+    return Response.json({
+      repoId: id,
+      productIds: [],
+      defaultProductId: null,
+    });
   }
   const links = await listRepoProductLinks(db, authz.scope.workspaceId);
   return Response.json(
@@ -39,17 +44,17 @@ export async function PUT(req: Request, { params }: Params) {
   const db = getDb();
   if (!db || !authz.scope) {
     return Response.json(
-      { error: "Repository links need a database (not available in local file mode)." },
+      {
+        error:
+          "Repository links need a database (not available in local file mode).",
+      },
       { status: 400 },
     );
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return Response.json({ error: "Request body must be JSON." }, { status: 400 });
-  }
+  const parsed = await readJsonBody(req);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.body;
 
   try {
     const links = await setRepoProducts(

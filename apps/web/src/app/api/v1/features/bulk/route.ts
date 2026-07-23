@@ -1,5 +1,6 @@
 import { revalidatePath } from "next/cache";
 
+import { readJsonBody } from "@/lib/api/body";
 import { authorizeWrite } from "@/lib/auth-session";
 import {
   InvalidPatchError,
@@ -20,12 +21,9 @@ export async function PATCH(req: Request) {
   const authz = await authorizeWrite(req);
   if (!authz.ok) return authz.response;
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return Response.json({ error: "Request body must be JSON." }, { status: 400 });
-  }
+  const parsed = await readJsonBody(req);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.body;
 
   try {
     const { specIds, patch, tagOps } = parseBulkPatchRequest(body);
@@ -35,7 +33,10 @@ export async function PATCH(req: Request) {
       tagOps,
       authz.scope ?? undefined,
     );
-    for (const path of ["/[org]/[product]/backlog", "/[org]/[product]/roadmap"]) {
+    for (const path of [
+      "/[org]/[product]/backlog",
+      "/[org]/[product]/roadmap",
+    ]) {
       revalidatePath(path, "page");
     }
     revalidatePath("/[org]/[product]/backlog/[...slug]", "page");

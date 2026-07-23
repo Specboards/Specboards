@@ -1,5 +1,6 @@
 import { revalidatePath } from "next/cache";
 
+import { readJsonBody } from "@/lib/api/body";
 import { authorizeOrgAdmin } from "@/lib/auth-session";
 import { InvalidPatchError } from "@/lib/features-service";
 import {
@@ -13,7 +14,11 @@ export const dynamic = "force-dynamic";
 
 type Params = { params: Promise<{ id: string }> };
 
-const REVALIDATE = ["/[org]/[product]/backlog", "/[org]/[product]/roadmap", "/[org]/settings/products"];
+const REVALIDATE = [
+  "/[org]/[product]/backlog",
+  "/[org]/[product]/roadmap",
+  "/[org]/settings/products",
+];
 
 /** PATCH /api/v1/product-groups/:id — update a group. Org-admin only. */
 export async function PATCH(req: Request, { params }: Params) {
@@ -21,12 +26,9 @@ export async function PATCH(req: Request, { params }: Params) {
   if (!authz.ok) return authz.response;
   const { id } = await params;
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return Response.json({ error: "Request body must be JSON." }, { status: 400 });
-  }
+  const parsed = await readJsonBody(req);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.body;
 
   try {
     const group = await updateProductGroup(
