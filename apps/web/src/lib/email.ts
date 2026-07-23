@@ -196,8 +196,23 @@ export async function sendEmail(message: OutboundEmail): Promise<void> {
     }),
   });
 
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`Postmark send failed (${res.status}): ${detail}`);
+  // Postmark returns HTTP 200 with `ErrorCode: 0` on success, but some failures
+  // (e.g. an inactive/suppressed recipient) also come back 200 with a non-zero
+  // ErrorCode, which an `res.ok` check alone would read as success. Read the
+  // body once and treat any non-zero ErrorCode as a failure too.
+  const raw = await res.text().catch(() => "");
+  let parsed: { ErrorCode?: number; Message?: string } | null = null;
+  try {
+    parsed = raw ? (JSON.parse(raw) as { ErrorCode?: number; Message?: string }) : null;
+  } catch {
+    parsed = null;
+  }
+  const postmarkError =
+    parsed != null && typeof parsed.ErrorCode === "number" && parsed.ErrorCode !== 0;
+  if (!res.ok || postmarkError) {
+    const code = parsed?.ErrorCode != null ? `, code ${parsed.ErrorCode}` : "";
+    throw new Error(
+      `Postmark send failed (${res.status}${code}): ${parsed?.Message ?? raw}`,
+    );
   }
 }

@@ -196,9 +196,14 @@ export function EmailCard({ email }: { email: string }) {
         return;
       }
       form.reset();
+      // Better Auth returns success even when the new address already belongs to
+      // another account (it sends nothing, to avoid leaking that the address
+      // exists). Word this so a user who never gets the email understands why,
+      // without us confirming either way. The link always goes to the current
+      // (verified) address.
       setStatus({
         kind: "ok",
-        message: `Check ${email} for a link to confirm the change.`,
+        message: `We've sent a confirmation link to ${email}. Open it to finish the change. If it doesn't arrive, the new address may already be in use by another account.`,
       });
     });
   }
