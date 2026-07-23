@@ -349,7 +349,10 @@ function Column({
               variant="link"
               size="inline"
               onClick={() => onOpenDetail(column.release!.id)}
-              className="justify-start text-left text-sm"
+              // whitespace-normal so a long release name wraps rather than
+              // overflowing: Button's base is whitespace-nowrap. Same fix as the
+              // card title above.
+              className="justify-start whitespace-normal text-left text-sm"
             >
               {column.name}
             </Button>
