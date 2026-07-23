@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/card";
 import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 
 type Status = { kind: "ok" | "error"; message: string } | null;
 
@@ -121,17 +122,13 @@ export function ProfileCard({
             <Input name="name" defaultValue={name} autoComplete="name" required />
           </FormField>
           <FormField label="Time zone">
-            <select
-              name="timezone"
-              defaultValue={timezone ?? browserZone}
-              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            >
+            <Select name="timezone" defaultValue={timezone ?? browserZone}>
               {zones.map((z) => (
                 <option key={z} value={z}>
                   {z}
                 </option>
               ))}
-            </select>
+            </Select>
           </FormField>
           <StatusLine status={status} />
           <Button type="submit" disabled={pending}>

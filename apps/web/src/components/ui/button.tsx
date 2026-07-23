@@ -26,6 +26,10 @@ const buttonVariants = cva(
         sm: "h-7 rounded-md px-2.5 text-xs",
         lg: "h-10 rounded-md px-6",
         icon: "h-8 w-8",
+        // No box: sits inline in a text run or a tight toolbar. Pair with
+        // variant="link" (or "ghost") for an inline action that still gets the
+        // shared focus ring, hover, and disabled treatment.
+        inline: "h-auto p-0",
       },
     },
     defaultVariants: {

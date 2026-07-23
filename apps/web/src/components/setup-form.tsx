@@ -97,13 +97,14 @@ export function SetupForm() {
             {previewSlug && !showSlugField ? (
               <p className="text-xs text-muted-foreground">
                 Your URL: <code>/{previewSlug}</code>{" "}
-                <button
-                  type="button"
+                <Button
+                  variant="link"
+                  size="inline"
                   onClick={customizeSlug}
-                  className="underline underline-offset-2 hover:text-foreground"
+                  className="text-xs font-normal text-muted-foreground underline hover:text-foreground"
                 >
                   Customize
-                </button>
+                </Button>
               </p>
             ) : null}
           </div>

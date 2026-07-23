@@ -12,6 +12,7 @@ import {
 } from "@/lib/api-client";
 import { useOrgSlug } from "@/lib/use-org";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import type { NotificationRecord } from "@/lib/store/types";
 
 /** How often to poll the inbox (ms). No realtime transport exists yet, so the
@@ -130,13 +131,14 @@ export function NotificationBell({ collapsed = false }: { collapsed?: boolean })
                 Notifications
               </span>
               {unread > 0 ? (
-                <button
-                  type="button"
+                <Button
+                  variant="link"
+                  size="inline"
                   onClick={onMarkAll}
-                  className="text-xs text-link hover:underline"
+                  className="text-xs"
                 >
                   Mark all read
-                </button>
+                </Button>
               ) : null}
             </div>
             {items.length === 0 ? (

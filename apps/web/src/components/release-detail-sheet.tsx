@@ -371,14 +371,15 @@ export function ReleaseDetailSheet({
             <span className="text-xs text-muted-foreground">
               {current.itemCount} item{current.itemCount === 1 ? "" : "s"}
             </span>
-            <button
-              type="button"
+            <Button
+              variant="link"
+              size="inline"
               onClick={remove}
               disabled={pending}
-              className="ml-auto text-xs text-muted-foreground underline-offset-2 hover:text-destructive hover:underline"
+              className="ml-auto text-xs font-normal text-muted-foreground underline-offset-2 hover:text-destructive"
             >
               Delete
-            </button>
+            </Button>
           </div>
         ) : null}
       </SheetContent>

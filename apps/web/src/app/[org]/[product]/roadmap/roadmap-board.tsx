@@ -31,6 +31,7 @@ import { MoveMenu, type MoveOption } from "@/components/move-menu";
 import { ReleaseDetailSheet } from "@/components/release-detail-sheet";
 import { StatusDot } from "@/components/status-dot";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardDescription,
@@ -344,13 +345,14 @@ function Column({
       <div className="space-y-0.5 px-1">
         <div className="flex items-baseline justify-between gap-2">
           {column.release ? (
-            <button
-              type="button"
+            <Button
+              variant="link"
+              size="inline"
               onClick={() => onOpenDetail(column.release!.id)}
-              className="text-left text-sm font-medium text-link hover:underline"
+              className="justify-start text-left text-sm"
             >
               {column.name}
-            </button>
+            </Button>
           ) : (
             <span className="text-sm font-medium text-muted-foreground">
               {column.name}
@@ -512,9 +514,10 @@ function CardBody({
           {/* Opens the same preview panel as the Backlog board (not a full-page
               nav), so the two spaces behave the same. stopPropagation keeps a
               click from also being read as a drag start. */}
-          <button
-            type="button"
-            className="text-left hover:underline"
+          <Button
+            variant="link"
+            size="inline"
+            className="justify-start text-left font-normal text-foreground"
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation();
@@ -522,7 +525,7 @@ function CardBody({
             }}
           >
             {feature.title}
-          </button>
+          </Button>
         </CardTitle>
         <CardDescription className="flex items-center gap-2 text-xs">
           <StatusDot status={feature.status} />

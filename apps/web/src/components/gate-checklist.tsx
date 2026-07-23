@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { Check, ListChecks } from "lucide-react";
+import { ListChecks } from "lucide-react";
 import { toast } from "sonner";
 
 import { AuthRequiredError, setGateCompletion } from "@/lib/api-client";
+import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import type { StageGate } from "@/lib/store/types";
 
@@ -114,16 +115,7 @@ export function GateChecklist({
                 )}
                 aria-pressed={checked}
               >
-                <span
-                  className={cn(
-                    "flex size-4 shrink-0 items-center justify-center rounded border",
-                    checked
-                      ? "border-success bg-success text-white"
-                      : "border-muted-foreground/40",
-                  )}
-                >
-                  {checked ? <Check className="size-3" strokeWidth={3} /> : null}
-                </span>
+                <Checkbox checked={checked} />
                 <span
                   className={cn(
                     checked && "text-muted-foreground line-through",

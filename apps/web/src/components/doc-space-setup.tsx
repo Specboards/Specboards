@@ -221,13 +221,14 @@ export function DocSpaceSetup({
                     </Button>
                   </div>
                   {picker === null ? (
-                    <button
-                      type="button"
+                    <Button
+                      variant="link"
+                      size="inline"
                       onClick={() => void openPicker()}
-                      className="text-sm text-link underline hover:text-link/80"
+                      className="text-sm underline"
                     >
                       Or connect an existing repository
-                    </button>
+                    </Button>
                   ) : picker === "loading" ? (
                     <p className="text-sm text-muted-foreground">Loading repositories…</p>
                   ) : picker.length === 0 ? (

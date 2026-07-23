@@ -341,14 +341,15 @@ export function IdeaDetailSheet({
                 Promote
               </Button>
             ) : null}
-            <button
-              type="button"
+            <Button
+              variant="link"
+              size="inline"
               onClick={remove}
               disabled={pending}
-              className="ml-auto text-xs text-muted-foreground underline-offset-2 hover:text-destructive hover:underline"
+              className="ml-auto text-xs font-normal text-muted-foreground underline-offset-2 hover:text-destructive"
             >
               Delete
-            </button>
+            </Button>
           </div>
         ) : null}
       </SheetContent>

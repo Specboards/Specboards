@@ -168,14 +168,15 @@ export function BulkActionBar({
           void apply({}, { addTags: [tag] }, `Add tag "${tag}"`);
         }}
       />
-      <button
-        type="button"
+      <Button
+        variant="link"
+        size="inline"
         onClick={() => void apply({}, { clearTags: true }, "Clear tags")}
         disabled={pending}
-        className="text-xs text-muted-foreground underline-offset-2 hover:underline disabled:opacity-50"
+        className="text-xs font-normal text-muted-foreground underline-offset-2"
       >
         Clear tags
-      </button>
+      </Button>
 
       <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />
       <Button

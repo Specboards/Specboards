@@ -3,6 +3,7 @@
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTransition } from "react";
 
+import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { statusLabel } from "@/lib/feature-helpers";
 import {
@@ -166,13 +167,14 @@ export function BacklogFilters({
       ) : null}
 
       {active ? (
-        <button
-          type="button"
+        <Button
+          variant="link"
+          size="inline"
           onClick={() => update({})}
-          className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+          className="text-xs font-normal text-muted-foreground underline-offset-2"
         >
           Clear filters
-        </button>
+        </Button>
       ) : null}
     </div>
   );

@@ -275,13 +275,14 @@ function VerifyEmailNotice({
         ) : null}
         <p className="mt-4 text-center text-xs text-muted-foreground">
           Wrong address?{" "}
-          <button
-            type="button"
+          <Button
+            variant="link"
+            size="inline"
             onClick={onBack}
-            className="text-link underline underline-offset-4"
+            className="text-xs underline underline-offset-4"
           >
             Go back
-          </button>
+          </Button>
         </p>
       </CardContent>
     </Card>

@@ -11,6 +11,7 @@ import {
   type FeatureFilters,
 } from "@/lib/feature-filters";
 import type { SavedView, SavedViewFilters } from "@/lib/store/types";
+import { Button } from "@/components/ui/button";
 
 /** Build a query string from a stored filter bundle (stable key order). */
 function viewQuery(filters: SavedViewFilters): string {
@@ -116,13 +117,14 @@ export function SavedViews({
               isActive ? "border-foreground bg-muted" : "border-input"
             }`}
           >
-            <button
-              type="button"
+            <Button
+              variant="link"
+              size="inline"
               onClick={() => apply(v.filters)}
-              className="hover:underline"
+              className="font-normal text-foreground underline-offset-2"
             >
               {v.name}
-            </button>
+            </Button>
             {canEdit ? (
               <button
                 type="button"
@@ -137,13 +139,14 @@ export function SavedViews({
         );
       })}
       {canEdit && filtersActive && !alreadySaved ? (
-        <button
-          type="button"
+        <Button
+          variant="link"
+          size="inline"
           onClick={onSave}
-          className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+          className="text-xs font-normal text-muted-foreground underline-offset-2"
         >
           + Save current view
-        </button>
+        </Button>
       ) : null}
       {error ? <span className="text-xs text-destructive">{error}</span> : null}
     </div>
