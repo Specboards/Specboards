@@ -6,10 +6,12 @@ import {
   DndContext,
   DragOverlay,
   PointerSensor,
-  closestCorners,
+  pointerWithin,
+  rectIntersection,
   useDroppable,
   useSensor,
   useSensors,
+  type CollisionDetection,
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
@@ -159,6 +161,24 @@ export function BoardClient({
   const { scrollRef, activeColumn, scrollToColumn } = useSwipeColumns(
     columns.length,
   );
+
+  // Column-aware collision: resolve what the pointer is actually over, then
+  // prefer a card (for precise within-column insertion) but fall back to the
+  // column droppable so a drop onto a short/empty column's open space still
+  // lands there. `closestCorners` (the dnd-kit board default) measured against
+  // the nearest card rect, so dragging from the bottom of a tall column toward a
+  // near-empty one kept resolving back to a source-column card and the drop
+  // no-oped (the card snapped home). The roadmap board avoids this the same way
+  // (it uses pointerWithin).
+  const collisionDetection: CollisionDetection = useCallback((args) => {
+    const pointerCollisions = pointerWithin(args);
+    const collisions =
+      pointerCollisions.length > 0 ? pointerCollisions : rectIntersection(args);
+    const cardCollisions = collisions.filter(
+      (c) => !String(c.id).startsWith(COL_PREFIX),
+    );
+    return cardCollisions.length > 0 ? cardCollisions : collisions;
+  }, []);
 
   function columnOf(id: string): string | undefined {
     if (id.startsWith(COL_PREFIX)) return id.slice(COL_PREFIX.length);
@@ -370,7 +390,7 @@ export function BoardClient({
       />
       <DndContext
         sensors={sensors}
-        collisionDetection={closestCorners}
+        collisionDetection={collisionDetection}
         onDragStart={onDragStart}
         onDragEnd={onDragEnd}
       >
@@ -494,7 +514,7 @@ function Column({
   return (
     <div
       data-board-column
-      className="w-72 shrink-0 rounded-md bg-muted/35 p-2.5 max-md:w-[calc(100vw-3rem)] max-md:snap-start"
+      className="flex w-72 shrink-0 flex-col rounded-md bg-muted/35 p-2.5 max-md:w-[calc(100vw-3rem)] max-md:snap-start"
     >
       <div className="flex items-center gap-2 px-2 py-1.5">
         <StatusDot status={status} />
@@ -506,7 +526,7 @@ function Column({
       <SortableContext items={cardIds} strategy={verticalListSortingStrategy}>
         <div
           ref={setNodeRef}
-          className={`min-h-12 space-y-2 rounded-md transition-colors ${isOver ? "bg-muted" : ""}`}
+          className={`min-h-12 flex-1 space-y-2 rounded-md transition-colors ${isOver ? "bg-muted" : ""}`}
         >
           {cardIds.map((id, index) => {
             const record = records[id];
