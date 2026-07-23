@@ -22,7 +22,12 @@ playwright-report
 **/playwright-report
 e2e/.tmp
 **/e2e/.tmp
+# tsc -b incremental markers, at every level. A stale nested tsbuildinfo makes
+# `tsc -b` skip a package build (so its dist is never produced) while the dist
+# itself is excluded above, breaking the in-container build. Excluding both
+# forces a clean rebuild, matching CI.
 *.tsbuildinfo
+**/*.tsbuildinfo
 *.log
 .env
 .env.*
