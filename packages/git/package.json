@@ -21,7 +21,7 @@
   "dependencies": {
     "@specboards/core": "workspace:*",
     "octokit": "^4.0.2",
-    "picomatch": "^4.0.2"
+    "picomatch": "^4.0.5"
   },
   "devDependencies": {
     "@types/node": "^22.20.0",
