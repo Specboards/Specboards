@@ -45,7 +45,7 @@
     "prepublishOnly": "tsc -b"
   },
   "devDependencies": {
-    "@types/node": "^22.20.0",
+    "@types/node": "^26.1.1",
     "vitest": "^3.2.6"
   }
 }
