@@ -14,6 +14,9 @@ export async function register(): Promise<void> {
     await assertTenantIsolation();
     await assertWorkerIsolation();
 
+    const { assertCanonicalOrigin } = await import("@/lib/origin-guard");
+    assertCanonicalOrigin();
+
     const { startDrainer } = await import("@/lib/webhooks/drainer");
     startDrainer();
   }

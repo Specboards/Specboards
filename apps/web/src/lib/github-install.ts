@@ -2,6 +2,9 @@ import { randomBytes } from "node:crypto";
 
 import { and, eq, githubInstallStates, lt, sql, type Database } from "@specboards/db";
 
+import { canonicalOrigin } from "@/lib/origin-guard";
+import { isMultiTenant } from "@/lib/tenancy";
+
 /**
  * GitHub App installation flow helpers.
  *
@@ -125,19 +128,38 @@ export function installUrlWithState(
 }
 
 /**
- * This deployment's public origin (e.g. `https://test.specboards.ai`). Behind
- * Fly's proxy `req.url` is the internal bind address, so derive it from the
- * forwarded headers (the same ones Better Auth trusts), with an `APP_URL`
- * env override for unusual setups. Used to build absolute GitHub callback URLs.
+ * This deployment's public origin (e.g. `https://test.specboards.ai`), used to
+ * build absolute GitHub callback URLs. Authority comes from the configured
+ * canonical origin (`APP_URL` / `BETTER_AUTH_URL`, validated at boot by
+ * `assertCanonicalOrigin`). Forwarded headers are proxy transport metadata a
+ * hostile client can influence, so they are never an authority source in
+ * multi-tenant mode; single-tenant self-host keeps them as a warned fallback
+ * so an unconfigured deployment behind a trusted proxy still works.
  */
 export function appOriginFromRequest(req: Request): string {
-  // Prefer an explicitly configured public URL — authoritative and immune to
-  // proxy header quirks. BETTER_AUTH_URL is already set wherever auth runs.
-  const configured = (process.env.APP_URL ?? process.env.BETTER_AUTH_URL)?.trim();
-  if (configured) return configured.replace(/\/+$/, "");
+  const configured = canonicalOrigin();
+  if (configured) return configured;
+  if (isMultiTenant()) {
+    throw new Error(
+      "[security] APP_URL/BETTER_AUTH_URL must be set in multi-tenant mode; refusing to " +
+        "derive the app origin from request headers.",
+    );
+  }
+  warnHeaderOrigin();
   const proto = req.headers.get("x-forwarded-proto") ?? "https";
   const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "";
   return `${proto}://${host}`;
+}
+
+let warnedHeaderOrigin = false;
+function warnHeaderOrigin(): void {
+  if (warnedHeaderOrigin) return;
+  warnedHeaderOrigin = true;
+  console.warn(
+    "[security] deriving the app origin from forwarded headers because APP_URL is not set. " +
+      "Set APP_URL to this deployment's public origin so callback URLs cannot be steered " +
+      "by a spoofed Host header.",
+  );
 }
 
 /** The App slug, e.g. `specboard-test`, used to build the install URL. */

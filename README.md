@@ -103,6 +103,11 @@ trial and unsafe anywhere else.
 
 Optional environment flags for a hosted deployment:
 
+- `APP_URL` - the deployment's canonical public origin (e.g.
+  `https://specboards.example.com`), used to build OAuth callback, webhook, and
+  discovery URLs. Strongly recommended whenever the app is reachable beyond
+  localhost; multi-tenant deployments refuse to start without it (or
+  `BETTER_AUTH_URL`), and it must be HTTPS outside local development.
 - `SPECBOARDS_BLOCK_PUBLIC_EMAIL_DOMAINS` - reject sign-ups from consumer email
   providers (gmail.com, outlook.com, ...).
 - `SPECBOARDS_SIGNUP_CODE_REQUIRED` - gate public sign-up behind a code (used for

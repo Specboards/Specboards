@@ -35,6 +35,12 @@ services:
       dockerfile: infra/web.Dockerfile
     environment:
       DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/specboard
+      # Public origin used for OAuth callbacks, webhook URLs, and discovery
+      # metadata. The localhost default suits a local trial; when serving
+      # beyond this machine, set APP_URL in infra/.env to the real HTTPS
+      # origin. Without it the app falls back to request headers, which a
+      # misconfigured proxy can spoof.
+      APP_URL: ${APP_URL:-http://localhost:3000}
       # Single-workspace self-host: auth/SSO are commercial add-ons.
       SPECBOARDS_SELF_HOST: "true"
       # Set to "true" to reject sign-ups from consumer email providers
