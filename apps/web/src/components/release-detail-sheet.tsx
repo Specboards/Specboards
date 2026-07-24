@@ -497,6 +497,26 @@ function ReleaseNotesSection({
     setDraftKind(null);
   }
 
+  // Save the in-app Markdown notes to a .md file on the user's machine.
+  function downloadNotes() {
+    const body = release.releaseNotesBody;
+    if (!body) return;
+    const slug =
+      release.name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "") || "release";
+    const blob = new Blob([body], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${slug}-release-notes.md`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  }
+
   const header = (
     <span className="text-xs font-medium text-muted-foreground">
       Release notes
@@ -577,17 +597,28 @@ function ReleaseNotesSection({
     <div className="space-y-1.5">
       <div className="flex items-center justify-between">
         {header}
-        {canEdit && mode !== "none" ? (
-          <button
-            type="button"
-            onClick={() =>
-              setDraftKind(mode === "external" ? "external" : "in_app")
-            }
-            className="text-2xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-          >
-            Edit
-          </button>
-        ) : null}
+        <div className="flex items-center gap-3">
+          {mode === "in_app" && release.releaseNotesBody ? (
+            <button
+              type="button"
+              onClick={downloadNotes}
+              className="text-2xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+            >
+              Download
+            </button>
+          ) : null}
+          {canEdit && mode !== "none" ? (
+            <button
+              type="button"
+              onClick={() =>
+                setDraftKind(mode === "external" ? "external" : "in_app")
+              }
+              className="text-2xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+            >
+              Edit
+            </button>
+          ) : null}
+        </div>
       </div>
 
       {mode === "in_app" && release.releaseNotesBody ? (
