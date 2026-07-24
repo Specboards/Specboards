@@ -6,7 +6,16 @@ import { assertCustomFieldTypes, InvalidPatchError } from "./features-service";
 
 /** A property definition stub; only `key` and `type` matter to the validator. */
 function prop(key: string, type: PropertyDef["type"]): PropertyDef {
-  return { id: key, key, label: key, type, options: [], levels: null, position: 0 };
+  return {
+    id: key,
+    key,
+    label: key,
+    type,
+    entity: "item",
+    options: [],
+    levels: null,
+    position: 0,
+  };
 }
 
 const props = [prop("due", "date"), prop("size", "number"), prop("owner", "text")];

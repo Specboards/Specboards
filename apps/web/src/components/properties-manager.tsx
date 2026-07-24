@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 
-import type { PropertyDef, PropertyType } from "@specboards/core";
+import type { PropertyDef, PropertyEntity, PropertyType } from "@specboards/core";
 import { PROPERTY_TYPES } from "@specboards/core";
 
 import { EmptyState } from "@/components/empty-state";
@@ -27,6 +27,11 @@ const TYPE_LABELS: Record<PropertyType, string> = {
   date: "Date",
   user: "Person",
   url: "URL",
+};
+
+const ENTITY_LABELS: Record<PropertyEntity, string> = {
+  item: "Work items",
+  release: "Releases",
 };
 
 /**
@@ -237,6 +242,11 @@ function PropertyRow({
         <span className="rounded-md border px-2 py-1.5 text-xs text-muted-foreground">
           {TYPE_LABELS[property.type]}
         </span>
+        {property.entity === "release" ? (
+          <span className="rounded-md border border-dashed px-2 py-1.5 text-xs text-muted-foreground">
+            Releases
+          </span>
+        ) : null}
         {canEdit ? (
           <div className="ml-auto flex gap-2">
             <Button
@@ -272,18 +282,24 @@ function PropertyRow({
           />
         </label>
       ) : null}
-      <div className="space-y-1.5">
-        <span className="text-xs font-medium text-muted-foreground">
-          Available on
-        </span>
-        <LevelChecks
-          levels={levels}
-          checked={checked}
-          onToggle={toggle}
-          disabled={!canEdit || pending}
-          idPrefix={property.id}
-        />
-      </div>
+      {property.entity === "release" ? (
+        <p className="text-xs text-muted-foreground">
+          Applies to every release.
+        </p>
+      ) : (
+        <div className="space-y-1.5">
+          <span className="text-xs font-medium text-muted-foreground">
+            Available on
+          </span>
+          <LevelChecks
+            levels={levels}
+            checked={checked}
+            onToggle={toggle}
+            disabled={!canEdit || pending}
+            idPrefix={property.id}
+          />
+        </div>
+      )}
     </fieldset>
   );
 }
@@ -298,6 +314,7 @@ function PropertyCreate({
   const router = useRouter();
   const [label, setLabel] = useState("");
   const [type, setType] = useState<PropertyType>("text");
+  const [entity, setEntity] = useState<PropertyEntity>("item");
   const [options, setOptions] = useState("");
   const [checked, setChecked] = useState<Set<string>>(
     () => new Set(levels.map((l) => l.key)),
@@ -319,6 +336,7 @@ function PropertyCreate({
         await createProperty({
           label: label.trim(),
           type,
+          entity,
           ...(hasOptions(type)
             ? {
                 options: options
@@ -327,11 +345,13 @@ function PropertyCreate({
                   .filter(Boolean),
               }
             : {}),
-          levels: levelsValue(levels, checked),
+          // Levels only apply to item properties; releases are workspace-wide.
+          ...(entity === "item" ? { levels: levelsValue(levels, checked) } : {}),
         });
         toast.success("Property added");
         setLabel("");
         setType("text");
+        setEntity("item");
         setOptions("");
         setChecked(new Set(levels.map((l) => l.key)));
         onDone();
@@ -378,6 +398,22 @@ function PropertyCreate({
             ))}
           </Select>
         </label>
+        <label className="space-y-1.5">
+          <span className="text-xs font-medium text-muted-foreground">
+            Applies to
+          </span>
+          <Select
+            value={entity}
+            onChange={(e) => setEntity(e.target.value as PropertyEntity)}
+            className="h-8 w-36"
+          >
+            {(Object.keys(ENTITY_LABELS) as PropertyEntity[]).map((en) => (
+              <option key={en} value={en}>
+                {ENTITY_LABELS[en]}
+              </option>
+            ))}
+          </Select>
+        </label>
       </div>
       {hasOptions(type) ? (
         <label className="block space-y-1.5">
@@ -392,18 +428,24 @@ function PropertyCreate({
           />
         </label>
       ) : null}
-      <div className="space-y-1.5">
-        <span className="text-xs font-medium text-muted-foreground">
-          Available on
-        </span>
-        <LevelChecks
-          levels={levels}
-          checked={checked}
-          onToggle={toggle}
-          disabled={pending}
-          idPrefix="new"
-        />
-      </div>
+      {entity === "release" ? (
+        <p className="text-xs text-muted-foreground">
+          Applies to every release. Edit its value on the release detail panel.
+        </p>
+      ) : (
+        <div className="space-y-1.5">
+          <span className="text-xs font-medium text-muted-foreground">
+            Available on
+          </span>
+          <LevelChecks
+            levels={levels}
+            checked={checked}
+            onToggle={toggle}
+            disabled={pending}
+            idPrefix="new"
+          />
+        </div>
+      )}
       <div className="flex gap-2">
         <Button
           type="button"

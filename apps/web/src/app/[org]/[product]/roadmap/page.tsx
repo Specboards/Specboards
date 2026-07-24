@@ -56,7 +56,12 @@ export default async function RoadmapPage({
   ).filter((f) => f.status !== "archived");
   const releases = await store.listReleases(access ?? undefined);
   const detailTemplates = await store.listDetailTemplates(access ?? undefined);
-  const properties = await store.listProperties(access ?? undefined);
+  const properties = await store.listProperties(access ?? undefined, "item");
+  // Release-scoped custom properties power the editor in the release detail sheet.
+  const releaseProperties = await store.listProperties(
+    access ?? undefined,
+    "release",
+  );
 
   // Card creation needs the workspace status workflow (first status is the
   // default) and the assignable members.
@@ -295,6 +300,8 @@ export default async function RoadmapPage({
       allowDrag={canEdit && !showShipped}
       editableReleaseIds={editableReleaseIds}
       productNamesById={productNamesById}
+      releaseProperties={releaseProperties}
+      members={members}
       quickAdd={quickAdd}
       bulkOptions={bulkOptions}
     />

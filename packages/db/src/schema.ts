@@ -675,9 +675,14 @@ export const workspaceProperties = pgTable(
     label: text("label").notNull(),
     /** One of core PROPERTY_TYPES: text/number/select/multiselect/date/user. */
     type: text("type").notNull(),
+    /** Which record the property is defined for: 'item' or 'release' (core
+     * PROPERTY_ENTITIES). Keys are unique per (workspace, entity), so an item
+     * and a release property can share a key. */
+    entity: text("entity").notNull().default("item"),
     /** string[] of choices for select/multiselect. */
     options: jsonb("options").notNull().default([]),
-    /** string[] of level keys the property applies to; null = all levels. */
+    /** string[] of level keys the property applies to; null = all levels.
+     * Always null for release-scoped properties (releases have no level). */
     levels: jsonb("levels"),
     /** Manual ordering in forms and settings; ascending. */
     position: integer("position").notNull().default(0),
@@ -686,7 +691,11 @@ export const workspaceProperties = pgTable(
       .defaultNow(),
   },
   (t) => [
-    unique("workspace_properties_ws_key_uq").on(t.workspaceId, t.key),
+    unique("workspace_properties_ws_entity_key_uq").on(
+      t.workspaceId,
+      t.entity,
+      t.key,
+    ),
     index("workspace_properties_ws_idx").on(t.workspaceId),
   ],
 );
@@ -830,6 +839,10 @@ export const releases = pgTable(
     releaseNotesMode: text("release_notes_mode").notNull().default("none"),
     releaseNotesBody: text("release_notes_body"),
     releaseNotesUrl: text("release_notes_url"),
+    /** Values for admin-defined release-scoped custom properties (see
+     * workspace_properties with entity='release'), keyed by property key.
+     * Mirrors features.custom_fields. */
+    customFields: jsonb("custom_fields").notNull().default({}),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

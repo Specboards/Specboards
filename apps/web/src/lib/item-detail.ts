@@ -93,7 +93,7 @@ export async function getItemDetailData(
 
   const [allProperties, releases, allFeatures, levels, products, allGates, allCompletedGateIds] =
     await Promise.all([
-      store.listProperties(access ?? undefined),
+      store.listProperties(access ?? undefined, "item"),
       store.listReleases(access ?? undefined),
       store.listFeatures(access ?? undefined),
       store.listLevels(access ?? undefined),

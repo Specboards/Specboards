@@ -20,6 +20,7 @@ import {
   resolveLevelUpdate,
   type IdeaStage,
   type PropertyDef,
+  type PropertyEntity,
   type WorkspaceLevel,
 } from "@specboards/core";
 
@@ -1595,11 +1596,22 @@ export class DbStore implements FeatureStore {
 
   // ── Custom properties ─────────────────────────────────────────────────
 
-  private async propertiesIn(tx: Tx, ws: string): Promise<PropertyDef[]> {
+  private async propertiesIn(
+    tx: Tx,
+    ws: string,
+    entity?: PropertyEntity,
+  ): Promise<PropertyDef[]> {
     const rows = await tx
       .select()
       .from(workspaceProperties)
-      .where(eq(workspaceProperties.workspaceId, ws))
+      .where(
+        entity
+          ? and(
+              eq(workspaceProperties.workspaceId, ws),
+              eq(workspaceProperties.entity, entity),
+            )
+          : eq(workspaceProperties.workspaceId, ws),
+      )
       .orderBy(
         asc(workspaceProperties.position),
         asc(workspaceProperties.createdAt),
@@ -1607,9 +1619,12 @@ export class DbStore implements FeatureStore {
     return rows.map(toPropertyDef);
   }
 
-  async listProperties(scope?: WorkspaceScope): Promise<PropertyDef[]> {
+  async listProperties(
+    scope?: WorkspaceScope,
+    entity?: PropertyEntity,
+  ): Promise<PropertyDef[]> {
     return this.scoped(scope, (tx) =>
-      this.propertiesIn(tx, scope!.workspaceId),
+      this.propertiesIn(tx, scope!.workspaceId, entity),
     );
   }
 
@@ -1901,12 +1916,22 @@ export class DbStore implements FeatureStore {
       if (!isPropertyType(input.type)) {
         throw new PropertyError(`Unknown property type: ${String(input.type)}`);
       }
-      const existing = await this.propertiesIn(tx, ws);
+      const entity: PropertyEntity = input.entity ?? "item";
+      // Keys and positions are scoped per entity, so an item and a release
+      // property can share a key and each ordering starts at 0.
+      const existing = (await this.propertiesIn(tx, ws)).filter(
+        (p) => p.entity === entity,
+      );
       const key = propertyKeyFromLabel(
         label,
         new Set(existing.map((p) => p.key)),
       );
-      const levels = await this.normalizeLevels(tx, ws, input.levels);
+      // Releases have no hierarchy level, so a release property is never
+      // level-scoped; item properties honor the requested levels.
+      const levels =
+        entity === "release"
+          ? null
+          : await this.normalizeLevels(tx, ws, input.levels);
       const position =
         existing.reduce((m, p) => Math.max(m, p.position), -1) + 1;
       const [row] = await tx
@@ -1916,6 +1941,7 @@ export class DbStore implements FeatureStore {
           key,
           label,
           type: input.type,
+          entity,
           options: normalizeOptions(input.type, input.options),
           levels,
           position,
@@ -2079,6 +2105,7 @@ export class DbStore implements FeatureStore {
           releaseNotesMode: input.releaseNotesMode ?? "none",
           releaseNotesBody: input.releaseNotesBody ?? null,
           releaseNotesUrl: input.releaseNotesUrl ?? null,
+          customFields: input.customFields ?? {},
         })
         .returning();
       if (!row) throw new ReleaseError(`A release named "${name}" already exists.`);
@@ -2142,6 +2169,10 @@ export class DbStore implements FeatureStore {
         set.releaseNotesBody = patch.releaseNotesBody;
       if (patch.releaseNotesUrl !== undefined)
         set.releaseNotesUrl = patch.releaseNotesUrl;
+      // Custom fields replace the whole map (mirrors features): the caller sends
+      // the complete, merged set of release-scoped values.
+      if (patch.customFields !== undefined)
+        set.customFields = patch.customFields;
 
       // Reassigning to a different product (or to portfolio) also needs write
       // access to the destination, and unschedules items that no longer match.
@@ -4021,6 +4052,7 @@ function toPropertyDef(row: {
   key: string;
   label: string;
   type: string;
+  entity: string;
   options: unknown;
   levels: unknown;
   position: number;
@@ -4030,6 +4062,7 @@ function toPropertyDef(row: {
     key: row.key,
     label: row.label,
     type: row.type as PropertyDef["type"],
+    entity: row.entity as PropertyEntity,
     options: Array.isArray(row.options) ? (row.options as string[]) : [],
     levels: Array.isArray(row.levels) ? (row.levels as string[]) : null,
     position: row.position,
@@ -4071,6 +4104,7 @@ function toReleaseRecord(
     releaseNotesMode: string;
     releaseNotesBody: string | null;
     releaseNotesUrl: string | null;
+    customFields: unknown;
   },
   itemCount: number,
 ): ReleaseRecord {
@@ -4086,6 +4120,7 @@ function toReleaseRecord(
     releaseNotesMode: row.releaseNotesMode as ReleaseNotesMode,
     releaseNotesBody: row.releaseNotesBody,
     releaseNotesUrl: row.releaseNotesUrl,
+    customFields: toCustomFields(row.customFields),
     itemCount,
   };
 }

@@ -2,6 +2,7 @@ import {
   canTransition,
   isForwardTransition,
   transitionErrorMessage,
+  isPropertyEntity,
   isPropertyType,
   isValidParentLevel,
   propertyKeyFromLabel,
@@ -264,7 +265,7 @@ export async function patchFeature(
   // fields must be real ISO dates). Skipped when no custom fields are being
   // written, so the common patch avoids the extra property lookup.
   if (patch.customFields && Object.keys(patch.customFields).length > 0) {
-    const properties = await store.listProperties(scope);
+    const properties = await store.listProperties(scope, "item");
     assertCustomFieldTypes(patch.customFields, properties);
   }
 
@@ -723,8 +724,15 @@ export function parsePropertyInput(body: unknown): PropertyInput {
     );
   }
   const input: PropertyInput = { label: raw.label.trim(), type: raw.type };
+  if ("entity" in raw) {
+    if (!isPropertyEntity(raw.entity)) {
+      throw new InvalidPatchError("entity must be one of: item, release.");
+    }
+    input.entity = raw.entity;
+  }
   if ("options" in raw) input.options = parseStringArray(raw.options, "options");
-  if ("levels" in raw && raw.levels !== null) {
+  // Levels only apply to item properties; a release property is workspace-wide.
+  if (input.entity !== "release" && "levels" in raw && raw.levels !== null) {
     input.levels = parseStringArray(raw.levels, "levels");
   }
   return input;
@@ -925,6 +933,10 @@ export async function createRelease(
   scope?: WorkspaceScope,
 ): Promise<ReleaseRecord> {
   const store = await getStore();
+  if (input.customFields && Object.keys(input.customFields).length > 0) {
+    const properties = await store.listProperties(scope, "release");
+    assertCustomFieldTypes(input.customFields, properties);
+  }
   return store.createRelease(input, scope);
 }
 
@@ -935,6 +947,15 @@ export async function updateRelease(
   scope?: WorkspaceScope,
 ): Promise<ReleaseRecord> {
   const store = await getStore();
+
+  // Type-check release custom-field values against their release-scoped property
+  // definitions (date fields must be real ISO dates), mirroring patchFeature.
+  // Skipped when no custom fields are being written.
+  if (patch.customFields && Object.keys(patch.customFields).length > 0) {
+    const properties = await store.listProperties(scope, "release");
+    assertCustomFieldTypes(patch.customFields, properties);
+  }
+
   // Capture the prior status so we can detect the ship edge for the webhook.
   const before = (await store.listReleases(scope)).find((r) => r.id === id) ?? null;
 
@@ -1214,6 +1235,8 @@ export function parseReleaseInput(body: unknown): ReleaseInput {
     input.releaseNotesBody = parseReleaseNotesBody(raw.releaseNotesBody);
   if ("releaseNotesUrl" in raw)
     input.releaseNotesUrl = parseReleaseNotesUrl(raw.releaseNotesUrl);
+  if ("customFields" in raw)
+    input.customFields = parseCustomFields(raw.customFields);
   return input;
 }
 
@@ -1241,11 +1264,13 @@ export function parseReleasePatch(body: unknown): ReleasePatch {
     patch.releaseNotesBody = parseReleaseNotesBody(raw.releaseNotesBody);
   if ("releaseNotesUrl" in raw)
     patch.releaseNotesUrl = parseReleaseNotesUrl(raw.releaseNotesUrl);
+  if ("customFields" in raw)
+    patch.customFields = parseCustomFields(raw.customFields);
   if (Object.keys(patch).length === 0) {
     throw new InvalidPatchError(
       "Patch must set at least one of: name, productId, status, " +
         "startDate, targetDate, notes, releaseNotesMode, releaseNotesBody, " +
-        "releaseNotesUrl.",
+        "releaseNotesUrl, customFields.",
     );
   }
   return patch;

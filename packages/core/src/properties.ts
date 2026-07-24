@@ -24,6 +24,22 @@ export function isPropertyType(value: unknown): value is PropertyType {
   );
 }
 
+/**
+ * The kind of record a custom property is defined for. Item properties attach
+ * to work items (scoped further by hierarchy `levels`); release properties
+ * attach to releases (which have no level, so `levels` is null for them).
+ */
+export const PROPERTY_ENTITIES = ["item", "release"] as const;
+
+export type PropertyEntity = (typeof PROPERTY_ENTITIES)[number];
+
+export function isPropertyEntity(value: unknown): value is PropertyEntity {
+  return (
+    typeof value === "string" &&
+    (PROPERTY_ENTITIES as readonly string[]).includes(value)
+  );
+}
+
 /** A custom property definition as the UI consumes it. */
 export interface PropertyDef {
   /** Row id (uuid in db mode), used to update/delete the definition. */
@@ -32,9 +48,12 @@ export interface PropertyDef {
   key: string;
   label: string;
   type: PropertyType;
+  /** Which record the property is defined for: work items or releases. */
+  entity: PropertyEntity;
   /** Choices for select/multiselect; empty for other types. */
   options: string[];
-  /** Level keys the property applies to; null = every level. */
+  /** Level keys the property applies to; null = every level. Always null for
+   * release-scoped properties (releases have no hierarchy level). */
   levels: string[] | null;
   /** Manual ordering in forms and settings; ascending. */
   position: number;

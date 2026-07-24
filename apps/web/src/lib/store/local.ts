@@ -22,6 +22,7 @@ import {
   resolveLevelUpdate,
   type IdeaStage,
   type PropertyDef,
+  type PropertyEntity,
   type WorkspaceLevel,
 } from "@specboards/core";
 
@@ -141,6 +142,8 @@ interface LocalRelease {
   releaseNotesMode?: "none" | "in_app" | "external";
   releaseNotesBody?: string | null;
   releaseNotesUrl?: string | null;
+  /** Release-scoped custom-property values (default empty when absent). */
+  customFields?: Record<string, CustomFieldValue>;
 }
 
 /** A comment persisted in local file mode. Keyed to the feature's stable
@@ -1054,9 +1057,17 @@ export class LocalFileStore implements FeatureStore {
     );
   }
 
-  async listProperties(_scope?: WorkspaceScope): Promise<PropertyDef[]> {
-    const rows = await this.readProperties();
-    return rows.sort((a, b) => a.position - b.position);
+  async listProperties(
+    _scope?: WorkspaceScope,
+    entity?: PropertyEntity,
+  ): Promise<PropertyDef[]> {
+    // Default `entity` for rows written before the discriminator existed.
+    const rows = (await this.readProperties()).map((p) => ({
+      ...p,
+      entity: p.entity ?? "item",
+    }));
+    const filtered = entity ? rows.filter((p) => p.entity === entity) : rows;
+    return filtered.sort((a, b) => a.position - b.position);
   }
 
   async createProperty(
@@ -1068,15 +1079,19 @@ export class LocalFileStore implements FeatureStore {
     if (!isPropertyType(input.type)) {
       throw new PropertyError(`Unknown property type: ${String(input.type)}`);
     }
+    const entity: PropertyEntity = input.entity ?? "item";
     const rows = await this.readProperties();
+    // Keys and positions are scoped per entity (see the db store).
+    const sameEntity = rows.filter((p) => (p.entity ?? "item") === entity);
     const property: PropertyDef = {
       id: randomUUID(),
-      key: propertyKeyFromLabel(label, new Set(rows.map((p) => p.key))),
+      key: propertyKeyFromLabel(label, new Set(sameEntity.map((p) => p.key))),
       label,
       type: input.type,
+      entity,
       options: localNormalizeOptions(input.type, input.options),
-      levels: input.levels ?? null,
-      position: rows.reduce((m, p) => Math.max(m, p.position), -1) + 1,
+      levels: entity === "release" ? null : (input.levels ?? null),
+      position: sameEntity.reduce((m, p) => Math.max(m, p.position), -1) + 1,
     };
     await this.writeProperties([...rows, property]);
     return property;
@@ -1412,6 +1427,7 @@ export class LocalFileStore implements FeatureStore {
         releaseNotesMode: r.releaseNotesMode ?? "none",
         releaseNotesBody: r.releaseNotesBody ?? null,
         releaseNotesUrl: r.releaseNotesUrl ?? null,
+        customFields: r.customFields ?? {},
         itemCount: counts.get(r.id) ?? 0,
       }))
       .sort(compareReleases);
@@ -1445,6 +1461,7 @@ export class LocalFileStore implements FeatureStore {
       releaseNotesMode: input.releaseNotesMode ?? "none",
       releaseNotesBody: input.releaseNotesBody ?? null,
       releaseNotesUrl: input.releaseNotesUrl ?? null,
+      customFields: input.customFields ?? {},
     };
     await this.writeReleases([...rows, release]);
     return {
@@ -1455,6 +1472,7 @@ export class LocalFileStore implements FeatureStore {
       releaseNotesMode: release.releaseNotesMode ?? "none",
       releaseNotesBody: release.releaseNotesBody ?? null,
       releaseNotesUrl: release.releaseNotesUrl ?? null,
+      customFields: release.customFields ?? {},
       itemCount: 0,
     };
   }
@@ -1498,6 +1516,8 @@ export class LocalFileStore implements FeatureStore {
       release.releaseNotesBody = patch.releaseNotesBody;
     if (patch.releaseNotesUrl !== undefined)
       release.releaseNotesUrl = patch.releaseNotesUrl;
+    if (patch.customFields !== undefined)
+      release.customFields = patch.customFields;
     if (patch.productId !== undefined) {
       const targetProductId = patch.productId;
       if (
@@ -1524,6 +1544,7 @@ export class LocalFileStore implements FeatureStore {
       releaseNotesMode: release.releaseNotesMode ?? "none",
       releaseNotesBody: release.releaseNotesBody ?? null,
       releaseNotesUrl: release.releaseNotesUrl ?? null,
+      customFields: release.customFields ?? {},
       itemCount: all.filter((f) => f.releaseId === id).length,
     };
   }

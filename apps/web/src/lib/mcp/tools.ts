@@ -675,6 +675,7 @@ export const TOOLS: McpTool[] = [
         releaseNotesMode: r.releaseNotesMode,
         releaseNotesBody: r.releaseNotesBody,
         releaseNotesUrl: r.releaseNotesUrl,
+        customFields: r.customFields,
         itemCount: r.itemCount,
       }));
     },
@@ -737,6 +738,14 @@ export const TOOLS: McpTool[] = [
           type: ["string", "null"],
           description: "External release-notes URL (http/https) for `external` mode.",
         },
+        customFields: {
+          type: "object",
+          description:
+            "Values for release-scoped custom properties (defined in Settings), " +
+            "keyed by property key. Values are string | number | boolean | " +
+            "string[] | null.",
+          additionalProperties: true,
+        },
       },
       required: ["name"],
       additionalProperties: false,
@@ -759,6 +768,7 @@ export const TOOLS: McpTool[] = [
         releaseNotesMode: release.releaseNotesMode,
         releaseNotesBody: release.releaseNotesBody,
         releaseNotesUrl: release.releaseNotesUrl,
+        customFields: release.customFields,
         itemCount: release.itemCount,
       };
     },
@@ -827,6 +837,14 @@ export const TOOLS: McpTool[] = [
           description:
             "External release-notes URL (http/https), or null to clear.",
         },
+        customFields: {
+          type: "object",
+          description:
+            "Values for release-scoped custom properties (defined in Settings), " +
+            "keyed by property key. Replaces the whole map, so include every " +
+            "value to keep. Values are string | number | boolean | string[] | null.",
+          additionalProperties: true,
+        },
       },
       required: ["id"],
       additionalProperties: false,
@@ -855,6 +873,7 @@ export const TOOLS: McpTool[] = [
         releaseNotesMode: release.releaseNotesMode,
         releaseNotesBody: release.releaseNotesBody,
         releaseNotesUrl: release.releaseNotesUrl,
+        customFields: release.customFields,
         itemCount: release.itemCount,
       };
     },

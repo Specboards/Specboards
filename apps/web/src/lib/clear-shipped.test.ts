@@ -26,6 +26,7 @@ function rel(id: string, status: ReleaseRecord["status"]): ReleaseRecord {
     releaseNotesMode: "none",
     releaseNotesBody: null,
     releaseNotesUrl: null,
+    customFields: {},
     itemCount: 0,
   };
 }

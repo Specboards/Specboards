@@ -17,7 +17,11 @@ import {
 } from "@dnd-kit/core";
 import { toast } from "sonner";
 
-import type { PropertyType, StatusWorkflow } from "@specboards/core";
+import type {
+  PropertyDef,
+  PropertyType,
+  StatusWorkflow,
+} from "@specboards/core";
 
 import { useBoardPrefs } from "@/app/[org]/[product]/backlog/board-prefs";
 import {
@@ -48,6 +52,7 @@ import { AuthRequiredError, patchFeature } from "@/lib/api-client";
 import { statusLabel } from "@/lib/feature-helpers";
 import { productBadge } from "@/lib/product-color";
 import type { FeatureRecord, ReleaseRecord } from "@/lib/store/types";
+import type { WorkspaceMember } from "@/lib/workspace";
 import { useAnnouncer } from "@/lib/use-announcer";
 import { useIsCoarsePointer, useIsMobile } from "@/lib/use-media-query";
 import { useSwipeColumns } from "@/lib/use-swipe-columns";
@@ -94,6 +99,8 @@ export function RoadmapBoard({
   allowDrag,
   editableReleaseIds,
   productNamesById,
+  releaseProperties,
+  members,
   quickAdd,
   bulkOptions,
 }: {
@@ -114,6 +121,10 @@ export function RoadmapBoard({
   editableReleaseIds: string[];
   /** Product name by id, for the detail panel's product label. */
   productNamesById: Record<string, string>;
+  /** Release-scoped custom-property definitions, edited in the detail panel. */
+  releaseProperties: PropertyDef[];
+  /** Workspace members, for `user`-typed release custom fields. */
+  members: WorkspaceMember[];
   /** Enables the per-column "Add {level}" quick add (editors, non-leaf level,
    * single product in scope, active view). The new item takes the column's
    * release. */
@@ -361,6 +372,8 @@ export function RoadmapBoard({
             ? (productNamesById[detailRelease.productId] ?? null)
             : null
         }
+        properties={releaseProperties}
+        members={members}
         onClose={() => setDetailReleaseId(null)}
       />
       <FeatureEditSheet

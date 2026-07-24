@@ -112,7 +112,7 @@ export async function ListView({
   // Custom properties power both the custom-field sort options and the date
   // range filters. Date-typed fields also add a from/to range filter, parsed
   // here so it applies (and shows in the bar) alongside the built-in filters.
-  const properties = await store.listProperties(access ?? undefined);
+  const properties = await store.listProperties(access ?? undefined, "item");
   const dateProps = properties.filter((p) => p.type === "date");
   const customDates = parseCustomDateFilters(
     sp,

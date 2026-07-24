@@ -84,7 +84,7 @@ export default async function CardsSettingsPage() {
         </Subsection>
         <Subsection
           title="Custom properties"
-          description="Define your own fields (text, number, select, date, person, URL…) and pick which levels they appear on. Values are edited on each item."
+          description="Define your own fields (text, number, select, date, person, URL…) for work items or releases. For item fields, pick which levels they appear on. Values are edited on each item or release."
         >
           <PropertiesManager
             levels={levels}

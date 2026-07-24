@@ -7,6 +7,7 @@ import type {
   ProductRole,
   ProductVisibility,
   PropertyDef,
+  PropertyEntity,
   PropertyType,
   SpecSection,
   WorkspaceLevel,
@@ -21,6 +22,7 @@ export type {
   ProductRole,
   ProductVisibility,
   PropertyDef,
+  PropertyEntity,
   PropertyType,
   WorkspaceLevel,
 };
@@ -405,8 +407,11 @@ export interface LevelUpdate {
 export interface PropertyInput {
   label: string;
   type: PropertyType;
+  /** Which record the property is for; defaults to 'item' when omitted. */
+  entity?: PropertyEntity;
   options?: string[];
-  /** Level keys the property applies to; null/omitted = every level. */
+  /** Level keys the property applies to; null/omitted = every level. Ignored
+   * for release-scoped properties. */
   levels?: string[] | null;
 }
 
@@ -506,6 +511,9 @@ export interface ReleaseRecord {
   /** External release-notes URL, or null. Linked out to when the mode is
    * `external`; retained across mode switches. */
   releaseNotesUrl: string | null;
+  /** Values for release-scoped custom properties, keyed by property key
+   * (mirrors an item's customFields). */
+  customFields: Record<string, CustomFieldValue>;
   /** Count of items scheduled into this release. */
   itemCount: number;
 }
@@ -521,6 +529,7 @@ export interface ReleaseInput {
   releaseNotesMode?: ReleaseNotesMode;
   releaseNotesBody?: string | null;
   releaseNotesUrl?: string | null;
+  customFields?: Record<string, CustomFieldValue>;
 }
 
 export type ReleasePatch = Partial<{
@@ -533,6 +542,7 @@ export type ReleasePatch = Partial<{
   releaseNotesMode: ReleaseNotesMode;
   releaseNotesBody: string | null;
   releaseNotesUrl: string | null;
+  customFields: Record<string, CustomFieldValue>;
 }>;
 
 /** Raised when a release can't be created/updated/deleted. */
@@ -948,8 +958,12 @@ export interface FeatureStore {
     completed: boolean,
     scope?: WorkspaceScope,
   ): Promise<void>;
-  /** The workspace's custom properties, ordered by position. */
-  listProperties(scope?: WorkspaceScope): Promise<PropertyDef[]>;
+  /** The workspace's custom properties, ordered by position. Pass `entity` to
+   * return only item- or release-scoped properties; omit for all. */
+  listProperties(
+    scope?: WorkspaceScope,
+    entity?: PropertyEntity,
+  ): Promise<PropertyDef[]>;
   /** Create a custom property definition; returns it with its key/id. */
   createProperty(
     input: PropertyInput,

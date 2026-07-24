@@ -65,7 +65,7 @@ export async function BoardView({
   const [allFeatures, properties, releases, detailTemplates] =
     await Promise.all([
       store.listFeatures(access ?? undefined),
-      store.listProperties(access ?? undefined),
+      store.listProperties(access ?? undefined, "item"),
       store.listReleases(access ?? undefined),
       store.listDetailTemplates(access ?? undefined),
     ]);

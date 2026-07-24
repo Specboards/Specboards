@@ -5,6 +5,12 @@ import { useRef, useState, useTransition } from "react";
 import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
 
+import type { PropertyDef } from "@specboards/core";
+
+import {
+  CustomFieldInput,
+  collectCustomFields,
+} from "@/components/item-properties";
 import { Badge } from "@/components/ui/badge";
 import { Box, BoxHeader } from "@/components/ui/box";
 import { Button } from "@/components/ui/button";
@@ -24,10 +30,12 @@ import {
 } from "@/lib/api-client";
 import {
   RELEASE_STATUSES,
+  type CustomFieldValue,
   type ReleasePatch,
   type ReleaseRecord,
   type ReleaseStatus,
 } from "@/lib/store/types";
+import type { WorkspaceMember } from "@/lib/workspace";
 
 const RELEASE_STATUS_LABELS: Record<ReleaseStatus, string> = {
   planned: "Planned",
@@ -68,6 +76,8 @@ export function ReleaseDetailSheet({
   release,
   canEdit,
   productName,
+  properties,
+  members,
   onClose,
 }: {
   /** The release to show, or null when the panel is closed. */
@@ -76,6 +86,10 @@ export function ReleaseDetailSheet({
   canEdit: boolean;
   /** The release's product name, or null for a workspace-wide portfolio release. */
   productName: string | null;
+  /** Release-scoped custom-property definitions. */
+  properties: PropertyDef[];
+  /** Workspace members, for `user`-typed custom fields. */
+  members: WorkspaceMember[];
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -299,6 +313,14 @@ export function ReleaseDetailSheet({
 
               <ReleaseNotesSection release={current} canEdit onCommit={commit} />
 
+              <ReleaseCustomFields
+                release={current}
+                properties={properties}
+                members={members}
+                canEdit
+                onCommit={commit}
+              />
+
               <p
                 className="h-4 text-2xs text-muted-foreground"
                 role="status"
@@ -342,6 +364,13 @@ export function ReleaseDetailSheet({
               </Box>
               <ReleaseNotesSection
                 release={current}
+                canEdit={false}
+                onCommit={() => {}}
+              />
+              <ReleaseCustomFields
+                release={current}
+                properties={properties}
+                members={members}
                 canEdit={false}
                 onCommit={() => {}}
               />
@@ -596,6 +625,102 @@ function ReleaseNotesSection({
         <p className="text-sm text-muted-foreground">No release notes.</p>
       )}
     </div>
+  );
+}
+
+/** Format a release custom-field value for the read-only view. */
+function formatCustomValue(
+  property: PropertyDef,
+  value: CustomFieldValue,
+  members: WorkspaceMember[],
+): string {
+  if (value === null || value === undefined || value === "") return "";
+  if (property.type === "user") {
+    return members.find((m) => m.userId === value)?.name ?? String(value);
+  }
+  if (Array.isArray(value)) return value.join(", ");
+  return String(value);
+}
+
+/**
+ * Release-scoped custom properties (defined in Settings -> Cards with the
+ * "Releases" scope), the release-side parity of an item's custom fields. For
+ * editors the values edit in a small form and save together; the whole map is
+ * sent on save (mirrors item custom fields). Viewers see a read-only list.
+ * Renders nothing when the workspace has no release-scoped properties.
+ */
+function ReleaseCustomFields({
+  release,
+  properties,
+  members,
+  canEdit,
+  onCommit,
+}: {
+  release: ReleaseRecord;
+  properties: PropertyDef[];
+  members: WorkspaceMember[];
+  canEdit: boolean;
+  onCommit: (patch: ReleasePatch) => void;
+}) {
+  if (properties.length === 0) return null;
+  const values = release.customFields ?? {};
+
+  if (!canEdit) {
+    return (
+      <div className="space-y-1.5">
+        <span className="text-xs font-medium text-muted-foreground">
+          Details
+        </span>
+        <dl className="space-y-1">
+          {properties.map((property) => (
+            <div key={property.key} className="flex gap-2 text-sm">
+              <dt className="w-32 shrink-0 text-muted-foreground">
+                {property.label}
+              </dt>
+              <dd className="min-w-0 flex-1">
+                {formatCustomValue(
+                  property,
+                  values[property.key] ?? null,
+                  members,
+                ) || "—"}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+    );
+  }
+
+  function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const data = new FormData(e.currentTarget);
+    onCommit({ customFields: collectCustomFields(properties, data, values) });
+  }
+
+  return (
+    <form onSubmit={onSubmit} className="space-y-2">
+      <span className="text-xs font-medium text-muted-foreground">Details</span>
+      <div className="space-y-2">
+        {properties.map((property) => (
+          <label
+            key={property.key}
+            className="grid grid-cols-[8rem_1fr] items-center gap-2"
+          >
+            <span className="truncate text-xs text-muted-foreground">
+              {property.label}
+            </span>
+            <CustomFieldInput
+              property={property}
+              value={values[property.key] ?? null}
+              members={members}
+            />
+          </label>
+        ))}
+      </div>
+      <Button type="submit" size="sm" variant="outline">
+        Save details
+      </Button>
+    </form>
   );
 }
 
