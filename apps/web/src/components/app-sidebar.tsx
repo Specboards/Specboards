@@ -120,7 +120,7 @@ export function BrandMark({ showWord = true }: { showWord?: boolean }) {
       <img src="/brand/specboards-mark.png" alt="" className="h-6 w-6" />
       {showWord ? (
         <span>
-          Spec<span className="text-muted-foreground">board</span>
+          Spec<span className="text-muted-foreground">boards</span>
         </span>
       ) : null}
     </Link>
