@@ -34,6 +34,8 @@ export interface FilterOptions {
   products?: { id: string; name: string }[];
   /** Date-typed custom fields, each offering a from/to range filter. */
   dateFields?: { key: string; label: string }[];
+  /** Whether to offer the "Show shipped" toggle (any shipped release exists). */
+  canShowShipped?: boolean;
 }
 
 /** One filter dimension, resolved to the options the current data set offers. */
@@ -258,6 +260,19 @@ export function BacklogFilters({
             {renderDateRange(field, "w-36")}
           </div>
         ))}
+        {options.canShowShipped ? (
+          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              className="h-4 w-4 cursor-pointer accent-primary"
+              checked={!!filters.showShipped}
+              onChange={(e) =>
+                set("showShipped", e.target.checked ? true : undefined)
+              }
+            />
+            Show shipped
+          </label>
+        ) : null}
         {active ? (
           <Button
             variant="link"
@@ -309,6 +324,21 @@ export function BacklogFilters({
                   {renderDateRange(field, "h-9 w-full")}
                 </div>
               ))}
+              {options.canShowShipped ? (
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 cursor-pointer accent-primary"
+                    checked={!!filters.showShipped}
+                    onChange={(e) =>
+                      set("showShipped", e.target.checked ? true : undefined)
+                    }
+                  />
+                  <span className="font-medium text-muted-foreground">
+                    Show shipped
+                  </span>
+                </label>
+              ) : null}
             </div>
             {active ? (
               <Button

@@ -23,6 +23,7 @@ import {
   applyFeatureFilters,
   filtersToQuery,
   hasActiveFilters,
+  hideDoneShippedItems,
   parseCustomDateFilters,
   parseFeatureFilters,
 } from "@/lib/feature-filters";
@@ -31,6 +32,7 @@ import { SortControl } from "./sort-control";
 import { getDb } from "@/lib/db";
 import { resolveWorkflowFor } from "@/lib/repo-config";
 import { getStore } from "@/lib/store";
+import { selectableReleases } from "@/lib/store/types";
 import { listWorkspaceMembers, type WorkspaceMember } from "@/lib/workspace";
 import { canConnectRepos, canEditProducts, requireWorkspaceAccess } from "@/lib/workspace-access";
 
@@ -76,6 +78,13 @@ export async function BoardView({
     dateProps.map((p) => p.key),
   );
   if (Object.keys(customDates).length > 0) filters.customDates = customDates;
+
+  // Finished-and-shipped work is hidden from the everyday board unless the user
+  // opts in via "Show shipped"; the toggle only appears when shipped releases
+  // exist to reveal.
+  const shippedReleaseIds = new Set(
+    releases.filter((r) => r.status === "shipped").map((r) => r.id),
+  );
 
   // The board scopes to the segment in the URL: one product, a product group
   // (`~key`, covering its subtree's products), or `all` = every product; it
@@ -126,10 +135,16 @@ export async function BoardView({
   // (pre-filter) drives the empty-state and toolbar decisions so the filter bar
   // never disappears when a filter empties the board.
   const featuresForLevel = scoped.filter((f) => f.level === activeLevel.key);
+  // Hide done-and-shipped items by default (before the user filters), so the
+  // toolbar/empty-state still see the level's real card count via
+  // `featuresForLevel` and the filter bar never vanishes.
+  const visibleForLevel = filters.showShipped
+    ? featuresForLevel
+    : hideDoneShippedItems(featuresForLevel, shippedReleaseIds);
   const filtering = hasActiveFilters(filters);
   const features = filtering
-    ? applyFeatureFilters(featuresForLevel, filters)
-    : featuresForLevel;
+    ? applyFeatureFilters(visibleForLevel, filters)
+    : visibleForLevel;
   const parentKey = parentLevelKey(activeLevel.key, levels);
   const parents = parentKey
     ? scoped
@@ -182,11 +197,15 @@ export async function BoardView({
     epics: filterableFeatures
       .filter((f) => f.childCount > 0)
       .map((f) => ({ specId: f.specId, title: f.title })),
-    releases: releases.map((r) => ({ id: r.id, name: r.name })),
+    releases: selectableReleases(releases, filters.release ?? null).map((r) => ({
+      id: r.id,
+      name: r.name,
+    })),
     products: productsById
       ? scopedProducts.map((p) => ({ id: p.id, name: p.name }))
       : undefined,
     dateFields: dateProps.map((p) => ({ key: p.key, label: p.label })),
+    canShowShipped: shippedReleaseIds.size > 0,
   };
 
   // The "New {level}" affordance, shared between the toolbar and the empty
@@ -218,9 +237,11 @@ export async function BoardView({
         parents={parents}
         productId={activeProduct?.id ?? null}
         products={scopedProducts.map((p) => ({ id: p.id, name: p.name }))}
-        releases={releases
-          .filter((r) => r.status !== "shipped")
-          .map((r) => ({ id: r.id, name: r.name, productId: r.productId }))}
+        releases={selectableReleases(releases).map((r) => ({
+          id: r.id,
+          name: r.name,
+          productId: r.productId,
+        }))}
         properties={properties}
         workflow={workflow}
         members={members}
@@ -318,7 +339,10 @@ export async function BoardView({
                       userId: m.userId,
                       name: m.name,
                     })),
-                    releases: releases.map((r) => ({ id: r.id, name: r.name })),
+                    releases: selectableReleases(releases).map((r) => ({
+                      id: r.id,
+                      name: r.name,
+                    })),
                   }
                 : undefined
             }

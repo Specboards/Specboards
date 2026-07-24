@@ -13,6 +13,7 @@ import { getDb } from "@/lib/db";
 import {
   applyFeatureFilters,
   hasActiveFilters,
+  hideDoneShippedItems,
   parseCustomDateFilters,
   parseFeatureFilters,
 } from "@/lib/feature-filters";
@@ -26,6 +27,7 @@ import {
 } from "@/lib/feature-helpers";
 import { resolveWorkflowFor } from "@/lib/repo-config";
 import { getStore } from "@/lib/store";
+import { selectableReleases } from "@/lib/store/types";
 import { listWorkspaceMembers } from "@/lib/workspace";
 import {
   canConnectRepos,
@@ -118,6 +120,12 @@ export async function ListView({
   );
   if (Object.keys(customDates).length > 0) filters.customDates = customDates;
 
+  // Finished-and-shipped work is hidden by default; "Show shipped" reveals it,
+  // and the toggle only appears when shipped releases exist.
+  const shippedReleaseIds = new Set(
+    releases.filter((r) => r.status === "shipped").map((r) => r.id),
+  );
+
   const options: FilterOptions = {
     statuses: workflow.statuses.filter((s) => s !== "archived"),
     assignees: members.map((m) => ({ userId: m.userId, name: m.name })),
@@ -125,11 +133,15 @@ export async function ListView({
     epics: features
       .filter((f) => f.childCount > 0)
       .map((f) => ({ specId: f.specId, title: f.title })),
-    releases: releases.map((r) => ({ id: r.id, name: r.name })),
+    releases: selectableReleases(releases, filters.release ?? null).map((r) => ({
+      id: r.id,
+      name: r.name,
+    })),
     products: productsById
       ? scopedProducts.map((p) => ({ id: p.id, name: p.name }))
       : undefined,
     dateFields: dateProps.map((p) => ({ key: p.key, label: p.label })),
+    canShowShipped: shippedReleaseIds.size > 0,
   };
 
   // Sort options include the workspace's sortable custom properties; a `cf:`
@@ -150,11 +162,16 @@ export async function ListView({
     ? sort.slice(CUSTOM_SORT_PREFIX.length)
     : null;
 
+  // Hide done-and-shipped items by default, before filtering and the hierarchy
+  // grouping, so it is the standing view unless "Show shipped" is on.
+  const visible = filters.showShipped
+    ? features
+    : hideDoneShippedItems(features, shippedReleaseIds);
   const filtering = hasActiveFilters(filters);
   // Filtering or a value-ordered sort (RICE, custom field) flattens the view:
   // excluding arbitrary rows, or ranking by a value, both break the
   // parent→child hierarchy grouping.
-  const base = filtering ? applyFeatureFilters(features, filters) : features;
+  const base = filtering ? applyFeatureFilters(visible, filters) : visible;
   const rows =
     sort === "rice"
       ? [...base]
@@ -171,7 +188,7 @@ export async function ListView({
             .map((feature) => ({ feature, depth: 0 }))
         : filtering
           ? base.map((feature) => ({ feature, depth: 0 }))
-          : buildHierarchyRows(features);
+          : buildHierarchyRows(visible);
 
   return (
     <section className="space-y-4">

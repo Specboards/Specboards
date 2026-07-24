@@ -21,6 +21,13 @@ export interface FeatureFilters {
    * `cf_<key>_to` in the query string.
    */
   customDates?: Record<string, { from?: string; to?: string }>;
+  /**
+   * Show items that are done and scheduled into a shipped release, which the
+   * backlog hides by default. A view toggle rather than a filter dimension: it
+   * does not count toward the active-filter total. Round-trips as
+   * `showShipped=1`.
+   */
+  showShipped?: boolean;
 }
 
 /** The single-value query keys — also the order the filter bar renders them. */
@@ -65,7 +72,30 @@ export function parseFeatureFilters(params: RawParams): FeatureFilters {
   if (parent) filters.parent = parent;
   const product = first(params.product);
   if (product) filters.product = product;
+  if (first(params.showShipped)) filters.showShipped = true;
   return filters;
+}
+
+/**
+ * Drop items that are done AND scheduled into a shipped release, keeping
+ * finished-and-shipped work out of the everyday backlog. A no-op when the
+ * workspace has no shipped releases. Applied before the user filters and the
+ * hierarchy grouping, independent of whether any filter is active, so it is the
+ * default view unless `showShipped` is set.
+ */
+export function hideDoneShippedItems(
+  features: FeatureRecord[],
+  shippedReleaseIds: ReadonlySet<string>,
+): FeatureRecord[] {
+  if (shippedReleaseIds.size === 0) return features;
+  return features.filter(
+    (f) =>
+      !(
+        f.status === "done" &&
+        f.releaseId !== null &&
+        shippedReleaseIds.has(f.releaseId)
+      ),
+  );
 }
 
 /**
@@ -165,5 +195,6 @@ export function filtersToQuery(filters: FeatureFilters): string {
     if (range.from) params.set(dateFromParam(key), range.from);
     if (range.to) params.set(dateToParam(key), range.to);
   }
+  if (filters.showShipped) params.set("showShipped", "1");
   return params.toString();
 }
