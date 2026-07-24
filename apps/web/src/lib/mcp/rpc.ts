@@ -27,7 +27,10 @@ const INSTRUCTIONS =
   "with update_spec_content (commits to git), and break a card down by " +
   "creating child specs with create_spec, then update_item(parentSpecId) to " +
   "nest each under the card. To roll changes up, read the child specs and " +
-  "write a summary into the parent card with update_item(details). Remove a " +
+  "write a summary into the parent card with update_item(details). After you " +
+  "open a PR for an item, record it with link_github (kind pull_request / " +
+  "issue / branch); list_github_links shows an item's links and unlink_github " +
+  "removes one. Remove a " +
   "DB-native card you no longer need with delete_item (spec-backed items are " +
   "deleted in git, not here). Organize work into versions with list_releases " +
   "and create_release; revise a release's dates, status, name, notes, or " +
