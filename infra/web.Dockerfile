@@ -6,6 +6,13 @@ COPY . .
 RUN pnpm install --frozen-lockfile
 # Standalone output so the runtime image only needs the traced server bundle.
 ENV NEXT_OUTPUT=standalone
+# Bake the running commit into the client bundle so the in-app "Source code"
+# link (AGPL source availability, /legal) resolves to the exact source. Pass
+# --build-arg GIT_SHA="$(git rev-parse --short HEAD)"; falls back to the repo
+# root when unset. A self-hoster running a modified copy can also set
+# NEXT_PUBLIC_SOURCE_REPO_URL to point the notice at their published fork.
+ARG GIT_SHA=""
+ENV NEXT_PUBLIC_GIT_SHA=$GIT_SHA
 RUN pnpm build
 
 FROM node:22-alpine AS runner

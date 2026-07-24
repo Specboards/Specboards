@@ -18,6 +18,7 @@ import {
   type NavItem,
 } from "@/lib/nav-model";
 import type { ProductGroupRecord, ProductRecord } from "@/lib/store";
+import { versionLabel } from "@/lib/source-info";
 import { useOrgPath, useOrgProductPath, useProductSlug } from "@/lib/use-org";
 import { cn } from "@/lib/utils";
 
@@ -189,6 +190,18 @@ export function SidebarBody({
       <div className="space-y-1 border-t p-2">
         <NotificationBell collapsed={collapsed} />
         <SidebarProfile collapsed={collapsed} />
+        {/* AGPL source-availability: a persistent link to the source + license
+            notice (see /legal), present in hosted and self-host builds. */}
+        <Link
+          href="/legal"
+          title="Source code & license"
+          className={cn(
+            "block rounded-md px-2 py-1 text-2xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+            collapsed && "text-center",
+          )}
+        >
+          {collapsed ? "©" : `Source & license · ${versionLabel()}`}
+        </Link>
       </div>
     </>
   );

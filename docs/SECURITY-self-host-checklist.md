@@ -105,3 +105,11 @@ a live backstop behind the app-code workspace filters.
       production advisories; run it against your build if you fork or vendor.
 - [ ] Run behind the reverse proxy / WAF you would use for any internet-facing
       service, and keep the host OS patched.
+
+## 8. License notices (AGPL)
+
+- [ ] The app ships an in-app source + license notice at `/legal`, linked from
+      the sidebar footer, satisfying the AGPLv3 source-availability obligation
+      out of the box. If you **modify** Specboards and expose it to users over a
+      network, publish your modified source and point the notice at it. See
+      [AGPL source availability](./AGPL-source-availability.md).
