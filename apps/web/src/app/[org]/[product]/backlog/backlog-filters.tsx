@@ -310,7 +310,7 @@ export function BacklogFilters({
                   <span className="font-medium text-muted-foreground">
                     {c.label}
                   </span>
-                  {renderSelect(c, "h-9 w-full")}
+                  {renderSelect(c, "h-8 w-full")}
                 </label>
               ))}
               {dateFields.map((field) => (
@@ -321,7 +321,7 @@ export function BacklogFilters({
                   <span className="font-medium text-muted-foreground">
                     {field.label}
                   </span>
-                  {renderDateRange(field, "h-9 w-full")}
+                  {renderDateRange(field, "h-8 w-full")}
                 </div>
               ))}
               {options.canShowShipped ? (

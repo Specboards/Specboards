@@ -242,7 +242,7 @@ export function DocSpaceSetup({
                         value={pickedRepo}
                         onChange={(e) => setPickedRepo(e.target.value)}
                         aria-label="Existing repository"
-                        className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm"
+                        className="h-8 w-full rounded-md border border-input bg-transparent px-3 text-sm"
                       >
                         {picker.map((repo) => (
                           <option key={repoKey(repo)} value={repoKey(repo)}>

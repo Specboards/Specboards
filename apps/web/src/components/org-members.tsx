@@ -326,14 +326,14 @@ function InviteForm({
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="teammate@example.com"
-                className="h-9 w-64"
+                className="h-8 w-64"
                 aria-label="Teammate email"
                 autoFocus
               />
               <Select
                 value={role}
                 onChange={(e) => setRole(e.target.value as OrgRole)}
-                className="h-9 w-32"
+                className="h-8 w-32"
                 aria-label="Org role"
               >
                 {ORG_ROLES.map((r) => (

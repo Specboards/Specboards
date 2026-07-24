@@ -541,7 +541,7 @@ function EmptySpecsState({
               value={repoId}
               onChange={(e) => setPickedRepoId(e.target.value)}
               disabled={pending}
-              className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
+              className="h-8 w-full rounded-md border border-input bg-transparent px-3 text-sm"
             >
               {[...repos]
                 .sort(
