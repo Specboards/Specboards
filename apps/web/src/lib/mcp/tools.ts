@@ -15,8 +15,13 @@ import {
   patchFeature,
   updateRelease,
 } from "@/lib/features-service";
+import {
+  addFeatureGithubLink,
+  parseGithubLinkInput,
+  removeFeatureGithubLink,
+} from "@/lib/github-links-service";
 import { createSpec, updateSpecContent } from "@/lib/spec-content";
-import { getStore, type WorkspaceScope } from "@/lib/store";
+import { getStore, type GithubLink, type WorkspaceScope } from "@/lib/store";
 import { type MemberRole } from "@/lib/workspace";
 
 /**
@@ -78,6 +83,20 @@ const specIdSchema = {
   type: "string",
   description: "The item's stable spec id (a UUID; see list_items).",
 } as const;
+
+/** Project a stored GitHub link down to the fields the MCP surface returns. */
+function githubLinkOut(link: GithubLink) {
+  return {
+    id: link.id,
+    kind: link.kind,
+    number: link.number,
+    branch: link.branch,
+    url: link.url,
+    title: link.title,
+    state: link.state,
+    inherited: link.inherited,
+  };
+}
 
 export const TOOLS: McpTool[] = [
   {
@@ -792,6 +811,119 @@ export const TOOLS: McpTool[] = [
         notes: release.notes,
         itemCount: release.itemCount,
       };
+    },
+  },
+  {
+    name: "list_github_links",
+    description:
+      "List a work item's linked GitHub artifacts (pull requests, issues, " +
+      "branches). Each link carries its id, kind, PR/issue number or branch " +
+      "name, url, cached title and state (open/closed/merged), and `inherited` " +
+      "(true when rolled up from a descendant item rather than linked directly " +
+      "here). read_item omits these, so use this to see or verify an item's " +
+      "GitHub links - for example after link_github.",
+    inputSchema: {
+      type: "object",
+      properties: { specId: specIdSchema },
+      required: ["specId"],
+      additionalProperties: false,
+    },
+    write: false,
+    run: async (args, ctx) => {
+      const specId = requireString(args, "specId");
+      const store = await getStore();
+      const f = await store.getFeature(specId, ctx.scope);
+      if (!f) throw new Error(`No item with spec id ${specId}.`);
+      return {
+        specId: f.specId,
+        title: f.title,
+        githubLinks: f.githubLinks.map(githubLinkOut),
+      };
+    },
+  },
+  {
+    name: "link_github",
+    description:
+      "Attach a GitHub artifact to a work item by spec id, closing the loop " +
+      "after you open a PR for the item. Pass `kind` plus its identifier: " +
+      "`pull_request` or `issue` with a positive integer `number`, or `branch` " +
+      "with a `branch` name. The PR/issue/branch must exist in the item's " +
+      "connected repository; its title, state, and url are resolved from GitHub " +
+      "and cached. Re-linking the same artifact refreshes that cached metadata. " +
+      "Requires write access to the item's product. Returns the resolved link " +
+      "and the item's refreshed link list.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        specId: specIdSchema,
+        kind: {
+          type: "string",
+          enum: ["pull_request", "issue", "branch"],
+          description: "The kind of GitHub artifact to link.",
+        },
+        number: {
+          type: "integer",
+          description:
+            "The pull request or issue number (required for pull_request " +
+            "and issue; omit for branch).",
+        },
+        branch: {
+          type: "string",
+          description: "The branch name (required for branch; omit otherwise).",
+        },
+      },
+      required: ["specId", "kind"],
+      additionalProperties: false,
+    },
+    write: true,
+    run: async (args, ctx) => {
+      const specId = requireString(args, "specId");
+      // Reuse the app's validation and GitHub resolution end to end; the store
+      // enforces per-product write access, matching the web link action.
+      const input = parseGithubLinkInput(args);
+      const links = await addFeatureGithubLink(specId, input, ctx.scope);
+      // Surface the link we just resolved (matched by kind + number/branch).
+      const linked = links.find(
+        (l) =>
+          !l.inherited &&
+          l.kind === input.kind &&
+          (input.kind === "branch"
+            ? l.branch === input.branch
+            : l.number === input.number),
+      );
+      return {
+        specId,
+        linked: linked ? githubLinkOut(linked) : null,
+        githubLinks: links.map(githubLinkOut),
+      };
+    },
+  },
+  {
+    name: "unlink_github",
+    description:
+      "Remove a GitHub link from a work item by the link's id (from " +
+      "list_github_links). Only a link added directly to this item can be " +
+      "removed; an inherited link lives on the descendant item it was linked " +
+      "to. Requires write access to the item's product. Returns the item's " +
+      "refreshed link list.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        specId: specIdSchema,
+        linkId: {
+          type: "string",
+          description: "The link's id (from list_github_links).",
+        },
+      },
+      required: ["specId", "linkId"],
+      additionalProperties: false,
+    },
+    write: true,
+    run: async (args, ctx) => {
+      const specId = requireString(args, "specId");
+      const linkId = requireString(args, "linkId");
+      const links = await removeFeatureGithubLink(specId, linkId, ctx.scope);
+      return { specId, githubLinks: links.map(githubLinkOut) };
     },
   },
 ];
