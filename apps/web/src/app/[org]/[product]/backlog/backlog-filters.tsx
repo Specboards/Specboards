@@ -6,6 +6,7 @@ import { SlidersHorizontal } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import {
   Sheet,
@@ -31,6 +32,10 @@ export interface FilterOptions {
   releases: { id: string; name: string }[];
   /** Products to filter by; provided only in the cross-product view. */
   products?: { id: string; name: string }[];
+  /** Date-typed custom fields, each offering a from/to range filter. */
+  dateFields?: { key: string; label: string }[];
+  /** Whether to offer the "Show shipped" toggle (any shipped release exists). */
+  canShowShipped?: boolean;
 }
 
 /** One filter dimension, resolved to the options the current data set offers. */
@@ -89,6 +94,20 @@ export function BacklogFilters({
     const next = { ...filters };
     if (value === undefined) delete next[key];
     else next[key] = value;
+    update(next);
+  }
+
+  /** Set or clear one end of a date-field range, dropping the field when empty. */
+  function setDateRange(fieldKey: string, part: "from" | "to", value: string) {
+    const range = { ...(filters.customDates?.[fieldKey] ?? {}) };
+    if (value) range[part] = value;
+    else delete range[part];
+    const customDates = { ...filters.customDates };
+    if (range.from || range.to) customDates[fieldKey] = range;
+    else delete customDates[fieldKey];
+    const next = { ...filters };
+    if (Object.keys(customDates).length) next.customDates = customDates;
+    else delete next.customDates;
     update(next);
   }
 
@@ -196,6 +215,37 @@ export function BacklogFilters({
     );
   }
 
+  // A from/to date-range control for one date-typed custom field. The two
+  // inputs bound each other (`max`/`min`) so a range can't invert.
+  const dateFields = options.dateFields ?? [];
+  function renderDateRange(
+    field: { key: string; label: string },
+    inputClass: string,
+  ) {
+    const range = filters.customDates?.[field.key] ?? {};
+    return (
+      <div className="flex items-center gap-1">
+        <Input
+          type="date"
+          aria-label={`${field.label} from`}
+          className={cn("h-8", inputClass)}
+          value={range.from ?? ""}
+          max={range.to || undefined}
+          onChange={(e) => setDateRange(field.key, "from", e.target.value)}
+        />
+        <span className="text-xs text-muted-foreground">to</span>
+        <Input
+          type="date"
+          aria-label={`${field.label} to`}
+          className={cn("h-8", inputClass)}
+          value={range.to ?? ""}
+          min={range.from || undefined}
+          onChange={(e) => setDateRange(field.key, "to", e.target.value)}
+        />
+      </div>
+    );
+  }
+
   return (
     <>
       {/* Desktop: inline filter row. */}
@@ -204,6 +254,25 @@ export function BacklogFilters({
         data-pending={pending}
       >
         {controls.map((c) => renderSelect(c, c.desktopWidth))}
+        {dateFields.map((field) => (
+          <div key={`cf:${field.key}`} className="flex items-center gap-1.5">
+            <span className="text-xs text-muted-foreground">{field.label}</span>
+            {renderDateRange(field, "w-36")}
+          </div>
+        ))}
+        {options.canShowShipped ? (
+          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              className="h-4 w-4 cursor-pointer accent-primary"
+              checked={!!filters.showShipped}
+              onChange={(e) =>
+                set("showShipped", e.target.checked ? true : undefined)
+              }
+            />
+            Show shipped
+          </label>
+        ) : null}
         {active ? (
           <Button
             variant="link"
@@ -244,6 +313,32 @@ export function BacklogFilters({
                   {renderSelect(c, "h-9 w-full")}
                 </label>
               ))}
+              {dateFields.map((field) => (
+                <div
+                  key={`cf:${field.key}`}
+                  className="flex flex-col gap-1.5 text-sm"
+                >
+                  <span className="font-medium text-muted-foreground">
+                    {field.label}
+                  </span>
+                  {renderDateRange(field, "h-9 w-full")}
+                </div>
+              ))}
+              {options.canShowShipped ? (
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 cursor-pointer accent-primary"
+                    checked={!!filters.showShipped}
+                    onChange={(e) =>
+                      set("showShipped", e.target.checked ? true : undefined)
+                    }
+                  />
+                  <span className="font-medium text-muted-foreground">
+                    Show shipped
+                  </span>
+                </label>
+              ) : null}
             </div>
             {active ? (
               <Button

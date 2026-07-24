@@ -211,6 +211,43 @@ function parseCustomFields(value: unknown): Record<string, CustomFieldValue> {
   return out;
 }
 
+/** Whether `value` is a real calendar date in `YYYY-MM-DD` form. */
+function isIsoDate(value: string): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!m) return false;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const date = new Date(Date.UTC(y, mo - 1, d));
+  return (
+    date.getUTCFullYear() === y &&
+    date.getUTCMonth() === mo - 1 &&
+    date.getUTCDate() === d
+  );
+}
+
+/**
+ * Enforce declared custom-property types on the values being written. Only
+ * `date` is checked today (it must be a real ISO `YYYY-MM-DD`), so a date field
+ * is trustworthy to sort and, later, to plot on a timeline. Values for unknown
+ * keys or untyped-here properties pass through (structural checks already ran
+ * in {@link parseCustomFields}). A `null` clears a field and is always allowed.
+ */
+export function assertCustomFieldTypes(
+  customFields: Record<string, CustomFieldValue>,
+  properties: PropertyDef[],
+): void {
+  const typeByKey = new Map(properties.map((p) => [p.key, p.type]));
+  for (const [key, value] of Object.entries(customFields)) {
+    if (value === null) continue;
+    if (typeByKey.get(key) === "date") {
+      if (typeof value !== "string" || !isIsoDate(value)) {
+        throw new InvalidPatchError(
+          `customFields.${key} must be a date in YYYY-MM-DD format.`,
+        );
+      }
+    }
+  }
+}
+
 /** Apply a validated patch, enforcing the status workflow. */
 export async function patchFeature(
   specId: string,
@@ -220,6 +257,14 @@ export async function patchFeature(
   const store = await getStore();
   const feature = await store.getFeature(specId, scope);
   if (!feature) throw new FeatureNotFoundError(specId);
+
+  // Type-check custom-field values against their property definitions (date
+  // fields must be real ISO dates). Skipped when no custom fields are being
+  // written, so the common patch avoids the extra property lookup.
+  if (patch.customFields && Object.keys(patch.customFields).length > 0) {
+    const properties = await store.listProperties(scope);
+    assertCustomFieldTypes(patch.customFields, properties);
+  }
 
   if (patch.title !== undefined && !feature.isDbNative) {
     throw new InvalidPatchError(

@@ -36,6 +36,7 @@ import {
 import { cn } from "@/lib/utils";
 import {
   releasesForProduct,
+  selectableReleases,
   type CustomFieldValue,
   type FeatureDetail,
   type ReleaseRecord,
@@ -84,10 +85,15 @@ export function ItemProperties({
 }) {
   const router = useRouter();
   // An item can only be scheduled into a release from its own product, or a
-  // workspace-wide portfolio release. Scope the picker to those.
-  const productReleases = feature.productId
-    ? releasesForProduct(releases, feature.productId)
-    : releases.filter((r) => r.productId === null);
+  // workspace-wide portfolio release. Scope the picker to those, and drop
+  // shipped releases (keeping the item's current one so its value never
+  // disappears) so finished vehicles don't clutter the dropdown.
+  const productReleases = selectableReleases(
+    feature.productId
+      ? releasesForProduct(releases, feature.productId)
+      : releases.filter((r) => r.productId === null),
+    feature.releaseId ?? null,
+  );
   const formRef = useRef<HTMLFormElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inFlightRef = useRef(false);

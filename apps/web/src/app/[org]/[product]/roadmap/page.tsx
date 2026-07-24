@@ -74,6 +74,9 @@ export default async function RoadmapPage({
   const customFieldLabels = Object.fromEntries(
     properties.map((p) => [p.key, p.label]),
   );
+  const customFieldTypes = Object.fromEntries(
+    properties.map((p) => [p.key, p.type]),
+  );
   const memberNames = Object.fromEntries(
     members.map((m) => [m.userId, m.name]),
   );
@@ -257,6 +260,19 @@ export default async function RoadmapPage({
         }
       : undefined;
 
+  // Bulk multi-select reuses the backlog board's action bar. Offered to editors
+  // on the active view only (the shipped view is read-only, like drag); the
+  // client also hides it on the mobile swipe layout. Releases to schedule into
+  // are the active (non-shipped) columns; the bar adds its own "No release".
+  const bulkOptions =
+    canEdit && !showShipped
+      ? {
+          statuses: workflow.statuses.filter((s) => s !== "archived"),
+          assignees: members.map((m) => ({ userId: m.userId, name: m.name })),
+          releases: activeReleases.map((r) => ({ id: r.id, name: r.name })),
+        }
+      : undefined;
+
   const board = (
     <RoadmapBoard
       // Remount when the data set changes (level or product scope) so the
@@ -273,12 +289,14 @@ export default async function RoadmapPage({
       workflow={workflow}
       productsById={productsById}
       customFieldLabels={customFieldLabels}
+      customFieldTypes={customFieldTypes}
       memberNames={memberNames}
       releaseNames={releaseNames}
       allowDrag={canEdit && !showShipped}
       editableReleaseIds={editableReleaseIds}
       productNamesById={productNamesById}
       quickAdd={quickAdd}
+      bulkOptions={bulkOptions}
     />
   );
 

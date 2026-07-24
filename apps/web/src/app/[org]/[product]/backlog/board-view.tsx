@@ -23,13 +23,16 @@ import {
   applyFeatureFilters,
   filtersToQuery,
   hasActiveFilters,
+  hideDoneShippedItems,
+  parseCustomDateFilters,
   parseFeatureFilters,
 } from "@/lib/feature-filters";
-import { parseSortMode } from "@/lib/feature-helpers";
+import { parseSortMode, sortableProperties } from "@/lib/feature-helpers";
 import { SortControl } from "./sort-control";
 import { getDb } from "@/lib/db";
 import { resolveWorkflowFor } from "@/lib/repo-config";
 import { getStore } from "@/lib/store";
+import { selectableReleases } from "@/lib/store/types";
 import { listWorkspaceMembers, type WorkspaceMember } from "@/lib/workspace";
 import { canConnectRepos, canEditProducts, requireWorkspaceAccess } from "@/lib/workspace-access";
 
@@ -52,7 +55,6 @@ export async function BoardView({
   const { product: productSlug } = await params;
   const sp = await searchParams;
   const filters = parseFeatureFilters(sp);
-  const sort = parseSortMode(sp.sort);
   // Board columns are the workflow statuses. A `status` filter narrows the
   // board to just that one column rather than emptying every other one.
   const allColumns = workflow.statuses.filter((s) => s !== "archived");
@@ -67,6 +69,22 @@ export async function BoardView({
       store.listReleases(access ?? undefined),
       store.listDetailTemplates(access ?? undefined),
     ]);
+
+  // Date-typed custom fields add a from/to range filter; parse those params now
+  // so the range is applied (and reflected in the bar) alongside the built-ins.
+  const dateProps = properties.filter((p) => p.type === "date");
+  const customDates = parseCustomDateFilters(
+    sp,
+    dateProps.map((p) => p.key),
+  );
+  if (Object.keys(customDates).length > 0) filters.customDates = customDates;
+
+  // Finished-and-shipped work is hidden from the everyday board unless the user
+  // opts in via "Show shipped"; the toggle only appears when shipped releases
+  // exist to reveal.
+  const shippedReleaseIds = new Set(
+    releases.filter((r) => r.status === "shipped").map((r) => r.id),
+  );
 
   // The board scopes to the segment in the URL: one product, a product group
   // (`~key`, covering its subtree's products), or `all` = every product; it
@@ -117,10 +135,16 @@ export async function BoardView({
   // (pre-filter) drives the empty-state and toolbar decisions so the filter bar
   // never disappears when a filter empties the board.
   const featuresForLevel = scoped.filter((f) => f.level === activeLevel.key);
+  // Hide done-and-shipped items by default (before the user filters), so the
+  // toolbar/empty-state still see the level's real card count via
+  // `featuresForLevel` and the filter bar never vanishes.
+  const visibleForLevel = filters.showShipped
+    ? featuresForLevel
+    : hideDoneShippedItems(featuresForLevel, shippedReleaseIds);
   const filtering = hasActiveFilters(filters);
   const features = filtering
-    ? applyFeatureFilters(featuresForLevel, filters)
-    : featuresForLevel;
+    ? applyFeatureFilters(visibleForLevel, filters)
+    : visibleForLevel;
   const parentKey = parentLevelKey(activeLevel.key, levels);
   const parents = parentKey
     ? scoped
@@ -146,6 +170,22 @@ export async function BoardView({
     properties.map((f) => [f.key, f.label]),
   );
 
+  // Sort options include the workspace's sortable custom properties, so a
+  // board can be ordered by e.g. a "Due date" date field. Parsed here (not up
+  // top) because a `cf:` sort is only honored for a key that actually exists.
+  const sortableProps = sortableProperties(properties);
+  const sort = parseSortMode(
+    sp.sort,
+    sortableProps.map((p) => p.key),
+  );
+  const customSorts = sortableProps.map((p) => ({
+    value: `cf:${p.key}`,
+    label: p.label,
+  }));
+  const customFieldTypes = Object.fromEntries(
+    properties.map((p) => [p.key, p.type]),
+  );
+
   // Filter-bar options mirror the list view: any status (minus archived),
   // workspace assignees, and tags/epics drawn from every in-scope card so the
   // choices don't shrink as you drill into a single level.
@@ -157,10 +197,15 @@ export async function BoardView({
     epics: filterableFeatures
       .filter((f) => f.childCount > 0)
       .map((f) => ({ specId: f.specId, title: f.title })),
-    releases: releases.map((r) => ({ id: r.id, name: r.name })),
+    releases: selectableReleases(releases, filters.release ?? null).map((r) => ({
+      id: r.id,
+      name: r.name,
+    })),
     products: productsById
       ? scopedProducts.map((p) => ({ id: p.id, name: p.name }))
       : undefined,
+    dateFields: dateProps.map((p) => ({ key: p.key, label: p.label })),
+    canShowShipped: shippedReleaseIds.size > 0,
   };
 
   // The "New {level}" affordance, shared between the toolbar and the empty
@@ -192,9 +237,11 @@ export async function BoardView({
         parents={parents}
         productId={activeProduct?.id ?? null}
         products={scopedProducts.map((p) => ({ id: p.id, name: p.name }))}
-        releases={releases
-          .filter((r) => r.status !== "shipped")
-          .map((r) => ({ id: r.id, name: r.name, productId: r.productId }))}
+        releases={selectableReleases(releases).map((r) => ({
+          id: r.id,
+          name: r.name,
+          productId: r.productId,
+        }))}
         properties={properties}
         workflow={workflow}
         members={members}
@@ -237,7 +284,7 @@ export async function BoardView({
         {featuresForLevel.length > 0 ? (
           <div className="flex flex-wrap items-center justify-between gap-2">
             <BacklogFilters filters={filters} options={filterOptions} />
-            <SortControl sort={sort} />
+            <SortControl sort={sort} customSorts={customSorts} />
           </div>
         ) : null}
         {featuresForLevel.length === 0 ? (
@@ -278,6 +325,7 @@ export async function BoardView({
             columns={columns}
             workflow={workflow}
             sortMode={sort}
+            customFieldTypes={customFieldTypes}
             customFieldLabels={customFieldLabels}
             memberNames={memberNames}
             releases={releases}
@@ -291,7 +339,10 @@ export async function BoardView({
                       userId: m.userId,
                       name: m.name,
                     })),
-                    releases: releases.map((r) => ({ id: r.id, name: r.name })),
+                    releases: selectableReleases(releases).map((r) => ({
+                      id: r.id,
+                      name: r.name,
+                    })),
                   }
                 : undefined
             }

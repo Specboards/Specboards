@@ -575,6 +575,21 @@ export function releasesForProduct(
   );
 }
 
+/**
+ * Releases offered in a scheduling picker: the unshipped ones, plus `keepId`
+ * (the item's currently-assigned release) even if it has since shipped, so an
+ * existing value never disappears from its own dropdown. Shared by the filter
+ * bar, the create drawer, and the item edit view so they agree on what a
+ * schedulable release is. Pass `keepId = null` where there is no current value
+ * (creating, or the filter bar with no active release filter).
+ */
+export function selectableReleases(
+  releases: ReleaseRecord[],
+  keepId: string | null = null,
+): ReleaseRecord[] {
+  return releases.filter((r) => r.status !== "shipped" || r.id === keepId);
+}
+
 /** Dated releases first (ascending target date), undated last, then by name. */
 export function compareReleases(
   a: Pick<ReleaseRecord, "targetDate" | "name">,

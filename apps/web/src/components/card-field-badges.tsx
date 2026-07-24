@@ -1,5 +1,7 @@
 "use client";
 
+import type { PropertyType } from "@specboards/core";
+
 import { Badge } from "@/components/ui/badge";
 import { CUSTOM_FIELD_PREFIX } from "@/lib/card-fields";
 import type { CustomFieldValue, FeatureRecord } from "@/lib/store/types";
@@ -13,6 +15,8 @@ import type { CustomFieldValue, FeatureRecord } from "@/lib/store/types";
 export type CardFieldMaps = {
   /** Label for each custom-property key (without the `cf:` prefix). */
   customFieldLabels: Record<string, string>;
+  /** Declared type per custom-property key, so `date` values render formatted. */
+  customFieldTypes: Record<string, PropertyType>;
   memberNames: Record<string, string>;
   /** Release name by id, for the release badge. */
   releaseNames: Record<string, string>;
@@ -24,13 +28,43 @@ export function customFieldText(value: CustomFieldValue): string {
   return String(value);
 }
 
+/**
+ * Format an ISO `YYYY-MM-DD` date value as a short human date (e.g. "Jul 24,
+ * 2026"). Parsed from its calendar parts, not `new Date(string)`, so a
+ * date-only value never shifts a day across the local timezone. Non-ISO input
+ * is returned unchanged.
+ */
+function formatCardDate(value: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+  if (!m) return value;
+  const date = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+/** Display text for a custom-field value, formatting `date`-typed values. */
+export function customFieldDisplay(
+  value: CustomFieldValue,
+  type: PropertyType | undefined,
+): string {
+  if (type === "date" && typeof value === "string" && value.trim() !== "") {
+    return formatCardDate(value);
+  }
+  return customFieldText(value);
+}
+
 /** Render one card field as a badge (or null when there's nothing to show). */
 export function renderCardField(
   key: string,
   f: FeatureRecord,
   maps: CardFieldMaps,
 ): React.ReactNode {
-  const { customFieldLabels, memberNames, releaseNames } = maps;
+  const { customFieldLabels, customFieldTypes, memberNames, releaseNames } =
+    maps;
   switch (key) {
     case "assignee":
       return f.assigneeId ? (
@@ -128,7 +162,10 @@ export function renderCardField(
     default: {
       if (!key.startsWith(CUSTOM_FIELD_PREFIX)) return null;
       const cfKey = key.slice(CUSTOM_FIELD_PREFIX.length);
-      const text = customFieldText(f.customFields[cfKey] ?? null);
+      const text = customFieldDisplay(
+        f.customFields[cfKey] ?? null,
+        customFieldTypes[cfKey],
+      );
       if (!text) return null;
       return (
         <Badge key={key} variant="secondary" size="sm">
@@ -172,7 +209,10 @@ export function featuredBadge(
 ): React.ReactNode {
   if (!featured) return null;
   if (!fields.includes(`${CUSTOM_FIELD_PREFIX}${featured}`)) return null;
-  const value = customFieldText(f.customFields[featured] ?? null);
+  const value = customFieldDisplay(
+    f.customFields[featured] ?? null,
+    maps.customFieldTypes[featured],
+  );
   if (!value) return null;
   return (
     <Badge variant="secondary" size="sm" className="w-fit">

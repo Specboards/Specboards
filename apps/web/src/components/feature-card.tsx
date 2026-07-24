@@ -9,6 +9,8 @@ import {
 } from "@/components/card-field-badges";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
+import type { PropertyType } from "@specboards/core";
+
 import { formatRiceScore } from "@/lib/feature-helpers";
 import { productBadge } from "@/lib/product-color";
 import type { FeatureRecord } from "@/lib/store/types";
@@ -40,6 +42,7 @@ export function FeatureCard({
   fields,
   featured,
   customFieldLabels,
+  customFieldTypes,
   memberNames,
   releaseNames,
   onOpen,
@@ -50,6 +53,8 @@ export function FeatureCard({
   featured: string | null;
   /** Label for each custom-property key (without the `cf:` prefix). */
   customFieldLabels: Record<string, string>;
+  /** Declared type per custom-property key, so `date` values render formatted. */
+  customFieldTypes: Record<string, PropertyType>;
   memberNames: Record<string, string>;
   /** Release name by id, for the release badge. */
   releaseNames: Record<string, string>;
@@ -59,7 +64,12 @@ export function FeatureCard({
   product?: ProductTag;
 }) {
   const orgHref = useOrgProductPath();
-  const maps: CardFieldMaps = { customFieldLabels, memberNames, releaseNames };
+  const maps: CardFieldMaps = {
+    customFieldLabels,
+    customFieldTypes,
+    memberNames,
+    releaseNames,
+  };
   const badges = cardFieldBadges(fields, featured, feature, maps);
   const featuredEl = featuredBadge(featured, fields, feature, maps);
 

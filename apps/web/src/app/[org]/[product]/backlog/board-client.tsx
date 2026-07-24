@@ -24,7 +24,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { ListChecks } from "lucide-react";
 import { toast } from "sonner";
 
-import type { StatusWorkflow } from "@specboards/core";
+import type { PropertyType, StatusWorkflow } from "@specboards/core";
 
 import { BoardColumnNav } from "@/components/board-column-nav";
 import { ColumnQuickAdd } from "@/components/column-quick-add";
@@ -39,7 +39,9 @@ import { useAnnouncer } from "@/lib/use-announcer";
 import { useIsCoarsePointer, useIsMobile } from "@/lib/use-media-query";
 import { useSwipeColumns } from "@/lib/use-swipe-columns";
 import {
+  compareByCustomField,
   compareByRiceScore,
+  CUSTOM_SORT_PREFIX,
   rankBetween,
   sortBoardCards,
   statusLabel,
@@ -71,12 +73,17 @@ export function BoardClient({
   bulkOptions,
   quickAdd,
   sortMode = "default",
+  customFieldTypes = {},
 }: {
   features: FeatureRecord[];
   columns: string[];
   workflow: StatusWorkflow;
-  /** How to order cards within each column: manual rank, or by RICE score. */
+  /** How to order cards within each column: manual rank, RICE score, or a
+   * custom property (`cf:<key>` sort mode). */
   sortMode?: SortMode;
+  /** Declared type per custom-property key, so a `cf:` sort compares dates and
+   * numbers correctly. */
+  customFieldTypes?: Record<string, PropertyType>;
   customFieldLabels: Record<string, string>;
   memberNames: Record<string, string>;
   /** The workspace's releases (for the release badge). */
@@ -98,7 +105,7 @@ export function BoardClient({
     Object.fromEntries(features.map((f) => [f.specId, f])),
   );
   const [lists, setLists] = useState<Record<string, string[]>>(() =>
-    groupIntoColumns(features, columns, sortMode),
+    groupIntoColumns(features, columns, sortMode, customFieldTypes),
   );
   const [activeId, setActiveId] = useState<string | null>(null);
   const [editingSpecId, setEditingSpecId] = useState<string | null>(null);
@@ -141,8 +148,8 @@ export function BoardClient({
   // server truth never clobbers an in-flight optimistic drag.
   useEffect(() => {
     setRecords(Object.fromEntries(features.map((f) => [f.specId, f])));
-    setLists(groupIntoColumns(features, columns, sortMode));
-  }, [features, columns, sortMode]);
+    setLists(groupIntoColumns(features, columns, sortMode, customFieldTypes));
+  }, [features, columns, sortMode, customFieldTypes]);
 
   // Below md the board is a swipe-column carousel: dragging is disabled (see
   // SortableCard) and horizontal swipes scroll between columns. On coarse
@@ -408,6 +415,7 @@ export function BoardClient({
               cardFields={cardFields}
               featured={featured}
               customFieldLabels={customFieldLabels}
+              customFieldTypes={customFieldTypes}
               memberNames={memberNames}
               releaseNames={releaseNames}
               onOpen={setEditingSpecId}
@@ -429,6 +437,7 @@ export function BoardClient({
               fields={cardFields}
               featured={featured}
               customFieldLabels={customFieldLabels}
+              customFieldTypes={customFieldTypes}
               memberNames={memberNames}
               releaseNames={releaseNames}
               onOpen={() => {}}
@@ -465,6 +474,7 @@ function Column({
   cardFields,
   featured,
   customFieldLabels,
+  customFieldTypes,
   memberNames,
   releaseNames,
   onOpen,
@@ -484,6 +494,7 @@ function Column({
   cardFields: string[];
   featured: string | null;
   customFieldLabels: Record<string, string>;
+  customFieldTypes: Record<string, PropertyType>;
   memberNames: Record<string, string>;
   releaseNames: Record<string, string>;
   onOpen: (specId: string) => void;
@@ -560,6 +571,7 @@ function Column({
                       fields={cardFields}
                       featured={featured}
                       customFieldLabels={customFieldLabels}
+                      customFieldTypes={customFieldTypes}
                       memberNames={memberNames}
                       releaseNames={releaseNames}
                       onOpen={() => onOpen(id)}
@@ -642,22 +654,31 @@ function arraysEqual(a: string[], b: string[]): boolean {
 }
 
 /** Group features into per-status ordered specId lists (board order). Cards sort
- * by manual rank by default, or by RICE score (highest first) when requested. */
+ * by manual rank by default, by RICE score (highest first), or by a custom
+ * property (`cf:<key>`, ascending, empties last) when requested. */
 function groupIntoColumns(
   features: FeatureRecord[],
   columns: string[],
   sortMode: SortMode = "default",
+  customFieldTypes: Record<string, PropertyType> = {},
 ): Record<string, string[]> {
   const byStatus = new Map<string, FeatureRecord[]>();
   for (const c of columns) byStatus.set(c, []);
   for (const f of features) byStatus.get(f.status)?.push(f);
+  const cfKey = sortMode.startsWith(CUSTOM_SORT_PREFIX)
+    ? sortMode.slice(CUSTOM_SORT_PREFIX.length)
+    : null;
   const out: Record<string, string[]> = {};
   for (const c of columns) {
     const cards = byStatus.get(c) ?? [];
     const ordered =
       sortMode === "rice"
         ? [...cards].sort(compareByRiceScore)
-        : sortBoardCards(cards);
+        : cfKey
+          ? [...cards].sort(
+              compareByCustomField(cfKey, customFieldTypes[cfKey] ?? "text"),
+            )
+          : sortBoardCards(cards);
     out[c] = ordered.map((f) => f.specId);
   }
   return out;

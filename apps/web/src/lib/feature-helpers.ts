@@ -1,9 +1,14 @@
 import { generateKeyBetween } from "fractional-indexing";
 
-import { defaultWorkflow, type StatusWorkflow } from "@specboards/core";
+import {
+  defaultWorkflow,
+  type PropertyDef,
+  type PropertyType,
+  type StatusWorkflow,
+} from "@specboards/core";
 import { fallbackStatusDots, statusColors } from "@specboards/ui";
 
-import type { FeatureRecord } from "./store/types";
+import type { CustomFieldValue, FeatureRecord } from "./store/types";
 
 /**
  * Human label for a status key. Prefers the workflow's explicit label (set by
@@ -73,13 +78,105 @@ export function compareByRiceScore(
   return a.title.localeCompare(b.title);
 }
 
-/** The backlog sort modes selectable in the UI. */
-export type SortMode = "default" | "rice";
+/**
+ * The backlog sort modes selectable in the UI. Beyond the two built-ins, a
+ * `cf:<key>` mode sorts by a workspace custom property (see
+ * {@link compareByCustomField}); the key is a property's stable `custom_fields`
+ * key.
+ */
+export type SortMode = "default" | "rice" | `cf:${string}`;
 
-/** Parse an untrusted `sort` search-param value. */
-export function parseSortMode(value: string | string[] | undefined): SortMode {
+/** Prefix marking a {@link SortMode} that targets a custom property. */
+export const CUSTOM_SORT_PREFIX = "cf:";
+
+/**
+ * Property types we can meaningfully order a backlog by. `multiselect` and
+ * `user` are excluded: a set of tags has no natural order, and a user id sorts
+ * by an opaque uuid rather than a name.
+ */
+export const SORTABLE_PROPERTY_TYPES: readonly PropertyType[] = [
+  "date",
+  "number",
+  "text",
+  "select",
+  "url",
+];
+
+/** Whether a property can back a `cf:` sort mode. */
+export function isSortableProperty(p: Pick<PropertyDef, "type">): boolean {
+  return SORTABLE_PROPERTY_TYPES.includes(p.type);
+}
+
+/** The sortable properties, in definition order (for building sort options). */
+export function sortableProperties(properties: PropertyDef[]): PropertyDef[] {
+  return properties.filter(isSortableProperty);
+}
+
+/**
+ * Parse an untrusted `sort` search-param value. A `cf:<key>` value is only
+ * honored when `<key>` is one of `sortableKeys` (the workspace's sortable
+ * property keys), so a stale or hand-typed param falls back to default rather
+ * than sorting by a field that no longer exists.
+ */
+export function parseSortMode(
+  value: string | string[] | undefined,
+  sortableKeys: readonly string[] = [],
+): SortMode {
   const v = Array.isArray(value) ? value[0] : value;
-  return v === "rice" ? "rice" : "default";
+  if (v === "rice") return "rice";
+  if (v && v.startsWith(CUSTOM_SORT_PREFIX)) {
+    const key = v.slice(CUSTOM_SORT_PREFIX.length);
+    if (sortableKeys.includes(key)) return v as SortMode;
+  }
+  return "default";
+}
+
+/**
+ * A comparable sort key for one custom-field value, or null when the value is
+ * empty (unset, blank, or an empty list) so empties can be forced last. Numbers
+ * sort numerically; everything else sorts as trimmed text (ISO `YYYY-MM-DD`
+ * dates sort correctly lexically).
+ */
+function customFieldSortKey(
+  value: CustomFieldValue,
+  type: PropertyType,
+): string | number | null {
+  if (value === null || value === undefined) return null;
+  if (Array.isArray(value)) return value.length ? value.join(", ") : null;
+  if (type === "number") {
+    const n = typeof value === "number" ? value : Number(value);
+    return Number.isFinite(n) ? n : null;
+  }
+  const s = String(value).trim();
+  return s === "" ? null : s;
+}
+
+/**
+ * Order features by a custom property (ascending), empty values last, ties
+ * broken by title. `type` selects numeric vs text comparison; pass the
+ * property's declared type so dates and numbers order correctly.
+ */
+export function compareByCustomField(
+  key: string,
+  type: PropertyType,
+): (a: FeatureRecord, b: FeatureRecord) => number {
+  return (a, b) => {
+    const av = customFieldSortKey(a.customFields[key] ?? null, type);
+    const bv = customFieldSortKey(b.customFields[key] ?? null, type);
+    if (av === null || bv === null) {
+      if (av === bv) return a.title.localeCompare(b.title);
+      return av === null ? 1 : -1;
+    }
+    if (typeof av === "number" && typeof bv === "number") {
+      if (av !== bv) return av - bv;
+    } else {
+      const c = String(av).localeCompare(String(bv), undefined, {
+        numeric: true,
+      });
+      if (c !== 0) return c;
+    }
+    return a.title.localeCompare(b.title);
+  };
 }
 
 /**
