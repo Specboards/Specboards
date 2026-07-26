@@ -15,6 +15,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import { withViewParams } from "@/lib/backlog-query";
 import { statusLabel } from "@/lib/feature-helpers";
 import {
   countActiveFilters,
@@ -76,12 +77,10 @@ export function BacklogFilters({
   const [sheetOpen, setSheetOpen] = useState(false);
 
   function update(next: FeatureFilters) {
-    // Rebuild the query from the filters, preserving the non-filter `view`
-    // param so clearing filters doesn't bounce the list view back to board.
-    const params = new URLSearchParams(filtersToQuery(next));
-    const view = searchParams.get("view");
-    if (view) params.set("view", view);
-    const query = params.toString();
+    // Rebuild the query from the filters, carrying over the params that shape
+    // the view itself (view, level, sort) so changing or clearing a filter
+    // doesn't bounce the user back to the board at the default level.
+    const query = withViewParams(filtersToQuery(next), searchParams);
     startTransition(() => {
       router.push(query ? `${pathname}?${query}` : pathname);
     });
