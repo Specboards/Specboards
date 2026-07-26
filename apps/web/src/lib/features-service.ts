@@ -394,6 +394,33 @@ async function applyFeaturePatch(
   }
 
   await store.updateFeature(specId, patch, scope, emit);
+
+  // Re-parenting away from an auto-created Feature grouping can leave it with
+  // nothing in it. Sync keys a grouping by the spec's folder and `create_spec`
+  // gives every spec its own folder, so the documented agent flow (create_spec,
+  // then update_item(parentSpecId) to nest it under a real card) stranded a
+  // same-named, empty grouping on the board every time. Clean it up here, at
+  // the moment it is abandoned. The store refuses unless it is genuinely an
+  // untouched, childless auto grouping.
+  //
+  // Best-effort: this is cleanup behind the user's write, so a failure must not
+  // fail the patch that already committed.
+  const previousParentSpecId = feature.parentSpecId;
+  if (
+    patch.parentSpecId !== undefined &&
+    previousParentSpecId !== null &&
+    previousParentSpecId !== patch.parentSpecId
+  ) {
+    try {
+      await store.pruneAutoGrouping(previousParentSpecId, scope);
+    } catch (err) {
+      console.warn(
+        `[features] pruning abandoned grouping ${previousParentSpecId} failed:`,
+        err,
+      );
+    }
+  }
+
   const updated = await store.getFeature(specId, scope);
   if (emit) notifyOutbox(); // nudge the relay so delivery isn't delayed a tick
 

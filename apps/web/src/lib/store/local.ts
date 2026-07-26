@@ -851,6 +851,17 @@ export class LocalFileStore implements FeatureStore {
     await this.writeItems(items.filter((i) => i.id !== specId));
   }
 
+  /**
+   * No-op in local file mode. Auto-created Feature groupings only ever come
+   * from GitHub sync, which is DB-only, so this store can never hold one.
+   */
+  async pruneAutoGrouping(
+    _specId: string,
+    _scope?: WorkspaceScope,
+  ): Promise<boolean> {
+    return false;
+  }
+
   async addRelation(
     specId: string,
     input: RelationInput,

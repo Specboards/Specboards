@@ -1124,6 +1124,20 @@ export interface FeatureStore {
     scope?: WorkspaceScope,
     emit?: OutboxEmit,
   ): Promise<void>;
+  /**
+   * Delete `specId` if, and only if, it is an auto-created Feature grouping
+   * (see github-sync) that has lost its last child and that nobody has touched:
+   * generated title, default status, and no release, assignee, tags, custom
+   * fields, RICE inputs, rank, details, relations, GitHub links, or comments.
+   *
+   * Exists because sync homes each imported spec under a grouping keyed by its
+   * folder, and `create_spec` gives every spec its own folder, so re-parenting
+   * the spec under a real card left a same-named grouping behind with nothing
+   * in it. Returns true when a grouping was removed. Never throws for an
+   * ineligible or missing row: it is opportunistic cleanup behind another
+   * write, and must not fail the write that triggered it.
+   */
+  pruneAutoGrouping(specId: string, scope?: WorkspaceScope): Promise<boolean>;
   /** `emit`, when given, records an outbox event in the same transaction. */
   updateFeature(
     specId: string,
