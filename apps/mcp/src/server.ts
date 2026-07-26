@@ -5,17 +5,22 @@ import { and, asc, eq, inArray, or } from "drizzle-orm";
 import { z } from "zod";
 
 import {
+  DEFAULT_STATUSES,
   canReadProduct,
   canWriteProduct,
   canTransition,
+  configPinsTransitions,
+  defaultWorkflow,
   descendantGroupIds,
   isForwardTransition,
+  isTransitionMode,
   resolveWorkflow,
   safeParseRepoConfig,
   transitionErrorMessage,
   workflowFromStages,
   type ProductAccess,
   type StatusWorkflow,
+  type TransitionMode,
 } from "@specboards/core";
 import {
   createDb,
@@ -655,23 +660,50 @@ server.tool(
 /**
  * The workspace's status workflow. Precedence mirrors the web app: admin-defined
  * stages (workspace_statuses) first, then the repo config's statuses, then the
- * built-in default.
+ * built-in default. The transitions between those stages come from the
+ * workspace's transition mode (strict = a pipeline, flexible = any stage to any
+ * other), except where a repo config pins `transitions` itself.
  */
 async function resolveWorkspaceWorkflow(
   workspaceId: string,
 ): Promise<StatusWorkflow> {
+  const [repo] = await db()
+    .select({ config: repositories.config })
+    .from(repositories)
+    .where(eq(repositories.workspaceId, workspaceId));
+  const config = safeParseRepoConfig(repo?.config);
+  if (configPinsTransitions(config)) return resolveWorkflow(config);
+
+  const mode = await resolveTransitionMode(workspaceId);
   const stages = await db()
     .select({ key: workspaceStatuses.key, label: workspaceStatuses.label })
     .from(workspaceStatuses)
     .where(eq(workspaceStatuses.workspaceId, workspaceId))
     .orderBy(asc(workspaceStatuses.position));
-  const custom = workflowFromStages(stages);
+  const custom = workflowFromStages(stages, mode);
   if (custom) return custom;
-  const [repo] = await db()
-    .select({ config: repositories.config })
-    .from(repositories)
-    .where(eq(repositories.workspaceId, workspaceId));
-  return resolveWorkflow(safeParseRepoConfig(repo?.config));
+
+  const vocabulary =
+    config?.statuses && config.statuses.length >= 2
+      ? config.statuses.filter((s) => s !== "archived")
+      : DEFAULT_STATUSES.filter((s) => s !== "archived");
+  return (
+    workflowFromStages(
+      vocabulary.map((key) => ({ key, label: key })),
+      mode,
+    ) ?? defaultWorkflow
+  );
+}
+
+/** The workspace's transition mode; an unreadable value reads as strict. */
+async function resolveTransitionMode(
+  workspaceId: string,
+): Promise<TransitionMode> {
+  const [row] = await db()
+    .select({ mode: workspaces.transitionMode })
+    .from(workspaces)
+    .where(eq(workspaces.id, workspaceId));
+  return isTransitionMode(row?.mode) ? row.mode : "strict";
 }
 
 /**

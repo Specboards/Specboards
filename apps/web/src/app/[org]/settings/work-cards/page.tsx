@@ -4,6 +4,7 @@ import { CardsFieldsEditor } from "@/components/cards-fields-editor";
 import { CollapsibleSettingsGroup } from "@/components/collapsible-settings-group";
 import { DetailTemplatesManager } from "@/components/detail-templates-manager";
 import { PropertiesManager } from "@/components/properties-manager";
+import { TransitionModeEditor } from "@/components/transition-mode-editor";
 import { WorkflowEditor } from "@/components/workflow-editor";
 import { WorkflowGatesEditor } from "@/components/workflow-gates-editor";
 import { BUILTIN_METADATA_FIELDS } from "@/lib/card-fields";
@@ -16,7 +17,8 @@ export const dynamic = "force-dynamic";
 
 /**
  * Cards settings, grouped into self-contained panels so related controls read
- * together: the item **Workflow** (the stages/board columns), **Fields** (which
+ * together: the item **Workflow** (the stages/board columns, how items move
+ * between them, and the gates guarding each), **Fields** (which
  * built-in fields show per level, plus custom properties), and **Templates**
  * (reusable detail skeletons). Any member sees the configuration; only admins
  * can change it (matching the /api/v1 write gates).
@@ -24,14 +26,21 @@ export const dynamic = "force-dynamic";
 export default async function CardsSettingsPage() {
   const access = await requireWorkspaceAccess();
   const store = await getStore();
-  const [levels, properties, detailTemplates, workflow, stageGates] =
-    await Promise.all([
-      store.listLevels(access ?? undefined),
-      store.listProperties(access ?? undefined),
-      store.listDetailTemplates(access ?? undefined),
-      resolveWorkflowFor(access),
-      store.listStageGates(access ?? undefined),
-    ]);
+  const [
+    levels,
+    properties,
+    detailTemplates,
+    workflow,
+    stageGates,
+    transitionMode,
+  ] = await Promise.all([
+    store.listLevels(access ?? undefined),
+    store.listProperties(access ?? undefined),
+    store.listDetailTemplates(access ?? undefined),
+    resolveWorkflowFor(access),
+    store.listStageGates(access ?? undefined),
+    store.getTransitionMode(access ?? undefined),
+  ]);
   const canEdit = !access || access.role === "owner";
 
   // The effective stages the editor starts from (DB-defined, or the built-in
@@ -53,6 +62,16 @@ export default async function CardsSettingsPage() {
           description="The board columns items move through. Rename a stage in place, reorder, add, or remove stages."
         >
           <WorkflowEditor initial={stages} canEdit={canEdit} />
+        </Subsection>
+        <Subsection
+          title="Transitions"
+          description="How freely items move between the stages above. This governs the board, the API, and agents alike."
+        >
+          <TransitionModeEditor
+            initial={transitionMode}
+            stages={stages}
+            canEdit={canEdit}
+          />
         </Subsection>
         <Subsection
           title="Stage gates"

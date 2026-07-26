@@ -68,10 +68,13 @@ describe("isForwardTransition", () => {
   it("never treats archiving as forward, even though archived is last", () => {
     // `archived` is appended to custom workflows, so a naive index check would
     // call every move to it "forward"; gates must not fire on archiving.
-    const wf = workflowFromStages([
-      { key: "todo", label: "To do" },
-      { key: "shipping", label: "Shipping" },
-    ])!;
+    const wf = workflowFromStages(
+      [
+        { key: "todo", label: "To do" },
+        { key: "shipping", label: "Shipping" },
+      ],
+      "flexible",
+    )!;
     expect(wf.statuses).toContain("archived");
     expect(isForwardTransition("todo", "archived", wf)).toBe(false);
     expect(isForwardTransition("todo", "shipping", wf)).toBe(true);

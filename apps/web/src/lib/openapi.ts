@@ -120,11 +120,12 @@ export function buildOpenApiDocument(baseUrl: string): Record<string, unknown> {
       "/api/v1/features/{specId}": {
         parameters: [{ name: "specId", in: "path", required: true, schema: { type: "string" } }],
         get: { tags: ["features"], summary: "One work item in full.", responses: { "200": ok("The item."), "404": { $ref: "#/components/responses/NotFound" } } },
-        patch: { tags: ["features"], summary: "Update status/tags/release/assignee. Status is validated against the workflow.", requestBody: { required: true, content: { "application/json": { schema: { type: "object" } } } }, responses: { "200": ok("The updated item."), "422": { $ref: "#/components/responses/Invalid" } } },
+        patch: { tags: ["features"], summary: "Update status/tags/release/assignee. Status is validated against the workflow; ?advance=1 walks a multi-stage move through the intermediate stages.", parameters: [{ name: "advance", in: "query", required: false, schema: { type: "boolean" }, description: "Walk intermediate stages when the target status is not reachable in one move. Stage gates still apply at every stage passed." }], requestBody: { required: true, content: { "application/json": { schema: { type: "object" } } } }, responses: { "200": ok("The updated item."), "422": { $ref: "#/components/responses/Invalid" } } },
         delete: { tags: ["features"], summary: "Delete a DB-native work item.", responses: { "200": ok("Deleted."), "422": { $ref: "#/components/responses/Invalid" } } },
       },
       "/api/v1/statuses": {
-        get: { tags: ["workflow"], summary: "The workspace's stages plus the resolved workflow (statuses + legal transitions).", responses: { "200": ok("Stages and workflow.") } },
+        get: { tags: ["workflow"], summary: "The workspace's stages, its transition mode, plus the resolved workflow (statuses + legal transitions).", responses: { "200": ok("Stages, transition mode, and workflow.") } },
+        patch: { tags: ["workflow"], summary: "Set the transition mode, strict or flexible (admin).", requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { transitionMode: { type: "string", enum: ["strict", "flexible"] } }, required: ["transitionMode"] } } } }, responses: { "200": ok("The new transition mode."), "422": { $ref: "#/components/responses/Invalid" } } },
       },
       "/api/v1/products": {
         get: listOp("products", "products", "List products the caller can see."),

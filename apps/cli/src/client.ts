@@ -113,10 +113,20 @@ export class SpecboardsClient {
     return feature;
   }
 
-  async patchFeature(specId: string, patch: FeaturePatch): Promise<Feature> {
+  /**
+   * Patch a feature. `advance` asks the server to walk a multi-stage status
+   * move through the intermediate stages, so one request does what used to
+   * take one per stage.
+   */
+  async patchFeature(
+    specId: string,
+    patch: FeaturePatch,
+    opts: { advance?: boolean } = {},
+  ): Promise<Feature> {
+    const query = opts.advance ? "?advance=1" : "";
     const { feature } = await this.request<{ feature: Feature }>(
       "PATCH",
-      `/api/v1/features/${encodeURIComponent(specId)}`,
+      `/api/v1/features/${encodeURIComponent(specId)}${query}`,
       patch,
     );
     return feature;
