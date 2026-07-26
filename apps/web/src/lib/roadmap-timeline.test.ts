@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  buildMonthAxis,
+  DEFAULT_AXIS_SCALE,
+  buildAxis,
   buildTimeline,
   dateSourceParam,
+  parseAxisScale,
   formatSpan,
   parseDateSource,
   parseDay,
@@ -112,24 +114,36 @@ describe("releaseSpan", () => {
   });
 });
 
-describe("buildMonthAxis", () => {
+describe("buildAxis", () => {
   it("pads the domain out to whole months", () => {
-    const axis = buildMonthAxis([{ start: "2026-07-13", end: "2026-08-04" }]);
+    const axis = buildAxis([{ start: "2026-07-13", end: "2026-08-04" }]);
     expect(axis).not.toBeNull();
+    expect(axis!.scale).toBe("month");
     expect(axis!.startMs).toBe(Date.UTC(2026, 6, 1));
     expect(axis!.endMs).toBe(Date.UTC(2026, 8, 1));
-    expect(axis!.months.map((m) => m.key)).toEqual(["2026-07", "2026-08"]);
-    expect(axis!.months.map((m) => m.label)).toEqual(["Jul 26", "Aug 26"]);
+    expect(axis!.columns.map((m) => m.label)).toEqual(["Jul 26", "Aug 26"]);
+  });
+
+  it("column keys are unique per scale", () => {
+    for (const scale of ["week", "month", "quarter"] as const) {
+      const axis = buildAxis(
+        [{ start: "2026-01-05", end: "2026-12-20" }],
+        null,
+        scale,
+      )!;
+      const keys = axis.columns.map((c) => c.key);
+      expect(new Set(keys).size).toBe(keys.length);
+    }
   });
 
   it("month widths sum to the full axis", () => {
-    const axis = buildMonthAxis([{ start: "2026-01-05", end: "2026-12-20" }])!;
-    const total = axis.months.reduce((a, m) => a + m.widthPct, 0);
+    const axis = buildAxis([{ start: "2026-01-05", end: "2026-12-20" }])!;
+    const total = axis.columns.reduce((a, m) => a + m.widthPct, 0);
     expect(total).toBeCloseTo(100, 6);
   });
 
   it("stretches to include today so the marker is on-axis", () => {
-    const axis = buildMonthAxis(
+    const axis = buildAxis(
       [{ start: "2026-07-13", end: "2026-07-20" }],
       "2026-10-02",
     )!;
@@ -137,11 +151,11 @@ describe("buildMonthAxis", () => {
   });
 
   it("does not conjure an axis from today alone", () => {
-    expect(buildMonthAxis([], "2026-07-26")).toBeNull();
+    expect(buildAxis([], "2026-07-26")).toBeNull();
   });
 
   it("returns null with nothing to draw", () => {
-    expect(buildMonthAxis([])).toBeNull();
+    expect(buildAxis([])).toBeNull();
   });
 
   it("handles a large span set without spreading arguments", () => {
@@ -149,12 +163,115 @@ describe("buildMonthAxis", () => {
       start: "2026-07-13",
       end: "2026-07-20",
     }));
-    expect(() => buildMonthAxis(spans)).not.toThrow();
+    expect(() => buildAxis(spans)).not.toThrow();
+  });
+});
+
+describe("buildAxis at other scales", () => {
+  it("pads a week axis out to whole Monday-to-Sunday weeks", () => {
+    // 13 Jul 2026 is a Monday; 22 Jul lands mid-week, so the axis runs to the
+    // following Monday.
+    const axis = buildAxis(
+      [{ start: "2026-07-15", end: "2026-07-22" }],
+      null,
+      "week",
+    )!;
+    expect(axis.scale).toBe("week");
+    expect(axis.startMs).toBe(Date.UTC(2026, 6, 13));
+    expect(axis.endMs).toBe(Date.UTC(2026, 6, 27));
+    expect(axis.columns.map((c) => c.label)).toEqual(["13 Jul", "20 Jul"]);
+  });
+
+  it("starts a week column on Monday whichever day the span starts", () => {
+    for (const [day, monday] of [
+      ["2026-07-13", Date.UTC(2026, 6, 13)], // Monday itself
+      ["2026-07-19", Date.UTC(2026, 6, 13)], // Sunday belongs to the week before
+      ["2026-07-20", Date.UTC(2026, 6, 20)],
+    ] as const) {
+      const axis = buildAxis([{ start: day, end: day }], null, "week")!;
+      expect(axis.startMs).toBe(monday);
+    }
+  });
+
+  it("pads a quarter axis out to whole quarters", () => {
+    const axis = buildAxis(
+      [{ start: "2026-02-10", end: "2026-08-01" }],
+      null,
+      "quarter",
+    )!;
+    expect(axis.startMs).toBe(Date.UTC(2026, 0, 1));
+    expect(axis.endMs).toBe(Date.UTC(2026, 9, 1));
+    expect(axis.columns.map((c) => c.label)).toEqual([
+      "Q1 26",
+      "Q2 26",
+      "Q3 26",
+    ]);
+  });
+
+  it("column widths sum to the full axis at every scale", () => {
+    for (const scale of ["week", "month", "quarter"] as const) {
+      const axis = buildAxis(
+        [{ start: "2026-01-05", end: "2027-03-20" }],
+        null,
+        scale,
+      )!;
+      const total = axis.columns.reduce((a, c) => a + c.widthPct, 0);
+      expect(total).toBeCloseTo(100, 6);
+    }
+  });
+
+  it("steps out to a coarser scale when the range is too long to draw", () => {
+    // Ten years of weeks would be ~520 columns; the axis reports what it drew.
+    const axis = buildAxis(
+      [{ start: "2020-01-01", end: "2030-01-01" }],
+      null,
+      "week",
+    )!;
+    expect(axis.scale).toBe("quarter");
+    expect(axis.columns.length).toBeLessThanOrEqual(120);
+  });
+
+  it("keeps the requested scale when the range fits", () => {
+    const axis = buildAxis(
+      [{ start: "2026-01-01", end: "2026-06-30" }],
+      null,
+      "week",
+    )!;
+    expect(axis.scale).toBe("week");
+  });
+
+  it("draws a very long range at the coarsest scale rather than refusing", () => {
+    const axis = buildAxis(
+      [{ start: "1990-01-01", end: "2090-01-01" }],
+      null,
+      "quarter",
+    )!;
+    expect(axis.scale).toBe("quarter");
+    expect(axis.columns.length).toBeGreaterThan(120);
+  });
+});
+
+describe("parseAxisScale", () => {
+  it("accepts the known scales", () => {
+    expect(parseAxisScale("week")).toBe("week");
+    expect(parseAxisScale("month")).toBe("month");
+    expect(parseAxisScale("quarter")).toBe("quarter");
+  });
+
+  it("falls back to the default for anything else", () => {
+    expect(parseAxisScale(undefined)).toBe(DEFAULT_AXIS_SCALE);
+    expect(parseAxisScale("")).toBe(DEFAULT_AXIS_SCALE);
+    expect(parseAxisScale("day")).toBe(DEFAULT_AXIS_SCALE);
+    expect(parseAxisScale("WEEK")).toBe(DEFAULT_AXIS_SCALE);
+  });
+
+  it("takes the first value from a repeated param", () => {
+    expect(parseAxisScale(["quarter", "week"])).toBe("quarter");
   });
 });
 
 describe("projectSpan", () => {
-  const axis = buildMonthAxis([{ start: "2026-07-01", end: "2026-07-31" }])!;
+  const axis = buildAxis([{ start: "2026-07-01", end: "2026-07-31" }])!;
 
   it("places a full-month span across the whole axis", () => {
     const p = projectSpan({ start: "2026-07-01", end: "2026-07-31" }, axis)!;
@@ -175,7 +292,7 @@ describe("projectSpan", () => {
 });
 
 describe("projectDay", () => {
-  const axis = buildMonthAxis([{ start: "2026-07-01", end: "2026-07-31" }])!;
+  const axis = buildAxis([{ start: "2026-07-01", end: "2026-07-31" }])!;
 
   it("positions a day inside the axis", () => {
     expect(projectDay("2026-07-16", axis)).toBeCloseTo((15 / 31) * 100, 6);
@@ -425,7 +542,7 @@ describe("buildTimeline with a custom date source", () => {
       null,
       byDue,
     )!;
-    expect(model.axis.months.at(-1)!.key).toBe("2026-09");
+    expect(model.axis.columns.at(-1)!.label).toBe("Sep 26");
     const row = model.groups[0]!.rows[0]!;
     // The bar sits after the release band it belongs to.
     expect(row.placement.leftPct).toBeGreaterThan(

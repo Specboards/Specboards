@@ -1,12 +1,19 @@
 /**
  * Query params that shape *which* view you are looking at rather than filtering
  * its contents: the view toggle, the hierarchy level, the sort, and the
- * timeline's start/end date sources. Controls that rebuild the query from
- * filter state alone (the filter bar, saved views) have to carry these across,
- * or changing a filter would bounce the user back to the default board at the
- * default level, plotted by the default fields.
+ * timeline's start/end date sources and zoom. Controls that rebuild the query
+ * from filter state alone (the filter bar, saved views) have to carry these
+ * across, or changing a filter would bounce the user back to the default board
+ * at the default level, plotted by the default fields at the default zoom.
  */
-const VIEW_PARAM_KEYS = ["view", "level", "sort", "start", "end"] as const;
+const VIEW_PARAM_KEYS = [
+  "view",
+  "level",
+  "sort",
+  "start",
+  "end",
+  "zoom",
+] as const;
 
 /** The subset of URLSearchParams this module reads (also satisfied by Next's
  * ReadonlyURLSearchParams). */
