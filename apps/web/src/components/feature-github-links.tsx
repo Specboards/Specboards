@@ -41,15 +41,23 @@ export function FeatureGithubLinks({
   specId,
   links,
   canEdit = true,
+  repos = [],
 }: {
   specId: string;
   links: GithubLink[];
   canEdit?: boolean;
+  /** Connected repos to choose between; only offered when there's more than
+   * one, since otherwise the repo is inferred from the item. */
+  repos?: { owner: string; name: string }[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [kind, setKind] = useState<GithubLinkKind>("pull_request");
   const [error, setError] = useState<string | null>(null);
+  // A DB-native card has no repo of its own, so in a multi-repo workspace the
+  // server can't infer one; let the user say which. Single-repo workspaces
+  // never see this control.
+  const showRepoPicker = repos.length > 1;
 
   function handleAuth(err: unknown): boolean {
     if (err instanceof AuthRequiredError) {
@@ -63,10 +71,13 @@ export function FeatureGithubLinks({
     e.preventDefault();
     const data = new FormData(e.currentTarget);
     const form = e.currentTarget;
+    const repo = showRepoPicker
+      ? String(data.get("repo") ?? "").trim() || undefined
+      : undefined;
     const input =
       kind === "branch"
-        ? { kind, branch: String(data.get("branch") ?? "").trim() }
-        : { kind, number: Number(data.get("number")) };
+        ? { kind, branch: String(data.get("branch") ?? "").trim(), repo }
+        : { kind, number: Number(data.get("number")), repo };
     if (kind === "branch" ? !input.branch : !input.number) {
       setError(kind === "branch" ? "Enter a branch name." : "Enter a number.");
       return;
@@ -153,6 +164,16 @@ export function FeatureGithubLinks({
               </option>
             ))}
           </Select>
+          {showRepoPicker ? (
+            <Select name="repo" aria-label="Repository" className="h-8" defaultValue="">
+              <option value="">Infer repository</option>
+              {repos.map((r) => (
+                <option key={`${r.owner}/${r.name}`} value={`${r.owner}/${r.name}`}>
+                  {r.owner}/{r.name}
+                </option>
+              ))}
+            </Select>
+          ) : null}
           {kind === "branch" ? (
             <Input name="branch" placeholder="branch name" className="h-8" />
           ) : (

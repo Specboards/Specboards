@@ -205,6 +205,7 @@ export function ItemDetailView({
           specId={feature.specId}
           links={feature.githubLinks}
           canEdit={canEdit}
+          repos={data.repos}
         />
       </DetailSection>
 

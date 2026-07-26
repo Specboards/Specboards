@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   InvalidGithubLinkError,
   parseGithubLinkInput,
+  pickRepo,
+  splitRepoSlug,
 } from "./github-links-service";
 
 /**
@@ -73,5 +75,65 @@ describe("parseGithubLinkInput", () => {
     expect(() => parseGithubLinkInput({ kind: "branch" })).toThrow(
       InvalidGithubLinkError,
     );
+  });
+});
+
+/**
+ * Repo disambiguation for a link. A DB-native card has no `repoId` of its own,
+ * so the service falls back to the card's product and then the workspace; these
+ * cover the pure decisions in that ladder (the DB traversal itself is exercised
+ * by the integration suite).
+ */
+describe("link repo selection", () => {
+  const spec = { isSpecRepo: true, owner: "acme", name: "specs" };
+  const app = { isSpecRepo: false, owner: "acme", name: "app" };
+  const infra = { isSpecRepo: false, owner: "acme", name: "infra" };
+
+  it("accepts an explicit repo and trims it", () => {
+    expect(
+      parseGithubLinkInput({
+        kind: "pull_request",
+        number: 190,
+        repo: "  acme/app  ",
+      }),
+    ).toEqual({ kind: "pull_request", number: 190, repo: "acme/app" });
+  });
+
+  it("treats a null repo as absent, so the repo is inferred", () => {
+    expect(
+      parseGithubLinkInput({ kind: "pull_request", number: 1, repo: null }),
+    ).toEqual({ kind: "pull_request", number: 1, repo: undefined });
+  });
+
+  it("rejects a repo that isn't owner/name", () => {
+    for (const bad of ["app", "acme/", "/app", "a/b/c"]) {
+      expect(() => splitRepoSlug(bad)).toThrow(InvalidGithubLinkError);
+    }
+    expect(splitRepoSlug("acme/app")).toEqual(["acme", "app"]);
+  });
+
+  it("rejects an empty repo string outright", () => {
+    expect(() =>
+      parseGithubLinkInput({ kind: "issue", number: 1, repo: "   " }),
+    ).toThrow(InvalidGithubLinkError);
+  });
+
+  it("uses the only candidate, whether or not it is the spec repo", () => {
+    expect(pickRepo([app])).toBe(app);
+    expect(pickRepo([spec])).toBe(spec);
+  });
+
+  it("breaks a tie in favour of the workspace spec repo", () => {
+    expect(pickRepo([app, spec, infra])).toBe(spec);
+  });
+
+  it("refuses to guess between several non-spec repos", () => {
+    // The caller is asked to pass `repo`; guessing would resolve a PR number
+    // against the wrong project.
+    expect(pickRepo([app, infra])).toBeNull();
+  });
+
+  it("has nothing to pick from an empty tier", () => {
+    expect(pickRepo([])).toBeNull();
   });
 });

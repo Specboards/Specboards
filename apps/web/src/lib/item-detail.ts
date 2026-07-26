@@ -10,6 +10,7 @@ import {
 
 import { ALL_PRODUCTS } from "@/lib/active-product";
 import { getDb } from "@/lib/db";
+import { listLinkableRepos } from "@/lib/github-links-service";
 import { resolveWorkflowFor } from "@/lib/repo-config";
 import { getStore } from "@/lib/store";
 import type {
@@ -71,6 +72,8 @@ export interface ItemDetailData {
   parentCandidates: ItemRef[];
   /** Other items this one can relate to (everything but itself). */
   relationCandidates: ItemRef[];
+  /** Connected repos, for the GitHub link form when a card's repo is ambiguous. */
+  repos: { owner: string; name: string }[];
 }
 
 /**
@@ -139,6 +142,10 @@ export async function getItemDetailData(
   const availableFields =
     levels.find((l) => l.key === feature.level)?.fields ?? null;
 
+  // Offered to the link form so a DB-native card in a multi-repo workspace can
+  // say which repo a PR lives in; the form hides the picker for a single repo.
+  const repos = access ? await listLinkableRepos(access.workspaceId) : [];
+
   return {
     feature,
     members,
@@ -158,6 +165,7 @@ export async function getItemDetailData(
     childLabel,
     parentCandidates,
     relationCandidates,
+    repos,
   };
 }
 
