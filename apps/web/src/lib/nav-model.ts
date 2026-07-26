@@ -35,6 +35,11 @@ export interface NavGroup {
 
 export const GROUPS: NavGroup[] = [
   {
+    // Sits above Plan and outside any product: the portfolio view leadership
+    // starts from, before drilling into a single product's plan.
+    items: [{ href: "/dashboard", label: "Dashboard", icon: Gauge }],
+  },
+  {
     label: "Plan",
     items: [
       { href: "/strategy", label: "Strategy", icon: Compass, productScoped: true },
@@ -68,8 +73,8 @@ export const GROUPS: NavGroup[] = [
 
 /**
  * The nav groups to show for the active product slug. A group scope (`~key`
- * segment) gets a Dashboard area (the group's management roll-up) prepended;
- * every other scope shows the base groups.
+ * segment) gets a Track area for that group's own roll-up prepended; every scope
+ * keeps the workspace-wide Dashboard that leads the base groups.
  */
 export function buildNavGroups(productSlug: string): NavGroup[] {
   if (!productSlug.startsWith(GROUP_SLUG_PREFIX)) return GROUPS;
@@ -77,7 +82,12 @@ export function buildNavGroups(productSlug: string): NavGroup[] {
     {
       label: "Track",
       items: [
-        { href: "/dashboard", label: "Dashboard", icon: Gauge, productScoped: true },
+        {
+          href: "/dashboard",
+          label: "Group dashboard",
+          icon: Gauge,
+          productScoped: true,
+        },
       ],
     },
     ...GROUPS,
