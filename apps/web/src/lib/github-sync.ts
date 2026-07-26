@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import {
+  featureTitleFor,
   leafLevel,
   parentLevelKey,
   parseRepoConfigYaml,
@@ -107,18 +108,6 @@ function featureKeyFor(frontmatterFeature: string | undefined, path: string, spe
   if (declared) return `feature:${declared}`;
   const dir = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
   return dir ? `path:${dir}` : `spec:${specId}`;
-}
-
-/** Human label for an auto-created Feature, derived from its grouping key. */
-function featureTitleFor(key: string, fallbackTitle: string): string {
-  const raw = key.startsWith("feature:")
-    ? key.slice("feature:".length)
-    : key.startsWith("path:")
-      ? key.slice(key.lastIndexOf("/") + 1)
-      : "";
-  const cleaned = raw.replace(/[-_]+/g, " ").trim();
-  if (!cleaned) return fallbackTitle;
-  return cleaned.replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 /** How sync assigned an item's parent: on import, or by a person in the app. */

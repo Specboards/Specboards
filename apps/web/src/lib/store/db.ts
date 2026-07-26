@@ -9,6 +9,7 @@ import {
   groupKeyFromName,
   wouldCreateCycle,
   wouldExceedDepth,
+  isGeneratedGroupingTitle,
   isLeafLevel,
   isPropertyType,
   isTransitionMode,
@@ -212,6 +213,13 @@ function tallyLink(
 
 type Tx = Parameters<Parameters<Database["transaction"]>[0]>[0];
 type ProductVisibilityRow = { id: string; visibility: "org" | "private" };
+
+/**
+ * The status a sync-created Feature grouping carries. Sync's insert does not
+ * set `status`, so the row takes the `features.status` column default; a
+ * grouping still sitting at this value has never been moved by anyone.
+ */
+const SYNC_CREATED_STATUS = "backlog";
 
 function canReadProductId(
   access: ProductAccess,
@@ -1106,6 +1114,105 @@ export class DbStore implements FeatureStore {
         .delete(features)
         .where(and(eq(features.id, row[0].id), eq(features.workspaceId, ws)));
       if (emit) await this.writeOutbox(tx, scope!, emit);
+    });
+  }
+
+  /**
+   * See FeatureStore.pruneAutoGrouping. Every check runs inside one scoped
+   * transaction, so a concurrent write cannot slip a child (or a comment, or a
+   * relation) onto the grouping between the checks and the delete.
+   */
+  async pruneAutoGrouping(
+    specId: string,
+    scope?: WorkspaceScope,
+  ): Promise<boolean> {
+    if (!scope) return false;
+    return this.scoped(scope, async (tx) => {
+      const ws = scope.workspaceId;
+      const [row] = await tx
+        .select({
+          id: features.id,
+          productId: features.productId,
+          repoId: features.repoId,
+          externalKey: features.externalKey,
+          title: features.title,
+          status: features.status,
+          tags: features.tags,
+          customFields: features.customFields,
+          releaseId: features.releaseId,
+          assigneeId: features.assigneeId,
+          details: features.details,
+          rank: features.rank,
+          riceReach: features.riceReach,
+          riceImpact: features.riceImpact,
+          riceConfidence: features.riceConfidence,
+          riceEffort: features.riceEffort,
+        })
+        .from(features)
+        .where(and(eq(features.specId, specId), eq(features.workspaceId, ws)));
+
+      // Only a sync-created grouping is ever a candidate: a spec-backed row has
+      // a repoId, and a card a person made by hand has no externalKey.
+      if (!row || row.repoId !== null || row.externalKey === null) return false;
+      const access = await this.accessIn(tx, scope);
+      if (!canWriteProductId(access, row.productId)) return false;
+
+      // Anything a person could have set means they adopted the grouping, so it
+      // stops being litter and we leave it alone.
+      const untouched =
+        isGeneratedGroupingTitle(row.externalKey, row.title) &&
+        row.status === SYNC_CREATED_STATUS &&
+        row.releaseId === null &&
+        row.assigneeId === null &&
+        row.details === null &&
+        row.rank === null &&
+        row.riceReach === null &&
+        row.riceImpact === null &&
+        row.riceConfidence === null &&
+        row.riceEffort === null &&
+        (row.tags?.length ?? 0) === 0 &&
+        Object.keys(row.customFields ?? {}).length === 0;
+      if (!untouched) return false;
+
+      // Referenced by anything at all: keep it. Children first, since a sibling
+      // spec still living here is the common reason to stop.
+      const [child] = await tx
+        .select({ id: features.id })
+        .from(features)
+        .where(and(eq(features.parentId, row.id), eq(features.workspaceId, ws)))
+        .limit(1);
+      if (child) return false;
+
+      const [relation] = await tx
+        .select({ id: featureLinks.id })
+        .from(featureLinks)
+        .where(
+          or(
+            eq(featureLinks.fromFeatureId, row.id),
+            eq(featureLinks.toFeatureId, row.id),
+          ),
+        )
+        .limit(1);
+      if (relation) return false;
+
+      const [ghLink] = await tx
+        .select({ id: featureGithubLinks.id })
+        .from(featureGithubLinks)
+        .where(eq(featureGithubLinks.featureId, row.id))
+        .limit(1);
+      if (ghLink) return false;
+
+      const [comment] = await tx
+        .select({ id: comments.id })
+        .from(comments)
+        .where(eq(comments.featureId, row.id))
+        .limit(1);
+      if (comment) return false;
+
+      await tx
+        .delete(features)
+        .where(and(eq(features.id, row.id), eq(features.workspaceId, ws)));
+      return true;
     });
   }
 
