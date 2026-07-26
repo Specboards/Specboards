@@ -30,9 +30,16 @@ import {
   canEditProducts,
   requireWorkspaceAccess,
 } from "@/lib/workspace-access";
+import { buildTimeline } from "@/lib/roadmap-timeline";
 import { RoadmapBoard, type RoadmapColumn } from "./roadmap-board";
+import { RoadmapTimeline, TimelineEmptyState } from "./roadmap-timeline";
 
 export const dynamic = "force-dynamic";
+
+/** Today as YYYY-MM-DD in UTC, for the timeline's today marker. */
+function todayUtc(): string {
+  return new Date().toISOString().slice(0, 10);
+}
 
 /** Roadmap: items grouped by release (dated first), unscheduled work last. */
 export default async function RoadmapPage({
@@ -172,7 +179,13 @@ export default async function RoadmapPage({
   // Shipped releases (and their items) leave the active roadmap and live under a
   // separate "Shipped releases" view (?view=shipped). Split the set so each view
   // only builds its own columns.
-  const showShipped = sp.view === "shipped";
+  const view = Array.isArray(sp.view) ? sp.view[0] : sp.view;
+  const showShipped = view === "shipped";
+  // The timeline is a peer view, not a sub-mode of the board: on a time axis
+  // shipped history and upcoming work belong side by side, so it draws from
+  // every dated release in scope rather than honouring the shipped/active split
+  // the column layout needs.
+  const showTimeline = view === "timeline";
   const activeReleases = scopedReleases.filter((r) => r.status !== "shipped");
   // Shipped releases read newest-first (most recent on the left) so the latest
   // ship isn't buried at the end of a long history; active releases keep the
@@ -217,7 +230,7 @@ export default async function RoadmapPage({
   // over the relevant button so the next step sits where the user is looking;
   // the toolbar hides its twin so each affordance renders exactly once.
   const itemCtaInEmptyState =
-    features.length === 0 && !activeLevel.isLeaf && !showShipped;
+    features.length === 0 && !activeLevel.isLeaf && !showShipped && !showTimeline;
   const releaseCtaInEmptyState =
     itemCtaInEmptyState && scopedReleases.length === 0;
   // A product roadmap creates a release for that product (admins/contributors);
@@ -278,6 +291,32 @@ export default async function RoadmapPage({
         }
       : undefined;
 
+  // Timeline model. Built from every dated release in scope (see showTimeline
+  // above) and the items at the active level; anything that cannot be placed
+  // lands in the model's `undated` tray rather than being dropped.
+  const today = todayUtc();
+  const timeline = showTimeline
+    ? buildTimeline(
+        features.map((f) => ({
+          specId: f.specId,
+          title: f.title,
+          status: f.status,
+          level: f.level,
+          releaseId: f.releaseId,
+          productId: f.productId,
+        })),
+        scopedReleases.map((r) => ({
+          id: r.id,
+          name: r.name,
+          status: r.status,
+          startDate: r.startDate,
+          targetDate: r.targetDate,
+          shippedDate: r.shippedDate,
+        })),
+        today,
+      )
+    : null;
+
   const board = (
     <RoadmapBoard
       // Remount when the data set changes (level or product scope) so the
@@ -318,29 +357,43 @@ export default async function RoadmapPage({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-lg font-semibold tracking-tight">
-              {showShipped ? "Shipped releases" : "Roadmap"}
+              {showShipped
+                ? "Shipped releases"
+                : showTimeline
+                  ? "Timeline"
+                  : "Roadmap"}
             </h1>
             <LevelSwitcher levels={levels} active={activeLevel.key} />
-            {showShipped ? (
+            {showShipped || showTimeline ? (
               <Link
-                href={roadmapViewHref(org, productSlug, sp.level, false)}
+                href={roadmapViewHref(org, productSlug, sp.level, "board")}
                 className="text-xs text-link hover:underline"
               >
-                ← Active roadmap
+                ← Roadmap board
               </Link>
-            ) : shippedReleases.length > 0 ? (
-              <Link
-                href={roadmapViewHref(org, productSlug, sp.level, true)}
-                className="text-xs text-link hover:underline"
-              >
-                Shipped releases ({shippedReleases.length}) →
-              </Link>
-            ) : null}
+            ) : (
+              <>
+                <Link
+                  href={roadmapViewHref(org, productSlug, sp.level, "timeline")}
+                  className="text-xs text-link hover:underline"
+                >
+                  Timeline →
+                </Link>
+                {shippedReleases.length > 0 ? (
+                  <Link
+                    href={roadmapViewHref(org, productSlug, sp.level, "shipped")}
+                    className="text-xs text-link hover:underline"
+                  >
+                    Shipped releases ({shippedReleases.length}) →
+                  </Link>
+                ) : null}
+              </>
+            )}
           </div>
           <div className="flex items-center gap-2">
             {releaseCtaInEmptyState ? null : newReleaseButton}
             {itemCtaInEmptyState ? null : newItemButton}
-            {features.length > 0 && canEdit ? (
+            {features.length > 0 && canEdit && !showTimeline ? (
               <CardFieldsMenu
                 catalog={catalog}
                 customFields={properties.map((f) => ({
@@ -351,7 +404,21 @@ export default async function RoadmapPage({
             ) : null}
           </div>
         </div>
-        {features.length === 0 && scopedReleases.length === 0 ? (
+        {showTimeline ? (
+          timeline ? (
+            <RoadmapTimeline
+              model={timeline}
+              org={org}
+              productSlug={productSlug}
+              // Product attribution only where it carries information: the same
+              // multi-product test the board's card tags use.
+              productNamesById={productsById ? productNamesById : undefined}
+              today={today}
+            />
+          ) : (
+            <TimelineEmptyState action={newReleaseButton} />
+          )
+        ) : features.length === 0 && scopedReleases.length === 0 ? (
           // Nothing at all yet: no items at this level and no releases.
           activeLevel.isLeaf ? (
             <NoSpecsEmptyState canConnect={canConnectRepos(access)} />
@@ -403,17 +470,21 @@ export default async function RoadmapPage({
   );
 }
 
-/** Build a roadmap link that toggles the shipped view while keeping the level. */
+/**
+ * Build a roadmap link that switches the view while keeping the level, so
+ * moving between the board, the timeline, and shipped releases never silently
+ * resets the altitude the user was working at.
+ */
 function roadmapViewHref(
   org: string,
   product: string,
   level: string | string[] | undefined,
-  shipped: boolean,
+  view: "board" | "timeline" | "shipped",
 ): string {
   const params = new URLSearchParams();
   const levelKey = Array.isArray(level) ? level[0] : level;
   if (levelKey) params.set("level", levelKey);
-  if (shipped) params.set("view", "shipped");
+  if (view !== "board") params.set("view", view);
   const qs = params.toString();
   return orgProductPath(org, product, `/roadmap${qs ? `?${qs}` : ""}`);
 }

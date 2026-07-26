@@ -73,6 +73,10 @@ test.describe("a11y: authenticated app", () => {
     { name: "backlog board", path: () => `/${slug}/all/backlog` },
     { name: "backlog list", path: () => `/${slug}/all/backlog?view=list` },
     { name: "roadmap", path: () => `/${slug}/all/roadmap` },
+    {
+      name: "roadmap timeline",
+      path: () => `/${slug}/all/roadmap?view=timeline`,
+    },
     { name: "ideas", path: () => `/${slug}/all/ideas` },
     { name: "settings: profile", path: () => `/${slug}/settings/profile` },
     { name: "settings: products", path: () => `/${slug}/settings/products` },
@@ -90,6 +94,12 @@ test.describe("a11y: authenticated app", () => {
   const DARK_PAGES: { name: string; path: () => string }[] = [
     { name: "backlog board", path: () => `/${slug}/all/backlog` },
     { name: "backlog list", path: () => `/${slug}/all/backlog?view=list` },
+    // The timeline draws bars from status colours against the grid, so it is
+    // the view most likely to regress contrast in the second token set.
+    {
+      name: "roadmap timeline",
+      path: () => `/${slug}/all/roadmap?view=timeline`,
+    },
     { name: "settings: profile", path: () => `/${slug}/settings/profile` },
   ];
 
