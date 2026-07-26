@@ -1,20 +1,20 @@
 /**
  * Pure geometry for the Roadmap timeline (Gantt) view: resolving the span an
- * item occupies, building the month axis those spans sit on, and projecting a
- * span onto that axis as percentages.
+ * item occupies, building the axis those spans sit on, and projecting a span
+ * onto that axis as percentages.
  *
  * Dates here are `YYYY-MM-DD` strings, the shape every date column and every
  * `date` custom field uses, and are parsed as UTC so a viewer's timezone can
  * never shift a bar by a day.
  *
- * Slice 1 resolves an item's span from its release. Items carry no date
- * columns of their own (`features` has `releaseId` and `customFields` but no
- * start/due/target column), so the selectable date-source model that reads
- * `date`-typed custom properties is a follow-on; this module is shaped to take
- * that source as an input rather than assuming the release.
+ * An item's span comes from a selectable source (its release, or a `date`-typed
+ * custom property at either end), because items carry no date columns of their
+ * own: `features` has `releaseId` and `customFields` but no start/due/target
+ * column.
  */
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const WEEK_MS = 7 * DAY_MS;
 
 const MONTH_LABELS = [
   "Jan",
@@ -92,21 +92,67 @@ export function releaseSpan(release: ReleaseDates): Span | null {
   return endMs < startMs ? { start, end: start } : { start, end };
 }
 
-/** One month column on the axis. */
-export interface AxisMonth {
-  /** `YYYY-MM`; stable React key. */
+/**
+ * How wide one axis column is. Weeks read a sprint, months a quarter's worth of
+ * releases, quarters an annual plan.
+ */
+export type AxisScale = "week" | "month" | "quarter";
+
+/** Coarsest to finest is not a total order anyone needs; this is the order the
+ * control offers, and the order `coarser` walks. */
+export const AXIS_SCALES: readonly AxisScale[] = ["week", "month", "quarter"];
+
+/** The scale a timeline uses when the URL says nothing. */
+export const DEFAULT_AXIS_SCALE: AxisScale = "month";
+
+/**
+ * The next scale out from `scale`, or null at the coarsest. Used to keep a very
+ * long range from being drawn as thousands of week columns.
+ */
+function coarser(scale: AxisScale): AxisScale | null {
+  return scale === "week" ? "month" : scale === "month" ? "quarter" : null;
+}
+
+/**
+ * Parse an untrusted `?zoom=` value, falling back to the default for anything
+ * unrecognised so a hand-edited or stale URL still renders.
+ */
+export function parseAxisScale(raw: string | string[] | undefined): AxisScale {
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  return AXIS_SCALES.includes(value as AxisScale)
+    ? (value as AxisScale)
+    : DEFAULT_AXIS_SCALE;
+}
+
+/**
+ * Most columns any axis will draw. Past this the header stops being readable and
+ * the track stops being scrollable at any useful speed, so `buildAxis` steps out
+ * to a coarser scale instead. 120 is a decade of months, or a bit over two years
+ * of weeks.
+ */
+const MAX_COLUMNS = 120;
+
+/** One column on the axis: a week, a month, or a quarter. */
+export interface AxisColumn {
+  /** Scale-qualified period start; stable React key. */
   key: string;
-  /** Short label, e.g. "Jul 26". */
+  /** Short label, e.g. "6 Jul", "Jul 26", "Q3 26". */
   label: string;
-  /** Share of the axis this month occupies, 0-100. */
+  /** Share of the axis this column occupies, 0-100. */
   widthPct: number;
 }
 
-export interface MonthAxis {
-  months: AxisMonth[];
-  /** UTC ms at the first instant of the first month. */
+export interface TimeAxis {
+  /**
+   * The scale actually drawn. May be coarser than the one requested when the
+   * range is too long (see MAX_COLUMNS), so the UI can say so rather than
+   * silently disagreeing with the control.
+   */
+  scale: AxisScale;
+  columns: AxisColumn[];
+  /** UTC ms at the first instant of the first column. */
   startMs: number;
-  /** UTC ms at the first instant *after* the last month (exclusive). */
+  /** UTC ms at the first instant *after* the last column (exclusive). */
   endMs: number;
 }
 
@@ -116,25 +162,99 @@ function monthStart(ms: number): number {
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1);
 }
 
-/** UTC ms at the first instant of the month after the one containing `ms`. */
-function nextMonthStart(ms: number): number {
+/** UTC ms at the Monday starting the week containing `ms`. */
+function weekStart(ms: number): number {
   const d = new Date(ms);
-  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1);
+  // getUTCDay is Sunday-0; shift so Monday is 0 and weeks read Mon-Sun.
+  const offset = (d.getUTCDay() + 6) % 7;
+  return Date.UTC(
+    d.getUTCFullYear(),
+    d.getUTCMonth(),
+    d.getUTCDate() - offset,
+  );
+}
+
+/** UTC ms at the first instant of the quarter containing `ms`. */
+function quarterStart(ms: number): number {
+  const d = new Date(ms);
+  return Date.UTC(d.getUTCFullYear(), Math.floor(d.getUTCMonth() / 3) * 3, 1);
+}
+
+/** UTC ms at the first instant of the column containing `ms`. */
+function columnStart(ms: number, scale: AxisScale): number {
+  if (scale === "week") return weekStart(ms);
+  if (scale === "quarter") return quarterStart(ms);
+  return monthStart(ms);
+}
+
+/** UTC ms at the first instant of the column after the one containing `ms`. */
+function nextColumnStart(ms: number, scale: AxisScale): number {
+  const start = columnStart(ms, scale);
+  // Weeks are a fixed length in UTC, so arithmetic is safe; months and quarters
+  // are not, so they step through the calendar.
+  if (scale === "week") return start + WEEK_MS;
+  const d = new Date(start);
+  return Date.UTC(
+    d.getUTCFullYear(),
+    d.getUTCMonth() + (scale === "quarter" ? 3 : 1),
+    1,
+  );
+}
+
+/** Header label for the column starting at `ms`. */
+function columnLabel(ms: number, scale: AxisScale): string {
+  const d = new Date(ms);
+  const year2 = String(d.getUTCFullYear()).slice(2);
+  if (scale === "week") return `${d.getUTCDate()} ${MONTH_LABELS[d.getUTCMonth()]}`;
+  if (scale === "quarter") {
+    return `Q${Math.floor(d.getUTCMonth() / 3) + 1} ${year2}`;
+  }
+  return `${MONTH_LABELS[d.getUTCMonth()]} ${year2}`;
+}
+
+/** Lay out the columns of one scale over a resolved domain. */
+function layOutColumns(
+  min: number,
+  max: number,
+  scale: AxisScale,
+): TimeAxis | null {
+  const startMs = columnStart(min, scale);
+  const endMs = nextColumnStart(max, scale);
+  const total = endMs - startMs;
+  if (total <= 0) return null;
+
+  const columns: AxisColumn[] = [];
+  let cursor = startMs;
+  while (cursor < endMs) {
+    const next = nextColumnStart(cursor, scale);
+    columns.push({
+      key: `${scale}:${new Date(cursor).toISOString().slice(0, 10)}`,
+      label: columnLabel(cursor, scale),
+      widthPct: ((Math.min(next, endMs) - cursor) / total) * 100,
+    });
+    cursor = next;
+  }
+
+  return { scale, columns, startMs, endMs };
 }
 
 /**
- * Build the month axis covering every span, padded out to whole months so the
- * header columns line up with the grid. `today` is folded in when there is
- * already something to draw, so the today marker is always on-axis; it never
- * conjures an axis on its own (a workspace with no dated releases has no
- * timeline, not a one-month timeline around today).
+ * Build the axis covering every span, padded out to whole periods so the header
+ * columns line up with the grid. `today` is folded in when there is already
+ * something to draw, so the today marker is always on-axis; it never conjures an
+ * axis on its own (a workspace with no dated releases has no timeline, not a
+ * one-month timeline around today).
+ *
+ * A range too long for the requested scale is drawn one scale coarser rather
+ * than as an unreadable header, and the axis reports which scale it landed on.
  *
  * Returns null when there is nothing to draw.
  */
-export function buildMonthAxis(
+export function buildAxis(
   spans: Span[],
   today?: string | null,
-): MonthAxis | null {
+  scale: AxisScale = DEFAULT_AXIS_SCALE,
+): TimeAxis | null {
   let min = Number.POSITIVE_INFINITY;
   let max = Number.NEGATIVE_INFINITY;
   for (const span of spans) {
@@ -159,27 +279,18 @@ export function buildMonthAxis(
     if (todayMs > max) max = todayMs;
   }
 
-  const startMs = monthStart(min);
-  const endMs = nextMonthStart(max);
-  const total = endMs - startMs;
-  if (total <= 0) return null;
-
-  const months: AxisMonth[] = [];
-  let cursor = startMs;
-  while (cursor < endMs) {
-    const next = nextMonthStart(cursor);
-    const d = new Date(cursor);
-    const year = d.getUTCFullYear();
-    const month = d.getUTCMonth();
-    months.push({
-      key: `${year}-${String(month + 1).padStart(2, "0")}`,
-      label: `${MONTH_LABELS[month]} ${String(year).slice(2)}`,
-      widthPct: ((Math.min(next, endMs) - cursor) / total) * 100,
-    });
-    cursor = next;
+  let active: AxisScale | null = scale;
+  while (active) {
+    const axis = layOutColumns(min, max, active);
+    if (!axis) return null;
+    if (axis.columns.length <= MAX_COLUMNS) return axis;
+    const next = coarser(active);
+    // At the coarsest scale a long range is simply long: draw it rather than
+    // refusing, since a 30-year quarter axis is still legible.
+    if (!next) return axis;
+    active = next;
   }
-
-  return { months, startMs, endMs };
+  return null;
 }
 
 function clamp(value: number, lo: number, hi: number): number {
@@ -198,7 +309,7 @@ export interface Placement {
  * instant. Both values are clamped into the axis, so a bar can never overhang
  * the grid it is drawn on.
  */
-export function projectSpan(span: Span, axis: MonthAxis): Placement | null {
+export function projectSpan(span: Span, axis: TimeAxis): Placement | null {
   const startMs = parseDay(span.start);
   const endMs = parseDay(span.end);
   if (startMs === null || endMs === null) return null;
@@ -216,7 +327,7 @@ export function projectSpan(span: Span, axis: MonthAxis): Placement | null {
  */
 export function projectDay(
   day: string | null | undefined,
-  axis: MonthAxis,
+  axis: TimeAxis,
 ): number | null {
   const ms = parseDay(day);
   if (ms === null) return null;
@@ -356,7 +467,7 @@ export interface TimelineGroup {
 }
 
 export interface TimelineModel {
-  axis: MonthAxis;
+  axis: TimeAxis;
   groups: TimelineGroup[];
   /**
    * Items with no resolvable dates. Surfaced in a tray rather than dropped, so
@@ -382,6 +493,7 @@ export function buildTimeline(
   releases: TimelineRelease[],
   today?: string | null,
   sources: DateSources = DEFAULT_DATE_SOURCES,
+  scale: AxisScale = DEFAULT_AXIS_SCALE,
 ): TimelineModel | null {
   const spans = new Map<string, Span>();
   for (const release of releases) {
@@ -421,12 +533,13 @@ export function buildTimeline(
 
   // The axis has to cover the release bands *and* every item bar, since a bar
   // driven by a custom date field can fall outside its release.
-  const axis = buildMonthAxis(
+  const axis = buildAxis(
     [
       ...visible.map((r) => spans.get(r.id)).filter((s): s is Span => s != null),
       ...itemSpans,
     ],
     today,
+    scale,
   );
   if (!axis) return null;
 

@@ -6,23 +6,41 @@ import { StatusDot } from "@/components/status-dot";
 import { statusDotColor, statusLabel } from "@/lib/feature-helpers";
 import { orgProductPath } from "@/lib/org-path";
 import {
+  AXIS_SCALES,
+  DEFAULT_AXIS_SCALE,
   DEFAULT_DATE_SOURCES,
   formatSpan,
   projectDay,
+  type AxisScale,
   type DateSources,
-  type MonthAxis,
+  type TimeAxis,
   type TimelineModel,
 } from "@/lib/roadmap-timeline";
 
-/** Minimum on-screen width of one month column, in px. */
-const MONTH_PX = 116;
-/** Minimum width of the whole track, so a one-month axis still reads as a time axis. */
+/**
+ * Minimum on-screen width of one column, in px, per scale. A week needs less
+ * room than "Jul 26" does, and a quarter label sits on three months of bar, so
+ * the track stays legible at every zoom instead of one width fitting none.
+ */
+const COLUMN_PX: Record<AxisScale, number> = {
+  week: 60,
+  month: 116,
+  quarter: 132,
+};
+/** Minimum width of the whole track, so a single-column axis still reads as a time axis. */
 const MIN_TRACK_PX = 640;
 /** Left gutter width (release / item labels), in px. Must match GUTTER_CLASS. */
 const GUTTER_CLASS = "w-56 shrink-0";
 
+/** Human label for a scale, used by the zoom control and its notices. */
+const SCALE_LABELS: Record<AxisScale, string> = {
+  week: "Weeks",
+  month: "Months",
+  quarter: "Quarters",
+};
+
 /**
- * The scrolling time track for one row: the month grid, the today marker, and
+ * The scrolling time track for one row: the column grid, the today marker, and
  * whatever bar the row draws on top. Purely presentational, so it is hidden
  * from assistive tech; every row states its dates as text in the gutter.
  */
@@ -32,7 +50,7 @@ function Track({
   todayPct,
   children,
 }: {
-  axis: MonthAxis;
+  axis: TimeAxis;
   widthPx: number;
   todayPct: number | null;
   children?: React.ReactNode;
@@ -40,11 +58,11 @@ function Track({
   return (
     <div className="relative shrink-0" style={{ width: `${widthPx}px` }}>
       <div className="absolute inset-0 flex" aria-hidden>
-        {axis.months.map((month) => (
+        {axis.columns.map((column) => (
           <div
-            key={month.key}
+            key={column.key}
             className="border-r border-border/60 last:border-r-0"
-            style={{ width: `${month.widthPct}%` }}
+            style={{ width: `${column.widthPct}%` }}
           />
         ))}
       </div>
@@ -62,15 +80,15 @@ function Track({
 
 /**
  * Roadmap timeline (Gantt): releases and the items scheduled into them, drawn
- * on a month axis.
+ * on a week, month, or quarter axis.
  *
- * Read-only by design in this slice. Dates are changed in the item detail and
- * release sheets, not by dragging here, so the view stays a server component
- * with no client bundle.
+ * Read-only by design. Dates are changed in the item detail and release sheets,
+ * not by dragging here, so the view stays a server component with no client
+ * bundle.
  *
- * Item bars currently take their span from the item's release, because items
- * carry no date columns of their own. The selectable date-source picker (release
- * span vs a `date` custom property) is the follow-on slice.
+ * Bars take their span from the selected date sources (the item's release by
+ * default, or a `date` custom property at either end); anything unplottable is
+ * counted in the undated tray rather than dropped.
  */
 export function RoadmapTimeline({
   model,
@@ -80,6 +98,7 @@ export function RoadmapTimeline({
   today,
   sources = DEFAULT_DATE_SOURCES,
   dateFieldLabels = {},
+  requestedScale = DEFAULT_AXIS_SCALE,
 }: {
   model: TimelineModel;
   org: string;
@@ -92,10 +111,16 @@ export function RoadmapTimeline({
   sources?: DateSources;
   /** Property key to label, for naming the plotted fields in copy. */
   dateFieldLabels?: Record<string, string>;
+  /** The zoom asked for, so a range too long to draw at it can say so. */
+  requestedScale?: AxisScale;
 }) {
   const { axis, groups, undated } = model;
-  const widthPx = Math.max(MIN_TRACK_PX, axis.months.length * MONTH_PX);
+  const widthPx = Math.max(
+    MIN_TRACK_PX,
+    axis.columns.length * COLUMN_PX[axis.scale],
+  );
   const todayPct = projectDay(today, axis);
+  const coarsened = axis.scale !== requestedScale;
 
   function itemHref(level: string, specId: string): string {
     return orgProductPath(org, productSlug, `/backlog/${level}/${specId}`);
@@ -103,9 +128,21 @@ export function RoadmapTimeline({
 
   return (
     <div className="space-y-4">
+      {/*
+        The requested zoom could not be drawn over this range, so the control and
+        the axis disagree. Say which one won rather than leaving the user to
+        wonder why "Weeks" produced month columns.
+      */}
+      {coarsened ? (
+        <p className="text-2xs text-muted-foreground">
+          This range is too long to draw in{" "}
+          {SCALE_LABELS[requestedScale].toLowerCase()}, so it is shown in{" "}
+          {SCALE_LABELS[axis.scale].toLowerCase()}.
+        </p>
+      ) : null}
       <div className="overflow-x-auto rounded-md border">
         <div className="w-max min-w-full">
-          {/* Month header */}
+          {/* Axis header */}
           <div className="flex border-b bg-muted/40">
             <div
               className={`${GUTTER_CLASS} sticky left-0 z-20 border-r bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground`}
@@ -114,16 +151,28 @@ export function RoadmapTimeline({
             </div>
             <div className="relative shrink-0" style={{ width: `${widthPx}px` }}>
               <div className="flex">
-                {axis.months.map((month) => (
+                {axis.columns.map((column) => (
                   <div
-                    key={month.key}
-                    className="border-r border-border/60 px-2 py-2 text-xs font-medium text-muted-foreground last:border-r-0"
-                    style={{ width: `${month.widthPct}%` }}
+                    key={column.key}
+                    className="truncate border-r border-border/60 px-2 py-2 text-xs font-medium text-muted-foreground last:border-r-0"
+                    style={{ width: `${column.widthPct}%` }}
                   >
-                    {month.label}
+                    {column.label}
                   </div>
                 ))}
               </div>
+              {/*
+                Names the marker line that runs down every row below. Without it
+                the line is an unexplained rule on the grid.
+              */}
+              {todayPct !== null ? (
+                <div
+                  className="pointer-events-none absolute bottom-0 z-20 -translate-x-1/2 whitespace-nowrap rounded-t-sm bg-primary px-1 text-2xs font-medium text-primary-foreground"
+                  style={{ left: `${todayPct}%` }}
+                >
+                  Today
+                </div>
+              ) : null}
             </div>
           </div>
 
@@ -266,13 +315,70 @@ function undatedReason(
   return `Not on the axis: these items are unscheduled, or have no ${fields} set.`;
 }
 
-/** Shown when no release in scope carries a date, so there is no axis to draw. */
-export function TimelineEmptyState({ action }: { action?: React.ReactNode }) {
+/**
+ * Axis granularity control.
+ *
+ * Plain links rather than a client-side select: the zoom lives in `?zoom=`, so
+ * each granularity is a link someone can send, it survives with JavaScript off,
+ * and the control needs no client bundle. `withViewParams` carries the param, so
+ * changing a filter or level keeps the zoom you chose.
+ */
+export function TimelineZoom({
+  active,
+  hrefs,
+}: {
+  active: AxisScale;
+  hrefs: Record<AxisScale, string>;
+}) {
+  return (
+    <div className="flex items-center gap-2 text-xs">
+      <span className="text-muted-foreground">Zoom</span>
+      <div
+        className="flex overflow-hidden rounded-md border"
+        role="group"
+        aria-label="Timeline zoom"
+      >
+        {AXIS_SCALES.map((scale) => (
+          <Link
+            key={scale}
+            href={hrefs[scale]}
+            aria-current={scale === active ? "true" : undefined}
+            className={`border-r px-2.5 py-1.5 last:border-r-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+              scale === active
+                ? "bg-secondary font-medium text-foreground"
+                : "text-muted-foreground hover:bg-muted"
+            }`}
+          >
+            {SCALE_LABELS[scale]}
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Shown when nothing in scope can be placed on an axis, so there is none to draw. */
+export function TimelineEmptyState({
+  action,
+  plottedByField = false,
+}: {
+  action?: React.ReactNode;
+  /**
+   * True when a custom date field is the selected source. The fix is then to fill
+   * that field in (or plot by the release again), not to date a release, so the
+   * copy must not send the user to the wrong place.
+   */
+  plottedByField?: boolean;
+}) {
   return (
     <EmptyState
       className="mt-8"
       title="Nothing to plot yet"
-      description="The timeline places items using the dates on the release they are scheduled into. Give a release a start or target date, then schedule work into it."
+      description={
+        plottedByField
+          ? "Nothing in scope has a value for the fields this timeline is plotted by. Set those dates on some items, or plot by the release span instead."
+          : "The timeline places items using the dates on the release they are scheduled into. Give a release a start or target date, then schedule work into it."
+      }
       action={action}
     />
   );

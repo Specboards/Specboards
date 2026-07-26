@@ -30,10 +30,21 @@ import {
   canEditProducts,
   requireWorkspaceAccess,
 } from "@/lib/workspace-access";
-import { buildTimeline, parseDateSource } from "@/lib/roadmap-timeline";
+import {
+  AXIS_SCALES,
+  DEFAULT_AXIS_SCALE,
+  buildTimeline,
+  parseAxisScale,
+  parseDateSource,
+  type AxisScale,
+} from "@/lib/roadmap-timeline";
 import { DateSourcePicker } from "./date-source-picker";
 import { RoadmapBoard, type RoadmapColumn } from "./roadmap-board";
-import { RoadmapTimeline, TimelineEmptyState } from "./roadmap-timeline";
+import {
+  RoadmapTimeline,
+  TimelineEmptyState,
+  TimelineZoom,
+} from "./roadmap-timeline";
 
 export const dynamic = "force-dynamic";
 
@@ -309,6 +320,9 @@ export default async function RoadmapPage({
     start: parseDateSource(sp.start, dateFieldKeys),
     end: parseDateSource(sp.end, dateFieldKeys),
   };
+  const plottedByField =
+    dateSources.start.kind === "property" || dateSources.end.kind === "property";
+  const axisScale = parseAxisScale(sp.zoom);
   const timeline = showTimeline
     ? buildTimeline(
         features.map((f) => ({
@@ -330,8 +344,18 @@ export default async function RoadmapPage({
         })),
         today,
         dateSources,
+        axisScale,
       )
     : null;
+
+  // One href per zoom, each keeping every other param (level, filters, plotted
+  // fields) so changing granularity never resets the view around it.
+  const zoomHrefs = Object.fromEntries(
+    AXIS_SCALES.map((scale) => [
+      scale,
+      roadmapZoomHref(org, productSlug, sp, scale),
+    ]),
+  ) as Record<AxisScale, string>;
 
   const board = (
     <RoadmapBoard
@@ -422,11 +446,17 @@ export default async function RoadmapPage({
         </div>
         {showTimeline ? (
           <>
-            <DateSourcePicker
-              fields={dateFields}
-              start={dateSources.start}
-              end={dateSources.end}
-            />
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <DateSourcePicker
+                fields={dateFields}
+                start={dateSources.start}
+                end={dateSources.end}
+              />
+              {/* Zoom is offered whenever there is an axis to zoom. */}
+              {timeline ? (
+                <TimelineZoom active={axisScale} hrefs={zoomHrefs} />
+              ) : null}
+            </div>
             {timeline ? (
               <RoadmapTimeline
                 model={timeline}
@@ -440,9 +470,13 @@ export default async function RoadmapPage({
                 dateFieldLabels={Object.fromEntries(
                   dateFields.map((f) => [f.key, f.label]),
                 )}
+                requestedScale={axisScale}
               />
             ) : (
-              <TimelineEmptyState action={newReleaseButton} />
+              <TimelineEmptyState
+                action={plottedByField ? null : newReleaseButton}
+                plottedByField={plottedByField}
+              />
             )}
           </>
         ) : features.length === 0 && scopedReleases.length === 0 ? (
@@ -512,6 +546,29 @@ function roadmapViewHref(
   const levelKey = Array.isArray(level) ? level[0] : level;
   if (levelKey) params.set("level", levelKey);
   if (view !== "board") params.set("view", view);
+  const qs = params.toString();
+  return orgProductPath(org, product, `/roadmap${qs ? `?${qs}` : ""}`);
+}
+
+/**
+ * Build a timeline link that changes only the zoom, preserving every other
+ * param the current URL carries (level, view, plotted fields, filters). The
+ * default scale is left out so the canonical URL stays clean.
+ */
+function roadmapZoomHref(
+  org: string,
+  product: string,
+  sp: Record<string, string | string[] | undefined>,
+  scale: AxisScale,
+): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(sp)) {
+    if (key === "zoom" || value === undefined) continue;
+    for (const one of Array.isArray(value) ? value : [value]) {
+      params.append(key, one);
+    }
+  }
+  if (scale !== DEFAULT_AXIS_SCALE) params.set("zoom", scale);
   const qs = params.toString();
   return orgProductPath(org, product, `/roadmap${qs ? `?${qs}` : ""}`);
 }

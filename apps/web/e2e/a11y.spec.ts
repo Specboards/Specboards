@@ -77,6 +77,12 @@ test.describe("a11y: authenticated app", () => {
       name: "roadmap timeline",
       path: () => `/${slug}/all/roadmap?view=timeline`,
     },
+    {
+      // The zoom control and the today marker's label only render on an axis, so
+      // scan a non-default zoom to cover both.
+      name: "roadmap timeline (weeks)",
+      path: () => `/${slug}/all/roadmap?view=timeline&zoom=week`,
+    },
     { name: "ideas", path: () => `/${slug}/all/ideas` },
     { name: "settings: profile", path: () => `/${slug}/settings/profile` },
     { name: "settings: products", path: () => `/${slug}/settings/products` },
