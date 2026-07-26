@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 
+import { pluralizeLevelLabel } from "@/lib/active-level";
 import { cn } from "@/lib/utils";
 import type { WorkspaceLevel } from "@/lib/store/types";
 
@@ -46,17 +47,10 @@ export function LevelSwitcher({
                 : "text-muted-foreground hover:text-foreground",
             )}
           >
-            {pluralize(level.label)}
+            {pluralizeLevelLabel(level.label)}
           </Link>
         );
       })}
     </div>
   );
-}
-
-/** Naive English pluralization for level labels (Epic → Epics, Story → Stories). */
-function pluralize(label: string): string {
-  if (/[^aeiou]y$/i.test(label)) return label.slice(0, -1) + "ies";
-  if (/(s|x|z|ch|sh)$/i.test(label)) return label + "es";
-  return label + "s";
 }

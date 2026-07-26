@@ -1,9 +1,10 @@
 "use client";
 
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { AuthRequiredError, deleteView, saveView } from "@/lib/api-client";
+import { withViewParams } from "@/lib/backlog-query";
 import {
   FILTER_KEYS,
   filtersToQuery,
@@ -49,6 +50,7 @@ export function SavedViews({
 }) {
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -57,7 +59,9 @@ export function SavedViews({
   const alreadySaved = views.some((v) => viewQuery(v.filters) === currentQuery);
 
   function apply(filters: SavedViewFilters) {
-    const query = viewQuery(filters);
+    // A view stores filters only, so keep the current view/level/sort: applying
+    // one from the list at Epic level should stay on the list at Epic level.
+    const query = withViewParams(viewQuery(filters), searchParams);
     startTransition(() => {
       router.push(query ? `${pathname}?${query}` : pathname);
     });

@@ -1,13 +1,19 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { childLevelKey, parentLevelKey } from "@specboards/core";
+
 import { EmptyState } from "@/components/empty-state";
+import { LevelSwitcher } from "@/components/level-switcher";
 import { NoSpecsEmptyState } from "@/components/no-specs-empty-state";
+import { WorkItemCreate } from "@/components/work-item-create";
 import { WorkViewTabs } from "@/components/work-view-tabs";
 import { Badge } from "@/components/ui/badge";
 import { Box, BoxHeader } from "@/components/ui/box";
 import { buttonVariants } from "@/components/ui/button";
+import { pluralizeLevelLabel, resolveActiveLevel } from "@/lib/active-level";
 import { resolveActiveScope, scopeProductFilter } from "@/lib/active-product";
+import { buildLevelRows } from "@/lib/backlog-rows";
 import { LOCAL_ORG_SLUG, orgProductPath } from "@/lib/org-path";
 import { getDb } from "@/lib/db";
 import {
@@ -41,10 +47,15 @@ import { SortControl } from "./sort-control";
 
 /**
  * List view of the backlog: a prioritized table of features. Status edits here
- * update metadata only (DB or local file) — spec content stays canonical in
+ * update metadata only (DB or local file) - spec content stays canonical in
  * git. A filter bar narrows the list; the active filters live in the URL query
  * string. One of the two views under `/backlog` (`?view=list`); the kanban is
  * the default `board` view. See ADR 0001 (D6).
+ *
+ * Like the board, the table shows one hierarchy level at a time, driven by the
+ * same `?level=` param, so switching between the two views keeps your altitude.
+ * The active level's items are the top-level rows, with their children from the
+ * level below nested under them.
  */
 export async function ListView({
   params,
@@ -109,6 +120,29 @@ export async function ListView({
     access && db ? await listWorkspaceMembers(db, access.workspaceId) : [];
   const savedViews = await store.listSavedViews(access ?? undefined);
 
+  // The table shows one level at a time (same `?level=` param as the board).
+  const [levels, detailTemplates] = await Promise.all([
+    store.listLevels(access ?? undefined),
+    store.listDetailTemplates(access ?? undefined),
+  ]);
+  const activeLevel = resolveActiveLevel(levels, sp.level);
+  const childKey = childLevelKey(activeLevel.key, levels);
+  const parentKey = parentLevelKey(activeLevel.key, levels);
+  const parentLabel = levels.find((l) => l.key === parentKey)?.label ?? null;
+  const parents = parentKey
+    ? features
+        .filter((f) => f.level === parentKey)
+        .map((f) => ({
+          specId: f.specId,
+          title: f.title,
+          productId: f.productId,
+        }))
+    : [];
+  // Seed a new item's Details editor with the active level's template.
+  const templateBody =
+    detailTemplates.find((t) => t.id === activeLevel.detailTemplateId)?.body ??
+    "";
+
   // Custom properties power both the custom-field sort options and the date
   // range filters. Date-typed fields also add a from/to range filter, parsed
   // here so it applies (and shows in the bar) alongside the built-in filters.
@@ -167,11 +201,17 @@ export async function ListView({
   const visible = filters.showShipped
     ? features
     : hideDoneShippedItems(features, shippedReleaseIds);
+  // Items at the active level, pre-filter: drives the toolbar and empty-state
+  // decisions so the filter bar never vanishes when a filter empties the table.
+  const featuresForLevel = features.filter((f) => f.level === activeLevel.key);
+  const visibleForLevel = visible.filter((f) => f.level === activeLevel.key);
   const filtering = hasActiveFilters(filters);
   // Filtering or a value-ordered sort (RICE, custom field) flattens the view:
   // excluding arbitrary rows, or ranking by a value, both break the
-  // parent→child hierarchy grouping.
-  const base = filtering ? applyFeatureFilters(visible, filters) : visible;
+  // parent->child hierarchy grouping, so only the active level's items show.
+  const base = filtering
+    ? applyFeatureFilters(visibleForLevel, filters)
+    : visibleForLevel;
   const rows =
     sort === "rice"
       ? [...base]
@@ -188,19 +228,71 @@ export async function ListView({
             .map((feature) => ({ feature, depth: 0 }))
         : filtering
           ? base.map((feature) => ({ feature, depth: 0 }))
-          : buildHierarchyRows(visible);
+          : buildLevelRows(visible, activeLevel.key, childKey);
+
+  // The "New {level}" affordance, shared between the toolbar and the empty
+  // state so it renders exactly once. Leaf items come from spec sync, so it
+  // only exists off-leaf. In a multi-product scope with no single product in
+  // context, the drawer's product picker resolves the target.
+  const newItemButton =
+    canEdit && !activeLevel.isLeaf ? (
+      <WorkItemCreate
+        levelKey={activeLevel.key}
+        levelLabel={activeLevel.label}
+        parentLabel={parentLabel}
+        parents={parents}
+        productId={activeProduct?.id ?? null}
+        products={scopedProducts.map((p) => ({ id: p.id, name: p.name }))}
+        releases={selectableReleases(releases).map((r) => ({
+          id: r.id,
+          name: r.name,
+          productId: r.productId,
+        }))}
+        properties={properties}
+        workflow={workflow}
+        members={members}
+        templateBody={templateBody}
+      />
+    ) : null;
+
+  // "Clear filters" returns to this same view and level, dropping only filters.
+  const clearFiltersHref = orgProductPath(
+    access?.orgSlug ?? LOCAL_ORG_SLUG,
+    productSlug,
+    `/backlog?view=list&level=${encodeURIComponent(activeLevel.key)}`,
+  );
 
   return (
     <section className="space-y-4">
       <div className="space-y-2">
-        <WorkViewTabs />
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <WorkViewTabs />
+            <LevelSwitcher levels={levels} active={activeLevel.key} />
+          </div>
+          {/* An empty level carries this button in its empty state instead. */}
+          {featuresForLevel.length === 0 ? null : newItemButton}
+        </div>
         <p className="text-sm text-muted-foreground">
           Your work items in a filterable table. Metadata edits land in the
           database; spec content stays in git.
         </p>
       </div>
-      {features.length === 0 ? (
-        <NoSpecsEmptyState canConnect={canConnectRepos(access)} />
+      {featuresForLevel.length === 0 ? (
+        activeLevel.isLeaf ? (
+          <NoSpecsEmptyState canConnect={canConnectRepos(access)} />
+        ) : (
+          <EmptyState
+            className="mt-8"
+            title={`No ${activeLevel.label.toLowerCase()} items yet`}
+            description={
+              canEdit
+                ? `${activeLevel.label} items collect the work one level down so this table can show progress at a higher altitude. Create the first one and it appears here, ready to move through your workflow.`
+                : `${activeLevel.label} items collect the work one level down. Once someone with edit access creates one, it appears here.`
+            }
+            action={newItemButton}
+          />
+        )
       ) : (
         <>
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -215,15 +307,11 @@ export async function ListView({
           {rows.length === 0 ? (
             <EmptyState
               variant="inline"
-              title="No features match these filters"
-              description={`All ${features.length} ${features.length === 1 ? "item is" : "items are"} hidden by the current filters.`}
+              title="No items match these filters"
+              description={`All ${featuresForLevel.length} ${featuresForLevel.length === 1 ? "item is" : "items are"} hidden by the current filters.`}
               action={
                 <Link
-                  href={orgProductPath(
-                    access?.orgSlug ?? LOCAL_ORG_SLUG,
-                    productSlug,
-                    "/backlog?view=list",
-                  )}
+                  href={clearFiltersHref}
                   className={buttonVariants({ size: "sm", variant: "outline" })}
                 >
                   Clear filters
@@ -233,7 +321,7 @@ export async function ListView({
           ) : (
             <Box>
               <BoxHeader>
-                <span>Features</span>
+                <span>{pluralizeLevelLabel(activeLevel.label)}</span>
                 <Badge variant="counter">{rows.length}</Badge>
               </BoxHeader>
               <BacklogTable
@@ -254,30 +342,4 @@ export async function ListView({
       )}
     </section>
   );
-}
-
-/** Order rows as a hierarchy: each top-level feature followed by its children. */
-function buildHierarchyRows<
-  T extends { specId: string; parentSpecId: string | null },
->(features: T[]): { feature: T; depth: number }[] {
-  const bySpec = new Map(features.map((f) => [f.specId, f]));
-  const childrenOf = new Map<string, T[]>();
-  const topLevel: T[] = [];
-  for (const f of features) {
-    const parent = f.parentSpecId ? bySpec.get(f.parentSpecId) : undefined;
-    if (parent) {
-      const arr = childrenOf.get(parent.specId) ?? [];
-      arr.push(f);
-      childrenOf.set(parent.specId, arr);
-    } else {
-      topLevel.push(f);
-    }
-  }
-  const rows: { feature: T; depth: number }[] = [];
-  for (const f of topLevel) {
-    rows.push({ feature: f, depth: 0 });
-    for (const c of childrenOf.get(f.specId) ?? [])
-      rows.push({ feature: c, depth: 1 });
-  }
-  return rows;
 }
