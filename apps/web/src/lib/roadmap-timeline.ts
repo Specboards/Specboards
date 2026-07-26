@@ -226,6 +226,61 @@ export function projectDay(
   return ((ms - axis.startMs) / total) * 100;
 }
 
+/**
+ * Where the timeline reads a bar's start (or end) from.
+ *
+ * `release` uses the span of the release the item is scheduled into, which is
+ * the only source that needs no workspace setup. A `property` source reads a
+ * `date`-typed custom property off the item, so a workspace with a "Due date"
+ * field can plan by it. Start and end are chosen independently, so "release
+ * start to due date" is expressible and shows slippage directly.
+ */
+export type DateSource =
+  | { kind: "release" }
+  | { kind: "property"; key: string };
+
+/** The reserved `?start=` / `?end=` value meaning "use the release span". */
+export const RELEASE_SOURCE = "release";
+/** Prefix marking a custom-property source, so a property keyed `release`
+ * cannot collide with the reserved value above. */
+const PROPERTY_PREFIX = "cf:";
+
+/** Serialize a source for the URL. */
+export function dateSourceParam(source: DateSource): string {
+  return source.kind === "release"
+    ? RELEASE_SOURCE
+    : `${PROPERTY_PREFIX}${source.key}`;
+}
+
+/**
+ * Parse an untrusted `?start=` / `?end=` value. Falls back to the release span
+ * for anything unrecognised, including a property that no longer exists, so a
+ * stale bookmark degrades to the default view rather than an empty one.
+ */
+export function parseDateSource(
+  raw: string | string[] | undefined,
+  availableKeys: readonly string[],
+): DateSource {
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  if (!value || !value.startsWith(PROPERTY_PREFIX)) return { kind: "release" };
+  const key = value.slice(PROPERTY_PREFIX.length);
+  return availableKeys.includes(key)
+    ? { kind: "property", key }
+    : { kind: "release" };
+}
+
+/** The start and end sources a timeline is currently plotted by. */
+export interface DateSources {
+  start: DateSource;
+  end: DateSource;
+}
+
+/** The default: both ends read from the release, matching the board. */
+export const DEFAULT_DATE_SOURCES: DateSources = {
+  start: { kind: "release" },
+  end: { kind: "release" },
+};
+
 /** The item fields the timeline needs. */
 export interface TimelineItem {
   specId: string;
@@ -235,6 +290,49 @@ export interface TimelineItem {
   level: string;
   releaseId: string | null;
   productId: string | null;
+  /**
+   * Custom-property values, keyed by property key. Only `date`-typed entries
+   * are read here, and only when a property source is selected; values are
+   * `YYYY-MM-DD` strings (enforced on write by assertCustomFieldTypes).
+   */
+  customFields: Record<string, unknown>;
+}
+
+/** Read one end of a span from the chosen source. */
+function readSource(
+  source: DateSource,
+  item: TimelineItem,
+  releaseEnd: string | null,
+): string | null {
+  if (source.kind === "release") return releaseEnd;
+  const value = item.customFields[source.key];
+  return typeof value === "string" && parseDay(value) !== null ? value : null;
+}
+
+/**
+ * The span an item occupies under the chosen sources, or null when either end
+ * cannot be resolved (the caller puts those in the undated tray).
+ *
+ * When a property source is selected and the item has no value for it, the
+ * item is undated rather than silently falling back to its release. A bar that
+ * looks like a due date but is really a release date is worse than an honest
+ * gap, and the tray names the field so the gap is actionable.
+ */
+export function resolveItemSpan(
+  item: TimelineItem,
+  releaseSpan: Span | null,
+  sources: DateSources,
+): Span | null {
+  const start = readSource(sources.start, item, releaseSpan?.start ?? null);
+  const end = readSource(sources.end, item, releaseSpan?.end ?? null);
+  if (start === null || end === null) return null;
+  const startMs = parseDay(start);
+  const endMs = parseDay(end);
+  if (startMs === null || endMs === null) return null;
+  // Mixed sources can put the end before the start (a due date earlier than the
+  // release start). Clamp so the bar never runs backwards; the collapse to a
+  // point is itself the signal that the two dates disagree.
+  return endMs < startMs ? { start, end: start } : { start, end };
 }
 
 /** The release fields the timeline needs. */
@@ -283,6 +381,7 @@ export function buildTimeline(
   items: TimelineItem[],
   releases: TimelineRelease[],
   today?: string | null,
+  sources: DateSources = DEFAULT_DATE_SOURCES,
 ): TimelineModel | null {
   const spans = new Map<string, Span>();
   for (const release of releases) {
@@ -290,17 +389,28 @@ export function buildTimeline(
     if (span) spans.set(release.id, span);
   }
 
-  const byRelease = new Map<string, TimelineItem[]>();
+  // Resolve every item's own span first: under a property source a bar can sit
+  // outside the release band it belongs to, which is exactly the slippage the
+  // view exists to show, so the item's span is not derived from the group's.
+  /** An item with its span resolved, before the axis exists to place it on. */
+  type PlacedLater = { item: TimelineItem; span: Span };
+
+  const byRelease = new Map<string, PlacedLater[]>();
   const undated: TimelineItem[] = [];
+  const itemSpans: Span[] = [];
   for (const item of items) {
-    const span = item.releaseId ? spans.get(item.releaseId) : undefined;
-    if (!span || !item.releaseId) {
+    const release = item.releaseId ? spans.get(item.releaseId) ?? null : null;
+    const span = resolveItemSpan(item, release, sources);
+    // An item needs a resolvable span *and* a dated release to sit under, since
+    // rows are grouped by release band.
+    if (!span || !item.releaseId || !spans.has(item.releaseId)) {
       undated.push(item);
       continue;
     }
+    itemSpans.push(span);
     const bucket = byRelease.get(item.releaseId);
-    if (bucket) bucket.push(item);
-    else byRelease.set(item.releaseId, [item]);
+    if (bucket) bucket.push({ item, span });
+    else byRelease.set(item.releaseId, [{ item, span }]);
   }
 
   const visible = releases.filter((release) => {
@@ -309,8 +419,13 @@ export function buildTimeline(
     return release.status !== "shipped";
   });
 
+  // The axis has to cover the release bands *and* every item bar, since a bar
+  // driven by a custom date field can fall outside its release.
   const axis = buildMonthAxis(
-    visible.map((r) => spans.get(r.id)).filter((s): s is Span => s != null),
+    [
+      ...visible.map((r) => spans.get(r.id)).filter((s): s is Span => s != null),
+      ...itemSpans,
+    ],
     today,
   );
   if (!axis) return null;
@@ -321,12 +436,13 @@ export function buildTimeline(
     if (!span) continue;
     const placement = projectSpan(span, axis);
     if (!placement) continue;
-    // Slice 1: an item's span is its release's span, so every row in a group
-    // shares the group's placement. Slice 2 resolves per-item date fields here,
-    // at which point these diverge.
-    const rows: TimelineRow[] = (byRelease.get(release.id) ?? []).map(
-      (item) => ({ item, span, placement }),
-    );
+    const rows: TimelineRow[] = [];
+    for (const { item, span: itemSpan } of byRelease.get(release.id) ?? []) {
+      const itemPlacement = projectSpan(itemSpan, axis);
+      if (itemPlacement) {
+        rows.push({ item, span: itemSpan, placement: itemPlacement });
+      }
+    }
     groups.push({ release, span, placement, rows });
   }
 

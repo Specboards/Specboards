@@ -6,8 +6,10 @@ import { StatusDot } from "@/components/status-dot";
 import { statusDotColor, statusLabel } from "@/lib/feature-helpers";
 import { orgProductPath } from "@/lib/org-path";
 import {
+  DEFAULT_DATE_SOURCES,
   formatSpan,
   projectDay,
+  type DateSources,
   type MonthAxis,
   type TimelineModel,
 } from "@/lib/roadmap-timeline";
@@ -76,6 +78,8 @@ export function RoadmapTimeline({
   productSlug,
   productNamesById,
   today,
+  sources = DEFAULT_DATE_SOURCES,
+  dateFieldLabels = {},
 }: {
   model: TimelineModel;
   org: string;
@@ -84,6 +88,10 @@ export function RoadmapTimeline({
   productNamesById?: Record<string, string>;
   /** Today as YYYY-MM-DD, resolved by the server so the marker is stable. */
   today: string;
+  /** Which fields the bars are plotted from; drives the undated explanation. */
+  sources?: DateSources;
+  /** Property key to label, for naming the plotted fields in copy. */
+  dateFieldLabels?: Record<string, string>;
 }) {
   const { axis, groups, undated } = model;
   const widthPx = Math.max(MIN_TRACK_PX, axis.months.length * MONTH_PX);
@@ -214,8 +222,7 @@ export function RoadmapTimeline({
             Undated ({undated.length})
           </h2>
           <p className="mt-0.5 text-2xs text-muted-foreground">
-            Not on the axis: these items are unscheduled, or their release has no
-            dates.
+            {undatedReason(sources, dateFieldLabels)}
           </p>
           <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
             {undated.map((item) => (
@@ -234,6 +241,29 @@ export function RoadmapTimeline({
       ) : null}
     </div>
   );
+}
+
+/**
+ * Why the items in the tray could not be placed. Naming the actual fields
+ * matters: under a custom date source "no due date" is a fixable gap in the
+ * data, which reads very differently from "not scheduled into a release".
+ */
+function undatedReason(
+  sources: DateSources,
+  labels: Record<string, string>,
+): string {
+  const named = [sources.start, sources.end]
+    .filter((s) => s.kind === "property")
+    .map((s) => labels[(s as { key: string }).key] ?? (s as { key: string }).key);
+  const unique = [...new Set(named)];
+  if (unique.length === 0) {
+    return "Not on the axis: these items are unscheduled, or their release has no dates.";
+  }
+  const fields =
+    unique.length === 1
+      ? unique[0]
+      : `${unique.slice(0, -1).join(", ")} and ${unique[unique.length - 1]}`;
+  return `Not on the axis: these items are unscheduled, or have no ${fields} set.`;
 }
 
 /** Shown when no release in scope carries a date, so there is no axis to draw. */

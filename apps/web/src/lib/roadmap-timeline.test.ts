@@ -3,11 +3,15 @@ import { describe, expect, it } from "vitest";
 import {
   buildMonthAxis,
   buildTimeline,
+  dateSourceParam,
   formatSpan,
+  parseDateSource,
   parseDay,
   projectDay,
   projectSpan,
   releaseSpan,
+  resolveItemSpan,
+  type DateSources,
   type TimelineItem,
   type TimelineRelease,
 } from "./roadmap-timeline";
@@ -27,7 +31,11 @@ function release(
   };
 }
 
-function item(specId: string, releaseId: string | null): TimelineItem {
+function item(
+  specId: string,
+  releaseId: string | null,
+  customFields: Record<string, unknown> = {},
+): TimelineItem {
   return {
     specId,
     title: specId,
@@ -35,6 +43,7 @@ function item(specId: string, releaseId: string | null): TimelineItem {
     level: "feature",
     releaseId,
     productId: "p1",
+    customFields,
   };
 }
 
@@ -261,6 +270,186 @@ describe("buildTimeline", () => {
   it("returns null when no release in scope carries a date", () => {
     expect(buildTimeline([item("a", "x")], [release("x")])).toBeNull();
     expect(buildTimeline([], [])).toBeNull();
+  });
+});
+
+describe("parseDateSource", () => {
+  const keys = ["due_date", "kickoff"];
+
+  it("defaults to the release span", () => {
+    expect(parseDateSource(undefined, keys)).toEqual({ kind: "release" });
+    expect(parseDateSource("release", keys)).toEqual({ kind: "release" });
+  });
+
+  it("resolves a known custom property", () => {
+    expect(parseDateSource("cf:due_date", keys)).toEqual({
+      kind: "property",
+      key: "due_date",
+    });
+  });
+
+  it("falls back to the release for a property that no longer exists", () => {
+    // A stale bookmark should degrade to the default view, not an empty one.
+    expect(parseDateSource("cf:deleted_field", keys)).toEqual({
+      kind: "release",
+    });
+  });
+
+  it("does not let a property named `release` collide with the reserved value", () => {
+    expect(parseDateSource("cf:release", ["release"])).toEqual({
+      kind: "property",
+      key: "release",
+    });
+    expect(parseDateSource("release", ["release"])).toEqual({ kind: "release" });
+  });
+
+  it("takes the first value from a repeated param", () => {
+    expect(parseDateSource(["cf:due_date", "cf:kickoff"], keys)).toEqual({
+      kind: "property",
+      key: "due_date",
+    });
+  });
+
+  it("round-trips through dateSourceParam", () => {
+    for (const raw of ["release", "cf:due_date"]) {
+      expect(dateSourceParam(parseDateSource(raw, keys))).toBe(raw);
+    }
+  });
+});
+
+describe("resolveItemSpan", () => {
+  const release = { start: "2026-07-01", end: "2026-07-20" };
+  const both = (k: string): DateSources => ({
+    start: { kind: "property", key: k },
+    end: { kind: "property", key: k },
+  });
+
+  it("uses the release span by default", () => {
+    expect(
+      resolveItemSpan(item("a", "r"), release, {
+        start: { kind: "release" },
+        end: { kind: "release" },
+      }),
+    ).toEqual(release);
+  });
+
+  it("reads a date custom field when selected", () => {
+    expect(
+      resolveItemSpan(item("a", "r", { due: "2026-08-05" }), release, both("due")),
+    ).toEqual({ start: "2026-08-05", end: "2026-08-05" });
+  });
+
+  it("mixes sources: release start to a due date", () => {
+    expect(
+      resolveItemSpan(item("a", "r", { due: "2026-08-05" }), release, {
+        start: { kind: "release" },
+        end: { kind: "property", key: "due" },
+      }),
+    ).toEqual({ start: "2026-07-01", end: "2026-08-05" });
+  });
+
+  it("is undated when the selected field is missing, rather than falling back", () => {
+    // A bar that looks like a due date but is really a release date would be
+    // worse than an honest gap.
+    expect(resolveItemSpan(item("a", "r"), release, both("due"))).toBeNull();
+  });
+
+  it("is undated when the field holds a non-date value", () => {
+    expect(
+      resolveItemSpan(item("a", "r", { due: "soon" }), release, both("due")),
+    ).toBeNull();
+    expect(
+      resolveItemSpan(item("a", "r", { due: 20260805 }), release, both("due")),
+    ).toBeNull();
+  });
+
+  it("clamps when the end resolves earlier than the start", () => {
+    // A due date before the release start: collapse to a point rather than
+    // drawing a backwards bar.
+    expect(
+      resolveItemSpan(item("a", "r", { due: "2026-06-01" }), release, {
+        start: { kind: "release" },
+        end: { kind: "property", key: "due" },
+      }),
+    ).toEqual({ start: "2026-07-01", end: "2026-07-01" });
+  });
+
+  it("is undated with no release when a release source is selected", () => {
+    expect(
+      resolveItemSpan(item("a", null), null, {
+        start: { kind: "release" },
+        end: { kind: "release" },
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("buildTimeline with a custom date source", () => {
+  const planned: TimelineRelease = {
+    id: "planned",
+    name: "planned",
+    status: "planned",
+    startDate: "2026-07-01",
+    targetDate: "2026-07-20",
+    shippedDate: null,
+  };
+  const byDue: DateSources = {
+    start: { kind: "property", key: "due" },
+    end: { kind: "property", key: "due" },
+  };
+
+  it("plots items by the custom field and trays the ones missing it", () => {
+    const model = buildTimeline(
+      [
+        item("has", "planned", { due: "2026-07-10" }),
+        item("missing", "planned"),
+      ],
+      [planned],
+      "2026-07-05",
+      byDue,
+    )!;
+    expect(model.groups[0]!.rows.map((r) => r.item.specId)).toEqual(["has"]);
+    expect(model.groups[0]!.rows[0]!.span).toEqual({
+      start: "2026-07-10",
+      end: "2026-07-10",
+    });
+    expect(model.undated.map((i) => i.specId)).toEqual(["missing"]);
+  });
+
+  it("stretches the axis to cover a bar outside its release band", () => {
+    // The point of plotting by due date: slippage past the release is visible,
+    // so the axis has to reach it rather than clipping it away.
+    const model = buildTimeline(
+      [item("late", "planned", { due: "2026-09-15" })],
+      [planned],
+      null,
+      byDue,
+    )!;
+    expect(model.axis.months.at(-1)!.key).toBe("2026-09");
+    const row = model.groups[0]!.rows[0]!;
+    // The bar sits after the release band it belongs to.
+    expect(row.placement.leftPct).toBeGreaterThan(
+      model.groups[0]!.placement.leftPct + model.groups[0]!.placement.widthPct,
+    );
+  });
+
+  it("still counts every item as either a bar or a tray entry", () => {
+    const model = buildTimeline(
+      [
+        item("a", "planned", { due: "2026-07-10" }),
+        item("b", "planned"),
+        item("c", null, { due: "2026-07-11" }),
+      ],
+      [planned],
+      null,
+      byDue,
+    )!;
+    const drawn = model.groups.flatMap((g) => g.rows.map((r) => r.item.specId));
+    expect([...drawn, ...model.undated.map((i) => i.specId)].sort()).toEqual([
+      "a",
+      "b",
+      "c",
+    ]);
   });
 });
 

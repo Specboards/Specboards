@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { parentLevelKey } from "@specboards/core";
+import { parentLevelKey, propertyAppliesToLevel } from "@specboards/core";
 
 import { BoardPrefsProvider } from "@/app/[org]/[product]/backlog/board-prefs";
 import { CardFieldsMenu } from "@/components/card-fields-menu";
@@ -30,7 +30,8 @@ import {
   canEditProducts,
   requireWorkspaceAccess,
 } from "@/lib/workspace-access";
-import { buildTimeline } from "@/lib/roadmap-timeline";
+import { buildTimeline, parseDateSource } from "@/lib/roadmap-timeline";
+import { DateSourcePicker } from "./date-source-picker";
 import { RoadmapBoard, type RoadmapColumn } from "./roadmap-board";
 import { RoadmapTimeline, TimelineEmptyState } from "./roadmap-timeline";
 
@@ -295,6 +296,19 @@ export default async function RoadmapPage({
   // above) and the items at the active level; anything that cannot be placed
   // lands in the model's `undated` tray rather than being dropped.
   const today = todayUtc();
+  // Date-typed custom properties are what the timeline can plot by besides the
+  // release span. Only properties that apply at the active level are offered,
+  // so the picker never lists a field the visible items cannot carry.
+  const dateFields = properties
+    .filter(
+      (p) => p.type === "date" && propertyAppliesToLevel(p, activeLevel.key),
+    )
+    .map((p) => ({ key: p.key, label: p.label }));
+  const dateFieldKeys = dateFields.map((f) => f.key);
+  const dateSources = {
+    start: parseDateSource(sp.start, dateFieldKeys),
+    end: parseDateSource(sp.end, dateFieldKeys),
+  };
   const timeline = showTimeline
     ? buildTimeline(
         features.map((f) => ({
@@ -304,6 +318,7 @@ export default async function RoadmapPage({
           level: f.level,
           releaseId: f.releaseId,
           productId: f.productId,
+          customFields: f.customFields,
         })),
         scopedReleases.map((r) => ({
           id: r.id,
@@ -314,6 +329,7 @@ export default async function RoadmapPage({
           shippedDate: r.shippedDate,
         })),
         today,
+        dateSources,
       )
     : null;
 
@@ -405,19 +421,30 @@ export default async function RoadmapPage({
           </div>
         </div>
         {showTimeline ? (
-          timeline ? (
-            <RoadmapTimeline
-              model={timeline}
-              org={org}
-              productSlug={productSlug}
-              // Product attribution only where it carries information: the same
-              // multi-product test the board's card tags use.
-              productNamesById={productsById ? productNamesById : undefined}
-              today={today}
+          <>
+            <DateSourcePicker
+              fields={dateFields}
+              start={dateSources.start}
+              end={dateSources.end}
             />
-          ) : (
-            <TimelineEmptyState action={newReleaseButton} />
-          )
+            {timeline ? (
+              <RoadmapTimeline
+                model={timeline}
+                org={org}
+                productSlug={productSlug}
+                // Product attribution only where it carries information: the
+                // same multi-product test the board's card tags use.
+                productNamesById={productsById ? productNamesById : undefined}
+                today={today}
+                sources={dateSources}
+                dateFieldLabels={Object.fromEntries(
+                  dateFields.map((f) => [f.key, f.label]),
+                )}
+              />
+            ) : (
+              <TimelineEmptyState action={newReleaseButton} />
+            )}
+          </>
         ) : features.length === 0 && scopedReleases.length === 0 ? (
           // Nothing at all yet: no items at this level and no releases.
           activeLevel.isLeaf ? (
