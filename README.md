@@ -236,6 +236,15 @@ pnpm --filter @specboards/db generate   # emit table migrations into infra/migra
 pnpm db:migrate                         # apply against $DATABASE_URL (incl. RLS policies)
 ```
 
+Deployed environments apply migrations themselves: the container image carries a
+bundled runner (`migrate.mjs`) plus the SQL, and Fly runs it as the
+`release_command` before a new version takes traffic, aborting the release if it
+fails. Self-hosting the image works the same way:
+
+```bash
+docker run --rm -e DATABASE_URL=postgres://… ghcr.io/…/specboards node migrate.mjs
+```
+
 ## License
 
 Specboards is **open source** under the
