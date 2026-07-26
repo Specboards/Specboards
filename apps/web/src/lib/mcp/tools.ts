@@ -981,8 +981,11 @@ export const TOOLS: McpTool[] = [
       "with a `branch` name. The PR/issue/branch must exist in the item's " +
       "connected repository; its title, state, and url are resolved from GitHub " +
       "and cached. Re-linking the same artifact refreshes that cached metadata. " +
-      "Requires write access to the item's product. Returns the resolved link " +
-      "and the item's refreshed link list.",
+      "The repository is inferred from the item (a spec's own repo, else its " +
+      "product's, else the workspace's); pass `repo` as \"owner/name\" only " +
+      "when the workspace has several connected repos and the error asks you " +
+      "to choose. Requires write access to the item's product. Returns the " +
+      "resolved link and the item's refreshed link list.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1001,6 +1004,12 @@ export const TOOLS: McpTool[] = [
         branch: {
           type: "string",
           description: "The branch name (required for branch; omit otherwise).",
+        },
+        repo: {
+          type: "string",
+          description:
+            'Which connected repository the artifact lives in, as "owner/name". ' +
+            "Optional: omit it and the repo is inferred from the item.",
         },
       },
       required: ["specId", "kind"],

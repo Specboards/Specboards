@@ -1,4 +1,11 @@
-import { and, eq, features, repositories } from "@specboards/db";
+import {
+  and,
+  desc,
+  eq,
+  features,
+  productRepositories,
+  repositories,
+} from "@specboards/db";
 import {
   createGitHubRepoClient,
   type GithubArtifactMeta,
@@ -40,11 +47,23 @@ export function parseGithubLinkInput(body: unknown): GithubLinkInput {
   }
   const kind = raw.kind as GithubLinkKind;
 
+  // Optional: which connected repo the artifact lives in. Only needed when the
+  // item's own repo can't be inferred and more than one candidate exists.
+  let repo: string | undefined;
+  if (raw.repo !== undefined && raw.repo !== null) {
+    if (typeof raw.repo !== "string" || raw.repo.trim() === "") {
+      throw new InvalidGithubLinkError(
+        'repo must be a non-empty "owner/name" string.',
+      );
+    }
+    repo = raw.repo.trim();
+  }
+
   if (kind === "branch") {
     if (typeof raw.branch !== "string" || raw.branch.trim() === "") {
       throw new InvalidGithubLinkError("branch must be a non-empty string.");
     }
-    return { kind, branch: raw.branch.trim() };
+    return { kind, branch: raw.branch.trim(), repo };
   }
 
   if (
@@ -56,37 +75,179 @@ export function parseGithubLinkInput(body: unknown): GithubLinkInput {
       `${kind} requires a positive integer number.`,
     );
   }
-  return { kind, number: raw.number };
+  return { kind, number: raw.number, repo };
 }
 
-/** Look up a feature's repo coordinates (owner-side, filtered by workspace). */
-async function resolveFeatureRepo(specId: string, workspaceId: string) {
+/**
+ * The workspace's connected repos, for the link form's repo picker. Returned
+ * ordered so the spec repo (the usual home of specs) comes first. Empty in
+ * local file mode or when nothing is connected.
+ */
+export async function listLinkableRepos(
+  workspaceId: string,
+): Promise<{ owner: string; name: string }[]> {
+  const db = getDb();
+  if (!db) return [];
+  return db
+    .select({ owner: repositories.owner, name: repositories.name })
+    .from(repositories)
+    .where(eq(repositories.workspaceId, workspaceId))
+    .orderBy(desc(repositories.isSpecRepo), repositories.owner, repositories.name);
+}
+
+/** The repo coordinates a link resolves against. */
+type RepoCoords = {
+  repoId: string;
+  owner: string;
+  name: string;
+  defaultBranch: string;
+  installationId: string;
+  isSpecRepo: boolean;
+};
+
+const REPO_COLUMNS = {
+  repoId: repositories.id,
+  owner: repositories.owner,
+  name: repositories.name,
+  defaultBranch: repositories.defaultBranch,
+  installationId: repositories.githubInstallationId,
+  isSpecRepo: repositories.isSpecRepo,
+} as const;
+
+/** `owner/name` for messages that have to name a repo. */
+function repoSlug(r: RepoCoords): string {
+  return `${r.owner}/${r.name}`;
+}
+
+/**
+ * Resolve which repository a link on `specId` should point at.
+ *
+ * A spec-backed item carries its own `repoId` (the repo the spec lives in), so
+ * that always wins. A DB-native card (initiative/epic/feature) has no repo of
+ * its own, and those are exactly the cards a team wants to attach a PR to, so
+ * fall back outward: the repos mapped to the card's product, then the
+ * workspace's repos. Within a tier a single candidate is used directly and the
+ * workspace spec repo breaks a tie; anything still ambiguous asks the caller to
+ * name a repo rather than guessing, since linking to the wrong repo would
+ * resolve a PR number against the wrong project.
+ *
+ * `requested` is an explicit `owner/name` from the caller and short-circuits
+ * the whole ladder (still checked against the workspace, so it can't reach
+ * another tenant's repo).
+ */
+async function resolveFeatureRepo(
+  specId: string,
+  workspaceId: string,
+  productId: string | null,
+  requested?: string | null,
+): Promise<RepoCoords> {
   const db = getDb();
   if (!db) {
     throw new GithubNotConfiguredError(
       "GitHub linking requires a connected repository.",
     );
   }
-  const rows = await db
-    .select({
-      repoId: repositories.id,
-      owner: repositories.owner,
-      name: repositories.name,
-      defaultBranch: repositories.defaultBranch,
-      installationId: repositories.githubInstallationId,
-    })
+
+  if (requested) {
+    const [owner, name] = splitRepoSlug(requested);
+    const rows = await db
+      .select(REPO_COLUMNS)
+      .from(repositories)
+      .where(
+        and(
+          eq(repositories.workspaceId, workspaceId),
+          eq(repositories.owner, owner),
+          eq(repositories.name, name),
+        ),
+      )
+      .limit(1);
+    if (!rows[0]) {
+      throw new InvalidGithubLinkError(
+        `No connected repository named ${requested} in this workspace.`,
+      );
+    }
+    return rows[0];
+  }
+
+  // 1. The spec's own repo, for a spec-backed item.
+  const own = await db
+    .select(REPO_COLUMNS)
     .from(features)
     .innerJoin(repositories, eq(features.repoId, repositories.id))
     .where(
       and(eq(features.specId, specId), eq(features.workspaceId, workspaceId)),
     )
     .limit(1);
-  return rows[0] ?? null;
+  if (own[0]) return own[0];
+
+  // 2. Repos mapped to the card's product (the sync default first).
+  if (productId) {
+    const mapped = await db
+      .select(REPO_COLUMNS)
+      .from(productRepositories)
+      .innerJoin(
+        repositories,
+        eq(productRepositories.repoId, repositories.id),
+      )
+      .where(
+        and(
+          eq(productRepositories.workspaceId, workspaceId),
+          eq(productRepositories.productId, productId),
+        ),
+      )
+      .orderBy(desc(productRepositories.isDefault));
+    const picked = pickRepo(mapped);
+    if (picked) return picked;
+    if (mapped.length > 1) throw ambiguous(mapped, "this card's product");
+  }
+
+  // 3. Any repo in the workspace.
+  const all = await db
+    .select(REPO_COLUMNS)
+    .from(repositories)
+    .where(eq(repositories.workspaceId, workspaceId));
+  const picked = pickRepo(all);
+  if (picked) return picked;
+  if (all.length > 1) throw ambiguous(all, "this workspace");
+
+  throw new GithubNotConfiguredError(
+    "GitHub linking requires a connected repository. Connect one under " +
+      "Settings > Integrations > Repositories first.",
+  );
+}
+
+/** Split `owner/name`, rejecting anything else. */
+export function splitRepoSlug(slug: string): [string, string] {
+  const parts = slug.split("/");
+  if (parts.length !== 2 || !parts[0]?.trim() || !parts[1]?.trim()) {
+    throw new InvalidGithubLinkError(
+      `repo must be in "owner/name" form; got "${slug}".`,
+    );
+  }
+  return [parts[0].trim(), parts[1].trim()];
+}
+
+/** The unambiguous choice from a tier: the only one, or the spec repo. */
+export function pickRepo<T extends { isSpecRepo: boolean }>(
+  candidates: T[],
+): T | null {
+  if (candidates.length === 1) return candidates[0]!;
+  if (candidates.length === 0) return null;
+  return candidates.find((r) => r.isSpecRepo) ?? null;
+}
+
+/** Ask the caller to disambiguate, naming the repos they can choose from. */
+function ambiguous(candidates: RepoCoords[], where: string): Error {
+  const names = candidates.map(repoSlug).join(", ");
+  return new InvalidGithubLinkError(
+    `${where} has more than one connected repository (${names}). ` +
+      `Pass repo: "owner/name" to say which one this link belongs to.`,
+  );
 }
 
 /** Resolve a link's GitHub metadata (title/state/url) for caching. */
 async function resolveMetadata(
-  repo: NonNullable<Awaited<ReturnType<typeof resolveFeatureRepo>>>,
+  repo: RepoCoords,
   input: GithubLinkInput,
 ): Promise<GithubArtifactMeta> {
   const db = getDb()!;
@@ -138,8 +299,16 @@ export async function addFeatureGithubLink(
   const feature = await store.getFeature(specId, scope);
   if (!feature) throw new FeatureNotFoundError(specId);
 
-  const repo = await resolveFeatureRepo(specId, scope.workspaceId);
-  if (!repo) throw new FeatureNotFoundError(specId);
+  // A missing repo is a configuration problem, not a missing item: resolve
+  // throws GithubNotConfiguredError / InvalidGithubLinkError with an actionable
+  // message. (This used to surface as "Unknown feature", because a DB-native
+  // card has no repoId of its own and the lookup was an inner join.)
+  const repo = await resolveFeatureRepo(
+    specId,
+    scope.workspaceId,
+    feature.productId,
+    input.repo,
+  );
 
   const meta = await resolveMetadata(repo, input);
   const resolved: ResolvedGithubLink = {

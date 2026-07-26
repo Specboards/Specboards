@@ -144,6 +144,12 @@ export interface GithubLinkInput {
   kind: GithubLinkKind;
   number?: number | null;
   branch?: string | null;
+  /**
+   * Which connected repository the artifact lives in, as `owner/name`. Only
+   * needed when the item's repo can't be inferred (a DB-native card in a
+   * workspace with several connected repos); otherwise omit it.
+   */
+  repo?: string | null;
 }
 
 /** A link with its GitHub metadata already resolved, ready to persist. */
