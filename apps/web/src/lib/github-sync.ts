@@ -121,6 +121,28 @@ function featureTitleFor(key: string, fallbackTitle: string): string {
   return cleaned.replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+/**
+ * Whether sync should auto-*create* a Feature grouping for `key`, given how
+ * many specs in the repo resolve to it.
+ *
+ * A grouping of one is not a grouping. `create_spec` writes every spec to its
+ * own folder (`specs/<slug>/spec.md`), so a path-derived key is unique per
+ * spec; creating a grouping for it minted one wrapper card per spec, titled
+ * from the folder slug. Worse, the documented agent workflow then re-parents
+ * the spec under a real card (`update_item(parentSpecId)`), which flips
+ * `parentSetBy` to `user` and leaves the wrapper childless forever.
+ *
+ * A `feature:` key is different: the author named that grouping deliberately,
+ * so it is honoured even when only one spec currently declares it.
+ *
+ * This gates creation only. An existing grouping is always reused, so groupings
+ * already on a board keep working and no item is orphaned by this rule.
+ */
+export function groupingIsWarranted(key: string, specCount: number): boolean {
+  if (key.startsWith("feature:")) return true;
+  return specCount >= 2;
+}
+
 /** How sync assigned an item's parent: on import, or by a person in the app. */
 export type ParentSetBy = "system" | "user" | null;
 
@@ -458,13 +480,38 @@ export async function syncRepository(db: Database, repo: RepoRecord): Promise<Sy
   // for a single-level hierarchy, where there's nowhere to home work items.
   const featureLevelKey = parentLevelKey(leafKey, levels);
 
-  // Existing blobShas keyed by specId, to skip unchanged files.
+  // Existing blobShas keyed by specId, to skip unchanged files. Parent state
+  // rides along so the loop can tell an unchanged-but-unhomed spec (left loose
+  // by the single-spec grouping rule) from one that is genuinely settled.
   const existingRows = await db
-    .select({ specId: features.specId, blobSha: specIndex.blobSha })
+    .select({
+      specId: features.specId,
+      blobSha: specIndex.blobSha,
+      parentId: features.parentId,
+      parentSetBy: features.parentSetBy,
+    })
     .from(features)
     .leftJoin(specIndex, eq(specIndex.featureId, features.id))
     .where(eq(features.repoId, repo.id));
   const existingBlob = new Map(existingRows.map((r) => [r.specId, r.blobSha]));
+  const existingParent = new Map(
+    existingRows.map((r) => [
+      r.specId,
+      { parentId: r.parentId, parentSetBy: r.parentSetBy as ParentSetBy },
+    ]),
+  );
+
+  // How many specs in this repo resolve to each grouping key. A key claimed by
+  // a single spec does not warrant a grouping (see groupingIsWarranted).
+  const keyCounts = new Map<string, number>();
+  for (const item of reconciled) {
+    const key = featureKeyFor(
+      item.spec.frontmatter.feature,
+      item.path,
+      item.spec.frontmatter.id,
+    );
+    keyCounts.set(key, (keyCounts.get(key) ?? 0) + 1);
+  }
 
   const summary: SyncSummary = {
     upserted: 0,
@@ -478,7 +525,23 @@ export async function syncRepository(db: Database, repo: RepoRecord): Promise<Sy
       if (item.idInjected) summary.idsInjected += 1;
 
       const specId = item.spec.frontmatter.id;
-      if (existingBlob.get(specId) === item.blobSha) {
+      const groupingKey = featureKeyFor(
+        item.spec.frontmatter.feature,
+        item.path,
+        specId,
+      );
+      // An unchanged spec is normally skipped. The exception: a spec the
+      // single-spec rule deliberately left unhomed, whose grouping has since
+      // become warranted because a sibling spec joined its folder. Re-process
+      // it so the new grouping homes every member, not only the spec that
+      // happened to arrive last.
+      const prior = existingParent.get(specId);
+      const awaitingGrouping =
+        prior !== undefined &&
+        prior.parentId === null &&
+        prior.parentSetBy === null &&
+        groupingIsWarranted(groupingKey, keyCounts.get(groupingKey) ?? 0);
+      if (existingBlob.get(specId) === item.blobSha && !awaitingGrouping) {
         summary.skipped += 1;
         continue;
       }
@@ -520,7 +583,7 @@ export async function syncRepository(db: Database, repo: RepoRecord): Promise<Sy
       // re-homes only system-assigned parents when the `feature:` frontmatter
       // changed, and tracks the last-synced key on the row (gh-51).
       if (featureLevelKey) {
-        const key = featureKeyFor(item.spec.frontmatter.feature, item.path, specId);
+        const key = groupingKey;
         const action = decideReparent(
           {
             parentId: row.parentId,
@@ -542,7 +605,10 @@ export async function syncRepository(db: Database, repo: RepoRecord): Promise<Sy
             )
             .limit(1);
           let featureId = existing[0]?.id;
-          if (!featureId) {
+          if (
+            !featureId &&
+            groupingIsWarranted(key, keyCounts.get(key) ?? 0)
+          ) {
             const newId = randomUUID();
             await tx.insert(features).values({
               id: newId,
@@ -557,10 +623,16 @@ export async function syncRepository(db: Database, repo: RepoRecord): Promise<Sy
             featureId = newId;
             summary.featuresCreated += 1;
           }
-          await tx
-            .update(features)
-            .set({ parentId: featureId, parentSetBy: "system", syncedFeatureKey: key })
-            .where(eq(features.id, row.id));
+          if (featureId) {
+            await tx
+              .update(features)
+              .set({ parentId: featureId, parentSetBy: "system", syncedFeatureKey: key })
+              .where(eq(features.id, row.id));
+          }
+          // Otherwise: the sole spec in a path-derived grouping. Left
+          // unparented on purpose, and deliberately not stamped with
+          // `syncedFeatureKey` / `parentSetBy`, so `awaitingGrouping` can still
+          // recognise it if a sibling spec later joins its folder.
         } else if (action.kind === "baseline") {
           // Record the current key without moving the parent, so a later
           // frontmatter change on this pre-tracking row is detectable.
