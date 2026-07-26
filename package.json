@@ -28,7 +28,7 @@
   "pnpm": {
     "overrides": {
       "esbuild": "0.28.1",
-      "postcss": "8.5.16",
+      "postcss": ">=8.5.18",
       "sharp": ">=0.35.0",
       "fast-uri": ">=3.1.4",
       "shell-quote": ">=1.9.0",

@@ -19,7 +19,7 @@
     "lint": "eslint src"
   },
   "dependencies": {
-    "js-yaml": "^5.2.1",
+    "js-yaml": "^5.2.2",
     "zod": "^4.4.3"
   },
   "devDependencies": {
