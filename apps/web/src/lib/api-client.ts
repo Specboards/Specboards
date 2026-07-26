@@ -53,6 +53,7 @@ import type {
   StageGate,
   StageGateInput,
   StatusStageInput,
+  TransitionMode,
   WorkspaceLevel,
   WorkspaceStatus,
 } from "@/lib/store/types";
@@ -504,6 +505,28 @@ export async function updateStatuses(
     throw new Error(body?.error ?? `Update workflow failed with ${res.status}`);
   }
   return body.statuses;
+}
+
+/** Set how freely items move between stages (admin only). */
+export async function updateTransitionMode(
+  mode: TransitionMode,
+): Promise<TransitionMode> {
+  const res = await apiFetch("/api/v1/statuses", {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ transitionMode: mode }),
+  });
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as {
+    transitionMode?: TransitionMode;
+    error?: string;
+  } | null;
+  if (!res.ok || !body?.transitionMode) {
+    throw new Error(
+      body?.error ?? `Update transitions failed with ${res.status}`,
+    );
+  }
+  return body.transitionMode;
 }
 
 /** The workspace's stage gates (checklist items per stage). */

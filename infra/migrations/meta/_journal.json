@@ -351,6 +351,13 @@
       "when": 1784920462183,
       "tag": "0049_open_aqueduct",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1785006862183,
+      "tag": "0050_workspace_transition_mode",
+      "breakpoints": true
     }
   ]
 }

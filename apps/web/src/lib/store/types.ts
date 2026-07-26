@@ -10,6 +10,7 @@ import type {
   PropertyEntity,
   PropertyType,
   SpecSection,
+  TransitionMode,
   WorkspaceLevel,
 } from "@specboards/core";
 
@@ -24,6 +25,7 @@ export type {
   PropertyDef,
   PropertyEntity,
   PropertyType,
+  TransitionMode,
   WorkspaceLevel,
 };
 
@@ -1219,6 +1221,16 @@ export interface FeatureStore {
     scope?: WorkspaceScope,
   ): Promise<IdeaStage[]>;
   /** The workspace's Ideas configuration (portal settings). */
+  /**
+   * How freely items move between stages in this workspace. Drives whether the
+   * resolved workflow's transitions are a pipeline or fully open.
+   */
+  getTransitionMode(scope?: WorkspaceScope): Promise<TransitionMode>;
+  /** Set the workspace's transition mode (owner only). Returns the new mode. */
+  setTransitionMode(
+    mode: TransitionMode,
+    scope?: WorkspaceScope,
+  ): Promise<TransitionMode>;
   getIdeaSettings(scope?: WorkspaceScope): Promise<IdeaSettings>;
   /** Update the workspace's Ideas configuration. Returns the updated settings. */
   updateIdeaSettings(

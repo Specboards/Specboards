@@ -22,8 +22,10 @@ const INSTRUCTIONS =
   "learn your role and the hierarchy levels. Use list_items / read_item to " +
   "review work, list_statuses (or read_item's allowedTransitions) to learn " +
   "which stage keys a status change accepts, update_item to change metadata " +
-  "or a DB-native card's body, " +
-  "and create_item to add higher-level cards. Edit an actual spec's Markdown " +
+  "or a DB-native card's body. Where list_statuses reports transitionMode " +
+  "\"strict\", stages must be walked in order: pass update_item(advance: true) " +
+  "to move an item several stages in one call rather than issuing one call per " +
+  "stage. Use create_item to add higher-level cards. Edit an actual spec's Markdown " +
   "with update_spec_content (commits to git), and break a card down by " +
   "creating child specs with create_spec, then update_item(parentSpecId) to " +
   "nest each under the card. To roll changes up, read the child specs and " +

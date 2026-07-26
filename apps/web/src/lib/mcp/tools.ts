@@ -7,6 +7,7 @@ import {
   createRelease,
   createWorkItem,
   deleteWorkItem,
+  getTransitionMode,
   listReleases,
   parseCreateFeatureInput,
   parseFeaturePatch,
@@ -175,20 +176,27 @@ export const TOOLS: McpTool[] = [
     description:
       "List the workspace's status workflow: the ordered stage keys (use these " +
       "exact keys with update_item), each stage's display label, and the moves " +
-      "allowed out of it. The default workflow permits only single-step moves " +
-      "(e.g. `backlog` reaches only `defining` or `archived`), so to advance " +
-      "several stages call update_item once per step. Call this before changing " +
-      "an item's status so you never have to guess a stage key.",
+      "allowed out of it, plus `transitionMode`. When the mode is `flexible`, " +
+      "any stage reaches any other and a single update_item call can set any " +
+      "status. When it is `strict`, stages must be walked in order (e.g. " +
+      "`backlog` reaches only `defining` or `archived`): to move an item " +
+      "several stages, pass update_item(advance: true) once - do NOT issue one " +
+      "call per stage. Call this before changing an item's status so you never " +
+      "have to guess a stage key.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     write: false,
     run: async (_args, ctx) => {
-      const workflow = await resolveWorkflowFor(ctx.scope ?? null);
+      const [workflow, transitionMode] = await Promise.all([
+        resolveWorkflowFor(ctx.scope ?? null),
+        getTransitionMode(ctx.scope),
+      ]);
       const titleCase = (key: string) =>
         key
           .split(/[_\s-]+/)
           .map((w) => (w ? w[0]!.toUpperCase() + w.slice(1) : w))
           .join(" ");
       return {
+        transitionMode,
         statuses: workflow.statuses.map((key) => ({
           key,
           label: workflow.labels?.[key] ?? titleCase(key),
@@ -451,14 +459,23 @@ export const TOOLS: McpTool[] = [
       "Set any of: status, tags, releaseId, assigneeId, customFields, " +
       "parentSpecId, and - for DB-native cards only - title and details " +
       "(Markdown body). Status changes are validated against the workspace " +
-      "workflow and its stage gates. A spec-backed item's title and body come " +
-      "from git and cannot be patched here (Phase 2). Use this to roll a " +
-      "summary of child specs up into a parent card's details.",
+      "workflow and its stage gates. On a workspace whose transitions are " +
+      "strict, a status several stages ahead is rejected: pass advance: true " +
+      "and this walks the item through the intermediate stages in one call " +
+      "(gates still apply at every stage it passes). A spec-backed item's " +
+      "title and body come from git and cannot be patched here (Phase 2). Use " +
+      "this to roll a summary of child specs up into a parent card's details.",
     inputSchema: {
       type: "object",
       properties: {
         specId: specIdSchema,
         status: { type: "string" },
+        advance: {
+          type: "boolean",
+          description:
+            "Walk intermediate stages when the target status isn't reachable " +
+            "in one move (strict workflows). Ignored without a status.",
+        },
         tags: { type: "array", items: { type: "string" } },
         releaseId: { type: ["string", "null"] },
         assigneeId: { type: ["string", "null"] },
@@ -482,9 +499,11 @@ export const TOOLS: McpTool[] = [
     write: true,
     run: async (args, ctx) => {
       const specId = requireString(args, "specId");
-      // parseFeaturePatch reads only known keys; specId is ignored by it.
+      // parseFeaturePatch reads only known keys; specId/advance are ignored by it.
       const patch = parseFeaturePatch(args);
-      const updated = await patchFeature(specId, patch, ctx.scope);
+      const updated = await patchFeature(specId, patch, ctx.scope, {
+        advance: args.advance === true,
+      });
       return {
         specId: updated.specId,
         title: updated.title,

@@ -64,6 +64,13 @@ export const workspaces = pgTable("workspaces", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
   slug: text("slug").notNull().unique(),
+  /**
+   * How freely items move between workflow stages: `strict` is a pipeline (one
+   * step forward, one back, or archive), `flexible` lets any stage reach any
+   * other. New workspaces are flexible; stage gates apply in both modes. See
+   * TransitionMode in @specboards/core.
+   */
+  transitionMode: text("transition_mode").notNull().default("flexible"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

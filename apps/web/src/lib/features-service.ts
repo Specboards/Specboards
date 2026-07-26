@@ -1,6 +1,7 @@
 import {
   canTransition,
   isForwardTransition,
+  shortestTransitionPath,
   transitionErrorMessage,
   isPropertyEntity,
   isPropertyType,
@@ -52,6 +53,7 @@ import {
   type ReleaseStatus,
   type StageGate,
   type StageGateInput,
+  type TransitionMode,
   type StatusStageInput,
   type WorkspaceStatus,
 } from "@/lib/store/types";
@@ -251,8 +253,74 @@ export function assertCustomFieldTypes(
   }
 }
 
-/** Apply a validated patch, enforcing the status workflow. */
+/** Options that change how a patch is applied, rather than what it sets. */
+export interface PatchOptions {
+  /**
+   * Walk the item through the shortest legal chain of intermediate stages when
+   * the requested status isn't reachable in one move. Without this, a strict
+   * workflow rejects the jump and the caller has to issue one call per stage,
+   * which is what agents and integrations kept having to do.
+   *
+   * Each hop is applied as an ordinary single-step move, so stage gates are
+   * enforced and an `item.status_changed` event is emitted per hop: the audit
+   * trail records the stages the item really passed through. The walk is not
+   * atomic (each hop is its own transaction); if a gate blocks a later hop the
+   * item stops there and the error says where it got to.
+   */
+  advance?: boolean;
+}
+
+/**
+ * Apply a validated patch, enforcing the status workflow. With
+ * {@link PatchOptions.advance} a multi-stage status move is walked one legal
+ * hop at a time instead of rejected.
+ */
 export async function patchFeature(
+  specId: string,
+  patch: FeaturePatch,
+  scope?: WorkspaceScope,
+  options?: PatchOptions,
+): Promise<FeatureDetail> {
+  if (patch.status === undefined || !options?.advance) {
+    return applyFeaturePatch(specId, patch, scope);
+  }
+
+  const store = await getStore();
+  const feature = await store.getFeature(specId, scope);
+  if (!feature) throw new FeatureNotFoundError(specId);
+  const workflow = await resolveWorkflowFor(scope ?? null);
+  const path = shortestTransitionPath(feature.status, patch.status, workflow);
+  if (path === null) {
+    throw new InvalidPatchError(
+      transitionErrorMessage(feature.status, patch.status, workflow),
+    );
+  }
+  // A single hop (or none) is an ordinary patch; no need to fan it out.
+  if (path.length <= 1) return applyFeaturePatch(specId, patch, scope);
+
+  let result = feature;
+  for (const [i, hop] of path.entries()) {
+    // The rest of the patch rides along with the final hop, so a caller can
+    // advance and set other fields in one request.
+    const hopPatch =
+      i === path.length - 1 ? { ...patch, status: hop } : { status: hop };
+    try {
+      result = await applyFeaturePatch(specId, hopPatch, scope);
+    } catch (err) {
+      if (err instanceof InvalidPatchError && i > 0) {
+        throw new InvalidPatchError(
+          `Advanced ${feature.status} -> ${path[i - 1]} on the way to ` +
+            `${patch.status}, then stopped: ${err.message}`,
+        );
+      }
+      throw err;
+    }
+  }
+  return result;
+}
+
+/** One validated single-step patch: the workflow rules apply as written. */
+async function applyFeaturePatch(
   specId: string,
   patch: FeaturePatch,
   scope?: WorkspaceScope,
@@ -1090,6 +1158,23 @@ export async function listStatuses(
 ): Promise<WorkspaceStatus[]> {
   const store = await getStore();
   return store.listStatuses(scope);
+}
+
+/** How freely items may move between stages in this workspace. */
+export async function getTransitionMode(
+  scope?: WorkspaceScope,
+): Promise<TransitionMode> {
+  const store = await getStore();
+  return store.getTransitionMode(scope);
+}
+
+/** Set the workspace's transition mode. Callers gate this to admins. */
+export async function setTransitionMode(
+  mode: TransitionMode,
+  scope?: WorkspaceScope,
+): Promise<TransitionMode> {
+  const store = await getStore();
+  return store.setTransitionMode(mode, scope);
 }
 
 /** Replace the workspace's workflow stages. */

@@ -5,7 +5,6 @@ import { parseArgs } from "node:util";
 
 import { ApiError, SpecboardsClient, type Feature, type FeaturePatch } from "./client.js";
 import { clearFileConfig, loadFileConfig, resolveConfig, saveFileConfig } from "./config.js";
-import { shortestTransitionPath } from "./workflow.js";
 
 // Read the version from package.json at runtime (bin lives at dist/index.js, so
 // the manifest is one level up) rather than hardcoding it, so `specboard
@@ -205,11 +204,13 @@ function describe(f: Feature, patch: FeaturePatch): string {
 
 /**
  * `status <specId> <target> [--advance]`. Without `--advance` this is a single
- * transition (the server rejects an illegal jump). With `--advance` the CLI
- * walks the spec through the shortest legal chain of intermediate statuses,
- * PATCHing each hop, so e.g. `backlog -> in_progress` succeeds via
- * `defining -> ready`. The path is computed from the workflow the server
- * reports, so it honors custom / config.yml workflows too.
+ * transition (the server rejects an illegal jump). With `--advance` the server
+ * walks the spec through the shortest legal chain of intermediate statuses, so
+ * e.g. `backlog -> in_progress` succeeds via `defining -> ready`.
+ *
+ * The walk used to happen here, one PATCH per hop. It moved server-side so the
+ * MCP tools and the REST API get it too, and so the intermediate hops can't be
+ * interrupted by a dying CLI process halfway along.
  */
 async function cmdStatus(specId: string, target: string, argv: string[]): Promise<void> {
   const { values } = parseArgs({
@@ -222,23 +223,13 @@ async function cmdStatus(specId: string, target: string, argv: string[]): Promis
   }
 
   const api = client();
-  const current = (await api.getFeature(specId)).status;
-  if (current === target) {
+  const before = (await api.getFeature(specId)).status;
+  if (before === target) {
     process.stdout.write(`${specId}: already ${target}\n`);
     return;
   }
-  const workflow = await api.getWorkflow();
-  const path = shortestTransitionPath(current, target, workflow);
-  if (path === null) {
-    fail(`no legal path from "${current}" to "${target}" in this workflow.`);
-  }
-
-  let from = current;
-  for (const step of path) {
-    const f = await api.patchFeature(specId, { status: step });
-    process.stdout.write(`${specId}: ${from} -> ${f.status}\n`);
-    from = f.status;
-  }
+  const after = await api.patchFeature(specId, { status: target }, { advance: true });
+  process.stdout.write(`${specId}: ${before} -> ${after.status}\n`);
 }
 
 async function cmdAssign(specId: string, who: string): Promise<void> {

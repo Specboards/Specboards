@@ -26,6 +26,31 @@ const DEFAULT_TRANSITIONS: Record<Status, Status[]> = {
   archived: ["backlog"],
 };
 
+/**
+ * How freely an item may move between stages.
+ *
+ * `strict` is a pipeline: one step forward, one step back, or archive. It suits
+ * a team that wants the board to reflect a real process, and it pairs with
+ * stage gates to hold work until its exit criteria are met.
+ *
+ * `flexible` lets any stage reach any other. It suits a team that treats the
+ * board as a place to record where things are rather than a process to walk,
+ * and it means one call (human or agent) can move an item from `backlog` to
+ * `in_review` without stepping through everything between.
+ *
+ * Stage gates apply in both modes: a forward move still has to satisfy the
+ * gates of every stage it passes over, so `flexible` loosens sequencing without
+ * loosening governance.
+ */
+export type TransitionMode = "strict" | "flexible";
+
+export const TRANSITION_MODES: readonly TransitionMode[] = ["strict", "flexible"];
+
+/** Whether `value` is a valid {@link TransitionMode}. */
+export function isTransitionMode(value: unknown): value is TransitionMode {
+  return typeof value === "string" && TRANSITION_MODES.includes(value as TransitionMode);
+}
+
 /** A status workflow: the ordered vocabulary plus its legal transitions. */
 export interface StatusWorkflow {
   statuses: readonly string[];
@@ -43,22 +68,82 @@ export const defaultWorkflow: StatusWorkflow = {
   transitions: DEFAULT_TRANSITIONS,
 };
 
+/** Every stage reaches every other. `archived` is included as a destination. */
+export function flexibleTransitions(
+  stagesWithArchived: readonly string[],
+): Record<string, string[]> {
+  return Object.fromEntries(
+    stagesWithArchived.map((k) => [
+      k,
+      stagesWithArchived.filter((other) => other !== k),
+    ]),
+  );
+}
+
 /**
- * Build a {@link StatusWorkflow} from admin-defined stages (ordered). Transitions
- * are open (any stage to any other), matching the config's "omit transitions"
- * rule, and the system `archived` status is appended so items can still be
- * archived and dropped from the board (which hides `archived`). Returns null when
- * there are fewer than two stages, so callers fall back to config/default.
+ * Pipeline transitions for an ordered stage list (excluding `archived`): one
+ * step forward, one step back, or archive; `archived` returns to the first
+ * stage.
+ *
+ * The built-in vocabulary keeps {@link DEFAULT_TRANSITIONS} verbatim rather
+ * than being regenerated, because it has one deliberate edge this rule cannot
+ * express: `done` reopens to `in_progress` (straight back to work) rather than
+ * to `in_review`. Regenerating would silently drop that move, which the board
+ * offers as a drag from Done to In Progress.
+ */
+export function strictTransitions(
+  stages: readonly string[],
+): Record<string, string[]> {
+  if (isDefaultVocabulary(stages)) {
+    return Object.fromEntries(
+      Object.entries(DEFAULT_TRANSITIONS).map(([k, v]) => [k, [...v]]),
+    );
+  }
+  const transitions: Record<string, string[]> = {};
+  stages.forEach((key, i) => {
+    const step: string[] = [];
+    const next = stages[i + 1];
+    const prev = stages[i - 1];
+    if (next) step.push(next);
+    if (prev) step.push(prev);
+    step.push("archived");
+    transitions[key] = step;
+  });
+  const first = stages[0];
+  transitions.archived = first ? [first] : [];
+  return transitions;
+}
+
+/** Whether `stages` is exactly the built-in vocabulary (archived aside). */
+function isDefaultVocabulary(stages: readonly string[]): boolean {
+  const builtin = DEFAULT_STATUSES.filter((s) => s !== "archived");
+  return (
+    stages.length === builtin.length &&
+    stages.every((s, i) => s === builtin[i])
+  );
+}
+
+/**
+ * Build a {@link StatusWorkflow} from admin-defined stages (ordered). The
+ * system `archived` status is appended so items can still be archived and
+ * dropped from the board (which hides `archived`). Returns null when there are
+ * fewer than two stages, so callers fall back to config/default.
+ *
+ * `mode` decides the transitions: see {@link TransitionMode}. It is required
+ * rather than defaulted, because silently picking one is how a workspace ends
+ * up in a mode nobody chose.
  */
 export function workflowFromStages(
   stages: readonly { key: string; label: string }[],
+  mode: TransitionMode,
 ): StatusWorkflow | null {
   if (stages.length < 2) return null;
   const keys = stages.map((s) => s.key);
   const withArchived = [...keys, "archived"];
-  const transitions = Object.fromEntries(
-    withArchived.map((k) => [k, withArchived.filter((other) => other !== k)]),
-  );
+  const transitions =
+    mode === "flexible"
+      ? flexibleTransitions(withArchived)
+      : strictTransitions(keys);
   const labels: Record<string, string> = { archived: "Archived" };
   for (const s of stages) labels[s.key] = s.label;
   return { statuses: withArchived, transitions, labels };
@@ -110,10 +195,62 @@ export function transitionErrorMessage(
   const hint = allowed.length
     ? `Allowed from "${from}": ${allowed.join(", ")}.`
     : `"${from}" has no outgoing transitions in this workflow.`;
-  const vocab = workflow.statuses.includes(to)
-    ? ""
-    : ` "${to}" is not a status in this workspace; valid statuses are: ${workflow.statuses.join(", ")}.`;
-  return `Illegal transition: ${from} -> ${to}. ${hint}${vocab}`;
+  if (!workflow.statuses.includes(to)) {
+    return (
+      `Illegal transition: ${from} -> ${to}. ${hint} "${to}" is not a status ` +
+      `in this workspace; valid statuses are: ${workflow.statuses.join(", ")}.`
+    );
+  }
+  // `to` is a real status just not reachable in one step, which is the common
+  // case on a strict workflow. Name both ways out so the caller doesn't have to
+  // brute-force the chain one call at a time.
+  const reachable = shortestTransitionPath(from, to, workflow);
+  const route =
+    reachable && reachable.length > 1
+      ? ` Pass advance to walk it there via ${reachable.slice(0, -1).join(" -> ")}, ` +
+        `or set this workspace's transitions to flexible in Settings > Cards > Workflow.`
+      : "";
+  return `Illegal transition: ${from} -> ${to}. ${hint}${route}`;
+}
+
+/**
+ * Shortest legal path from `from` to `to` through the workflow's transitions,
+ * as the ordered list of intermediate-and-final statuses to move through
+ * (excluding `from`). Returns `[]` when already at the target, or `null` when
+ * no legal path exists.
+ *
+ * `archived` is never used as an intermediate hop (it drops an item off the
+ * board, not down the pipeline); it is only ever a destination when `to` is
+ * itself `archived`. This is a plain breadth-first search, so the result is a
+ * fewest-hops path; ties are broken by transition-declaration order.
+ */
+export function shortestTransitionPath(
+  from: string,
+  to: string,
+  workflow: StatusWorkflow = defaultWorkflow,
+): string[] | null {
+  if (from === to) return [];
+  if (!workflow.statuses.includes(to)) return null;
+
+  const visited = new Set<string>([from]);
+  // Queue of (node, path-taken-to-reach-node-excluding-`from`).
+  const queue: Array<{ node: string; path: string[] }> = [
+    { node: from, path: [] },
+  ];
+
+  while (queue.length > 0) {
+    const { node, path } = queue.shift()!;
+    for (const next of workflow.transitions[node] ?? []) {
+      if (visited.has(next)) continue;
+      // Skip `archived` unless it is the requested destination.
+      if (next === "archived" && to !== "archived") continue;
+      const nextPath = [...path, next];
+      if (next === to) return nextPath;
+      visited.add(next);
+      queue.push({ node: next, path: nextPath });
+    }
+  }
+  return null;
 }
 
 /**
@@ -132,10 +269,21 @@ export function resolveWorkflow(
 ): StatusWorkflow {
   const statuses = config?.statuses;
   if (!statuses || statuses.length < 2) return defaultWorkflow;
-  const transitions =
-    config?.transitions ??
-    Object.fromEntries(
-      statuses.map((s) => [s, statuses.filter((other) => other !== s)]),
-    );
+  const transitions = config?.transitions ?? flexibleTransitions(statuses);
   return { statuses: [...statuses], transitions };
+}
+
+/** Whether a repo config pins the state machine itself (transitions given). */
+export function configPinsTransitions(
+  config?: {
+    statuses?: readonly string[];
+    transitions?: Record<string, string[]>;
+  } | null,
+): boolean {
+  return (
+    !!config?.statuses &&
+    config.statuses.length >= 2 &&
+    !!config.transitions &&
+    Object.keys(config.transitions).length > 0
+  );
 }

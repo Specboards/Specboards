@@ -98,6 +98,7 @@ import {
   type SavedViewInput,
   type SavedViewPatch,
   type OutboxEmit,
+  type TransitionMode,
   type WorkspaceScope,
 } from "./types";
 
@@ -2194,6 +2195,27 @@ export class LocalFileStore implements FeatureStore {
       "utf8",
     );
     return rows;
+  }
+
+  /**
+   * Local file mode has no workspace row to hold the setting, and a solo
+   * dogfooding session is the case that least wants a rigid pipeline, so it is
+   * always flexible. Teams that want a strict pipeline are running the DB mode.
+   */
+  async getTransitionMode(_scope?: WorkspaceScope): Promise<TransitionMode> {
+    return "flexible";
+  }
+
+  async setTransitionMode(
+    mode: TransitionMode,
+    _scope?: WorkspaceScope,
+  ): Promise<TransitionMode> {
+    if (mode !== "flexible") {
+      throw new Error(
+        "Local file mode is always flexible; set transitions per workspace in the hosted app.",
+      );
+    }
+    return mode;
   }
 
   async getIdeaSettings(_scope?: WorkspaceScope): Promise<IdeaSettings> {

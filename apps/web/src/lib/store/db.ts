@@ -11,6 +11,7 @@ import {
   wouldExceedDepth,
   isLeafLevel,
   isPropertyType,
+  isTransitionMode,
   isValidParentLevel,
   productKeyFromName,
   promotedIdeaStatus,
@@ -21,6 +22,7 @@ import {
   type IdeaStage,
   type PropertyDef,
   type PropertyEntity,
+  type TransitionMode,
   type WorkspaceLevel,
 } from "@specboards/core";
 
@@ -64,6 +66,7 @@ import {
   workspaceProperties,
   workspaceStageGates,
   workspaceStatuses,
+  workspaces,
   featureGateCompletions,
   type Database,
 } from "@specboards/db";
@@ -3003,6 +3006,32 @@ export class DbStore implements FeatureStore {
         label: s.label,
         position: i,
       }));
+    });
+  }
+
+  async getTransitionMode(scope?: WorkspaceScope): Promise<TransitionMode> {
+    return this.scoped(scope, async (tx) => {
+      const row = await tx
+        .select({ mode: workspaces.transitionMode })
+        .from(workspaces)
+        .where(eq(workspaces.id, scope!.workspaceId))
+        .limit(1);
+      // An unrecognized value (hand-edited row) reads as the safer pipeline
+      // rather than silently opening every transition.
+      return isTransitionMode(row[0]?.mode) ? row[0]!.mode : "strict";
+    });
+  }
+
+  async setTransitionMode(
+    mode: TransitionMode,
+    scope?: WorkspaceScope,
+  ): Promise<TransitionMode> {
+    return this.scoped(scope, async (tx) => {
+      await tx
+        .update(workspaces)
+        .set({ transitionMode: mode })
+        .where(eq(workspaces.id, scope!.workspaceId));
+      return mode;
     });
   }
 

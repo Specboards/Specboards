@@ -16,6 +16,12 @@ export const dynamic = "force-dynamic";
 
 type Params = { params: Promise<{ specId: string }> };
 
+/** Whether `?advance` asks for a multi-stage status move to be walked. */
+function advanceRequested(req: Request): boolean {
+  const raw = new URL(req.url).searchParams.get("advance");
+  return raw !== null && raw !== "0" && raw !== "false";
+}
+
 /** GET /api/v1/features/:specId — full feature detail (metadata + spec content). */
 export async function GET(req: Request, { params }: Params) {
   const authz = await resolveReadScope(req);
@@ -37,12 +43,17 @@ export async function GET(req: Request, { params }: Params) {
  * PATCH /api/v1/features/:specId — update PM metadata (status / tags /
  * releaseId / assigneeId / customFields). Status changes are validated
  * against the workflow state machine.
+ *
+ * `?advance=1` walks a multi-stage status move through the intermediate stages
+ * instead of rejecting it, emitting one status_changed event per hop. Without
+ * it, a strict workflow still rejects the jump.
  */
 export async function PATCH(req: Request, { params }: Params) {
   const authz = await authorizeWrite(req);
   if (!authz.ok) return authz.response;
 
   const { specId } = await params;
+  const advance = advanceRequested(req);
 
   const parsed = await readJsonBody(req);
   if (!parsed.ok) return parsed.response;
@@ -53,6 +64,7 @@ export async function PATCH(req: Request, { params }: Params) {
       specId,
       parseFeaturePatch(body),
       authz.scope ?? undefined,
+      { advance },
     );
     for (const path of ["/[org]/[product]/backlog", "/[org]/[product]/roadmap"])
       revalidatePath(path, "page");
