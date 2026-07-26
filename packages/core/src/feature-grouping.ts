@@ -22,6 +22,12 @@ const PATH_PREFIX = "path:";
  * `feature:` value, or the last segment of the folder path, with `-`/`_` runs
  * turned into spaces and each word capitalised.
  *
+ * Whitespace runs collapse too. `featureSlug` cannot emit a space, so a key
+ * carrying one came from a hand-authored `feature:` value or a folder name with
+ * a space in it, and a space next to a hyphen used to produce a double-spaced
+ * title ("Palouse Mail  Mailpit"). That is the second path into a generated
+ * grouping title, distinct from `create_spec`'s slugger.
+ *
  * Returns `fallbackTitle` when the key yields nothing usable (e.g. a `spec:`
  * key, which carries only a uuid).
  */
@@ -31,7 +37,7 @@ export function featureTitleFor(key: string, fallbackTitle: string): string {
     : key.startsWith(PATH_PREFIX)
       ? key.slice(key.lastIndexOf("/") + 1)
       : "";
-  const cleaned = raw.replace(/[-_]+/g, " ").trim();
+  const cleaned = raw.replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim();
   if (!cleaned) return fallbackTitle;
   return cleaned.replace(/\b\w/g, (c) => c.toUpperCase());
 }
