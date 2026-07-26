@@ -26,11 +26,30 @@
 - **Always deploy to test first.** New code goes to `specboard-test` and is
   verified there before production. Never deploy production from a feature
   branch: merge to `main` first, then `fly deploy`.
+- **Merging to `main` deploys test automatically.** `.github/workflows/fly-deploy.yml`
+  runs on every push to `main`, so a merged PR is on `specboard-test` within
+  minutes without anyone running a command. Production is the manual step
+  (`fly deploy`, or the workflow's `workflow_dispatch` with environment
+  `production`). Plan for this: by the time you go to verify something on test,
+  it is usually already deployed.
 - **Databases are Fly Postgres apps:** `specboard-test-db` (test) and
   `specboard-prod-db` (production). The app reads its connection string from the
-  `DATABASE_URL` secret. Run migrations against a cloud DB by fetching that
-  secret (`fly ssh console -a <app> -C 'printenv DATABASE_URL'`), tunnelling with
-  `fly proxy`, and running `pnpm db:migrate` against the local port.
+  `DATABASE_URL` secret.
+- **Schema migrations run themselves on deploy.** Both `fly.toml` and
+  `fly.test.toml` set `[deploy] release_command = "node migrate.mjs"`, so Fly
+  applies pending migrations in a one-off machine on the new image before it
+  takes traffic, and aborts the release if that fails (the previous version
+  keeps serving). Just write the migration, merge, and deploy: do not apply
+  schema changes by hand. The runner is `packages/db/src/migrate.ts`, bundled
+  into the image by `infra/web.Dockerfile` alongside `infra/migrations`. It is
+  idempotent and takes a session advisory lock, so a retried deploy is safe. It
+  uses `DATABASE_URL` (which must have DDL rights) unless `MIGRATE_DATABASE_URL`
+  is set.
+- **To inspect or repair a cloud database by hand**, fetch its connection string
+  (`fly ssh console -a <app> -C 'printenv DATABASE_URL'`), tunnel with
+  `fly proxy <local>:5432 -a <db-app>`, and point `psql` (or, in a genuine
+  recovery, `pnpm db:migrate`) at the local port. This is the exception now, not
+  the release path.
 
 ## Design system
 

@@ -7,6 +7,18 @@ primary_region = "sjc"
 [build]
   dockerfile = "infra/web.Dockerfile"
 
+[deploy]
+  # Apply pending schema migrations on the new image before it takes traffic.
+  # Fly runs this in a one-off machine and aborts the release if it exits
+  # non-zero, so a failed migration leaves the previous version serving rather
+  # than promoting code whose schema never landed. Migrations were applied by
+  # hand before this existed, which left a window where new code was live and
+  # the column it needed was not. The runner is idempotent (drizzle records what
+  # it has applied) and takes a session advisory lock, so a retried deploy is
+  # safe. It needs a role with DDL rights: DATABASE_URL is used by default, or
+  # set MIGRATE_DATABASE_URL if the app's own connection is ever narrowed.
+  release_command = "node migrate.mjs"
+
 [http_service]
   internal_port = 3000
   force_https = true
