@@ -72,6 +72,7 @@ import {
   type IdeaRecord,
   type IdeaSettings,
   type IdeaSettingsPatch,
+  type BlockingEdge,
   type GroupProductSummary,
   type GroupSummary,
   SIGNAL_SAMPLE_LIMIT,
@@ -1944,6 +1945,25 @@ export class LocalFileStore implements FeatureStore {
         .sort((a, b) => a.position - b.position || a.name.localeCompare(b.name))
         .map((p) => summaries.get(p.id)!),
     };
+  }
+
+  async listBlockingEdges(_scope?: WorkspaceScope): Promise<BlockingEdge[]> {
+    const [meta, features] = await Promise.all([
+      this.readMetadata(),
+      this.loadAll(),
+    ]);
+    const known = new Set(features.map((f) => f.specId));
+    const out: BlockingEdge[] = [];
+    for (const [fromSpec, m] of Object.entries(meta)) {
+      for (const link of m.links ?? []) {
+        // Same rule as the relation counts: both ends must resolve to a real
+        // item, so a link to a deleted spec is not drawn.
+        if (link.type !== "blocks") continue;
+        if (!known.has(fromSpec) || !known.has(link.to)) continue;
+        out.push({ blockerSpecId: fromSpec, blockedSpecId: link.to });
+      }
+    }
+    return out;
   }
 
   async getWorkspaceSummary(

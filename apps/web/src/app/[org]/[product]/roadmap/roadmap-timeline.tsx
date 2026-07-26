@@ -17,20 +17,11 @@ import {
   type TimelineModel,
 } from "@/lib/roadmap-timeline";
 
-/**
- * Minimum on-screen width of one column, in px, per scale. A week needs less
- * room than "Jul 26" does, and a quarter label sits on three months of bar, so
- * the track stays legible at every zoom instead of one width fitting none.
- */
-const COLUMN_PX: Record<AxisScale, number> = {
-  week: 60,
-  month: 116,
-  quarter: 132,
-};
-/** Minimum width of the whole track, so a single-column axis still reads as a time axis. */
-const MIN_TRACK_PX = 640;
-/** Left gutter width (release / item labels), in px. Must match GUTTER_CLASS. */
-const GUTTER_CLASS = "w-56 shrink-0";
+import {
+  COLUMN_PX,
+  GUTTER_CLASS,
+  MIN_TRACK_PX,
+} from "./timeline-geometry";
 
 /** Human label for a scale, used by the zoom control and its notices. */
 const SCALE_LABELS: Record<AxisScale, string> = {
@@ -350,6 +341,50 @@ export function TimelineZoom({
             }`}
           >
             {SCALE_LABELS[scale]}
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * How the timeline's rows are organized: grouped under release bands (the
+ * single-product reading) or laddered down the hierarchy (the portfolio one).
+ * Links, for the same reasons as the zoom control.
+ */
+export function TimelineRowsToggle({
+  ladder,
+  hrefs,
+}: {
+  ladder: boolean;
+  hrefs: { releases: string; ladder: string };
+}) {
+  const options: { key: "releases" | "ladder"; label: string }[] = [
+    { key: "releases", label: "By release" },
+    { key: "ladder", label: "Laddered" },
+  ];
+  const active = ladder ? "ladder" : "releases";
+  return (
+    <div className="flex items-center gap-2 text-xs">
+      <span className="text-muted-foreground">Rows</span>
+      <div
+        className="flex overflow-hidden rounded-md border"
+        role="group"
+        aria-label="Timeline rows"
+      >
+        {options.map((option) => (
+          <Link
+            key={option.key}
+            href={hrefs[option.key]}
+            aria-current={option.key === active ? "true" : undefined}
+            className={`border-r px-2.5 py-1.5 last:border-r-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+              option.key === active
+                ? "bg-secondary font-medium text-foreground"
+                : "text-muted-foreground hover:bg-muted"
+            }`}
+          >
+            {option.label}
           </Link>
         ))}
       </div>

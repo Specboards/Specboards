@@ -336,6 +336,15 @@ export interface GroupSummary {
   products: GroupProductSummary[];
 }
 
+/**
+ * One `blocks` relation, as spec ids. Stored one way only (blocker to blocked),
+ * so "blocked by" is the `blockedSpecId` side.
+ */
+export interface BlockingEdge {
+  blockerSpecId: string;
+  blockedSpecId: string;
+}
+
 /** One item flagged by a portfolio signal, with just enough to link to it. */
 export interface SignalItem {
   specId: string;
@@ -1148,6 +1157,12 @@ export interface FeatureStore {
   ): Promise<ProductGroupRecord>;
   /** Delete a group (must have no child groups or member products). */
   deleteProductGroup(id: string, scope?: WorkspaceScope): Promise<void>;
+  /**
+   * Every `blocks` relation in the workspace whose *both* ends the caller can
+   * read, as spec ids. One query for a view that needs the whole dependency
+   * graph (the portfolio timeline's edges) rather than one item's relations.
+   */
+  listBlockingEdges(scope?: WorkspaceScope): Promise<BlockingEdge[]>;
   /** A group's roll-up over the readable products in its subtree. */
   getGroupSummary(id: string, scope?: WorkspaceScope): Promise<GroupSummary>;
   /**

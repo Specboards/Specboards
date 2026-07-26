@@ -83,6 +83,12 @@ test.describe("a11y: authenticated app", () => {
       name: "roadmap timeline (weeks)",
       path: () => `/${slug}/all/roadmap?view=timeline&zoom=week`,
     },
+    {
+      // The laddered (portfolio) reading of the timeline: disclosures, progress
+      // fills, and the dependency overlay.
+      name: "roadmap timeline (laddered)",
+      path: () => `/${slug}/all/roadmap?view=timeline&ladder=1`,
+    },
     { name: "leadership dashboard", path: () => `/${slug}/dashboard` },
     { name: "ideas", path: () => `/${slug}/all/ideas` },
     { name: "settings: profile", path: () => `/${slug}/settings/profile` },

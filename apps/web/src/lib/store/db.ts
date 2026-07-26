@@ -121,6 +121,7 @@ import {
   type IdeaSettings,
   type IdeaSettingsPatch,
   type CreateProductGroupInput,
+  type BlockingEdge,
   type GroupProductSummary,
   type GroupSummary,
   SIGNAL_SAMPLE_LIMIT,
@@ -4069,6 +4070,52 @@ export class DbStore implements FeatureStore {
           .map((g) => this.groupRecord(g, counts)),
         products: ordered,
       };
+    });
+  }
+
+  async listBlockingEdges(scope?: WorkspaceScope): Promise<BlockingEdge[]> {
+    return this.scoped(scope, async (tx) => {
+      const ws = scope!.workspaceId;
+      const [rows, access, productById] = await Promise.all([
+        tx
+          .select({
+            id: features.id,
+            specId: features.specId,
+            productId: features.productId,
+          })
+          .from(features)
+          .where(eq(features.workspaceId, ws)),
+        this.accessIn(tx, scope!),
+        this.productVisibilityIn(tx, ws),
+      ]);
+      // Same filter listFeatures applies to the counts it derives from these
+      // edges: an edge is only visible when both of its ends are.
+      const specById = new Map(
+        rows
+          .filter((row) => canReadProductId(access, productById, row.productId))
+          .map((row) => [row.id, row.specId]),
+      );
+      const links = await tx
+        .select({
+          fromFeatureId: featureLinks.fromFeatureId,
+          toFeatureId: featureLinks.toFeatureId,
+        })
+        .from(featureLinks)
+        .where(
+          and(
+            eq(featureLinks.workspaceId, ws),
+            eq(featureLinks.type, "blocks"),
+          ),
+        );
+      const out: BlockingEdge[] = [];
+      for (const link of links) {
+        const blocker = specById.get(link.fromFeatureId);
+        const blocked = specById.get(link.toFeatureId);
+        if (blocker && blocked) {
+          out.push({ blockerSpecId: blocker, blockedSpecId: blocked });
+        }
+      }
+      return out;
     });
   }
 
