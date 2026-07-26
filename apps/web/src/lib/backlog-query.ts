@@ -1,11 +1,12 @@
 /**
- * Query params that shape *which* backlog view you are looking at rather than
- * filtering its contents: the view toggle, the hierarchy level, and the sort.
- * Controls that rebuild the query from filter state alone (the filter bar,
- * saved views) have to carry these across, or changing a filter would bounce
- * the user back to the default board at the default level.
+ * Query params that shape *which* view you are looking at rather than filtering
+ * its contents: the view toggle, the hierarchy level, the sort, and the
+ * timeline's start/end date sources. Controls that rebuild the query from
+ * filter state alone (the filter bar, saved views) have to carry these across,
+ * or changing a filter would bounce the user back to the default board at the
+ * default level, plotted by the default fields.
  */
-const VIEW_PARAM_KEYS = ["view", "level", "sort"] as const;
+const VIEW_PARAM_KEYS = ["view", "level", "sort", "start", "end"] as const;
 
 /** The subset of URLSearchParams this module reads (also satisfied by Next's
  * ReadonlyURLSearchParams). */
