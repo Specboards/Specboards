@@ -83,6 +83,7 @@ test.describe("a11y: authenticated app", () => {
       name: "roadmap timeline (weeks)",
       path: () => `/${slug}/all/roadmap?view=timeline&zoom=week`,
     },
+    { name: "leadership dashboard", path: () => `/${slug}/dashboard` },
     { name: "ideas", path: () => `/${slug}/all/ideas` },
     { name: "settings: profile", path: () => `/${slug}/settings/profile` },
     { name: "settings: products", path: () => `/${slug}/settings/products` },

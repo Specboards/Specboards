@@ -63,9 +63,10 @@ test.describe("settings: product groups", () => {
     await page.getByLabel("Switch product").selectOption("~payments-platform");
     await expect(page).toHaveURL(new RegExp(`/${ws.slug}/~payments-platform/`));
 
-    // A group scope unlocks the Dashboard area in the sidebar; the roll-up
-    // shows the group with its one product.
-    await page.getByRole("link", { name: "Dashboard" }).click();
+    // A group scope unlocks a Group dashboard area in the sidebar (distinct from
+    // the workspace-wide Dashboard above it); the roll-up shows the group with
+    // its one product.
+    await page.getByRole("link", { name: "Group dashboard" }).click();
     await expect(
       page.getByRole("heading", { name: "Payments Platform" }),
     ).toBeVisible();

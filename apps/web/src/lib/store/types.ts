@@ -336,6 +336,64 @@ export interface GroupSummary {
   products: GroupProductSummary[];
 }
 
+/** One item flagged by a portfolio signal, with just enough to link to it. */
+export interface SignalItem {
+  specId: string;
+  title: string;
+  level: string;
+  status: string;
+  productId: string | null;
+  releaseId: string | null;
+  /** Whole days since the item last changed. Only meaningful for `stale`. */
+  staleDays?: number;
+}
+
+/**
+ * Work worth escalating, workspace-wide. Each list is capped (see
+ * SIGNAL_SAMPLE_LIMIT) while `counts` stays the true total, so a dashboard can
+ * show a handful of examples without implying they are all of them.
+ */
+export interface WorkspaceSignals {
+  /** Not done, and something blocks it (an inbound `blocks` relation). */
+  blocked: SignalItem[];
+  /** Not done, and the target date of its release has passed. */
+  overdue: SignalItem[];
+  /** Mid-workflow but untouched for `staleDays` days. */
+  stale: SignalItem[];
+  counts: { blocked: number; overdue: number; stale: number };
+}
+
+/** Options shaping the workspace roll-up's signals. */
+export interface WorkspaceSummaryOptions {
+  /** Today as `YYYY-MM-DD`, supplied by the caller so the result is deterministic. */
+  today: string;
+  /**
+   * Statuses that count as work in flight: everything between the first stage
+   * and done. The workflow lives above the store (stages are workspace
+   * configurable and renameable), so the caller resolves this rather than the
+   * store guessing at status keys.
+   */
+  activeStatuses: string[];
+  /** Days without an update before in-flight work is called stale. Default 14. */
+  staleDays?: number;
+}
+
+/**
+ * The whole workspace rolled up: one summary per readable product (the same
+ * shape and the same aggregation a group roll-up uses, over every readable
+ * product instead of one subtree) plus the escalation signals.
+ *
+ * Products in no group are included, which is the gap a per-group roll-up
+ * cannot cover.
+ */
+export interface WorkspaceSummary {
+  products: GroupProductSummary[];
+  signals: WorkspaceSignals;
+}
+
+/** How many example items each signal carries. */
+export const SIGNAL_SAMPLE_LIMIT = 8;
+
 /** A user's membership of one product, joined to their identity. */
 export interface ProductMemberRecord {
   userId: string;
@@ -1092,6 +1150,15 @@ export interface FeatureStore {
   deleteProductGroup(id: string, scope?: WorkspaceScope): Promise<void>;
   /** A group's roll-up over the readable products in its subtree. */
   getGroupSummary(id: string, scope?: WorkspaceScope): Promise<GroupSummary>;
+  /**
+   * The workspace's roll-up: every readable product (grouped or not) plus the
+   * escalation signals. Shares its aggregation with getGroupSummary, so the two
+   * dashboards can never disagree about what a status count means.
+   */
+  getWorkspaceSummary(
+    options: WorkspaceSummaryOptions,
+    scope?: WorkspaceScope,
+  ): Promise<WorkspaceSummary>;
   /** A product's members joined to their identities, ordered by name. */
   listProductMembers(
     productId: string,

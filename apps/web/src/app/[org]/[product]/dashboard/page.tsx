@@ -4,10 +4,14 @@ import { notFound, redirect } from "next/navigation";
 import { descendantGroupIds, resolveProductColor } from "@specboards/core";
 
 import { EmptyState } from "@/components/empty-state";
-import { StatusDot } from "@/components/status-dot";
+import {
+  ReleaseProgress,
+  StatusBar,
+  StatusLegend,
+  combineStatusCounts,
+} from "@/components/status-rollup";
 import { buttonVariants } from "@/components/ui/button";
 import { GROUP_SLUG_PREFIX, resolveActiveScope } from "@/lib/active-product";
-import { statusDotColor } from "@/lib/feature-helpers";
 import { LOCAL_ORG_SLUG, orgPath, orgProductPath } from "@/lib/org-path";
 import { productDotColor } from "@/lib/product-color";
 import { resolveWorkflowFor } from "@/lib/repo-config";
@@ -20,120 +24,6 @@ import type {
 import { requireWorkspaceAccess } from "@/lib/workspace-access";
 
 export const dynamic = "force-dynamic";
-
-/** Sum per-status counts across a set of product summaries. */
-function combineStatusCounts(
-  summaries: GroupProductSummary[],
-): Record<string, number> {
-  const out: Record<string, number> = {};
-  for (const s of summaries) {
-    for (const [status, n] of Object.entries(s.statusCounts)) {
-      out[status] = (out[status] ?? 0) + n;
-    }
-  }
-  return out;
-}
-
-/**
- * Horizontal stacked bar of item counts per status, in workflow order. Width
- * segments are percentage-based inline styles (allowed by the CSP's
- * `style-src-attr`, same as Radix's dynamic widths).
- */
-function StatusBar({
-  counts,
-  statusOrder,
-}: {
-  counts: Record<string, number>;
-  statusOrder: string[];
-}) {
-  const total = Object.values(counts).reduce((a, b) => a + b, 0);
-  if (total === 0) {
-    return <div className="h-2 w-full rounded-full bg-muted" aria-hidden />;
-  }
-  // Workflow statuses first (in order), then any strays (renamed/legacy keys).
-  const ordered = [
-    ...statusOrder.filter((s) => counts[s]),
-    ...Object.keys(counts).filter((s) => !statusOrder.includes(s)),
-  ];
-  return (
-    <div
-      className="flex h-2 w-full overflow-hidden rounded-full bg-muted"
-      aria-hidden
-    >
-      {ordered.map((status) => (
-        <div
-          key={status}
-          style={{
-            backgroundColor: statusDotColor(status),
-            width: `${((counts[status] ?? 0) / total) * 100}%`,
-          }}
-        />
-      ))}
-    </div>
-  );
-}
-
-/** Compact "n done of m" release progress line with a thin bar. */
-function ReleaseProgress({
-  name,
-  done,
-  total,
-}: {
-  name: string;
-  done: number;
-  total: number;
-}) {
-  const pct = total === 0 ? 0 : Math.round((done / total) * 100);
-  return (
-    <div className="flex items-center gap-2 text-xs">
-      <span className="w-32 truncate text-muted-foreground" title={name}>
-        {name}
-      </span>
-      <div
-        className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted"
-        aria-hidden
-      >
-        <div
-          className="h-full rounded-full bg-success"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      <span className="w-16 text-right tabular-nums text-muted-foreground">
-        {done}/{total} done
-      </span>
-    </div>
-  );
-}
-
-/** Legend of status counts under a bar, workflow order. */
-function StatusLegend({
-  counts,
-  statusOrder,
-  labels,
-}: {
-  counts: Record<string, number>;
-  statusOrder: string[];
-  labels: Record<string, string> | undefined;
-}) {
-  const ordered = [
-    ...statusOrder.filter((s) => counts[s]),
-    ...Object.keys(counts).filter((s) => !statusOrder.includes(s)),
-  ];
-  if (ordered.length === 0) return null;
-  return (
-    <div className="flex flex-wrap gap-x-3 gap-y-1">
-      {ordered.map((status) => (
-        <span
-          key={status}
-          className="flex items-center gap-1 text-xs text-muted-foreground"
-        >
-          <StatusDot status={status} />
-          {labels?.[status] ?? status} {counts[status]}
-        </span>
-      ))}
-    </div>
-  );
-}
 
 /**
  * Group dashboard: a management roll-up of a product group's subtree. Per
