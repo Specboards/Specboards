@@ -92,6 +92,32 @@ test.describe("goals", () => {
     await expect(page.getByText("No work linked yet")).toBeVisible();
   });
 
+  test("nests a child goal under its parent instead of listing it flat", async ({
+    page,
+  }) => {
+    const ws = await getWorkspace();
+    await page.goto(`/${ws.slug}/all/goals`);
+
+    await page.getByRole("button", { name: "New goal" }).first().click();
+    await page.getByLabel("Title").fill("Company objective");
+    await page.getByRole("button", { name: "Create goal" }).click();
+    await expect(page.getByText("Company objective")).toBeVisible();
+
+    // "Sits under" only appears once there is another goal to sit under.
+    await page.getByRole("button", { name: "New goal" }).first().click();
+    await page.getByLabel("Title").fill("Product objective");
+    await page.getByLabel("Sits under").selectOption({ label: "Company objective" });
+    await page.getByRole("button", { name: "Create goal" }).click();
+
+    const child = page
+      .getByRole("heading", { name: "Product objective" })
+      // The card, its indent wrapper, and the rule that carries the ladder.
+      .locator("xpath=ancestor::div[contains(@class,'border-l-2')][1]");
+    await expect(child).toBeVisible();
+    // Nesting says who the parent is, so the card does not repeat it in words.
+    await expect(page.getByText("under Company objective")).toHaveCount(0);
+  });
+
   test("rejects a period that ends before it starts", async ({ page }) => {
     const ws = await getWorkspace();
     await page.goto(`/${ws.slug}/all/goals`);

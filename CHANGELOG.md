@@ -12,6 +12,41 @@ for how and when the version is bumped.
 > notes in Specboards, not here. This file resumes at 0.25.5; backfilling the
 > gap is a deliberate decision that has not been taken yet.
 
+## [Unreleased]
+
+Where goals surface once they exist, and a deploy fix.
+
+### Added
+
+- **Goal roll-up on the portfolio dashboard.** `/{org}/dashboard` now carries a
+  Goals section: each goal's status, product, period, and both progress figures,
+  still labelled and still never merged. Hidden entirely until a goal exists.
+- **Goal swimlanes on the roadmap timeline.** A third option on the timeline's
+  rows toggle (`?rows=goals`), beside "By release" and "Laddered": one lane per
+  goal, drawn over its measurement period, with the work laddering up to it
+  inside. The band fills with **outcome** progress and states delivery beside
+  it. Two things follow from what a goal is: a lane is not a partition (work
+  serving two goals is drawn in both), and the level switcher does not filter it
+  (a goal is served by an initiative and a single work item alike). Goals with
+  no period, and work that ladders up to nothing, are trayed rather than
+  dropped. New `listGoalLinks` store method reads the whole link graph in one
+  call.
+- **Nested goals render as a tree.** The Goals page lays goals out by
+  `parentGoalId` instead of listing them flat, so a company objective and the
+  product goals under it read as one ladder. A goal whose parent is out of scope
+  is promoted to the top level and says whose it is; editing it no longer
+  silently detaches it from that parent.
+
+### Fixed
+
+- **`GIT_SHA` is passed on every deploy path.** /legal's "Source code" link
+  pins to the running commit (the AGPL section 13 offer), but the build arg that
+  bakes it in was only ever passed by hand, so three releases shipped pointing
+  at the repo root instead. The GitHub workflow now passes it for both test and
+  production, and local deploys go through `pnpm deploy:test` /
+  `pnpm deploy:prod` (`scripts/deploy.sh`), which supplies it and refuses to
+  ship production from a feature branch or a dirty tree.
+
 ## [0.25.5] - 2026-07-27
 
 Planning entities: two new first-class records, and a change to what a work item

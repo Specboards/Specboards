@@ -3,6 +3,7 @@ import Link from "next/link";
 import { descendantGroupIds, resolveProductColor } from "@specboards/core";
 
 import { EmptyState } from "@/components/empty-state";
+import { GoalProgressPair } from "@/components/goal-progress";
 import { StatusDot } from "@/components/status-dot";
 import {
   ReleaseProgress,
@@ -18,11 +19,13 @@ import {
   orgPath,
   orgProductPath,
 } from "@/lib/org-path";
+import { goalStatusLabel, goalStatusTone } from "@/lib/goal-status";
 import { productDotColor } from "@/lib/product-color";
 import { resolveWorkflowFor } from "@/lib/repo-config";
 import { getStore } from "@/lib/store";
 import { compareShippedReleases } from "@/lib/store/types";
 import type {
+  GoalRecord,
   GroupProductSummary,
   ProductGroupRecord,
   ProductRecord,
@@ -35,6 +38,13 @@ export const dynamic = "force-dynamic";
 
 /** Newest shipped releases worth showing; older history lives on the roadmap. */
 const RECENT_SHIPPED = 5;
+
+/**
+ * Goals shown before the section defers to the Goals page. Goals sort open
+ * first (see `compareGoals`), so a cut here drops judged history rather than
+ * live objectives, and the section says how many it is not showing.
+ */
+const GOALS_SHOWN = 6;
 
 /** Today as YYYY-MM-DD in UTC. Resolved here so the signals are deterministic. */
 function todayUtc(): string {
@@ -67,11 +77,12 @@ export default async function LeadershipDashboardPage() {
   // than a hardcoded status key.
   const activeStatuses = statusOrder.slice(1).filter((s) => s !== "done");
 
-  const [products, groups, releases, summary] = await Promise.all([
+  const [products, groups, releases, summary, goals] = await Promise.all([
     store.listProducts(access ?? undefined),
     store.listProductGroups(access ?? undefined),
     store.listReleases(access ?? undefined),
     store.getWorkspaceSummary({ today, activeStatuses }, access ?? undefined),
+    store.listGoals(access ?? undefined),
   ]);
 
   const productById = new Map(products.map((p) => [p.id, p]));
@@ -254,6 +265,53 @@ export default async function LeadershipDashboardPage() {
         </div>
       ) : null}
 
+      {/*
+        What the portfolio is *for*, above what it is shipping. Hidden entirely
+        until a goal exists, so a workspace that does not work this way is not
+        shown an empty frame it has to reason about.
+      */}
+      {goals.length > 0 ? (
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-sm font-semibold tracking-tight">Goals</h2>
+            <p className="text-2xs text-muted-foreground">
+              {goals.length > GOALS_SHOWN
+                ? `Showing ${GOALS_SHOWN} of ${goals.length}. `
+                : null}
+              <Link
+                href={orgProductPath(org, ALL_PRODUCTS, "/goals")}
+                className="text-link hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                All goals →
+              </Link>
+            </p>
+          </div>
+          <p className="text-2xs text-muted-foreground">
+            Two figures per goal, kept apart on purpose: whether the metric
+            moved, and whether the work shipped. A goal delivering in full while
+            its outcome sits still is the thing worth knowing.
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {goals.slice(0, GOALS_SHOWN).map((goal) => (
+              <GoalRow
+                key={goal.id}
+                org={org}
+                goal={goal}
+                product={
+                  goal.productId ? productById.get(goal.productId) : undefined
+                }
+                parentTitle={
+                  goal.parentGoalId
+                    ? goals.find((g) => g.id === goal.parentGoalId)?.title ??
+                      null
+                    : null
+                }
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       {inFlight.length + planned.length + shipped.length > 0 ? (
         <div className="space-y-3">
           <h2 className="text-sm font-semibold tracking-tight">Releases</h2>
@@ -388,6 +446,54 @@ function ProductRow({
         statusOrder={statusOrder}
         labels={labels}
       />
+    </div>
+  );
+}
+
+/**
+ * One goal on the portfolio roll-up: what it is, whose it is, and both of its
+ * progress figures.
+ *
+ * Read-only like everything else here. The title links to the Goals page of the
+ * product that owns it (or the cross-product one for an org-wide goal), which
+ * is where key results are updated and work is linked.
+ */
+function GoalRow({
+  org,
+  goal,
+  product,
+  parentTitle,
+}: {
+  org: string;
+  goal: GoalRecord;
+  product: ProductRecord | undefined;
+  parentTitle: string | null;
+}) {
+  const context = [
+    product?.name ?? "Org-wide",
+    parentTitle ? `under ${parentTitle}` : null,
+    goal.periodEnd ? `by ${goal.periodEnd}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return (
+    <div className="space-y-2 rounded-md border p-3">
+      <div className="flex items-baseline justify-between gap-2">
+        <Link
+          href={orgProductPath(org, product?.key ?? ALL_PRODUCTS, "/goals")}
+          className="truncate text-sm font-medium hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          title={goal.title}
+        >
+          {goal.title}
+        </Link>
+        <span
+          className={`shrink-0 text-2xs font-medium ${goalStatusTone(goal.status)}`}
+        >
+          {goalStatusLabel(goal.status)}
+        </span>
+      </div>
+      <p className="text-2xs text-muted-foreground">{context}</p>
+      <GoalProgressPair goal={goal} compact />
     </div>
   );
 }

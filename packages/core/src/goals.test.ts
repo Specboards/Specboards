@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildGoalTree,
   compareGoals,
   deliveryProgress,
+  flattenGoalTree,
   formatMetric,
   goalProgress,
   goalsForProduct,
@@ -211,5 +213,77 @@ describe("wouldCreateGoalCycle", () => {
   it("allows a legitimate reparent and detaching to the root", () => {
     expect(wouldCreateGoalCycle(goals, "c", "a")).toBe(false);
     expect(wouldCreateGoalCycle(goals, "c", null)).toBe(false);
+  });
+});
+
+describe("buildGoalTree", () => {
+  const goal = (
+    id: string,
+    parentGoalId: string | null,
+    extra: Partial<{ status: GoalStatus; periodEnd: string | null; title: string }> = {},
+  ) => ({
+    id,
+    parentGoalId,
+    status: extra.status ?? ("on_track" as GoalStatus),
+    periodEnd: extra.periodEnd ?? null,
+    title: extra.title ?? id,
+  });
+
+  const ids = <T extends { id: string }>(rows: { goal: T }[]) =>
+    rows.map((r) => r.goal.id);
+
+  it("nests children under their parent, in reading order", () => {
+    const rows = flattenGoalTree(
+      buildGoalTree([
+        goal("child-b", "root"),
+        goal("root", null),
+        goal("child-a", "root"),
+        goal("grandchild", "child-a"),
+      ]),
+    );
+    expect(ids(rows)).toEqual(["root", "child-a", "grandchild", "child-b"]);
+    expect(rows.map((r) => r.depth)).toEqual([0, 1, 2, 1]);
+  });
+
+  it("orders siblings by compareGoals at every level", () => {
+    // Closed goals recede; among the open ones, the soonest period end wins.
+    const rows = flattenGoalTree(
+      buildGoalTree([
+        goal("root", null),
+        goal("done", "root", { status: "achieved", periodEnd: "2026-01-01" }),
+        goal("later", "root", { periodEnd: "2026-12-31" }),
+        goal("sooner", "root", { periodEnd: "2026-06-30" }),
+      ]),
+    );
+    expect(ids(rows)).toEqual(["root", "sooner", "later", "done"]);
+  });
+
+  it("promotes a goal whose parent is out of scope, and says so", () => {
+    // The everyday case: one product's goals, whose parent is another's.
+    const nodes = buildGoalTree([goal("orphan", "elsewhere"), goal("root", null)]);
+    const rows = flattenGoalTree(nodes);
+    expect(ids(rows).sort()).toEqual(["orphan", "root"]);
+    expect(rows.find((r) => r.goal.id === "orphan")?.orphaned).toBe(true);
+    expect(rows.find((r) => r.goal.id === "root")?.orphaned).toBe(false);
+  });
+
+  it("keeps every goal in a cycle exactly once", () => {
+    // wouldCreateGoalCycle stops this being written; if a row is corrupt
+    // anyway, the goals still have to be reachable in the UI that repairs it.
+    const rows = flattenGoalTree(
+      buildGoalTree([goal("a", "b"), goal("b", "a"), goal("c", null)]),
+    );
+    expect(ids(rows).slice().sort()).toEqual(["a", "b", "c"]);
+  });
+
+  it("treats a goal parented to itself as a root", () => {
+    const rows = flattenGoalTree(buildGoalTree([goal("self", "self")]));
+    expect(ids(rows)).toEqual(["self"]);
+    expect(rows[0].depth).toBe(0);
+  });
+
+  it("returns nothing for no goals", () => {
+    expect(buildGoalTree([])).toEqual([]);
+    expect(flattenGoalTree([])).toEqual([]);
   });
 });
