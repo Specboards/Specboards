@@ -38,11 +38,14 @@ import {
   parseDateSource,
   type AxisScale,
 } from "@/lib/roadmap-timeline";
+import { buildLadder } from "@/lib/roadmap-ladder";
 import { DateSourcePicker } from "./date-source-picker";
+import { RoadmapLadder } from "./roadmap-ladder";
 import { RoadmapBoard, type RoadmapColumn } from "./roadmap-board";
 import {
   RoadmapTimeline,
   TimelineEmptyState,
+  TimelineRowsToggle,
   TimelineZoom,
 } from "./roadmap-timeline";
 
@@ -51,6 +54,11 @@ export const dynamic = "force-dynamic";
 /** Today as YYYY-MM-DD in UTC, for the timeline's today marker. */
 function todayUtc(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+/** First value of a possibly-repeated query param. */
+function first(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
 }
 
 /** Roadmap: items grouped by release (dated first), unscheduled work last. */
@@ -323,9 +331,43 @@ export default async function RoadmapPage({
   const plottedByField =
     dateSources.start.kind === "property" || dateSources.end.kind === "property";
   const axisScale = parseAxisScale(sp.zoom);
-  const timeline = showTimeline
-    ? buildTimeline(
-        features.map((f) => ({
+  // The portfolio reading of the timeline: rows ladder down the hierarchy from
+  // the active level instead of being grouped under release bands. Same axis,
+  // same date sources, same zoom (see lib/roadmap-ladder.ts).
+  const showLadder = showTimeline && first(sp.ladder) === "1";
+  const timelineReleases = scopedReleases.map((r) => ({
+    id: r.id,
+    name: r.name,
+    status: r.status,
+    startDate: r.startDate,
+    targetDate: r.targetDate,
+    shippedDate: r.shippedDate,
+  }));
+  const timeline =
+    showTimeline && !showLadder
+      ? buildTimeline(
+          features.map((f) => ({
+            specId: f.specId,
+            title: f.title,
+            status: f.status,
+            level: f.level,
+            releaseId: f.releaseId,
+            productId: f.productId,
+            customFields: f.customFields,
+          })),
+          timelineReleases,
+          today,
+          dateSources,
+          axisScale,
+        )
+      : null;
+
+  // The ladder needs every item in scope, not just the active level: rows below
+  // the active level are its children, and items deeper still feed rolled-up
+  // parent spans even when they are not drawn.
+  const ladder = showLadder
+    ? buildLadder({
+        items: scoped.map((f) => ({
           specId: f.specId,
           title: f.title,
           status: f.status,
@@ -333,19 +375,19 @@ export default async function RoadmapPage({
           releaseId: f.releaseId,
           productId: f.productId,
           customFields: f.customFields,
+          parentSpecId: f.parentSpecId,
+          childCount: f.childCount,
+          childDoneCount: f.childDoneCount,
         })),
-        scopedReleases.map((r) => ({
-          id: r.id,
-          name: r.name,
-          status: r.status,
-          startDate: r.startDate,
-          targetDate: r.targetDate,
-          shippedDate: r.shippedDate,
-        })),
+        releases: timelineReleases,
+        activeLevel: activeLevel.key,
+        levelOrder: levels.map((l) => l.key),
+        statusOrder: workflow.statuses.filter((s) => s !== "archived"),
+        blockingEdges: await store.listBlockingEdges(access ?? undefined),
         today,
-        dateSources,
-        axisScale,
-      )
+        sources: dateSources,
+        scale: axisScale,
+      })
     : null;
 
   // One href per zoom, each keeping every other param (level, filters, plotted
@@ -447,17 +489,41 @@ export default async function RoadmapPage({
         {showTimeline ? (
           <>
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <DateSourcePicker
-                fields={dateFields}
-                start={dateSources.start}
-                end={dateSources.end}
-              />
+              <div className="flex flex-wrap items-center gap-3">
+                <DateSourcePicker
+                  fields={dateFields}
+                  start={dateSources.start}
+                  end={dateSources.end}
+                />
+                <TimelineRowsToggle
+                  ladder={showLadder}
+                  hrefs={{
+                    releases: roadmapParamHref(org, productSlug, sp, {
+                      ladder: null,
+                    }),
+                    ladder: roadmapParamHref(org, productSlug, sp, {
+                      ladder: "1",
+                    }),
+                  }}
+                />
+              </div>
               {/* Zoom is offered whenever there is an axis to zoom. */}
-              {timeline ? (
+              {timeline || ladder ? (
                 <TimelineZoom active={axisScale} hrefs={zoomHrefs} />
               ) : null}
             </div>
-            {timeline ? (
+            {ladder ? (
+              <RoadmapLadder
+                model={ladder}
+                org={org}
+                productSlug={productSlug}
+                productNamesById={productsById ? productNamesById : undefined}
+                today={today}
+                // Collapse state is per scope and level, so expanding the
+                // initiative ladder does not reshape the epic one.
+                stateKey={`${productSlug}:${activeLevel.key}`}
+              />
+            ) : timeline ? (
               <RoadmapTimeline
                 model={timeline}
                 org={org}
@@ -551,24 +617,39 @@ function roadmapViewHref(
 }
 
 /**
- * Build a timeline link that changes only the zoom, preserving every other
- * param the current URL carries (level, view, plotted fields, filters). The
- * default scale is left out so the canonical URL stays clean.
+ * Build a roadmap link that changes only the named params, preserving every
+ * other one the current URL carries (level, view, plotted fields, filters,
+ * zoom). A null value drops the param, so a toggle's "off" state is the clean
+ * URL rather than an explicit `=0`.
  */
+function roadmapParamHref(
+  org: string,
+  product: string,
+  sp: Record<string, string | string[] | undefined>,
+  patch: Record<string, string | null>,
+): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(sp)) {
+    if (key in patch || value === undefined) continue;
+    for (const one of Array.isArray(value) ? value : [value]) {
+      params.append(key, one);
+    }
+  }
+  for (const [key, value] of Object.entries(patch)) {
+    if (value !== null) params.set(key, value);
+  }
+  const qs = params.toString();
+  return orgProductPath(org, product, `/roadmap${qs ? `?${qs}` : ""}`);
+}
+
+/** The zoom link for one scale; the default scale is left out of the URL. */
 function roadmapZoomHref(
   org: string,
   product: string,
   sp: Record<string, string | string[] | undefined>,
   scale: AxisScale,
 ): string {
-  const params = new URLSearchParams();
-  for (const [key, value] of Object.entries(sp)) {
-    if (key === "zoom" || value === undefined) continue;
-    for (const one of Array.isArray(value) ? value : [value]) {
-      params.append(key, one);
-    }
-  }
-  if (scale !== DEFAULT_AXIS_SCALE) params.set("zoom", scale);
-  const qs = params.toString();
-  return orgProductPath(org, product, `/roadmap${qs ? `?${qs}` : ""}`);
+  return roadmapParamHref(org, product, sp, {
+    zoom: scale === DEFAULT_AXIS_SCALE ? null : scale,
+  });
 }
