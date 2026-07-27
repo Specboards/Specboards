@@ -28,6 +28,29 @@ describe("featureTitleFor", () => {
     expect(featureTitleFor("path:specs/a--b__c", "fallback")).toBe("A B C");
   });
 
+  /**
+   * The customer's second reported title carried a double space, which
+   * featureSlug cannot produce: it maps every run of non-alphanumerics to a
+   * single hyphen. So the key came from somewhere else, a hand-authored
+   * `feature:` value or a folder name with a space in it, and a space adjacent to
+   * a hyphen turned into two spaces. Whitespace now collapses with the
+   * separators.
+   */
+  it("collapses whitespace next to a separator, not just the separators", () => {
+    const expected = "Smtp Transport In Palouse Mail Mailpit In The E2e Stack";
+    for (const key of [
+      "path:specs/smtp-transport-in-palouse-mail -mailpit-in-the-e2e-stack",
+      "path:specs/smtp-transport-in-palouse-mail- mailpit-in-the-e2e-stack",
+      "feature:smtp-transport-in-palouse-mail  mailpit-in-the-e2e-stack",
+    ]) {
+      expect(featureTitleFor(key, "fallback")).toBe(expected);
+    }
+  });
+
+  it("falls back when the key is only whitespace", () => {
+    expect(featureTitleFor("feature:   ", "Spec Title")).toBe("Spec Title");
+  });
+
   it("falls back for a spec: key, which carries only a uuid", () => {
     expect(featureTitleFor("spec:0f8e-1234", "Spec Title")).toBe("Spec Title");
   });
@@ -56,6 +79,27 @@ describe("isGeneratedGroupingTitle", () => {
     expect(isGeneratedGroupingTitle("path:specs/checkout", "Payments")).toBe(
       false,
     );
+  });
+
+  /**
+   * A grouping created before whitespace collapsed keeps its double-spaced title,
+   * which no longer matches what the helper generates. That row therefore counts
+   * as "touched" and is kept rather than pruned, which is the safe direction: the
+   * fix must never turn into a licence to delete older cards.
+   */
+  it("treats a pre-existing double-spaced title as not generated", () => {
+    expect(
+      isGeneratedGroupingTitle(
+        "path:specs/palouse-mail -mailpit",
+        "Palouse Mail  Mailpit",
+      ),
+    ).toBe(false);
+    expect(
+      isGeneratedGroupingTitle(
+        "path:specs/palouse-mail -mailpit",
+        "Palouse Mail Mailpit",
+      ),
+    ).toBe(true);
   });
 
   it("is case- and space-sensitive", () => {
