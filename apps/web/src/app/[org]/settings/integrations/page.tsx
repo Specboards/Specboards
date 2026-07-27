@@ -20,6 +20,9 @@ import { getServerSessionUser } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
 import { isGithubConfigured } from "@/lib/github-app";
 import { loadWorkspaceInstallations, NO_INSTALLATIONS } from "@/lib/github-connect";
+import { leafLevel } from "@specboards/core";
+
+import { getStore } from "@/lib/store";
 import { listProducts } from "@/lib/products-service";
 import { listRepoProductLinks } from "@/lib/repo-links-service";
 import { isSingleTenant } from "@/lib/tenancy";
@@ -109,6 +112,10 @@ export default async function IntegrationsSettingsPage({
   // Products feed the webhook product filter (admin) and the per-repo product
   // link chips (any member); the list is already visibility-filtered.
   const products = await listProducts(access);
+  // Imported specs land at the leaf level, so post-import links point there
+  // (sync no longer creates Feature groupings to home them under).
+  const store = await getStore();
+  const leafLevelKey = leafLevel(await store.listLevels(access)).key;
   const endpoints = isAdmin
     ? await listWebhookEndpoints(db, access.workspaceId)
     : [];
@@ -178,6 +185,7 @@ export default async function IntegrationsSettingsPage({
           installations={installations}
           products={products.map((p) => ({ id: p.id, name: p.name }))}
           links={repoLinks}
+          leafLevelKey={leafLevelKey}
         />
       }
     />
