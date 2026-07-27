@@ -74,6 +74,10 @@ import {
   type IdeaSettingsPatch,
   type GroupProductSummary,
   type GroupSummary,
+  SIGNAL_SAMPLE_LIMIT,
+  type SignalItem,
+  type WorkspaceSummary,
+  type WorkspaceSummaryOptions,
   type ProductAccess,
   type ProductGroupPatch,
   type ProductGroupRecord,
@@ -1939,6 +1943,98 @@ export class LocalFileStore implements FeatureStore {
       products: [...member]
         .sort((a, b) => a.position - b.position || a.name.localeCompare(b.name))
         .map((p) => summaries.get(p.id)!),
+    };
+  }
+
+  async getWorkspaceSummary(
+    options: WorkspaceSummaryOptions,
+    _scope?: WorkspaceScope,
+  ): Promise<WorkspaceSummary> {
+    const [products, allFeatures, releases] = await Promise.all([
+      this.readProducts(),
+      this.loadAll(),
+      this.listReleases(),
+    ]);
+
+    // Same aggregation as getGroupSummary, over every product rather than one
+    // subtree. File mode is single-user, so everything is readable.
+    const summaries = new Map<string, GroupProductSummary>(
+      products.map((p) => [
+        p.id,
+        { productId: p.id, itemCount: 0, statusCounts: {}, releases: [] },
+      ]),
+    );
+    const releaseTotals = new Map<
+      string,
+      Map<string, { total: number; done: number }>
+    >();
+    for (const f of allFeatures) {
+      if (!f.productId) continue;
+      const summary = summaries.get(f.productId);
+      if (!summary) continue;
+      summary.itemCount += 1;
+      summary.statusCounts[f.status] = (summary.statusCounts[f.status] ?? 0) + 1;
+      if (f.releaseId) {
+        const byRelease =
+          releaseTotals.get(f.productId) ??
+          new Map<string, { total: number; done: number }>();
+        releaseTotals.set(f.productId, byRelease);
+        const entry = byRelease.get(f.releaseId) ?? { total: 0, done: 0 };
+        entry.total += 1;
+        if (isDone(f.status)) entry.done += 1;
+        byRelease.set(f.releaseId, entry);
+      }
+    }
+    for (const [productId, byRelease] of releaseTotals) {
+      const summary = summaries.get(productId);
+      if (!summary) continue;
+      summary.releases = [...byRelease.entries()].map(
+        ([releaseId, { total, done }]) => ({ releaseId, total, done }),
+      );
+    }
+
+    const live = allFeatures.filter(
+      (f) => f.status !== "archived" && !isDone(f.status),
+    );
+    const signal = (f: (typeof live)[number]): SignalItem => ({
+      specId: f.specId,
+      title: f.title,
+      level: f.level,
+      status: f.status,
+      productId: f.productId,
+      releaseId: f.releaseId,
+    });
+    const overdueReleases = new Set(
+      releases
+        .filter(
+          (r) =>
+            r.status !== "shipped" &&
+            r.targetDate !== null &&
+            r.targetDate < options.today,
+        )
+        .map((r) => r.id),
+    );
+    const blocked = live.filter((f) => f.blockedByCount > 0).map(signal);
+    const overdue = live
+      .filter((f) => f.releaseId && overdueReleases.has(f.releaseId))
+      .map(signal);
+    // File mode keeps no per-item updated_at, so staleness is unknowable here.
+    // Reporting an empty list is honest; inventing one from file mtimes would
+    // measure when the repo was cloned, not when the work last moved.
+    return {
+      products: [...products]
+        .sort((a, b) => a.position - b.position || a.name.localeCompare(b.name))
+        .map((p) => summaries.get(p.id)!),
+      signals: {
+        blocked: blocked.slice(0, SIGNAL_SAMPLE_LIMIT),
+        overdue: overdue.slice(0, SIGNAL_SAMPLE_LIMIT),
+        stale: [],
+        counts: {
+          blocked: blocked.length,
+          overdue: overdue.length,
+          stale: 0,
+        },
+      },
     };
   }
 

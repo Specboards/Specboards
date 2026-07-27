@@ -49,6 +49,7 @@ import {
   ideas,
   inArray,
   isNull,
+  lt,
   members,
   ne,
   notifications,
@@ -122,6 +123,11 @@ import {
   type CreateProductGroupInput,
   type GroupProductSummary,
   type GroupSummary,
+  SIGNAL_SAMPLE_LIMIT,
+  type SignalItem,
+  type WorkspaceSignals,
+  type WorkspaceSummary,
+  type WorkspaceSummaryOptions,
   type ProductAccess,
   type ProductGroupPatch,
   type ProductGroupRecord,
@@ -4045,59 +4051,11 @@ export class DbStore implements FeatureStore {
         (p) => p.groupId && subtree.has(p.groupId) && canReadProduct(access, p),
       );
 
-      const summaries = new Map<string, GroupProductSummary>(
-        readable.map((p) => [
-          p.id,
-          { productId: p.id, itemCount: 0, statusCounts: {}, releases: [] },
-        ]),
+      const summaries = await this.productAggregates(
+        tx,
+        ws,
+        readable.map((p) => p.id),
       );
-      if (readable.length > 0) {
-        // One grouped scan of features yields item totals, the status
-        // breakdown, and per-release progress (all derived at read time, no
-        // denormalized counts).
-        const rows = await tx
-          .select({
-            productId: features.productId,
-            status: features.status,
-            releaseId: features.releaseId,
-            n: count(),
-          })
-          .from(features)
-          .where(
-            and(
-              eq(features.workspaceId, ws),
-              inArray(features.productId, [...summaries.keys()]),
-            ),
-          )
-          .groupBy(features.productId, features.status, features.releaseId);
-        const releaseTotals = new Map<string, Map<string, { total: number; done: number }>>();
-        for (const row of rows) {
-          if (!row.productId) continue;
-          const summary = summaries.get(row.productId);
-          if (!summary) continue;
-          const n = Number(row.n);
-          summary.itemCount += n;
-          summary.statusCounts[row.status] =
-            (summary.statusCounts[row.status] ?? 0) + n;
-          if (row.releaseId) {
-            const byRelease =
-              releaseTotals.get(row.productId) ??
-              new Map<string, { total: number; done: number }>();
-            releaseTotals.set(row.productId, byRelease);
-            const entry = byRelease.get(row.releaseId) ?? { total: 0, done: 0 };
-            entry.total += n;
-            if (isDone(row.status)) entry.done += n;
-            byRelease.set(row.releaseId, entry);
-          }
-        }
-        for (const [productId, byRelease] of releaseTotals) {
-          const summary = summaries.get(productId);
-          if (!summary) continue;
-          summary.releases = [...byRelease.entries()].map(
-            ([releaseId, { total, done }]) => ({ releaseId, total, done }),
-          );
-        }
-      }
 
       // Keep product order consistent with listProducts (position, then name).
       const ordered = [...readable]
@@ -4112,6 +4070,215 @@ export class DbStore implements FeatureStore {
         products: ordered,
       };
     });
+  }
+
+  /**
+   * Per-product item totals, status breakdown, and per-release progress, all
+   * derived at read time from one grouped scan (no denormalized counts).
+   *
+   * The roll-up shape both dashboards share: the caller decides which products
+   * are in scope (a group's subtree, or the whole workspace) and this decides
+   * what a count means, so the group and leadership dashboards cannot drift.
+   */
+  private async productAggregates(
+    tx: Tx,
+    ws: string,
+    productIds: string[],
+  ): Promise<Map<string, GroupProductSummary>> {
+    const summaries = new Map<string, GroupProductSummary>(
+      productIds.map((id) => [
+        id,
+        { productId: id, itemCount: 0, statusCounts: {}, releases: [] },
+      ]),
+    );
+    if (productIds.length === 0) return summaries;
+
+    const rows = await tx
+      .select({
+        productId: features.productId,
+        status: features.status,
+        releaseId: features.releaseId,
+        n: count(),
+      })
+      .from(features)
+      .where(
+        and(
+          eq(features.workspaceId, ws),
+          inArray(features.productId, productIds),
+        ),
+      )
+      .groupBy(features.productId, features.status, features.releaseId);
+
+    const releaseTotals = new Map<
+      string,
+      Map<string, { total: number; done: number }>
+    >();
+    for (const row of rows) {
+      if (!row.productId) continue;
+      const summary = summaries.get(row.productId);
+      if (!summary) continue;
+      const n = Number(row.n);
+      summary.itemCount += n;
+      summary.statusCounts[row.status] =
+        (summary.statusCounts[row.status] ?? 0) + n;
+      if (row.releaseId) {
+        const byRelease =
+          releaseTotals.get(row.productId) ??
+          new Map<string, { total: number; done: number }>();
+        releaseTotals.set(row.productId, byRelease);
+        const entry = byRelease.get(row.releaseId) ?? { total: 0, done: 0 };
+        entry.total += n;
+        if (isDone(row.status)) entry.done += n;
+        byRelease.set(row.releaseId, entry);
+      }
+    }
+    for (const [productId, byRelease] of releaseTotals) {
+      const summary = summaries.get(productId);
+      if (!summary) continue;
+      summary.releases = [...byRelease.entries()].map(
+        ([releaseId, { total, done }]) => ({ releaseId, total, done }),
+      );
+    }
+    return summaries;
+  }
+
+  async getWorkspaceSummary(
+    options: WorkspaceSummaryOptions,
+    scope?: WorkspaceScope,
+  ): Promise<WorkspaceSummary> {
+    return this.scoped(scope, async (tx) => {
+      const ws = scope!.workspaceId;
+      const [productRows, access] = await Promise.all([
+        tx.select().from(products).where(eq(products.workspaceId, ws)),
+        this.accessIn(tx, scope!),
+      ]);
+      // Same visibility rule as listProducts and the group roll-up: a product
+      // the viewer cannot read contributes nothing, so no total can betray that
+      // it exists.
+      const readable = productRows.filter((p) => canReadProduct(access, p));
+      const readableIds = readable.map((p) => p.id);
+
+      const summaries = await this.productAggregates(tx, ws, readableIds);
+      const ordered = [...readable]
+        .sort((a, b) => a.position - b.position || a.name.localeCompare(b.name))
+        .map((p) => summaries.get(p.id)!);
+
+      return {
+        products: ordered,
+        signals: await this.workspaceSignals(tx, ws, readableIds, options),
+      };
+    });
+  }
+
+  /**
+   * The three escalation signals, each as a true count plus a capped sample.
+   *
+   * Every query is restricted to `readableIds`, so an unreadable product cannot
+   * leak an item's title through a signal, and each excludes archived items and
+   * anything already done (a blocker on finished work is history, not a signal).
+   */
+  private async workspaceSignals(
+    tx: Tx,
+    ws: string,
+    readableIds: string[],
+    options: WorkspaceSummaryOptions,
+  ): Promise<WorkspaceSignals> {
+    const empty: WorkspaceSignals = {
+      blocked: [],
+      overdue: [],
+      stale: [],
+      counts: { blocked: 0, overdue: 0, stale: 0 },
+    };
+    if (readableIds.length === 0) return empty;
+
+    const inScope = and(
+      eq(features.workspaceId, ws),
+      inArray(features.productId, readableIds),
+      ne(features.status, "archived"),
+      ne(features.status, "done"),
+    );
+    const select = {
+      specId: features.specId,
+      title: features.title,
+      level: features.level,
+      status: features.status,
+      productId: features.productId,
+      releaseId: features.releaseId,
+      updatedAt: features.updatedAt,
+    };
+
+    const staleDays = options.staleDays ?? 14;
+    const todayMs = Date.parse(`${options.today}T00:00:00Z`);
+    // A malformed `today` would silently make everything (or nothing) overdue,
+    // so refuse rather than reporting a number nobody can trust.
+    if (Number.isNaN(todayMs)) {
+      throw new Error(`getWorkspaceSummary: invalid today "${options.today}"`);
+    }
+    const staleBefore = new Date(todayMs - staleDays * 24 * 60 * 60 * 1000);
+
+    const [blockedRows, overdueRows, staleRows] = await Promise.all([
+      // Blocked: an inbound `blocks` edge. The edge is stored one way only
+      // (from blocks to), so "blocked" is the to_feature_id side.
+      tx
+        .selectDistinct(select)
+        .from(features)
+        .innerJoin(featureLinks, eq(featureLinks.toFeatureId, features.id))
+        .where(and(inScope, eq(featureLinks.type, "blocks")))
+        .orderBy(asc(features.updatedAt)),
+      // Past target: the release it ships in was due before today.
+      tx
+        .select(select)
+        .from(features)
+        .innerJoin(releases, eq(releases.id, features.releaseId))
+        .where(
+          and(
+            inScope,
+            ne(releases.status, "shipped"),
+            lt(releases.targetDate, options.today),
+          ),
+        )
+        .orderBy(asc(releases.targetDate)),
+      // Stale: in flight by the caller's definition, untouched for staleDays.
+      options.activeStatuses.length === 0
+        ? Promise.resolve([])
+        : tx
+            .select(select)
+            .from(features)
+            .where(
+              and(
+                inScope,
+                inArray(features.status, options.activeStatuses),
+                lt(features.updatedAt, staleBefore),
+              ),
+            )
+            .orderBy(asc(features.updatedAt)),
+    ]);
+
+    const item = (row: (typeof blockedRows)[number]): SignalItem => ({
+      specId: row.specId,
+      title: row.title,
+      level: row.level,
+      status: row.status,
+      productId: row.productId,
+      releaseId: row.releaseId,
+    });
+    const withAge = (row: (typeof staleRows)[number]): SignalItem => ({
+      ...item(row),
+      staleDays: Math.floor(
+        (todayMs - row.updatedAt.getTime()) / (24 * 60 * 60 * 1000),
+      ),
+    });
+
+    return {
+      blocked: blockedRows.slice(0, SIGNAL_SAMPLE_LIMIT).map(item),
+      overdue: overdueRows.slice(0, SIGNAL_SAMPLE_LIMIT).map(item),
+      stale: staleRows.slice(0, SIGNAL_SAMPLE_LIMIT).map(withAge),
+      counts: {
+        blocked: blockedRows.length,
+        overdue: overdueRows.length,
+        stale: staleRows.length,
+      },
+    };
   }
 
   async listProductMembers(
