@@ -5,6 +5,58 @@ All notable changes to Specboard are recorded here. The format is based on
 [Semantic Versioning](https://semver.org/). See [VERSIONING.md](./VERSIONING.md)
 for how and when the version is bumped.
 
+> **Gap notice.** Versions **0.22.0 through 0.25.2** shipped to production
+> without a changelog entry, a version bump, or a git tag: the repo sat at
+> `0.21.0` across six releases while `app.specboards.ai` moved well past it, and
+> tagging stopped at `v0.19.0`. Their contents are recorded in each release's
+> notes in Specboards, not here. This file resumes at 0.25.5; backfilling the
+> gap is a deliberate decision that has not been taken yet.
+
+## [0.25.5] - 2026-07-27
+
+Planning entities: two new first-class records, and a change to what a work item
+fundamentally is.
+
+### Added
+
+- **Goals and key results** (gh-27). A goal states an outcome with a measurable
+  target and a period, and is deliberately **not** a hierarchy level: it is
+  measured, and the work serving it is many-to-many across products, neither of
+  which the single-parent item hierarchy can express. New `goals`, `key_results`
+  and `goal_links` tables (migration 0052), a Goals area under Plan, a Goals
+  section on every item, REST endpoints, and six MCP tools. Each goal carries
+  **two** progress figures that are never merged: `progress` (the mean of its key
+  results, i.e. did the outcome move) and `deliveryProgress` (the share of linked
+  work done, i.e. did we ship it). Both are computed on read. Key-result progress
+  measures distance travelled from a baseline rather than distance to a target,
+  so decreasing metrics need no special case.
+- **Cycles** (gh-28). Sprints and iterations as a second, orthogonal axis to
+  releases: an item can be in a release *and* a cycle, and clearing one leaves
+  the other untouched. New `cycles` table plus `features.cycle_id` (migration
+  0051), a Cycles area under Build, a `?cycle=` backlog filter, a bulk control,
+  and four MCP tools. A cycle has **no stored status**: it is upcoming, active or
+  complete purely from its dates, so it can never be stale and nothing has to run
+  to keep it current. Rollover is an explicit action that leaves finished work in
+  the cycle that delivered it.
+
+### Changed
+
+- **A spec is now an attachment to a work item, not its identity**
+  ([ADR 0003](./docs/adr/0003-spec-as-attachment.md)). Work items can be created
+  at every level including the leaf, so work done by a person rather than an
+  agent is tracked and rolls up like any other, instead of needing a spec file
+  written for it. `isDbNative` is re-derived from `spec_index` presence rather
+  than `repo_id`, which stopped meaning the same thing once a repo-less leaf row
+  became possible. `create_spec(workItemId)` attaches a spec to an item that
+  already exists rather than creating a second card for the same work.
+- **Sync no longer auto-creates Feature grouping cards.** An imported spec that
+  matches no existing grouping lands unparented in Unassigned, and the import
+  summary reports how many did. This retires the mechanism the v0.25.0
+  wrapper-orphan bug came from. Existing groupings are untouched.
+- Deleting a work item that has a spec attached now removes the spec file from
+  git in the same operation, behind an explicit confirmation. Deleting the row
+  alone let the next sync re-import the spec and silently recreate the item.
+
 ## [Unreleased]
 
 ### Changed
