@@ -46,6 +46,7 @@ import {
   RoadmapTimeline,
   TimelineEmptyState,
   TimelineRowsToggle,
+  TimelineShippedToggle,
   TimelineZoom,
 } from "./roadmap-timeline";
 
@@ -335,6 +336,9 @@ export default async function RoadmapPage({
   // the active level instead of being grouped under release bands. Same axis,
   // same date sources, same zoom (see lib/roadmap-ladder.ts).
   const showLadder = showTimeline && first(sp.ladder) === "1";
+  // Shipped history is on by default (the timeline is the one view where past
+  // and future belong side by side) and hidden with `?shipped=0`.
+  const hideShipped = first(sp.shipped) === "0";
   const timelineReleases = scopedReleases.map((r) => ({
     id: r.id,
     name: r.name,
@@ -343,6 +347,10 @@ export default async function RoadmapPage({
     targetDate: r.targetDate,
     shippedDate: r.shippedDate,
   }));
+  // Bar fill is read from how far a status has moved through the workflow, so
+  // the order is the workflow's, minus the archived terminal (nothing archived
+  // is on the board).
+  const statusOrder = workflow.statuses.filter((s) => s !== "archived");
   const timeline =
     showTimeline && !showLadder
       ? buildTimeline(
@@ -354,20 +362,37 @@ export default async function RoadmapPage({
             releaseId: f.releaseId,
             productId: f.productId,
             customFields: f.customFields,
+            childCount: f.childCount,
+            childDoneCount: f.childDoneCount,
           })),
           timelineReleases,
           today,
           dateSources,
           axisScale,
+          { statusOrder, hideShipped },
         )
       : null;
 
   // The ladder needs every item in scope, not just the active level: rows below
   // the active level are its children, and items deeper still feed rolled-up
   // parent spans even when they are not drawn.
+  // The shipped filter expressed in the ladder's own terms: its rows are items,
+  // not releases, so hiding shipped history means dropping the releases and the
+  // work scheduled into them before the model is built. (The release timeline
+  // does the same inside buildTimeline, where releases are the rows.)
+  const shippedReleaseIds = new Set(
+    timelineReleases.filter((r) => r.status === "shipped").map((r) => r.id),
+  );
+  const ladderReleases = hideShipped
+    ? timelineReleases.filter((r) => !shippedReleaseIds.has(r.id))
+    : timelineReleases;
+  const ladderItems = hideShipped
+    ? scoped.filter((f) => !f.releaseId || !shippedReleaseIds.has(f.releaseId))
+    : scoped;
+
   const ladder = showLadder
     ? buildLadder({
-        items: scoped.map((f) => ({
+        items: ladderItems.map((f) => ({
           specId: f.specId,
           title: f.title,
           status: f.status,
@@ -379,10 +404,10 @@ export default async function RoadmapPage({
           childCount: f.childCount,
           childDoneCount: f.childDoneCount,
         })),
-        releases: timelineReleases,
+        releases: ladderReleases,
         activeLevel: activeLevel.key,
         levelOrder: levels.map((l) => l.key),
-        statusOrder: workflow.statuses.filter((s) => s !== "archived"),
+        statusOrder,
         blockingEdges: await store.listBlockingEdges(access ?? undefined),
         today,
         sources: dateSources,
@@ -506,6 +531,16 @@ export default async function RoadmapPage({
                     }),
                   }}
                 />
+                {/* Only offered when there is shipped history in scope to hide. */}
+                {shippedReleases.length > 0 ? (
+                  <TimelineShippedToggle
+                    hidden={hideShipped}
+                    count={shippedReleases.length}
+                    href={roadmapParamHref(org, productSlug, sp, {
+                      shipped: hideShipped ? null : "0",
+                    })}
+                  />
+                ) : null}
               </div>
               {/* Zoom is offered whenever there is an axis to zoom. */}
               {timeline || ladder ? (
@@ -537,11 +572,15 @@ export default async function RoadmapPage({
                   dateFields.map((f) => [f.key, f.label]),
                 )}
                 requestedScale={axisScale}
+                // Collapse state is per scope and level, so folding up the
+                // feature timeline does not reshape the epic one.
+                stateKey={`${productSlug}:${activeLevel.key}`}
               />
             ) : (
               <TimelineEmptyState
                 action={plottedByField ? null : newReleaseButton}
                 plottedByField={plottedByField}
+                shippedHidden={hideShipped && shippedReleases.length > 0}
               />
             )}
           </>

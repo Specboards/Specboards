@@ -51,6 +51,7 @@ import {
 import { AuthRequiredError, patchFeature } from "@/lib/api-client";
 import { statusLabel } from "@/lib/feature-helpers";
 import { productBadge } from "@/lib/product-color";
+import { releaseStatusLabel } from "@/lib/release-status";
 import type { FeatureRecord, ReleaseRecord } from "@/lib/store/types";
 import type { WorkspaceMember } from "@/lib/workspace";
 import { useAnnouncer } from "@/lib/use-announcer";
@@ -60,12 +61,6 @@ import { cn } from "@/lib/utils";
 
 const COL_PREFIX = "rel:";
 const UNSCHEDULED = "__unscheduled__";
-
-const RELEASE_STATUS_LABELS: Record<string, string> = {
-  planned: "Planned",
-  in_progress: "In progress",
-  shipped: "Shipped",
-};
 
 /** A roadmap column: one release, or the trailing "Unscheduled" bucket. */
 export type RoadmapColumn = {
@@ -449,7 +444,7 @@ function Column({
       : formatReleaseDates(column.startDate, column.targetDate);
   const statusLabelText =
     column.status && column.status !== "planned" && !(shipped && column.shippedDate)
-      ? (RELEASE_STATUS_LABELS[column.status] ?? column.status)
+      ? releaseStatusLabel(column.status)
       : null;
 
   return (

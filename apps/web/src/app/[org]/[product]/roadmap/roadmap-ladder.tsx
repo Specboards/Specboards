@@ -13,7 +13,9 @@ import {
   type LadderRow,
 } from "@/lib/roadmap-ladder";
 import { formatSpan, projectDay } from "@/lib/roadmap-timeline";
+import { TimelineCollapseAll } from "./roadmap-timeline";
 import { COLUMN_PX, GUTTER_PX, MIN_TRACK_PX } from "./timeline-geometry";
+import { TimelineScroller } from "./timeline-scroller";
 
 /** Row height in px. Fixed, because the edge overlay positions by row index. */
 const ROW_PX = 32;
@@ -134,6 +136,24 @@ export function RoadmapLadder({
     });
   }
 
+  // Expanding or collapsing the whole ladder in one action, rather than working
+  // down a long list of chevrons.
+  const collapsibleIds = useMemo(
+    () => rows.filter((r) => r.childRowCount > 0).map((r) => r.item.specId),
+    [rows],
+  );
+  const allCollapsed =
+    collapsibleIds.length > 0 && collapsibleIds.every((id) => collapsed.has(id));
+  const expandAll =
+    collapsibleIds.length > 0 ? (
+      <TimelineCollapseAll
+        allCollapsed={allCollapsed}
+        onToggle={() =>
+          setCollapsed(allCollapsed ? new Set() : new Set(collapsibleIds))
+        }
+      />
+    ) : undefined;
+
   function itemHref(row: LadderRow): string {
     return orgProductPath(
       org,
@@ -144,15 +164,25 @@ export function RoadmapLadder({
 
   return (
     <div className="space-y-4">
-      <div className="overflow-x-auto rounded-md border">
+      <TimelineScroller
+        label="Portfolio timeline"
+        leading={expandAll}
+        focusPx={
+          todayPct === null ? null : GUTTER_PX + (todayPct / 100) * widthPx
+        }
+      >
         <div className="w-max min-w-full">
           {/* Axis header, with the release bands named along it. */}
           <div className="flex border-b bg-muted/40">
+            {/* Opaque in two layers, so the axis cannot show through the sticky
+                corner cell as it scrolls past (see the release timeline). */}
             <div
-              className="sticky left-0 z-20 shrink-0 border-r bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground"
+              className="sticky left-0 z-30 shrink-0 border-r bg-background"
               style={{ width: `${GUTTER_PX}px` }}
             >
-              Item
+              <div className="h-full bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground">
+                Item
+              </div>
             </div>
             <div className="relative shrink-0" style={{ width: `${widthPx}px` }}>
               <div className="flex">
@@ -360,7 +390,7 @@ export function RoadmapLadder({
             })}
           </div>
         </div>
-      </div>
+      </TimelineScroller>
 
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-2xs text-muted-foreground">
         <span>

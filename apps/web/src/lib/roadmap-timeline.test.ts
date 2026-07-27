@@ -5,6 +5,7 @@ import {
   buildAxis,
   buildTimeline,
   dateSourceParam,
+  itemProgressPct,
   parseAxisScale,
   formatSpan,
   parseDateSource,
@@ -387,6 +388,129 @@ describe("buildTimeline", () => {
   it("returns null when no release in scope carries a date", () => {
     expect(buildTimeline([item("a", "x")], [release("x")])).toBeNull();
     expect(buildTimeline([], [])).toBeNull();
+  });
+
+  describe("hideShipped", () => {
+    it("drops shipped releases and takes their items with them", () => {
+      const model = buildTimeline(
+        [item("a", "shipped"), item("b", "planned")],
+        [shipped, planned],
+        null,
+        undefined,
+        undefined,
+        { hideShipped: true },
+      )!;
+      expect(model.groups.map((g) => g.release.id)).toEqual(["planned"]);
+      // Not in the tray either: the item is dated, it is filtered out.
+      expect(model.undated).toEqual([]);
+    });
+
+    it("still trays an item whose release is not in scope at all", () => {
+      const model = buildTimeline(
+        [item("a", "gone"), item("b", "planned")],
+        [shipped, planned],
+        null,
+        undefined,
+        undefined,
+        { hideShipped: true },
+      )!;
+      expect(model.undated.map((i) => i.specId)).toEqual(["a"]);
+    });
+
+    it("returns null when only shipped history carries dates", () => {
+      expect(
+        buildTimeline([item("a", "shipped")], [shipped], null, undefined, undefined, {
+          hideShipped: true,
+        }),
+      ).toBeNull();
+    });
+  });
+
+  describe("release progress", () => {
+    const statusOrder = ["backlog", "in_progress", "done"];
+    const withStatus = (specId: string, status: string): TimelineItem => ({
+      ...item(specId, "planned"),
+      status,
+    });
+
+    it("averages the progress of the items scheduled into the release", () => {
+      const model = buildTimeline(
+        [withStatus("a", "backlog"), withStatus("b", "done")],
+        [planned],
+        null,
+        undefined,
+        undefined,
+        { statusOrder },
+      )!;
+      // 0% and 100% -> 50%.
+      expect(model.groups[0]!.progressPct).toBe(50);
+      expect(model.groups[0]!.itemCount).toBe(2);
+    });
+
+    it("counts an undated item, which is still scope the release has to finish", () => {
+      const undatedItem: TimelineItem = {
+        ...withStatus("c", "done"),
+        releaseId: "planned",
+        customFields: {},
+      };
+      const model = buildTimeline(
+        [withStatus("a", "backlog"), undatedItem],
+        [planned],
+        null,
+        { start: { kind: "property", key: "due" }, end: { kind: "release" } },
+        undefined,
+        { statusOrder },
+      )!;
+      // Neither item can be drawn under a property source they lack, but both
+      // still count toward the release's progress.
+      expect(model.groups[0]!.itemCount).toBe(2);
+      expect(model.groups[0]!.progressPct).toBe(50);
+    });
+
+    it("reads a parent from its children rather than its own status", () => {
+      const parent: TimelineItem = {
+        ...withStatus("p", "backlog"),
+        childCount: 4,
+        childDoneCount: 3,
+      };
+      const model = buildTimeline([parent], [planned], null, undefined, undefined, {
+        statusOrder,
+      })!;
+      expect(model.groups[0]!.progressPct).toBe(75);
+    });
+
+    it("reads 0 for a release with nothing scheduled", () => {
+      const model = buildTimeline([], [planned], null, undefined, undefined, {
+        statusOrder,
+      })!;
+      expect(model.groups[0]!.progressPct).toBe(0);
+      expect(model.groups[0]!.itemCount).toBe(0);
+    });
+  });
+});
+
+describe("itemProgressPct", () => {
+  const statusOrder = ["backlog", "in_progress", "done"];
+
+  it("places a leaf by how far its status has moved through the workflow", () => {
+    expect(itemProgressPct({ status: "backlog" }, statusOrder)).toBe(0);
+    expect(itemProgressPct({ status: "in_progress" }, statusOrder)).toBe(50);
+    expect(itemProgressPct({ status: "done" }, statusOrder)).toBe(100);
+  });
+
+  it("prefers a parent's children over its own status", () => {
+    expect(
+      itemProgressPct(
+        { status: "done", childCount: 4, childDoneCount: 1 },
+        statusOrder,
+      ),
+    ).toBe(25);
+  });
+
+  it("reads 0 for an unknown status or a workflow with nothing to measure", () => {
+    expect(itemProgressPct({ status: "mystery" }, statusOrder)).toBe(0);
+    expect(itemProgressPct({ status: "backlog" }, ["backlog"])).toBe(0);
+    expect(itemProgressPct({ status: "backlog" }, [])).toBe(0);
   });
 });
 

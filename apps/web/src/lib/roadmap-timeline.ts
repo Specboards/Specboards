@@ -407,6 +407,36 @@ export interface TimelineItem {
    * `YYYY-MM-DD` strings (enforced on write by assertCustomFieldTypes).
    */
   customFields: Record<string, unknown>;
+  /**
+   * Direct children and how many of them are done, from the store's roll-up.
+   * Optional because the base timeline can draw a bar without them; supplied,
+   * they let a parent's progress read its children instead of its own status.
+   */
+  childCount?: number;
+  childDoneCount?: number;
+}
+
+/**
+ * How far one item has got, 0-100.
+ *
+ * A parent reads its children (`childDoneCount / childCount`, over all direct
+ * children, not just the ones drawn). A leaf reads how far its status has moved
+ * through the workflow. One rule, statable in a sentence, which matters more
+ * here than precision: a score nobody can interpret is worse than no fill.
+ *
+ * Lives here rather than in the ladder because both timelines fill bars by it
+ * and the ladder is built on this module, not beside it.
+ */
+export function itemProgressPct(
+  item: Pick<TimelineItem, "status" | "childCount" | "childDoneCount">,
+  statusOrder: readonly string[],
+): number {
+  if (item.childCount && item.childCount > 0) {
+    return Math.round(((item.childDoneCount ?? 0) / item.childCount) * 100);
+  }
+  const index = statusOrder.indexOf(item.status);
+  if (index < 0 || statusOrder.length < 2) return 0;
+  return Math.round((index / (statusOrder.length - 1)) * 100);
 }
 
 /** Read one end of a span from the chosen source. */
@@ -464,6 +494,30 @@ export interface TimelineGroup {
   span: Span;
   placement: Placement;
   rows: TimelineRow[];
+  /**
+   * The release's own progress, 0-100: the mean of `itemProgressPct` over every
+   * item at the active level scheduled into it, whatever their dates. Undated
+   * items count, because they are still scope the release has to finish; a
+   * release with nothing scheduled reads 0.
+   */
+  progressPct: number;
+  /** How many items that mean was taken over, so the UI can say so. */
+  itemCount: number;
+}
+
+/** Options that do not change the geometry, only what is drawn and how it fills. */
+export interface TimelineOptions {
+  /**
+   * Workflow statuses in order (archived excluded), for leaf progress. Omitted,
+   * every bar reads 0% and the UI simply draws no fill.
+   */
+  statusOrder?: readonly string[];
+  /**
+   * Drop shipped releases and the items scheduled into them. Those items are
+   * removed outright rather than moved to the undated tray: they are dated, they
+   * are just filtered out, and a tray that claimed otherwise would be a lie.
+   */
+  hideShipped?: boolean;
 }
 
 export interface TimelineModel {
@@ -494,9 +548,21 @@ export function buildTimeline(
   today?: string | null,
   sources: DateSources = DEFAULT_DATE_SOURCES,
   scale: AxisScale = DEFAULT_AXIS_SCALE,
+  options: TimelineOptions = {},
 ): TimelineModel | null {
+  const { statusOrder = [], hideShipped = false } = options;
+  const drawn = hideShipped
+    ? releases.filter((r) => r.status !== "shipped")
+    : releases;
+  // The releases deliberately left out, so their items can be left out too. An
+  // item pointing at a release that is not in scope at all is a different case
+  // and still belongs in the undated tray.
+  const hiddenIds = new Set(
+    releases.filter((r) => !drawn.includes(r)).map((r) => r.id),
+  );
+
   const spans = new Map<string, Span>();
-  for (const release of releases) {
+  for (const release of drawn) {
     const span = releaseSpan(release);
     if (span) spans.set(release.id, span);
   }
@@ -510,7 +576,16 @@ export function buildTimeline(
   const byRelease = new Map<string, PlacedLater[]>();
   const undated: TimelineItem[] = [];
   const itemSpans: Span[] = [];
+  /** Every item scheduled into a drawn release, dated or not: the progress base. */
+  const scheduled = new Map<string, TimelineItem[]>();
   for (const item of items) {
+    // A filtered-out release takes its items with it (see hideShipped).
+    if (item.releaseId && hiddenIds.has(item.releaseId)) continue;
+    if (item.releaseId) {
+      const all = scheduled.get(item.releaseId);
+      if (all) all.push(item);
+      else scheduled.set(item.releaseId, [item]);
+    }
     const release = item.releaseId ? spans.get(item.releaseId) ?? null : null;
     const span = resolveItemSpan(item, release, sources);
     // An item needs a resolvable span *and* a dated release to sit under, since
@@ -525,7 +600,7 @@ export function buildTimeline(
     else byRelease.set(item.releaseId, [{ item, span }]);
   }
 
-  const visible = releases.filter((release) => {
+  const visible = drawn.filter((release) => {
     if (!spans.has(release.id)) return false;
     if ((byRelease.get(release.id)?.length ?? 0) > 0) return true;
     return release.status !== "shipped";
@@ -556,7 +631,24 @@ export function buildTimeline(
         rows.push({ item, span: itemSpan, placement: itemPlacement });
       }
     }
-    groups.push({ release, span, placement, rows });
+    const contributing = scheduled.get(release.id) ?? [];
+    const progressPct =
+      contributing.length === 0
+        ? 0
+        : Math.round(
+            contributing.reduce(
+              (sum, item) => sum + itemProgressPct(item, statusOrder),
+              0,
+            ) / contributing.length,
+          );
+    groups.push({
+      release,
+      span,
+      placement,
+      rows,
+      progressPct,
+      itemCount: contributing.length,
+    });
   }
 
   return { axis, groups, undated };

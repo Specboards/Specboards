@@ -13,6 +13,7 @@ import {
   DEFAULT_AXIS_SCALE,
   DEFAULT_DATE_SOURCES,
   buildAxis,
+  itemProgressPct,
   parseDay,
   projectSpan,
   releaseSpan,
@@ -115,24 +116,14 @@ export interface BuildLadderInput {
 }
 
 /**
- * How far a bar is filled.
- *
- * A parent reads its children (`childDoneCount / childCount`, over all direct
- * children, not just rendered ones). A leaf reads how far its status has moved
- * through the workflow. Both are one rule the UI can state in a sentence, which
- * matters more here than precision: a score nobody can interpret is worse than
- * no fill at all.
+ * How far a bar is filled. The rule lives in `itemProgressPct`, shared with the
+ * release timeline so the two views cannot fill a bar by different arithmetic.
  */
 export function progressPct(
   item: LadderItem,
   statusOrder: string[],
 ): number {
-  if (item.childCount > 0) {
-    return Math.round((item.childDoneCount / item.childCount) * 100);
-  }
-  const index = statusOrder.indexOf(item.status);
-  if (index < 0 || statusOrder.length < 2) return 0;
-  return Math.round((index / (statusOrder.length - 1)) * 100);
+  return itemProgressPct(item, statusOrder);
 }
 
 /**
