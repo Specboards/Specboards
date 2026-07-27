@@ -37,6 +37,9 @@ import type {
   OrgMemberRecord,
   OrgRole,
   ProductGroupPatch,
+  CycleInput,
+  CyclePatch,
+  CycleRecord,
   ProductGroupRecord,
   ProductMemberInput,
   ProductMemberRecord,
@@ -849,6 +852,87 @@ export async function deleteRelease(id: string): Promise<void> {
     } | null;
     throw new Error(body?.error ?? `Delete release failed with ${res.status}`);
   }
+}
+
+
+// ── Cycles ────────────────────────────────────────────────────────────────
+
+/** Create a cycle; returns the created record (with its derived state). */
+export async function createCycle(input: CycleInput): Promise<CycleRecord> {
+  const res = await apiFetch("/api/v1/cycles", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as {
+    cycle?: CycleRecord;
+    error?: string;
+  } | null;
+  if (!res.ok || !body?.cycle) {
+    throw new Error(body?.error ?? `Create cycle failed with ${res.status}`);
+  }
+  return body.cycle;
+}
+
+/** Update a cycle's name, dates, notes or product; returns the updated record. */
+export async function updateCycle(
+  id: string,
+  patch: CyclePatch,
+): Promise<CycleRecord> {
+  const res = await apiFetch(`/api/v1/cycles/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as {
+    cycle?: CycleRecord;
+    error?: string;
+  } | null;
+  if (!res.ok || !body?.cycle) {
+    throw new Error(body?.error ?? `Update cycle failed with ${res.status}`);
+  }
+  return body.cycle;
+}
+
+/** Delete a cycle. Its items are unscheduled, not deleted. */
+export async function deleteCycle(id: string): Promise<void> {
+  const res = await apiFetch(`/api/v1/cycles/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (res.status === 401) throw new AuthRequiredError();
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(body?.error ?? `Delete cycle failed with ${res.status}`);
+  }
+}
+
+/** Move a cycle's unfinished work into another cycle; returns how many moved. */
+export async function rolloverCycle(
+  fromCycleId: string,
+  toCycleId: string,
+): Promise<{ moved: number; toCycleId: string }> {
+  const res = await apiFetch(
+    `/api/v1/cycles/${encodeURIComponent(fromCycleId)}/rollover`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ toCycleId }),
+    },
+  );
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as {
+    moved?: number;
+    toCycleId?: string;
+    error?: string;
+  } | null;
+  if (!res.ok || typeof body?.moved !== "number") {
+    throw new Error(body?.error ?? `Rollover failed with ${res.status}`);
+  }
+  return { moved: body.moved, toCycleId };
 }
 
 /** Create a typed relation from a feature; returns its refreshed relations. */

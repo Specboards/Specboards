@@ -7,6 +7,7 @@ import {
   isPropertyType,
   isValidParentLevel,
   propertyKeyFromLabel,
+  validateCycleDates,
   type PropertyDef,
 } from "@specboards/core";
 
@@ -48,6 +49,10 @@ import {
   type PropertyInput,
   type PropertyPatch,
   type RelationInput,
+  type CycleInput,
+  type CyclePatch,
+  type CycleRecord,
+  type CycleRolloverResult,
   type ReleaseInput,
   type ReleaseNotesMode,
   type ReleasePatch,
@@ -106,6 +111,12 @@ export function parseFeaturePatch(body: unknown): FeaturePatch {
     }
     patch.releaseId = raw.releaseId as string | null;
   }
+  if ("cycleId" in raw) {
+    if (raw.cycleId !== null && !isUuid(raw.cycleId)) {
+      throw new InvalidPatchError("cycleId must be a UUID or null.");
+    }
+    patch.cycleId = raw.cycleId as string | null;
+  }
   if ("tags" in raw) {
     if (!Array.isArray(raw.tags) || raw.tags.some((t) => typeof t !== "string")) {
       throw new InvalidPatchError("tags must be an array of strings.");
@@ -160,7 +171,7 @@ export function parseFeaturePatch(body: unknown): FeaturePatch {
 
   if (Object.keys(patch).length === 0) {
     throw new InvalidPatchError(
-      "Patch must set at least one of: title, status, rank, tags, releaseId, assigneeId, customFields, parentSpecId, details.",
+      "Patch must set at least one of: title, status, rank, tags, releaseId, cycleId, assigneeId, customFields, parentSpecId, details.",
     );
   }
   return patch;
@@ -432,7 +443,7 @@ async function applyFeaturePatch(
 /** The fields a bulk edit may set directly. Tags are handled separately (add /
  * clear) so a mixed selection isn't clobbered by a single replacement; other
  * per-item concerns (title, rank, parent, details, customFields) are excluded. */
-const BULK_PATCH_KEYS = ["status", "assigneeId", "releaseId"] as const;
+const BULK_PATCH_KEYS = ["status", "assigneeId", "releaseId", "cycleId"] as const;
 
 /** Cap a single batch so one request can't fan out unbounded work. */
 const BULK_MAX_ITEMS = 200;
@@ -514,7 +525,7 @@ export function parseBulkPatchRequest(body: unknown): BulkPatchRequest {
 
   if (Object.keys(patch).length === 0 && !tagOps.addTags && !tagOps.clearTags) {
     throw new InvalidPatchError(
-      "A bulk edit must change at least one of: status, assigneeId, releaseId, addTags, clearTags.",
+      "A bulk edit must change at least one of: status, assigneeId, releaseId, cycleId, addTags, clearTags.",
     );
   }
   if (tagOps.clearTags && tagOps.addTags) {
@@ -690,6 +701,12 @@ export function parseCreateFeatureInput(body: unknown): CreateFeatureInput {
       throw new InvalidPatchError("releaseId must be a UUID or null.");
     }
     input.releaseId = raw.releaseId;
+  }
+  if ("cycleId" in raw && raw.cycleId !== null) {
+    if (!isUuid(raw.cycleId)) {
+      throw new InvalidPatchError("cycleId must be a UUID or null.");
+    }
+    input.cycleId = raw.cycleId;
   }
   if ("customFields" in raw && raw.customFields !== null) {
     input.customFields = parseCustomFields(raw.customFields);
@@ -1429,6 +1446,114 @@ export function parseReleasePatch(body: unknown): ReleasePatch {
       "Patch must set at least one of: name, productId, status, " +
         "startDate, targetDate, notes, releaseNotesMode, releaseNotesBody, " +
         "releaseNotesUrl, customFields.",
+    );
+  }
+  return patch;
+}
+
+// ── Cycles ────────────────────────────────────────────────────────────────
+// Thin service wrappers, mirroring the release ones. Cycles carry no derived
+// invariant of their own the way releases do (clampReleaseTarget): the
+// start/end ordering is enforced by validateCycleDates in core, so both stores
+// and both parsers reject the same thing with the same wording.
+
+export async function listCycles(
+  scope?: WorkspaceScope,
+): Promise<CycleRecord[]> {
+  const store = await getStore();
+  return store.listCycles(scope);
+}
+
+export async function createCycle(
+  input: CycleInput,
+  scope?: WorkspaceScope,
+): Promise<CycleRecord> {
+  const store = await getStore();
+  return store.createCycle(input, scope);
+}
+
+export async function updateCycle(
+  id: string,
+  patch: CyclePatch,
+  scope?: WorkspaceScope,
+): Promise<CycleRecord> {
+  const store = await getStore();
+  return store.updateCycle(id, patch, scope);
+}
+
+export async function deleteCycle(
+  id: string,
+  scope?: WorkspaceScope,
+): Promise<void> {
+  const store = await getStore();
+  await store.deleteCycle(id, scope);
+}
+
+export async function rolloverCycle(
+  fromId: string,
+  toId: string,
+  scope?: WorkspaceScope,
+): Promise<CycleRolloverResult> {
+  const store = await getStore();
+  return store.rolloverCycle(fromId, toId, scope);
+}
+
+/** Parse and validate an untrusted cycle POST body. */
+export function parseCycleInput(body: unknown): CycleInput {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    throw new InvalidPatchError("Request body must be a JSON object.");
+  }
+  const raw = body as Record<string, unknown>;
+  if (typeof raw.name !== "string" || raw.name.trim() === "") {
+    throw new InvalidPatchError("name is required.");
+  }
+  const startDate = parseDate(raw.startDate, "startDate");
+  const endDate = parseDate(raw.endDate, "endDate");
+  if (!startDate || !endDate) {
+    throw new InvalidPatchError("startDate and endDate are required.");
+  }
+  const dateError = validateCycleDates(startDate, endDate);
+  if (dateError) throw new InvalidPatchError(dateError);
+  const input: CycleInput = { name: raw.name.trim(), startDate, endDate };
+  if ("productId" in raw) input.productId = parseProductId(raw.productId);
+  if ("notes" in raw) input.notes = parseReleaseNotes(raw.notes);
+  return input;
+}
+
+/** Parse and validate an untrusted cycle PATCH body. */
+export function parseCyclePatch(body: unknown): CyclePatch {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    throw new InvalidPatchError("Request body must be a JSON object.");
+  }
+  const raw = body as Record<string, unknown>;
+  const patch: CyclePatch = {};
+  if ("name" in raw) {
+    if (typeof raw.name !== "string" || raw.name.trim() === "") {
+      throw new InvalidPatchError("name must be a non-empty string.");
+    }
+    patch.name = raw.name.trim();
+  }
+  if ("productId" in raw) patch.productId = parseProductId(raw.productId);
+  if ("startDate" in raw) {
+    const value = parseDate(raw.startDate, "startDate");
+    if (!value) throw new InvalidPatchError("startDate cannot be cleared.");
+    patch.startDate = value;
+  }
+  if ("endDate" in raw) {
+    const value = parseDate(raw.endDate, "endDate");
+    if (!value) throw new InvalidPatchError("endDate cannot be cleared.");
+    patch.endDate = value;
+  }
+  if ("notes" in raw) patch.notes = parseReleaseNotes(raw.notes);
+  // Only checked when both ends are in the patch; a patch moving one end is
+  // validated by the store against the stored value it leaves alone.
+  if (patch.startDate && patch.endDate) {
+    const dateError = validateCycleDates(patch.startDate, patch.endDate);
+    if (dateError) throw new InvalidPatchError(dateError);
+  }
+  if (Object.keys(patch).length === 0) {
+    throw new InvalidPatchError(
+      "Patch must set at least one of: name, productId, startDate, endDate, notes.",
     );
   }
   return patch;

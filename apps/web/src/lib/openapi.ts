@@ -82,6 +82,7 @@ export function buildOpenApiDocument(baseUrl: string): Record<string, unknown> {
       { name: "products", description: "Product backlogs." },
       { name: "repositories", description: "Connected GitHub repositories." },
       { name: "releases", description: "Ship vehicles / versions." },
+      { name: "cycles", description: "Sprints / iterations: date-bounded time boxes, orthogonal to releases." },
       { name: "views", description: "Saved backlog filters." },
       { name: "ideas", description: "Captured ideas." },
       { name: "workflow", description: "Status vocabulary and transitions." },
@@ -155,6 +156,19 @@ export function buildOpenApiDocument(baseUrl: string): Record<string, unknown> {
         parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
         patch: { tags: ["releases"], summary: "Update a release.", requestBody: { required: true, content: { "application/json": { schema: { type: "object" } } } }, responses: { "200": ok("The updated release.") } },
         delete: { tags: ["releases"], summary: "Delete a release.", responses: { "204": { description: "Deleted." } } },
+      },
+      "/api/v1/cycles": {
+        get: listOp("cycles", "cycles", "List cycles (active first, then upcoming, then most recently complete). Each carries a derived state."),
+        post: { tags: ["cycles"], summary: "Create a cycle.", requestBody: { required: true, content: { "application/json": { schema: { type: "object" } } } }, responses: { "201": ok("The created cycle.") } },
+      },
+      "/api/v1/cycles/{id}": {
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+        patch: { tags: ["cycles"], summary: "Update a cycle's name, product, dates or notes.", requestBody: { required: true, content: { "application/json": { schema: { type: "object" } } } }, responses: { "200": ok("The updated cycle.") } },
+        delete: { tags: ["cycles"], summary: "Delete a cycle (its items are unscheduled, not deleted).", responses: { "204": { description: "Deleted." } } },
+      },
+      "/api/v1/cycles/{id}/rollover": {
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+        post: { tags: ["cycles"], summary: "Move this cycle's unfinished work into another cycle.", requestBody: { required: true, content: { "application/json": { schema: { type: "object" } } } }, responses: { "200": ok("How many items moved.") } },
       },
       "/api/v1/views": {
         get: { tags: ["views"], summary: "The caller's saved backlog views.", responses: { "200": ok("The views.") } },

@@ -12,6 +12,7 @@ import {
   Link as LinkIcon,
   List,
   Loader,
+  Repeat,
   Rocket,
   Tags,
   Target,
@@ -35,9 +36,12 @@ import {
 } from "@/lib/feature-helpers";
 import { cn } from "@/lib/utils";
 import {
+  cyclesForProduct,
   releasesForProduct,
+  selectableCycles,
   selectableReleases,
   type CustomFieldValue,
+  type CycleRecord,
   type FeatureDetail,
   type ReleaseRecord,
 } from "@/lib/store/types";
@@ -69,6 +73,7 @@ export function ItemProperties({
   members = [],
   properties = [],
   releases = [],
+  cycles = [],
   workflow,
   canEdit = true,
   availableFields = null,
@@ -78,6 +83,7 @@ export function ItemProperties({
   /** Custom properties that apply at this item's level. */
   properties?: PropertyDef[];
   releases?: ReleaseRecord[];
+  cycles?: CycleRecord[];
   workflow?: StatusWorkflow;
   canEdit?: boolean;
   /** Built-in metadata field keys available at this item's level; null = all. */
@@ -93,6 +99,15 @@ export function ItemProperties({
       ? releasesForProduct(releases, feature.productId)
       : releases.filter((r) => r.productId === null),
     feature.releaseId ?? null,
+  );
+  // Cycles are the second, orthogonal axis: same product scoping, but finished
+  // cycles drop out instead of shipped releases. The item's current cycle is
+  // kept even once it has ended, so its value never silently disappears.
+  const productCycles = selectableCycles(
+    feature.productId
+      ? cyclesForProduct(cycles, feature.productId)
+      : cycles.filter((c) => c.productId === null),
+    feature.cycleId ?? null,
   );
   const formRef = useRef<HTMLFormElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -158,6 +173,9 @@ export function ItemProperties({
         status: String(data.get("status") ?? feature.status),
         ...(productReleases.length > 0
           ? { releaseId: String(data.get("releaseId") ?? "") || null }
+          : {}),
+        ...(productCycles.length > 0
+          ? { cycleId: String(data.get("cycleId") ?? "") || null }
           : {}),
         ...(show("tags")
           ? {
@@ -280,6 +298,25 @@ export function ItemProperties({
             {productReleases.map((r) => (
               <option key={r.id} value={r.id}>
                 {r.name}
+              </option>
+            ))}
+          </Select>
+        </PropertyRow>
+      ) : null}
+
+      {productCycles.length > 0 ? (
+        <PropertyRow icon={Repeat} label="Cycle">
+          <Select
+            name="cycleId"
+            defaultValue={feature.cycleId ?? ""}
+            className={INLINE_SELECT}
+          >
+            <option value="">None</option>
+            {productCycles.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+                {c.state === "active" ? " (active)" : ""}
+                {c.state === "complete" ? " (ended)" : ""}
               </option>
             ))}
           </Select>

@@ -25,22 +25,36 @@ const INSTRUCTIONS =
   "or a DB-native card's body. Where list_statuses reports transitionMode " +
   "\"strict\", stages must be walked in order: pass update_item(advance: true) " +
   "to move an item several stages in one call rather than issuing one call per " +
-  "stage. Use create_item to add higher-level cards. Edit an actual spec's Markdown " +
+  "stage. Use create_item to add a card at ANY level, including the leaf: a " +
+  "spec is an optional attachment to a work item, not a requirement for one, " +
+  "so work being done by a person rather than an agent is tracked as an " +
+  "ordinary item and rolls up the same way. Edit an actual spec's Markdown " +
   "with update_spec_content (commits to git), and break a card down by " +
   "creating child specs with create_spec, then update_item(parentSpecId) to " +
-  "nest each under the card. To roll changes up, read the child specs and " +
+  "nest each under the card. Pass create_spec a workItemId to ATTACH a spec " +
+  "to an item that already exists, which keeps its id, status and history " +
+  "instead of creating a second card for the same work. To roll changes up, " +
+  "read the child specs and " +
   "write a summary into the parent card with update_item(details). After you " +
   "open a PR for an item, record it with link_github (kind pull_request / " +
   "issue / branch); list_github_links shows an item's links and unlink_github " +
-  "removes one. Remove a " +
-  "DB-native card you no longer need with delete_item (spec-backed items are " +
-  "deleted in git, not here). Organize work into versions with list_releases " +
+  "removes one. Remove an item with delete_item; one that has a spec attached " +
+  "needs removeSpec: true, which deletes its spec file from git too (without " +
+  "that it would be re-imported on the next sync). " +
+  "Organize work into versions with list_releases " +
   "and create_release; revise a release's dates, status, name, notes, or " +
   "product with update_release. A release belongs to a product (managed by that " +
   "product's admins/contributors) or is a workspace-wide portfolio release (set " +
   "productId to null; owner-only). Schedule an item into a release via " +
   "update_item(releaseId); the item must belong to the release's product, or " +
-  "the release must be a portfolio release. Products can be collected into " +
+  "the release must be a portfolio release. Cycles (sprints / iterations) are " +
+  "a SECOND, ORTHOGONAL axis: a release is what ships together, a cycle is " +
+  "the time box a team works in, and an item can be in both at once. Use " +
+  "list_cycles / create_cycle / update_cycle, schedule with " +
+  "update_item(cycleId), and rollover_cycle to move a closing cycle's " +
+  "unfinished work into the next one (finished work stays put). A cycle has " +
+  "no status: it is upcoming, active or complete purely from its dates. " +
+  "Products can be collected into " +
   "product groups " +
   "(nested management roll-ups): list_product_groups shows them, " +
   "list_items(group) scopes to a group's subtree, and group_summary returns " +

@@ -6,6 +6,7 @@ import {
   Lightbulb,
   Map,
   Microscope,
+  Repeat,
   Settings,
   TrendingUp,
   type LucideIcon,
@@ -57,6 +58,7 @@ export const GROUPS: NavGroup[] = [
     items: [
       { href: "/ideas", label: "Ideas", icon: Lightbulb, productScoped: true },
       { href: "/backlog", label: "Backlog", icon: KanbanSquare, productScoped: true },
+      { href: "/cycles", label: "Cycles", icon: Repeat, productScoped: true },
     ],
   },
   {

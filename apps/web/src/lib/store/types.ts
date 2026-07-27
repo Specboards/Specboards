@@ -1,4 +1,5 @@
 import type {
+  CycleState,
   DetailTemplate,
   DetailTemplateInput,
   DetailTemplatePatch,
@@ -15,6 +16,7 @@ import type {
 } from "@specboards/core";
 
 export type {
+  CycleState,
   DetailTemplate,
   DetailTemplateInput,
   DetailTemplatePatch,
@@ -56,6 +58,9 @@ export interface FeatureRecord {
   tags: string[];
   /** Owning release, or null when unscheduled. */
   releaseId: string | null;
+  /** Owning cycle (sprint/iteration), or null when not in one. Orthogonal to
+   * releaseId: an item can hold both. */
+  cycleId: string | null;
   /** Assigned user id, or null when unassigned. */
   assigneeId: string | null;
   /** Values keyed by custom-property key (see PropertyDef). */
@@ -205,6 +210,7 @@ export type FeaturePatch = Partial<
     | "rank"
     | "tags"
     | "releaseId"
+    | "cycleId"
     | "assigneeId"
     | "customFields"
     | "parentSpecId"
@@ -234,6 +240,9 @@ export interface CreateFeatureInput {
   /** Release to schedule the new item into; must belong to the item's product
    * or be a portfolio release. Null/omitted leaves it unscheduled. */
   releaseId?: string | null;
+  /** Cycle to schedule the new item into; must belong to the item's product or
+   * be workspace-wide. Null/omitted leaves it out of any cycle. */
+  cycleId?: string | null;
   /** Initial values for the workspace's custom properties, keyed by property key. */
   customFields?: Record<string, CustomFieldValue>;
   tags?: string[];
@@ -630,6 +639,61 @@ export type ReleasePatch = Partial<{
 /** Raised when a release can't be created/updated/deleted. */
 export class ReleaseError extends Error {}
 
+/**
+ * A cycle (sprint / iteration) as the UI consumes it: a date-bounded time box,
+ * orthogonal to releases. Note there is no stored status - `state` is derived
+ * from the dates on every read (see core `cycleState`), so a cycle can never be
+ * stale and nothing has to run to keep it current.
+ */
+export interface CycleRecord {
+  id: string;
+  name: string;
+  /** Product this cycle belongs to, or null for a workspace-wide cycle
+   * spanning every product. */
+  productId: string | null;
+  /** Inclusive first day, YYYY-MM-DD. */
+  startDate: string;
+  /** Inclusive last day, YYYY-MM-DD. */
+  endDate: string;
+  /** Free-form notes (Markdown), e.g. the cycle's goal. */
+  notes: string | null;
+  /** Derived from the dates against today; never stored. */
+  state: CycleState;
+  /** Count of items scheduled into this cycle. */
+  itemCount: number;
+  /** Of those items, how many are in a terminal ("done") status. Drives the
+   * cycle's progress and the rollover count. */
+  doneCount: number;
+}
+
+export interface CycleInput {
+  name: string;
+  /** Product to scope the cycle to, or null/omitted for a workspace-wide one. */
+  productId?: string | null;
+  startDate: string;
+  endDate: string;
+  notes?: string | null;
+}
+
+export type CyclePatch = Partial<{
+  name: string;
+  productId: string | null;
+  startDate: string;
+  endDate: string;
+  notes: string | null;
+}>;
+
+/** Outcome of rolling a cycle's unfinished work into another cycle. */
+export interface CycleRolloverResult {
+  /** Number of items moved. */
+  moved: number;
+  /** The cycle they were moved into. */
+  toCycleId: string;
+}
+
+/** Raised when a cycle can't be created/updated/deleted. */
+export class CycleError extends Error {}
+
 /** A comment on a feature, with its author resolved for display. */
 export interface CommentRecord {
   id: string;
@@ -684,6 +748,20 @@ export interface NotificationList {
   items: NotificationRecord[];
   unreadCount: number;
 }
+
+// Cycle helpers live in core (they are pure date logic shared with the CLI);
+// re-exported here so UI code imports its scoping helpers from one place,
+// alongside releasesForProduct / selectableReleases below.
+export {
+  compareCycles,
+  cycleDaysRemaining,
+  cycleLengthDays,
+  cycleState,
+  cycleStateLabel,
+  cyclesForProduct,
+  isCycleActive,
+  selectableCycles,
+} from "@specboards/core";
 
 /** The releases a single product's roadmap should show: that product's own
  * releases plus workspace-wide (portfolio) releases, which apply everywhere. */
@@ -1102,6 +1180,31 @@ export interface FeatureStore {
   ): Promise<ReleaseRecord>;
   /** Delete a release; its items are unscheduled, not deleted. */
   deleteRelease(id: string, scope?: WorkspaceScope): Promise<void>;
+
+  /** The workspace's cycles, ordered active → upcoming → most recently
+   * complete. `state` on each is derived from its dates, never stored. */
+  listCycles(scope?: WorkspaceScope): Promise<CycleRecord[]>;
+  createCycle(input: CycleInput, scope?: WorkspaceScope): Promise<CycleRecord>;
+  updateCycle(
+    id: string,
+    patch: CyclePatch,
+    scope?: WorkspaceScope,
+  ): Promise<CycleRecord>;
+  /** Delete a cycle. `features.cycle_id` is ON DELETE SET NULL, so its items
+   * are unscheduled rather than deleted. */
+  deleteCycle(id: string, scope?: WorkspaceScope): Promise<void>;
+  /**
+   * Move every unfinished item out of `fromId` and into `toId`. An explicit
+   * user action, never a background job: what carries over is a planning
+   * decision the team makes when they close a cycle, and a cron that guessed
+   * would be wrong as often as right. Items already done stay where they are,
+   * so the finished cycle keeps an honest record of what it delivered.
+   */
+  rolloverCycle(
+    fromId: string,
+    toId: string,
+    scope?: WorkspaceScope,
+  ): Promise<CycleRolloverResult>;
   /** Comments on a feature (by stable specId), oldest first, author resolved.
    * Requires read access to the feature's product. */
   listComments(

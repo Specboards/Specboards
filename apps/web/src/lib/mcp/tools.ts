@@ -4,17 +4,23 @@ import { eq, users, workspaces } from "@specboards/db";
 import { getDb } from "@/lib/db";
 import { resolveWorkflowFor } from "@/lib/repo-config";
 import {
+  createCycle,
   createRelease,
   createWorkItem,
   deleteWorkItem,
   getTransitionMode,
+  listCycles,
   listReleases,
   parseCreateFeatureInput,
   parseFeaturePatch,
+  parseCycleInput,
+  parseCyclePatch,
   parseReleaseInput,
   parseReleaseNotesPatch,
   parseReleasePatch,
   patchFeature,
+  rolloverCycle,
+  updateCycle,
   updateRelease,
 } from "@/lib/features-service";
 import {
@@ -381,6 +387,7 @@ export const TOOLS: McpTool[] = [
           product: f.productId ? (keyById.get(f.productId) ?? null) : null,
           assigneeId: f.assigneeId,
           releaseId: f.releaseId,
+          cycleId: f.cycleId,
           parentSpecId: f.parentSpecId,
           childCount: f.childCount,
           childDoneCount: f.childDoneCount,
@@ -420,6 +427,7 @@ export const TOOLS: McpTool[] = [
         allowedTransitions: workflow.transitions[f.status] ?? [],
         tags: f.tags,
         releaseId: f.releaseId,
+        cycleId: f.cycleId,
         assigneeId: f.assigneeId,
         assigneeName: f.assigneeName,
         customFields: f.customFields,
@@ -456,7 +464,7 @@ export const TOOLS: McpTool[] = [
     name: "update_item",
     description:
       "Update an item's metadata and (for DB-native cards) its content. " +
-      "Set any of: status, tags, releaseId, assigneeId, customFields, " +
+      "Set any of: status, tags, releaseId, cycleId, assigneeId, customFields, " +
       "parentSpecId, and - for DB-native cards only - title and details " +
       "(Markdown body). Status changes are validated against the workspace " +
       "workflow and its stage gates. On a workspace whose transitions are " +
@@ -478,6 +486,12 @@ export const TOOLS: McpTool[] = [
         },
         tags: { type: "array", items: { type: "string" } },
         releaseId: { type: ["string", "null"] },
+        cycleId: {
+          type: ["string", "null"],
+          description:
+            "Cycle (sprint) to schedule into, from list_cycles. Independent " +
+            "of releaseId: setting one never changes the other.",
+        },
         assigneeId: { type: ["string", "null"] },
         parentSpecId: { type: ["string", "null"] },
         title: {
@@ -509,6 +523,8 @@ export const TOOLS: McpTool[] = [
         title: updated.title,
         status: updated.status,
         tags: updated.tags,
+        releaseId: updated.releaseId,
+        cycleId: updated.cycleId,
         isDbNative: updated.isDbNative,
       };
     },
@@ -924,6 +940,166 @@ export const TOOLS: McpTool[] = [
         customFields: release.customFields,
         itemCount: release.itemCount,
       };
+    },
+  },
+  {
+    name: "list_cycles",
+    description:
+      "List the workspace's cycles (sprints / iterations): the time boxes a " +
+      "team works in. A cycle is a SECOND, ORTHOGONAL axis to releases, not a " +
+      "kind of release: a release answers 'what ships together', a cycle " +
+      "answers 'what is the team working on for the next two weeks'. An item " +
+      "can be in a release AND a cycle at once, and setting one never touches " +
+      "the other. Each cycle reports a derived `state` (upcoming / active / " +
+      "complete) computed from its dates, so it is never stale, plus its item " +
+      "and done counts. Ordered active first, then upcoming by soonest start, " +
+      "then most recently complete. Pass a cycle `id` to update_item's " +
+      "`cycleId` to schedule an item into it.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    write: false,
+    run: async (_args, ctx) => {
+      const cycles = await listCycles(ctx.scope);
+      return cycles.map((c) => ({
+        id: c.id,
+        name: c.name,
+        productId: c.productId,
+        startDate: c.startDate,
+        endDate: c.endDate,
+        state: c.state,
+        notes: c.notes,
+        itemCount: c.itemCount,
+        doneCount: c.doneCount,
+      }));
+    },
+  },
+  {
+    name: "create_cycle",
+    description:
+      'Create a cycle (a sprint / iteration like "Sprint 14"). Provide a ' +
+      "`name` (unique within its product), `startDate` and `endDate` " +
+      "(YYYY-MM-DD, both inclusive; the end cannot precede the start); " +
+      "optionally `productId` to scope it to a product (omit or pass null for " +
+      "a workspace-wide cycle spanning every product) and `notes` (Markdown, " +
+      "e.g. the cycle's goal). There is deliberately no status to set: a " +
+      "cycle is upcoming, active, or complete purely from its dates. A " +
+      "product cycle requires admin/contributor access to that product; a " +
+      "workspace-wide one requires the workspace owner.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          description: "Cycle name, unique within its product.",
+        },
+        startDate: {
+          type: "string",
+          description: "First day of the cycle, YYYY-MM-DD (inclusive).",
+        },
+        endDate: {
+          type: "string",
+          description: "Last day of the cycle, YYYY-MM-DD (inclusive).",
+        },
+        productId: {
+          type: ["string", "null"],
+          description:
+            "Product to scope the cycle to (from list_products); null or " +
+            "omitted for a workspace-wide cycle.",
+        },
+        notes: {
+          type: ["string", "null"],
+          description: "Free-form notes (Markdown), e.g. the cycle's goal.",
+        },
+      },
+      required: ["name", "startDate", "endDate"],
+      additionalProperties: false,
+    },
+    write: true,
+    run: async (args, ctx) => {
+      const cycle = await createCycle(parseCycleInput(args), ctx.scope);
+      return {
+        id: cycle.id,
+        name: cycle.name,
+        productId: cycle.productId,
+        startDate: cycle.startDate,
+        endDate: cycle.endDate,
+        state: cycle.state,
+        notes: cycle.notes,
+        itemCount: cycle.itemCount,
+      };
+    },
+  },
+  {
+    name: "update_cycle",
+    description:
+      "Update a cycle's name, dates, notes, or owning product. Pass the cycle " +
+      "`id` (from list_cycles) plus any of `name`, `startDate`, `endDate`, " +
+      "`notes`, `productId`. Moving a cycle to a product unschedules items " +
+      "belonging to other products, mirroring releases. There is no status " +
+      "to set: moving the dates is what changes a cycle's state.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Cycle id from list_cycles." },
+        name: { type: "string" },
+        startDate: { type: "string", description: "YYYY-MM-DD." },
+        endDate: { type: "string", description: "YYYY-MM-DD." },
+        notes: { type: ["string", "null"] },
+        productId: {
+          type: ["string", "null"],
+          description: "Move to a product, or null for workspace-wide.",
+        },
+      },
+      required: ["id"],
+      additionalProperties: false,
+    },
+    write: true,
+    run: async (args, ctx) => {
+      const id = requireString(args, "id");
+      const { id: _omit, ...rest } = args;
+      const cycle = await updateCycle(id, parseCyclePatch(rest), ctx.scope);
+      return {
+        id: cycle.id,
+        name: cycle.name,
+        productId: cycle.productId,
+        startDate: cycle.startDate,
+        endDate: cycle.endDate,
+        state: cycle.state,
+        notes: cycle.notes,
+        itemCount: cycle.itemCount,
+        doneCount: cycle.doneCount,
+      };
+    },
+  },
+  {
+    name: "rollover_cycle",
+    description:
+      "Move a cycle's UNFINISHED work into another cycle, which is how a team " +
+      "closes one cycle and opens the next. Items already done or archived " +
+      "stay where they are, so the finished cycle keeps an honest record of " +
+      "what it actually delivered. Deliberately an explicit action rather " +
+      "than something that happens when a cycle's end date passes: what " +
+      "carries over is a decision, not a rule. Pass `fromCycleId` and " +
+      "`toCycleId` (both from list_cycles); returns how many items moved.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        fromCycleId: {
+          type: "string",
+          description: "The cycle being closed.",
+        },
+        toCycleId: {
+          type: "string",
+          description: "The cycle its unfinished work moves into.",
+        },
+      },
+      required: ["fromCycleId", "toCycleId"],
+      additionalProperties: false,
+    },
+    write: true,
+    run: async (args, ctx) => {
+      const fromCycleId = requireString(args, "fromCycleId");
+      const toCycleId = requireString(args, "toCycleId");
+      return rolloverCycle(fromCycleId, toCycleId, ctx.scope);
     },
   },
   {

@@ -28,6 +28,7 @@ export const SCOPE_RESOURCES = [
   "products",
   "repositories",
   "releases",
+  "cycles",
   "views",
   "ideas",
   "webhooks",

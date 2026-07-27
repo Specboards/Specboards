@@ -14,6 +14,7 @@ import { listLinkableRepos } from "@/lib/github-links-service";
 import { resolveWorkflowFor } from "@/lib/repo-config";
 import { getStore } from "@/lib/store";
 import type {
+  CycleRecord,
   FeatureDetail,
   ReleaseRecord,
   StageGate,
@@ -50,6 +51,8 @@ export interface ItemDetailData {
   /** Custom properties that apply at this item's level. */
   properties: PropertyDef[];
   releases: ReleaseRecord[];
+  /** Cycles (sprints) offered by the item's cycle picker. */
+  cycles: CycleRecord[];
   workflow: StatusWorkflow;
   /** Exit-criteria gates for the item's *current* stage, in checklist order. */
   stageGates: StageGate[];
@@ -94,10 +97,11 @@ export async function getItemDetailData(
     access && db ? await listWorkspaceMembers(db, access.workspaceId) : [];
   const workflow = await resolveWorkflowFor(access);
 
-  const [allProperties, releases, allFeatures, levels, products, allGates, allCompletedGateIds] =
+  const [allProperties, releases, cycles, allFeatures, levels, products, allGates, allCompletedGateIds] =
     await Promise.all([
       store.listProperties(access ?? undefined, "item"),
       store.listReleases(access ?? undefined),
+      store.listCycles(access ?? undefined),
       store.listFeatures(access ?? undefined),
       store.listLevels(access ?? undefined),
       store.listProducts(access ?? undefined),
@@ -151,6 +155,7 @@ export async function getItemDetailData(
     members,
     properties,
     releases,
+    cycles,
     workflow,
     stageGates,
     completedGateIds,

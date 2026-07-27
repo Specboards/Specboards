@@ -20,6 +20,9 @@ export interface BulkOptions {
   statuses: string[];
   assignees: { userId: string; name: string }[];
   releases: { id: string; name: string }[];
+  /** Cycles offered by the bar; the second scheduling axis, applied
+   * independently of the release control beside it. */
+  cycles?: { id: string; name: string }[];
 }
 
 /**
@@ -49,7 +52,7 @@ export function BulkActionBar({
   if (count === 0) return null;
 
   async function apply(
-    patch: Pick<FeaturePatch, "status" | "assigneeId" | "releaseId">,
+    patch: Pick<FeaturePatch, "status" | "assigneeId" | "releaseId" | "cycleId">,
     tagOps: BulkTagOps,
     label: string,
   ) {
@@ -148,6 +151,28 @@ export function BulkActionBar({
           {options.releases.map((r) => (
             <option key={r.id} value={r.id}>
               {r.name}
+            </option>
+          ))}
+        </Select>
+      ) : null}
+
+      {options.cycles && options.cycles.length > 0 ? (
+        <Select
+          aria-label="Set cycle for selected"
+          className="h-8 w-auto"
+          value=""
+          disabled={pending}
+          onChange={(e) => {
+            if (!e.target.value) return;
+            const cycleId = e.target.value === "none" ? null : e.target.value;
+            void apply({ cycleId }, {}, "Set cycle");
+          }}
+        >
+          <option value="">Set cycle…</option>
+          <option value="none">No cycle</option>
+          {options.cycles.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
             </option>
           ))}
         </Select>

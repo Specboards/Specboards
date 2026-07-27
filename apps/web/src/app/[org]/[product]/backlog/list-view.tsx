@@ -33,7 +33,7 @@ import {
 } from "@/lib/feature-helpers";
 import { resolveWorkflowFor } from "@/lib/repo-config";
 import { getStore } from "@/lib/store";
-import { selectableReleases } from "@/lib/store/types";
+import { selectableCycles, selectableReleases } from "@/lib/store/types";
 import { listWorkspaceMembers } from "@/lib/workspace";
 import {
   canConnectRepos,
@@ -94,7 +94,10 @@ export async function ListView({
   const features = sortFeatures(await store.listFeatures(access ?? undefined))
     .filter((f) => f.status !== "archived")
     .filter((f) => inScope(f.productId));
-  const releases = await store.listReleases(access ?? undefined);
+  const [releases, cycles] = await Promise.all([
+    store.listReleases(access ?? undefined),
+    store.listCycles(access ?? undefined),
+  ]);
   const releaseNames = Object.fromEntries(releases.map((r) => [r.id, r.name]));
 
   // Multi-product scope ("all" or a group): show a Product column tagging each
@@ -170,6 +173,12 @@ export async function ListView({
     releases: selectableReleases(releases, filters.release ?? null).map((r) => ({
       id: r.id,
       name: r.name,
+    })),
+    // Finished cycles drop out of the picker, except the one currently
+    // filtered on, so an existing filter never disappears from its own bar.
+    cycles: selectableCycles(cycles, filters.cycle ?? null).map((c) => ({
+      id: c.id,
+      name: c.name,
     })),
     products: productsById
       ? scopedProducts.map((p) => ({ id: p.id, name: p.name }))
@@ -338,6 +347,7 @@ export async function ListView({
                   statuses: options.statuses,
                   assignees: options.assignees,
                   releases: options.releases,
+                  cycles: options.cycles,
                 }}
               />
             </Box>

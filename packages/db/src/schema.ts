@@ -619,6 +619,15 @@ export const features = pgTable(
     releaseId: uuid("release_id").references(() => releases.id, {
       onDelete: "set null",
     }),
+    /**
+     * Owning cycle (sprint/iteration), or null when not in one. Orthogonal to
+     * `release_id`: an item can be scheduled into both, and clearing one leaves
+     * the other alone. `set null` on delete mirrors releases exactly, so
+     * deleting a cycle unschedules its items and destroys no work.
+     */
+    cycleId: uuid("cycle_id").references(() => cycles.id, {
+      onDelete: "set null",
+    }),
     /** Fractional/lexical rank for manual backlog ordering. */
     rank: text("rank"),
     tags: text("tags").array().notNull().default([]),
@@ -658,6 +667,7 @@ export const features = pgTable(
     index("features_workspace_level_idx").on(t.workspaceId, t.level),
     index("features_external_key_idx").on(t.workspaceId, t.externalKey),
     index("features_release_idx").on(t.releaseId),
+    index("features_cycle_idx").on(t.cycleId),
     foreignKey({
       columns: [t.workspaceId, t.level],
       foreignColumns: [workspaceLevels.workspaceId, workspaceLevels.key],
@@ -868,6 +878,62 @@ export const releases = pgTable(
       .where(sql`${t.productId} is null`),
     index("releases_ws_idx").on(t.workspaceId),
     index("releases_product_idx").on(t.productId),
+  ],
+);
+
+/**
+ * A cycle (sprint / iteration): a date-bounded time box a team works in
+ * (`features.cycle_id`). Deliberately a *second, orthogonal axis* to releases,
+ * not a flavour of one: an item can be in release v1.0 and in cycle "Sprint 14"
+ * at the same time. A release is the customer-facing ship vehicle with an
+ * explicit planned/in_progress/shipped lifecycle; a cycle is the team-facing
+ * time box whose state is a function of today's date.
+ *
+ * There is deliberately **no status column**. A cycle is upcoming, active, or
+ * complete purely from `start_date`/`end_date` against today, which avoids the
+ * reopen/re-stamp problem `releases.shipped_date` needed migration 0043 to fix
+ * and means a cycle can never be stale. See `core/cycles.ts`.
+ */
+export const cycles = pgTable(
+  "cycles",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    /** Product this cycle belongs to, or null for a workspace-wide cycle
+     * spanning every product. Mirrors the releases convention exactly: product
+     * cycles are managed by that product's admins/contributors, workspace-wide
+     * ones are owner-only. Cycles default to per-product in the UI. */
+    productId: uuid("product_id").references(() => products.id, {
+      onDelete: "cascade",
+    }),
+    name: text("name").notNull(),
+    /** Inclusive first day of the cycle (date-only). */
+    startDate: text("start_date").notNull(),
+    /** Inclusive last day of the cycle (date-only); must be >= startDate. */
+    endDate: text("end_date").notNull(),
+    /** Free-form notes (Markdown), e.g. the cycle's goal. */
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    // Names unique within a product, and independently within the
+    // workspace-wide scope, so two products can both run "Sprint 1".
+    uniqueIndex("cycles_product_name_uq")
+      .on(t.productId, t.name)
+      .where(sql`${t.productId} is not null`),
+    uniqueIndex("cycles_ws_global_name_uq")
+      .on(t.workspaceId, t.name)
+      .where(sql`${t.productId} is null`),
+    index("cycles_ws_idx").on(t.workspaceId),
+    index("cycles_product_idx").on(t.productId),
+    index("cycles_dates_idx").on(t.workspaceId, t.startDate, t.endDate),
   ],
 );
 

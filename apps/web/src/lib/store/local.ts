@@ -3,6 +3,8 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 
 import {
+  compareCycles,
+  cycleState,
   DEFAULT_PRODUCT_KEY,
   descendantGroupIds,
   groupKeyFromName,
@@ -19,6 +21,8 @@ import {
   resolveIdeaStages,
   resolveLevels,
   resolveLevelUpdate,
+  todayDateOnly,
+  validateCycleDates,
   type IdeaStage,
   type PropertyDef,
   type PropertyEntity,
@@ -45,6 +49,11 @@ import {
   type BoardPreferences,
   type CreateFeatureInput,
   type CreateProductGroupInput,
+  CycleError,
+  type CycleInput,
+  type CyclePatch,
+  type CycleRecord,
+  type CycleRolloverResult,
   type CreateProductInput,
   type DeleteFeatureOptions,
   type DetailTemplate,
@@ -119,6 +128,8 @@ interface LocalItem {
   parentSpecId: string | null;
   /** Owning release id, or null when unscheduled. */
   releaseId?: string | null;
+  /** Owning cycle id, or null when not in one. Orthogonal to releaseId. */
+  cycleId?: string | null;
   /** Owning product id; defaults to the default product when absent. */
   productId?: string | null;
   /** Markdown details body, or null/absent for a blank body. */
@@ -150,6 +161,18 @@ interface LocalRelease {
   releaseNotesUrl?: string | null;
   /** Release-scoped custom-property values (default empty when absent). */
   customFields?: Record<string, CustomFieldValue>;
+}
+
+/** A cycle (sprint/iteration) persisted in local file mode. No status field:
+ * the state is derived from the dates on read, exactly as in the DB store. */
+interface LocalCycle {
+  id: string;
+  name: string;
+  /** Product this cycle belongs to, or null for a workspace-wide cycle. */
+  productId?: string | null;
+  startDate: string;
+  endDate: string;
+  notes?: string | null;
 }
 
 /** A comment persisted in local file mode. Keyed to the feature's stable
@@ -240,6 +263,8 @@ interface LocalMetadata {
   tags?: string[];
   /** Owning release id, or null when unscheduled. */
   releaseId?: string | null;
+  /** Owning cycle id, or null when not in one. Orthogonal to releaseId. */
+  cycleId?: string | null;
   assigneeId?: string | null;
   customFields?: Record<string, CustomFieldValue>;
   /** RICE prioritization inputs (see RiceInputs). */
@@ -345,6 +370,10 @@ export class LocalFileStore implements FeatureStore {
 
   private get releasesPath() {
     return path.join(this.root, ".specboards", "local-releases.json");
+  }
+
+  private get cyclesPath() {
+    return path.join(this.root, ".specboards", "local-cycles.json");
   }
 
   private get commentsPath() {
@@ -540,6 +569,7 @@ export class LocalFileStore implements FeatureStore {
         rank: m.rank ?? null,
         tags: m.tags ?? [],
         releaseId: m.releaseId ?? null,
+        cycleId: m.cycleId ?? null,
         assigneeId: m.assigneeId ?? null,
         assigneeName: null, // no user records in local file mode
         customFields: m.customFields ?? {},
@@ -577,6 +607,7 @@ export class LocalFileStore implements FeatureStore {
         rank: null,
         tags: item.tags ?? [],
         releaseId: item.releaseId ?? null,
+        cycleId: item.cycleId ?? null,
         assigneeId: item.assigneeId,
         assigneeName: null,
         customFields: item.customFields ?? {},
@@ -797,6 +828,15 @@ export class LocalFileStore implements FeatureStore {
         throw new FeatureError("Release belongs to a different product.");
       }
     }
+    // Cycles follow the same rule on their own axis.
+    if (input.cycleId) {
+      const cycle = (await this.readCycles()).find((c) => c.id === input.cycleId);
+      if (!cycle) throw new FeatureError(`Unknown cycle: ${input.cycleId}`);
+      const cycleProductId = cycle.productId ?? null;
+      if (cycleProductId !== null && cycleProductId !== productId) {
+        throw new FeatureError("Cycle belongs to a different product.");
+      }
+    }
     const item: LocalItem = {
       id,
       title,
@@ -806,6 +846,7 @@ export class LocalFileStore implements FeatureStore {
       tags: input.tags ?? [],
       parentSpecId: input.parentSpecId ?? null,
       releaseId: input.releaseId ?? null,
+      cycleId: input.cycleId ?? null,
       productId,
       details: input.details?.trim() ? input.details : null,
       customFields: input.customFields ?? {},
@@ -823,6 +864,7 @@ export class LocalFileStore implements FeatureStore {
       rank: null,
       tags: item.tags,
       releaseId: item.releaseId ?? null,
+      cycleId: item.cycleId ?? null,
       assigneeId: item.assigneeId,
       customFields: item.customFields ?? {},
       ...riceFields({
@@ -1608,6 +1650,193 @@ export class LocalFileStore implements FeatureStore {
       }
     }
     if (metaChanged) await this.writeMetadata(meta);
+  }
+
+  // ── Cycles ────────────────────────────────────────────────────────────
+  // Persisted to `.specboards/local-cycles.json`. File mode has no product
+  // roles, so the per-product write checks the DB store makes are absent here;
+  // every other rule (name uniqueness per scope, date validation, unscheduling
+  // on delete, done work staying put on rollover) is the same.
+
+  private async readCycles(): Promise<LocalCycle[]> {
+    return this.readJsonFile<LocalCycle>(this.cyclesPath);
+  }
+
+  private async writeCycles(rows: LocalCycle[]): Promise<void> {
+    await fs.mkdir(path.dirname(this.cyclesPath), { recursive: true });
+    await fs.writeFile(
+      this.cyclesPath,
+      JSON.stringify(rows, null, 2) + "\n",
+      "utf8",
+    );
+  }
+
+  /** Set `cycleId` on every item/metadata row matching `match`, returning how
+   * many changed. Both stores of item state have to move together in file mode. */
+  private async retargetCycle(
+    match: (current: string | null | undefined) => boolean,
+    next: string | null,
+    skipSpecIds?: Set<string>,
+  ): Promise<number> {
+    let moved = 0;
+    const items = await this.readItems();
+    let itemsChanged = false;
+    for (const item of items) {
+      if (!match(item.cycleId) || skipSpecIds?.has(item.id)) continue;
+      item.cycleId = next;
+      itemsChanged = true;
+      moved += 1;
+    }
+    if (itemsChanged) await this.writeItems(items);
+
+    const meta = await this.readMetadata();
+    let metaChanged = false;
+    for (const [specId, m] of Object.entries(meta)) {
+      if (!match(m.cycleId) || skipSpecIds?.has(specId)) continue;
+      m.cycleId = next;
+      metaChanged = true;
+      moved += 1;
+    }
+    if (metaChanged) await this.writeMetadata(meta);
+    return moved;
+  }
+
+  async listCycles(_scope?: WorkspaceScope): Promise<CycleRecord[]> {
+    const [rows, all] = await Promise.all([this.readCycles(), this.loadAll()]);
+    const totals = new Map<string, { items: number; done: number }>();
+    for (const f of all) {
+      if (!f.cycleId) continue;
+      const acc = totals.get(f.cycleId) ?? { items: 0, done: 0 };
+      acc.items += 1;
+      if (isDone(f.status)) acc.done += 1;
+      totals.set(f.cycleId, acc);
+    }
+    const today = todayDateOnly();
+    return rows
+      .map((r) => ({
+        id: r.id,
+        name: r.name,
+        productId: r.productId ?? null,
+        startDate: r.startDate,
+        endDate: r.endDate,
+        notes: r.notes ?? null,
+        state: cycleState(r, today),
+        itemCount: totals.get(r.id)?.items ?? 0,
+        doneCount: totals.get(r.id)?.done ?? 0,
+      }))
+      .sort((a, b) => compareCycles(a, b, today));
+  }
+
+  async createCycle(
+    input: CycleInput,
+    _scope?: WorkspaceScope,
+  ): Promise<CycleRecord> {
+    const name = input.name.trim();
+    if (!name) throw new CycleError("Cycle name is required.");
+    const dateError = validateCycleDates(input.startDate, input.endDate);
+    if (dateError) throw new CycleError(dateError);
+    const productId = input.productId ?? null;
+    const rows = await this.readCycles();
+    if (rows.some((c) => c.name === name && (c.productId ?? null) === productId)) {
+      throw new CycleError(`A cycle named "${name}" already exists.`);
+    }
+    const cycle: LocalCycle = {
+      id: randomUUID(),
+      name,
+      productId,
+      startDate: input.startDate,
+      endDate: input.endDate,
+      notes: input.notes ?? null,
+    };
+    await this.writeCycles([...rows, cycle]);
+    return {
+      id: cycle.id,
+      name,
+      productId,
+      startDate: cycle.startDate,
+      endDate: cycle.endDate,
+      notes: cycle.notes ?? null,
+      state: cycleState(cycle),
+      itemCount: 0,
+      doneCount: 0,
+    };
+  }
+
+  async updateCycle(
+    id: string,
+    patch: CyclePatch,
+    _scope?: WorkspaceScope,
+  ): Promise<CycleRecord> {
+    const rows = await this.readCycles();
+    const cycle = rows.find((c) => c.id === id);
+    if (!cycle) throw new CycleError(`Unknown cycle: ${id}`);
+
+    // Validate the dates as they will be after the patch, so moving one end
+    // cannot produce a cycle that ends before it starts.
+    const startDate = patch.startDate ?? cycle.startDate;
+    const endDate = patch.endDate ?? cycle.endDate;
+    const dateError = validateCycleDates(startDate, endDate);
+    if (dateError) throw new CycleError(dateError);
+
+    if (patch.name !== undefined) {
+      const name = patch.name.trim();
+      if (!name) throw new CycleError("Cycle name is required.");
+      cycle.name = name;
+    }
+    if (patch.productId !== undefined) cycle.productId = patch.productId;
+    if (patch.startDate !== undefined) cycle.startDate = patch.startDate;
+    if (patch.endDate !== undefined) cycle.endDate = patch.endDate;
+    if (patch.notes !== undefined) cycle.notes = patch.notes;
+
+    if (
+      rows.some(
+        (c) =>
+          c.id !== id &&
+          c.name === cycle.name &&
+          (c.productId ?? null) === (cycle.productId ?? null),
+      )
+    ) {
+      throw new CycleError(`A cycle named "${cycle.name}" already exists.`);
+    }
+    await this.writeCycles(rows);
+    const listed = await this.listCycles();
+    return listed.find((c) => c.id === id)!;
+  }
+
+  async deleteCycle(id: string, _scope?: WorkspaceScope): Promise<void> {
+    const rows = await this.readCycles();
+    if (!rows.some((c) => c.id === id))
+      throw new CycleError(`Unknown cycle: ${id}`);
+    await this.writeCycles(rows.filter((c) => c.id !== id));
+    // Unschedule the deleted cycle's items (mirrors the DB's SET NULL).
+    await this.retargetCycle((current) => current === id, null);
+  }
+
+  async rolloverCycle(
+    fromId: string,
+    toId: string,
+    _scope?: WorkspaceScope,
+  ): Promise<CycleRolloverResult> {
+    if (fromId === toId) {
+      throw new CycleError("Pick a different cycle to roll work into.");
+    }
+    const rows = await this.readCycles();
+    if (!rows.some((c) => c.id === fromId))
+      throw new CycleError(`Unknown cycle: ${fromId}`);
+    if (!rows.some((c) => c.id === toId))
+      throw new CycleError(`Unknown cycle: ${toId}`);
+    // Done and archived work stays in the cycle that delivered (or dropped) it.
+    const finished = new Set(
+      (await this.loadAll())
+        .filter((f) => f.status === "done" || f.status === "archived")
+        .map((f) => f.specId),
+    );
+    const moved = await this.retargetCycle(
+      (current) => current === fromId,
+      toId,
+      finished,
+    );
+    return { moved, toCycleId: toId };
   }
 
   // ── Comments ──────────────────────────────────────────────────────────

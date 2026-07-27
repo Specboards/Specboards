@@ -39,6 +39,7 @@ export function ItemDetailView({
     members,
     properties,
     releases,
+    cycles,
     workflow,
     stageGates,
     completedGateIds,
@@ -88,6 +89,7 @@ export function ItemDetailView({
         members={members}
         properties={properties}
         releases={releases}
+        cycles={cycles}
         workflow={workflow}
         canEdit={canEdit}
         availableFields={availableFields}
