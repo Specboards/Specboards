@@ -28,6 +28,7 @@ import {
   deleteRelease,
   updateRelease,
 } from "@/lib/api-client";
+import { RELEASE_STATUS_LABELS } from "@/lib/release-status";
 import {
   RELEASE_STATUSES,
   type CustomFieldValue,
@@ -36,12 +37,6 @@ import {
   type ReleaseStatus,
 } from "@/lib/store/types";
 import type { WorkspaceMember } from "@/lib/workspace";
-
-const RELEASE_STATUS_LABELS: Record<ReleaseStatus, string> = {
-  planned: "Planned",
-  in_progress: "In progress",
-  shipped: "Shipped",
-};
 
 /** The statuses selectable inline. Shipping/reopening runs through the footer
  * buttons (with a confirm) so it stays a deliberate action, not an autosave. */
@@ -101,6 +96,8 @@ export function ReleaseDetailSheet({
   // Serialize field autosaves: coalesce a change made while one is in flight.
   const inFlightRef = useRef(false);
   const queuedRef = useRef<ReleasePatch | null>(null);
+  // The ship-date field, so a start date moved past it can pull it along.
+  const targetDateRef = useRef<HTMLInputElement | null>(null);
 
   function handleAuthError(err: unknown): boolean {
     if (err instanceof AuthRequiredError) {
@@ -249,13 +246,27 @@ export function ReleaseDetailSheet({
                     type="date"
                     defaultValue={current.startDate ?? ""}
                     className={INLINE_CONTROL}
-                    onChange={(e) =>
-                      commit({ startDate: e.target.value || null })
-                    }
+                    onChange={(e) => {
+                      const startDate = e.target.value || null;
+                      // Moving the start past the ship date takes the ship date
+                      // with it (the service holds the same rule for the API and
+                      // MCP). Mirrored into the field here because it is
+                      // uncontrolled: a refresh alone would leave the user
+                      // looking at the date that no longer applies.
+                      const target = targetDateRef.current;
+                      const targetDate = target?.value || null;
+                      if (startDate && targetDate && targetDate < startDate) {
+                        if (target) target.value = startDate;
+                        commit({ startDate, targetDate: startDate });
+                        return;
+                      }
+                      commit({ startDate });
+                    }}
                   />
                 </Field>
                 <Field label={shipped ? "Planned ship date" : "Ship date"}>
                   <Input
+                    ref={targetDateRef}
                     type="date"
                     defaultValue={current.targetDate ?? ""}
                     className={INLINE_CONTROL}

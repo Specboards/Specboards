@@ -1022,6 +1022,34 @@ export async function updateLevelTemplates(
   return store.updateLevelTemplates(templates, scope);
 }
 
+/**
+ * Keep a release's ship date on or after its start date by pulling the ship date
+ * along when the start moves past it.
+ *
+ * A ship date earlier than the start is never a plan anyone means, so pushing a
+ * release out should not also require re-picking its end: the invariant is
+ * maintained here rather than rejected, which is what makes moving a release a
+ * single edit. Only a patch that moves the start can trigger it, and only
+ * against the ship date the release will actually have (the patch's own, or the
+ * stored one it leaves alone), so a patch that sets both dates is respected as
+ * written unless it is itself backwards.
+ *
+ * Lives in the service, not the form, so the REST API and the MCP tools hold the
+ * same invariant the UI does. Dates are validated as `YYYY-MM-DD` upstream
+ * (parseDate), which is why they compare as strings.
+ */
+export function clampReleaseTarget(
+  patch: ReleasePatch,
+  before: { targetDate: string | null } | null,
+): ReleasePatch {
+  const start = patch.startDate;
+  if (!start) return patch;
+  const target =
+    patch.targetDate !== undefined ? patch.targetDate : before?.targetDate ?? null;
+  if (!target || target >= start) return patch;
+  return { ...patch, targetDate: start };
+}
+
 /** Create a release. */
 export async function createRelease(
   input: ReleaseInput,
@@ -1032,7 +1060,12 @@ export async function createRelease(
     const properties = await store.listProperties(scope, "release");
     assertCustomFieldTypes(input.customFields, properties);
   }
-  return store.createRelease(input, scope);
+  // Same invariant as an edit: a release cannot be born ending before it starts.
+  const dates = clampReleaseTarget(
+    { startDate: input.startDate, targetDate: input.targetDate },
+    null,
+  );
+  return store.createRelease({ ...input, ...dates }, scope);
 }
 
 /** Update a release. */
@@ -1054,28 +1087,39 @@ export async function updateRelease(
   // Capture the prior status so we can detect the ship edge for the webhook.
   const before = (await store.listReleases(scope)).find((r) => r.id === id) ?? null;
 
+  // A start moved past the ship date takes the ship date with it, so the two can
+  // never end up in the wrong order. Applied before the webhook payload is built
+  // so an event reports the dates the release actually lands on.
+  const effective = clampReleaseTarget(patch, before);
+
   // Record release.shipped in the same transaction as the ship. A ship patch is
   // status-only in practice; apply any name/date overrides in the patch so the
   // payload reflects the post-update release (itemCount is unaffected by status).
   let emit: OutboxEmit | undefined;
-  if (before && before.status !== "shipped" && patch.status === "shipped") {
+  if (before && before.status !== "shipped" && effective.status === "shipped") {
     emit = {
       type: "release.shipped",
       // A product release scopes its event to that product; a portfolio
       // release (null productId) stays workspace-level.
-      productId: patch.productId !== undefined ? patch.productId : before.productId,
+      productId:
+        effective.productId !== undefined ? effective.productId : before.productId,
       data: {
         releaseId: before.id,
-        name: patch.name?.trim() || before.name,
-        startDate: patch.startDate !== undefined ? patch.startDate : before.startDate,
+        name: effective.name?.trim() || before.name,
+        startDate:
+          effective.startDate !== undefined
+            ? effective.startDate
+            : before.startDate,
         targetDate:
-          patch.targetDate !== undefined ? patch.targetDate : before.targetDate,
+          effective.targetDate !== undefined
+            ? effective.targetDate
+            : before.targetDate,
         itemCount: before.itemCount,
       },
     };
   }
 
-  const updated = await store.updateRelease(id, patch, scope, emit);
+  const updated = await store.updateRelease(id, effective, scope, emit);
   if (emit) notifyOutbox();
 
   return updated;
