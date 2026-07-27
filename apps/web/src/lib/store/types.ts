@@ -1,5 +1,7 @@
 import type {
   CycleState,
+  GoalStatus,
+  MetricKind,
   DetailTemplate,
   DetailTemplateInput,
   DetailTemplatePatch,
@@ -17,6 +19,8 @@ import type {
 
 export type {
   CycleState,
+  GoalStatus,
+  MetricKind,
   DetailTemplate,
   DetailTemplateInput,
   DetailTemplatePatch,
@@ -694,6 +698,108 @@ export interface CycleRolloverResult {
 /** Raised when a cycle can't be created/updated/deleted. */
 export class CycleError extends Error {}
 
+/** One key result under a goal, with its progress computed on read. */
+export interface KeyResultRecord {
+  id: string;
+  goalId: string;
+  title: string;
+  metricKind: MetricKind;
+  startValue: number;
+  targetValue: number;
+  currentValue: number;
+  position: number;
+  /** Computed from start/current/target; null when the measure is degenerate.
+   * Never stored (see core `keyResultProgress`). */
+  progress: number | null;
+}
+
+/**
+ * A goal (objective) as the UI consumes it. Note the two progress numbers,
+ * which stay separate on purpose: `progress` measures the outcome (key
+ * results), `deliveryProgress` measures how much of the linked work has
+ * shipped. Shipping everything and moving no metric is precisely what OKRs
+ * exist to surface, so they are never merged.
+ */
+export interface GoalRecord {
+  id: string;
+  title: string;
+  description: string | null;
+  /** Product this goal belongs to, or null for an org-wide goal. */
+  productId: string | null;
+  periodStart: string | null;
+  periodEnd: string | null;
+  /** Parent goal, or null at the root of the goal tree. */
+  parentGoalId: string | null;
+  /** The owner's confidence call; distinct from computed progress. */
+  status: GoalStatus;
+  keyResults: KeyResultRecord[];
+  /** Mean of the key results' progress; null when there are none. */
+  progress: number | null;
+  /** Count of work items linked to this goal that the caller can read. */
+  linkedItemCount: number;
+  /** Share of those linked items in a terminal status; null when none. */
+  deliveryProgress: number | null;
+}
+
+export interface GoalInput {
+  title: string;
+  description?: string | null;
+  productId?: string | null;
+  periodStart?: string | null;
+  periodEnd?: string | null;
+  parentGoalId?: string | null;
+  status?: GoalStatus;
+}
+
+export type GoalPatch = Partial<{
+  title: string;
+  description: string | null;
+  productId: string | null;
+  periodStart: string | null;
+  periodEnd: string | null;
+  parentGoalId: string | null;
+  status: GoalStatus;
+}>;
+
+export interface KeyResultInput {
+  title: string;
+  metricKind?: MetricKind;
+  startValue?: number;
+  targetValue: number;
+  currentValue?: number;
+}
+
+export type KeyResultPatch = Partial<{
+  title: string;
+  metricKind: MetricKind;
+  startValue: number;
+  targetValue: number;
+  currentValue: number;
+  position: number;
+}>;
+
+/** A work item contributing to a goal, as the goal detail lists it. */
+export interface GoalContribution {
+  specId: string;
+  title: string;
+  status: string;
+  level: string;
+  productId: string | null;
+  /** True when the item's status is terminal (feeds deliveryProgress). */
+  done: boolean;
+}
+
+/** A goal an item ladders up to, as the item detail lists it. */
+export interface ItemGoalRef {
+  goalId: string;
+  title: string;
+  status: GoalStatus;
+  productId: string | null;
+}
+
+/** Raised when a goal or key result can't be created/updated/deleted. */
+export class GoalError extends Error {}
+
 /** A comment on a feature, with its author resolved for display. */
 export interface CommentRecord {
   id: string;
@@ -752,6 +858,19 @@ export interface NotificationList {
 // Cycle helpers live in core (they are pure date logic shared with the CLI);
 // re-exported here so UI code imports its scoping helpers from one place,
 // alongside releasesForProduct / selectableReleases below.
+export {
+  compareGoals,
+  deliveryProgress,
+  formatMetric,
+  goalProgress,
+  goalStatusLabel,
+  goalsForProduct,
+  isGoalClosed,
+  keyResultProgress,
+  GOAL_STATUSES,
+  METRIC_KINDS,
+} from "@specboards/core";
+
 export {
   compareCycles,
   cycleDaysRemaining,
@@ -1205,6 +1324,53 @@ export interface FeatureStore {
     toId: string,
     scope?: WorkspaceScope,
   ): Promise<CycleRolloverResult>;
+
+  /** The workspace's goals with their key results and computed progress,
+   * ordered open first, then by soonest period end. */
+  listGoals(scope?: WorkspaceScope): Promise<GoalRecord[]>;
+  createGoal(input: GoalInput, scope?: WorkspaceScope): Promise<GoalRecord>;
+  updateGoal(
+    id: string,
+    patch: GoalPatch,
+    scope?: WorkspaceScope,
+  ): Promise<GoalRecord>;
+  /** Delete a goal. Its key results cascade; its links to work items are
+   * removed, and the work items themselves are untouched. */
+  deleteGoal(id: string, scope?: WorkspaceScope): Promise<void>;
+
+  createKeyResult(
+    goalId: string,
+    input: KeyResultInput,
+    scope?: WorkspaceScope,
+  ): Promise<GoalRecord>;
+  updateKeyResult(
+    id: string,
+    patch: KeyResultPatch,
+    scope?: WorkspaceScope,
+  ): Promise<GoalRecord>;
+  deleteKeyResult(id: string, scope?: WorkspaceScope): Promise<GoalRecord>;
+
+  /** Work items linked to a goal, filtered to those the caller can read. The
+   * goal itself stays visible even when some of its work does not. */
+  listGoalContributions(
+    goalId: string,
+    scope?: WorkspaceScope,
+  ): Promise<GoalContribution[]>;
+  /** Goals an item ladders up to (many-to-many; any level can link). */
+  listItemGoals(
+    specId: string,
+    scope?: WorkspaceScope,
+  ): Promise<ItemGoalRef[]>;
+  linkGoal(
+    goalId: string,
+    specId: string,
+    scope?: WorkspaceScope,
+  ): Promise<void>;
+  unlinkGoal(
+    goalId: string,
+    specId: string,
+    scope?: WorkspaceScope,
+  ): Promise<void>;
   /** Comments on a feature (by stable specId), oldest first, author resolved.
    * Requires read access to the feature's product. */
   listComments(

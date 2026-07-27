@@ -4,7 +4,12 @@ import path from "node:path";
 
 import {
   compareCycles,
+  compareGoals,
   cycleState,
+  deliveryProgress,
+  goalProgress,
+  isGoalStatus,
+  keyResultProgress,
   DEFAULT_PRODUCT_KEY,
   descendantGroupIds,
   groupKeyFromName,
@@ -23,7 +28,12 @@ import {
   resolveLevelUpdate,
   todayDateOnly,
   validateCycleDates,
+  validateGoalPeriod,
+  validateKeyResult,
+  wouldCreateGoalCycle,
+  type GoalStatus,
   type IdeaStage,
+  type MetricKind,
   type PropertyDef,
   type PropertyEntity,
   type WorkspaceLevel,
@@ -50,6 +60,14 @@ import {
   type CreateFeatureInput,
   type CreateProductGroupInput,
   CycleError,
+  GoalError,
+  type GoalContribution,
+  type GoalInput,
+  type GoalPatch,
+  type GoalRecord,
+  type ItemGoalRef,
+  type KeyResultInput,
+  type KeyResultPatch,
   type CycleInput,
   type CyclePatch,
   type CycleRecord,
@@ -173,6 +191,33 @@ interface LocalCycle {
   startDate: string;
   endDate: string;
   notes?: string | null;
+}
+
+/** A goal persisted in local file mode, with its key results and links nested
+ * (file mode has no joins to do). Progress is still computed on read. */
+interface LocalGoal {
+  id: string;
+  title: string;
+  description?: string | null;
+  productId?: string | null;
+  periodStart?: string | null;
+  periodEnd?: string | null;
+  parentGoalId?: string | null;
+  status: GoalStatus;
+  keyResults?: LocalKeyResult[];
+  /** Stable spec ids of the work items laddering up to this goal. */
+  linkedSpecIds?: string[];
+}
+
+/** A key result nested under a LocalGoal. */
+interface LocalKeyResult {
+  id: string;
+  title: string;
+  metricKind: MetricKind;
+  startValue: number;
+  targetValue: number;
+  currentValue: number;
+  position: number;
 }
 
 /** A comment persisted in local file mode. Keyed to the feature's stable
@@ -1837,6 +1882,321 @@ export class LocalFileStore implements FeatureStore {
       finished,
     );
     return { moved, toCycleId: toId };
+  }
+
+  // ── Goals ─────────────────────────────────────────────────────────────
+  // Persisted to `.specboards/local-goals.json` (goals with their key results
+  // and links nested, since file mode has no joins to do). File mode has no
+  // product roles, so the per-product write checks the DB store makes are
+  // absent; every other rule is the same, including the two progress figures
+  // being computed on read rather than stored.
+
+  private get goalsPath() {
+    return path.join(this.root, ".specboards", "local-goals.json");
+  }
+
+  private async readGoals(): Promise<LocalGoal[]> {
+    return this.readJsonFile<LocalGoal>(this.goalsPath);
+  }
+
+  private async writeGoals(rows: LocalGoal[]): Promise<void> {
+    await fs.mkdir(path.dirname(this.goalsPath), { recursive: true });
+    await fs.writeFile(
+      this.goalsPath,
+      JSON.stringify(rows, null, 2) + "\n",
+      "utf8",
+    );
+  }
+
+  /** Build the UI record for one stored goal, computing both progress figures. */
+  private toGoalRecord(
+    goal: LocalGoal,
+    doneBySpecId: Map<string, boolean>,
+  ): GoalRecord {
+    const measures = (goal.keyResults ?? [])
+      .slice()
+      .sort((a, b) => a.position - b.position || a.title.localeCompare(b.title));
+    // Links to items that no longer exist are ignored rather than counted as
+    // not-done, which would drag delivery progress down for no reason.
+    const links = (goal.linkedSpecIds ?? [])
+      .filter((specId) => doneBySpecId.has(specId))
+      .map((specId) => ({ done: doneBySpecId.get(specId) === true }));
+    return {
+      id: goal.id,
+      title: goal.title,
+      description: goal.description ?? null,
+      productId: goal.productId ?? null,
+      periodStart: goal.periodStart ?? null,
+      periodEnd: goal.periodEnd ?? null,
+      parentGoalId: goal.parentGoalId ?? null,
+      status: goal.status,
+      keyResults: measures.map((kr) => ({
+        ...kr,
+        goalId: goal.id,
+        progress: keyResultProgress(kr),
+      })),
+      progress: goalProgress(measures),
+      linkedItemCount: links.length,
+      deliveryProgress: deliveryProgress(links),
+    };
+  }
+
+  /** Map of specId -> is the item done, over every item in the workspace. */
+  private async doneBySpecId(): Promise<Map<string, boolean>> {
+    return new Map(
+      (await this.loadAll()).map((f) => [f.specId, isDone(f.status)]),
+    );
+  }
+
+  async listGoals(_scope?: WorkspaceScope): Promise<GoalRecord[]> {
+    const [rows, doneMap] = await Promise.all([
+      this.readGoals(),
+      this.doneBySpecId(),
+    ]);
+    return rows.map((g) => this.toGoalRecord(g, doneMap)).sort(compareGoals);
+  }
+
+  async createGoal(
+    input: GoalInput,
+    _scope?: WorkspaceScope,
+  ): Promise<GoalRecord> {
+    const title = input.title.trim();
+    if (!title) throw new GoalError("Goal title is required.");
+    const periodError = validateGoalPeriod(
+      input.periodStart ?? null,
+      input.periodEnd ?? null,
+    );
+    if (periodError) throw new GoalError(periodError);
+    const status = input.status ?? "on_track";
+    if (!isGoalStatus(status)) {
+      throw new GoalError(`Unknown goal status: ${status}`);
+    }
+    const rows = await this.readGoals();
+    if (input.parentGoalId && !rows.some((g) => g.id === input.parentGoalId)) {
+      throw new GoalError(`Unknown goal: ${input.parentGoalId}`);
+    }
+    const goal: LocalGoal = {
+      id: randomUUID(),
+      title,
+      description: input.description ?? null,
+      productId: input.productId ?? null,
+      periodStart: input.periodStart ?? null,
+      periodEnd: input.periodEnd ?? null,
+      parentGoalId: input.parentGoalId ?? null,
+      status,
+      keyResults: [],
+      linkedSpecIds: [],
+    };
+    await this.writeGoals([...rows, goal]);
+    return this.toGoalRecord(goal, new Map());
+  }
+
+  async updateGoal(
+    id: string,
+    patch: GoalPatch,
+    _scope?: WorkspaceScope,
+  ): Promise<GoalRecord> {
+    const rows = await this.readGoals();
+    const goal = rows.find((g) => g.id === id);
+    if (!goal) throw new GoalError(`Unknown goal: ${id}`);
+
+    const periodStart =
+      patch.periodStart !== undefined ? patch.periodStart : goal.periodStart ?? null;
+    const periodEnd =
+      patch.periodEnd !== undefined ? patch.periodEnd : goal.periodEnd ?? null;
+    const periodError = validateGoalPeriod(periodStart, periodEnd);
+    if (periodError) throw new GoalError(periodError);
+
+    if (patch.title !== undefined) {
+      const title = patch.title.trim();
+      if (!title) throw new GoalError("Goal title is required.");
+      goal.title = title;
+    }
+    if (patch.description !== undefined) goal.description = patch.description;
+    if (patch.productId !== undefined) goal.productId = patch.productId;
+    if (patch.periodStart !== undefined) goal.periodStart = patch.periodStart;
+    if (patch.periodEnd !== undefined) goal.periodEnd = patch.periodEnd;
+    if (patch.status !== undefined) {
+      if (!isGoalStatus(patch.status)) {
+        throw new GoalError(`Unknown goal status: ${patch.status}`);
+      }
+      goal.status = patch.status;
+    }
+    if (patch.parentGoalId !== undefined) {
+      if (patch.parentGoalId !== null) {
+        if (!rows.some((g) => g.id === patch.parentGoalId)) {
+          throw new GoalError(`Unknown goal: ${patch.parentGoalId}`);
+        }
+        const tree = rows.map((g) => ({
+          id: g.id,
+          parentGoalId: g.parentGoalId ?? null,
+        }));
+        if (wouldCreateGoalCycle(tree, id, patch.parentGoalId)) {
+          throw new GoalError("A goal cannot be nested under itself.");
+        }
+      }
+      goal.parentGoalId = patch.parentGoalId;
+    }
+    await this.writeGoals(rows);
+    return this.toGoalRecord(goal, await this.doneBySpecId());
+  }
+
+  async deleteGoal(id: string, _scope?: WorkspaceScope): Promise<void> {
+    const rows = await this.readGoals();
+    if (!rows.some((g) => g.id === id)) {
+      throw new GoalError(`Unknown goal: ${id}`);
+    }
+    // Children are orphaned to the root, not deleted with their parent
+    // (mirrors the DB's ON DELETE SET NULL on parent_goal_id).
+    for (const goal of rows) {
+      if (goal.parentGoalId === id) goal.parentGoalId = null;
+    }
+    await this.writeGoals(rows.filter((g) => g.id !== id));
+  }
+
+  /** Resolve a goal by id from the stored set, or throw. */
+  private async goalById(
+    rows: LocalGoal[],
+    id: string,
+  ): Promise<LocalGoal> {
+    const goal = rows.find((g) => g.id === id);
+    if (!goal) throw new GoalError(`Unknown goal: ${id}`);
+    return goal;
+  }
+
+  async createKeyResult(
+    goalId: string,
+    input: KeyResultInput,
+    _scope?: WorkspaceScope,
+  ): Promise<GoalRecord> {
+    const rows = await this.readGoals();
+    const goal = await this.goalById(rows, goalId);
+    const title = input.title.trim();
+    if (!title) throw new GoalError("Key result title is required.");
+    const metricKind = input.metricKind ?? "number";
+    const startValue = input.startValue ?? 0;
+    const error = validateKeyResult({
+      metricKind,
+      startValue,
+      targetValue: input.targetValue,
+    });
+    if (error) throw new GoalError(error);
+    goal.keyResults = goal.keyResults ?? [];
+    goal.keyResults.push({
+      id: randomUUID(),
+      title,
+      metricKind,
+      startValue,
+      targetValue: input.targetValue,
+      currentValue: input.currentValue ?? startValue,
+      position: goal.keyResults.length,
+    });
+    await this.writeGoals(rows);
+    return this.toGoalRecord(goal, await this.doneBySpecId());
+  }
+
+  async updateKeyResult(
+    id: string,
+    patch: KeyResultPatch,
+    _scope?: WorkspaceScope,
+  ): Promise<GoalRecord> {
+    const rows = await this.readGoals();
+    const goal = rows.find((g) => (g.keyResults ?? []).some((k) => k.id === id));
+    if (!goal) throw new GoalError(`Unknown key result: ${id}`);
+    const kr = goal.keyResults!.find((k) => k.id === id)!;
+
+    const metricKind = patch.metricKind ?? kr.metricKind;
+    const startValue = patch.startValue ?? kr.startValue;
+    const targetValue = patch.targetValue ?? kr.targetValue;
+    const error = validateKeyResult({ metricKind, startValue, targetValue });
+    if (error) throw new GoalError(error);
+
+    if (patch.title !== undefined) {
+      const title = patch.title.trim();
+      if (!title) throw new GoalError("Key result title is required.");
+      kr.title = title;
+    }
+    if (patch.metricKind !== undefined) kr.metricKind = patch.metricKind;
+    if (patch.startValue !== undefined) kr.startValue = patch.startValue;
+    if (patch.targetValue !== undefined) kr.targetValue = patch.targetValue;
+    if (patch.currentValue !== undefined) kr.currentValue = patch.currentValue;
+    if (patch.position !== undefined) kr.position = patch.position;
+    await this.writeGoals(rows);
+    return this.toGoalRecord(goal, await this.doneBySpecId());
+  }
+
+  async deleteKeyResult(
+    id: string,
+    _scope?: WorkspaceScope,
+  ): Promise<GoalRecord> {
+    const rows = await this.readGoals();
+    const goal = rows.find((g) => (g.keyResults ?? []).some((k) => k.id === id));
+    if (!goal) throw new GoalError(`Unknown key result: ${id}`);
+    goal.keyResults = goal.keyResults!.filter((k) => k.id !== id);
+    await this.writeGoals(rows);
+    return this.toGoalRecord(goal, await this.doneBySpecId());
+  }
+
+  async listGoalContributions(
+    goalId: string,
+    _scope?: WorkspaceScope,
+  ): Promise<GoalContribution[]> {
+    const [rows, all] = await Promise.all([this.readGoals(), this.loadAll()]);
+    const goal = await this.goalById(rows, goalId);
+    const linked = new Set(goal.linkedSpecIds ?? []);
+    return all
+      .filter((f) => linked.has(f.specId))
+      .map((f) => ({
+        specId: f.specId,
+        title: f.title,
+        status: f.status,
+        level: f.level,
+        productId: f.productId,
+        done: isDone(f.status),
+      }));
+  }
+
+  async listItemGoals(
+    specId: string,
+    _scope?: WorkspaceScope,
+  ): Promise<ItemGoalRef[]> {
+    const rows = await this.readGoals();
+    return rows
+      .filter((g) => (g.linkedSpecIds ?? []).includes(specId))
+      .map((g) => ({
+        goalId: g.id,
+        title: g.title,
+        status: g.status,
+        productId: g.productId ?? null,
+      }));
+  }
+
+  async linkGoal(
+    goalId: string,
+    specId: string,
+    _scope?: WorkspaceScope,
+  ): Promise<void> {
+    const rows = await this.readGoals();
+    const goal = await this.goalById(rows, goalId);
+    const all = await this.loadAll();
+    if (!all.some((f) => f.specId === specId)) {
+      throw new GoalError(`Unknown work item: ${specId}`);
+    }
+    goal.linkedSpecIds = goal.linkedSpecIds ?? [];
+    // Linking twice is a no-op: the caller's intent is already true.
+    if (!goal.linkedSpecIds.includes(specId)) goal.linkedSpecIds.push(specId);
+    await this.writeGoals(rows);
+  }
+
+  async unlinkGoal(
+    goalId: string,
+    specId: string,
+    _scope?: WorkspaceScope,
+  ): Promise<void> {
+    const rows = await this.readGoals();
+    const goal = await this.goalById(rows, goalId);
+    goal.linkedSpecIds = (goal.linkedSpecIds ?? []).filter((s) => s !== specId);
+    await this.writeGoals(rows);
   }
 
   // ── Comments ──────────────────────────────────────────────────────────

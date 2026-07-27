@@ -365,6 +365,13 @@
       "when": 1785174727400,
       "tag": "0051_cycles",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1785175986334,
+      "tag": "0052_goals",
+      "breakpoints": true
     }
   ]
 }

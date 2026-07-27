@@ -83,6 +83,7 @@ export function buildOpenApiDocument(baseUrl: string): Record<string, unknown> {
       { name: "repositories", description: "Connected GitHub repositories." },
       { name: "releases", description: "Ship vehicles / versions." },
       { name: "cycles", description: "Sprints / iterations: date-bounded time boxes, orthogonal to releases." },
+      { name: "goals", description: "Objectives and key results, with the work that ladders up to them." },
       { name: "views", description: "Saved backlog filters." },
       { name: "ideas", description: "Captured ideas." },
       { name: "workflow", description: "Status vocabulary and transitions." },
@@ -169,6 +170,31 @@ export function buildOpenApiDocument(baseUrl: string): Record<string, unknown> {
       "/api/v1/cycles/{id}/rollover": {
         parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
         post: { tags: ["cycles"], summary: "Move this cycle's unfinished work into another cycle.", requestBody: { required: true, content: { "application/json": { schema: { type: "object" } } } }, responses: { "200": ok("How many items moved.") } },
+      },
+      "/api/v1/goals": {
+        get: listOp("goals", "goals", "List goals with their key results. Progress (outcome) and deliveryProgress (output) are both computed on read, never stored."),
+        post: { tags: ["goals"], summary: "Create a goal.", requestBody: { required: true, content: { "application/json": { schema: { type: "object" } } } }, responses: { "201": ok("The created goal.") } },
+      },
+      "/api/v1/goals/{id}": {
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+        get: { tags: ["goals"], summary: "One goal with its key results and contributing work.", responses: { "200": ok("The goal and its contributions.") } },
+        patch: { tags: ["goals"], summary: "Update a goal.", requestBody: { required: true, content: { "application/json": { schema: { type: "object" } } } }, responses: { "200": ok("The updated goal.") } },
+        delete: { tags: ["goals"], summary: "Delete a goal (its linked work items are untouched).", responses: { "204": { description: "Deleted." } } },
+      },
+      "/api/v1/goals/{id}/key-results": {
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+        post: { tags: ["goals"], summary: "Add a key result to a goal.", requestBody: { required: true, content: { "application/json": { schema: { type: "object" } } } }, responses: { "201": ok("The goal, with its recomputed progress.") } },
+      },
+      "/api/v1/goals/{id}/links": {
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+        get: { tags: ["goals"], summary: "Work items laddering up to this goal.", responses: { "200": ok("The contributions.") } },
+        post: { tags: ["goals"], summary: "Link a work item to this goal (many-to-many; may cross products).", requestBody: { required: true, content: { "application/json": { schema: { type: "object" } } } }, responses: { "201": ok("The refreshed contributions.") } },
+        delete: { tags: ["goals"], summary: "Unlink a work item (pass ?specId=).", responses: { "200": ok("The refreshed contributions.") } },
+      },
+      "/api/v1/key-results/{id}": {
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+        patch: { tags: ["goals"], summary: "Update a key result (most often its currentValue).", requestBody: { required: true, content: { "application/json": { schema: { type: "object" } } } }, responses: { "200": ok("The goal, with its recomputed progress.") } },
+        delete: { tags: ["goals"], summary: "Delete a key result.", responses: { "200": ok("The goal, with its recomputed progress.") } },
       },
       "/api/v1/views": {
         get: { tags: ["views"], summary: "The caller's saved backlog views.", responses: { "200": ok("The views.") } },

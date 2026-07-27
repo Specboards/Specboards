@@ -54,6 +54,17 @@ const INSTRUCTIONS =
   "update_item(cycleId), and rollover_cycle to move a closing cycle's " +
   "unfinished work into the next one (finished work stays put). A cycle has " +
   "no status: it is upcoming, active or complete purely from its dates. " +
+  "Goals (objectives) say WHY work exists, in a form that can be measured: " +
+  "list_goals / create_goal / update_goal, create_key_result and " +
+  "update_key_result for the measurements, and link_goal to record that an " +
+  "item ladders up to a goal. Goals are deliberately NOT a hierarchy level - " +
+  "they are measured, and the work serving them is many-to-many across " +
+  "products - so link_goal works from any level and an item can serve several " +
+  "goals. Each goal reports two separate progress figures: `progress` (the " +
+  "mean of its key results, i.e. did the outcome move) and " +
+  "`deliveryProgress` (the share of linked work done, i.e. did we ship it). " +
+  "Never average them: shipping everything while no metric moves is precisely " +
+  "what goals exist to reveal. " +
   "Products can be collected into " +
   "product groups " +
   "(nested management roll-ups): list_product_groups shows them, " +

@@ -5,22 +5,34 @@ import { getDb } from "@/lib/db";
 import { resolveWorkflowFor } from "@/lib/repo-config";
 import {
   createCycle,
+  createGoal,
+  createKeyResult,
   createRelease,
   createWorkItem,
   deleteWorkItem,
   getTransitionMode,
   listCycles,
+  listGoalContributions,
+  listGoals,
   listReleases,
   parseCreateFeatureInput,
   parseFeaturePatch,
+  linkGoal,
   parseCycleInput,
   parseCyclePatch,
+  parseGoalInput,
+  parseGoalPatch,
+  parseKeyResultInput,
+  parseKeyResultPatch,
   parseReleaseInput,
   parseReleaseNotesPatch,
   parseReleasePatch,
   patchFeature,
   rolloverCycle,
+  unlinkGoal,
   updateCycle,
+  updateGoal,
+  updateKeyResult,
   updateRelease,
 } from "@/lib/features-service";
 import {
@@ -1100,6 +1112,246 @@ export const TOOLS: McpTool[] = [
       const fromCycleId = requireString(args, "fromCycleId");
       const toCycleId = requireString(args, "toCycleId");
       return rolloverCycle(fromCycleId, toCycleId, ctx.scope);
+    },
+  },
+  {
+    name: "list_goals",
+    description:
+      "List the workspace's goals (objectives) with their key results. A goal " +
+      "says WHY work exists in a form that can be measured; it is NOT a " +
+      "hierarchy level, because a goal is measured and the work serving it is " +
+      "many-to-many and crosses products, neither of which the single-parent " +
+      "item hierarchy can carry. Each goal reports TWO progress figures, both " +
+      "computed on read and never stored: `progress` is the mean of its key " +
+      "results (did the outcome move?) and `deliveryProgress` is the share of " +
+      "linked work that is done (did we ship it?). They are deliberately " +
+      "separate - everything shipping while no metric moves is exactly what " +
+      "goals exist to make visible, so do not average them together. " +
+      "`status` is the owner's confidence call, not arithmetic.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    write: false,
+    run: async (_args, ctx) => {
+      const goals = await listGoals(ctx.scope);
+      return goals.map((g) => ({
+        id: g.id,
+        title: g.title,
+        description: g.description,
+        productId: g.productId,
+        parentGoalId: g.parentGoalId,
+        periodStart: g.periodStart,
+        periodEnd: g.periodEnd,
+        status: g.status,
+        progress: g.progress,
+        deliveryProgress: g.deliveryProgress,
+        linkedItemCount: g.linkedItemCount,
+        keyResults: g.keyResults.map((kr) => ({
+          id: kr.id,
+          title: kr.title,
+          metricKind: kr.metricKind,
+          startValue: kr.startValue,
+          currentValue: kr.currentValue,
+          targetValue: kr.targetValue,
+          progress: kr.progress,
+        })),
+      }));
+    },
+  },
+  {
+    name: "create_goal",
+    description:
+      "Create a goal (objective). Provide a `title`; optionally " +
+      "`description`, `productId` (omit or null for an org-wide goal spanning " +
+      "every product), `periodStart` / `periodEnd` (YYYY-MM-DD; either may be " +
+      "omitted for an open-ended goal), `parentGoalId` to nest it under a " +
+      "wider objective, and `status`. Add key results with create_key_result " +
+      "and link the work that serves it with link_goal. A goal with no key " +
+      "results yet is a valid state and reads as 'not measured', not 0%.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        description: { type: ["string", "null"] },
+        productId: {
+          type: ["string", "null"],
+          description:
+            "Product to scope the goal to (from list_products); null or " +
+            "omitted for an org-wide goal.",
+        },
+        periodStart: { type: ["string", "null"], description: "YYYY-MM-DD." },
+        periodEnd: { type: ["string", "null"], description: "YYYY-MM-DD." },
+        parentGoalId: { type: ["string", "null"] },
+        status: {
+          type: "string",
+          description:
+            "on_track | at_risk | off_track | achieved | missed (default on_track).",
+        },
+      },
+      required: ["title"],
+      additionalProperties: false,
+    },
+    write: true,
+    run: async (args, ctx) => {
+      const goal = await createGoal(parseGoalInput(args), ctx.scope);
+      return { id: goal.id, title: goal.title, status: goal.status };
+    },
+  },
+  {
+    name: "update_goal",
+    description:
+      "Update a goal's title, description, period, product, parent, or " +
+      "status. Pass the goal `id` (from list_goals). Note that `status` is " +
+      "the owner's confidence call and is independent of the computed " +
+      "progress: a goal can be 80% of the way to target and still be " +
+      "off_track, or at 20% early in its period and perfectly on_track. To " +
+      "move progress, update a key result's currentValue instead.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Goal id from list_goals." },
+        title: { type: "string" },
+        description: { type: ["string", "null"] },
+        productId: { type: ["string", "null"] },
+        periodStart: { type: ["string", "null"] },
+        periodEnd: { type: ["string", "null"] },
+        parentGoalId: { type: ["string", "null"] },
+        status: { type: "string" },
+      },
+      required: ["id"],
+      additionalProperties: false,
+    },
+    write: true,
+    run: async (args, ctx) => {
+      const id = requireString(args, "id");
+      const { id: _omit, ...rest } = args;
+      const goal = await updateGoal(id, parseGoalPatch(rest), ctx.scope);
+      return {
+        id: goal.id,
+        title: goal.title,
+        status: goal.status,
+        progress: goal.progress,
+      };
+    },
+  },
+  {
+    name: "create_key_result",
+    description:
+      "Add a key result (a measurable outcome) to a goal. Provide `goalId`, " +
+      "`title` and `targetValue`; optionally `metricKind` (number / percent / " +
+      "boolean), `startValue` (the baseline, default 0) and `currentValue`. " +
+      "Progress is measured as the distance travelled from start to target, " +
+      "so ALWAYS set `startValue` to the real baseline: a metric that starts " +
+      "at 40 and targets 60 reads 0% at 40, not 67%. Decreasing metrics work " +
+      "with no special case (start 8, target 3). The target must differ from " +
+      "the start. Returns the goal with its recomputed progress.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        goalId: { type: "string" },
+        title: { type: "string" },
+        targetValue: { type: "number" },
+        metricKind: {
+          type: "string",
+          description: "number | percent | boolean (default number).",
+        },
+        startValue: { type: "number", description: "Baseline; default 0." },
+        currentValue: { type: "number", description: "Defaults to startValue." },
+      },
+      required: ["goalId", "title", "targetValue"],
+      additionalProperties: false,
+    },
+    write: true,
+    run: async (args, ctx) => {
+      const goalId = requireString(args, "goalId");
+      const { goalId: _omit, ...rest } = args;
+      const goal = await createKeyResult(
+        goalId,
+        parseKeyResultInput(rest),
+        ctx.scope,
+      );
+      return { id: goal.id, title: goal.title, progress: goal.progress };
+    },
+  },
+  {
+    name: "update_key_result",
+    description:
+      "Update a key result, most often its `currentValue` as you check in on " +
+      "the metric. Pass the key result `id` (from list_goals) plus any of " +
+      "`title`, `metricKind`, `startValue`, `targetValue`, `currentValue`. " +
+      "Returns the goal with its recomputed progress.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        title: { type: "string" },
+        metricKind: { type: "string" },
+        startValue: { type: "number" },
+        targetValue: { type: "number" },
+        currentValue: { type: "number" },
+      },
+      required: ["id"],
+      additionalProperties: false,
+    },
+    write: true,
+    run: async (args, ctx) => {
+      const id = requireString(args, "id");
+      const { id: _omit, ...rest } = args;
+      const goal = await updateKeyResult(
+        id,
+        parseKeyResultPatch(rest),
+        ctx.scope,
+      );
+      return {
+        id: goal.id,
+        title: goal.title,
+        progress: goal.progress,
+        keyResults: goal.keyResults.map((kr) => ({
+          id: kr.id,
+          title: kr.title,
+          currentValue: kr.currentValue,
+          progress: kr.progress,
+        })),
+      };
+    },
+  },
+  {
+    name: "link_goal",
+    description:
+      "Record that a work item ladders up to a goal, which is how you say " +
+      "WHY the work exists. Many-to-many and reachable from ANY level: an " +
+      "initiative and a single work item can both contribute, one item can " +
+      "serve several goals, and the item may belong to a different product " +
+      "than the goal (cross-product linkage is the point). Pass `goalId` and " +
+      "the item's `specId`. Linking something already linked is a no-op. Use " +
+      "`unlink: true` to remove the link instead.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        goalId: { type: "string" },
+        specId: specIdSchema,
+        unlink: {
+          type: "boolean",
+          description: "Remove the link rather than create it.",
+        },
+      },
+      required: ["goalId", "specId"],
+      additionalProperties: false,
+    },
+    write: true,
+    run: async (args, ctx) => {
+      const goalId = requireString(args, "goalId");
+      const specId = requireString(args, "specId");
+      if (args.unlink === true) {
+        await unlinkGoal(goalId, specId, ctx.scope);
+      } else {
+        await linkGoal(goalId, specId, ctx.scope);
+      }
+      const contributions = await listGoalContributions(goalId, ctx.scope);
+      return {
+        goalId,
+        specId,
+        linked: args.unlink !== true,
+        contributionCount: contributions.length,
+      };
     },
   },
   {

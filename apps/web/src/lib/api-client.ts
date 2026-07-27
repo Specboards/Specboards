@@ -38,6 +38,12 @@ import type {
   OrgRole,
   ProductGroupPatch,
   CycleInput,
+  GoalContribution,
+  GoalInput,
+  GoalPatch,
+  GoalRecord,
+  KeyResultInput,
+  KeyResultPatch,
   CyclePatch,
   CycleRecord,
   ProductGroupRecord,
@@ -933,6 +939,124 @@ export async function rolloverCycle(
     throw new Error(body?.error ?? `Rollover failed with ${res.status}`);
   }
   return { moved: body.moved, toCycleId };
+}
+
+
+// ── Goals ─────────────────────────────────────────────────────────────────
+
+/** Create a goal; returns the created record. */
+export async function createGoal(input: GoalInput): Promise<GoalRecord> {
+  return goalRequest("/api/v1/goals", { method: "POST", body: input }, "Create goal");
+}
+
+/** Update a goal's metadata; returns the updated record. */
+export async function updateGoal(
+  id: string,
+  patch: GoalPatch,
+): Promise<GoalRecord> {
+  return goalRequest(
+    `/api/v1/goals/${encodeURIComponent(id)}`,
+    { method: "PATCH", body: patch },
+    "Update goal",
+  );
+}
+
+/** Delete a goal. Linked work items are untouched. */
+export async function deleteGoal(id: string): Promise<void> {
+  const res = await apiFetch(`/api/v1/goals/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (res.status === 401) throw new AuthRequiredError();
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(body?.error ?? `Delete goal failed with ${res.status}`);
+  }
+}
+
+/** Add a key result; returns the goal with its recomputed progress. */
+export async function createKeyResult(
+  goalId: string,
+  input: KeyResultInput,
+): Promise<GoalRecord> {
+  return goalRequest(
+    `/api/v1/goals/${encodeURIComponent(goalId)}/key-results`,
+    { method: "POST", body: input },
+    "Add key result",
+  );
+}
+
+/** Update a key result; returns the goal with its recomputed progress. */
+export async function updateKeyResult(
+  id: string,
+  patch: KeyResultPatch,
+): Promise<GoalRecord> {
+  return goalRequest(
+    `/api/v1/key-results/${encodeURIComponent(id)}`,
+    { method: "PATCH", body: patch },
+    "Update key result",
+  );
+}
+
+/** Delete a key result; returns the goal with its recomputed progress. */
+export async function deleteKeyResult(id: string): Promise<GoalRecord> {
+  return goalRequest(
+    `/api/v1/key-results/${encodeURIComponent(id)}`,
+    { method: "DELETE" },
+    "Delete key result",
+  );
+}
+
+/** Link or unlink a work item to a goal; returns the refreshed contributions. */
+export async function setGoalLink(
+  goalId: string,
+  specId: string,
+  linked: boolean,
+): Promise<GoalContribution[]> {
+  const base = `/api/v1/goals/${encodeURIComponent(goalId)}/links`;
+  const res = linked
+    ? await apiFetch(base, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ specId }),
+      })
+    : await apiFetch(`${base}?specId=${encodeURIComponent(specId)}`, {
+        method: "DELETE",
+      });
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as {
+    contributions?: GoalContribution[];
+    error?: string;
+  } | null;
+  if (!res.ok || !body?.contributions) {
+    throw new Error(body?.error ?? `Goal link failed with ${res.status}`);
+  }
+  return body.contributions;
+}
+
+/** Shared shape for the goal endpoints, all of which return `{ goal }`. */
+async function goalRequest(
+  path: string,
+  init: { method: string; body?: unknown },
+  label: string,
+): Promise<GoalRecord> {
+  const res = await apiFetch(path, {
+    method: init.method,
+    ...(init.body !== undefined
+      ? {
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(init.body),
+        }
+      : {}),
+  });
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as {
+    goal?: GoalRecord;
+    error?: string;
+  } | null;
+  if (!res.ok || !body?.goal) {
+    throw new Error(body?.error ?? `${label} failed with ${res.status}`);
+  }
+  return body.goal;
 }
 
 /** Create a typed relation from a feature; returns its refreshed relations. */
