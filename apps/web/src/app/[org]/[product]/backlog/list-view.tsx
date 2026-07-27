@@ -231,11 +231,12 @@ export async function ListView({
           : buildLevelRows(visible, activeLevel.key, childKey);
 
   // The "New {level}" affordance, shared between the toolbar and the empty
-  // state so it renders exactly once. Leaf items come from spec sync, so it
-  // only exists off-leaf. In a multi-product scope with no single product in
-  // context, the drawer's product picker resolves the target.
+  // state so it renders exactly once. Every level is creatable, leaf included:
+  // a work item with no spec is a first-class row (ADR 0003). In a multi-product
+  // scope with no single product in context, the drawer's product picker
+  // resolves the target.
   const newItemButton =
-    canEdit && !activeLevel.isLeaf ? (
+    canEdit ? (
       <WorkItemCreate
         levelKey={activeLevel.key}
         levelLabel={activeLevel.label}
@@ -280,7 +281,10 @@ export async function ListView({
       </div>
       {featuresForLevel.length === 0 ? (
         activeLevel.isLeaf ? (
-          <NoSpecsEmptyState canConnect={canConnectRepos(access)} />
+          <NoSpecsEmptyState
+            canConnect={canConnectRepos(access)}
+            createAction={newItemButton}
+          />
         ) : (
           <EmptyState
             className="mt-8"

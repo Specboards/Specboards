@@ -219,9 +219,9 @@ export type FeaturePatch = Partial<
 };
 
 /**
- * Fields to create a DB-native work item (an initiative/epic — a non-leaf
- * level). Leaf items come from git/spec sync, not this path. `level` must be a
- * non-leaf level and `parentSpecId`, when set, the level immediately above.
+ * Fields to create a work item with no spec attached, at any level including
+ * the leaf (a spec is an attachment, not an identity - see ADR 0003).
+ * `parentSpecId`, when set, must be the level immediately above.
  */
 export interface CreateFeatureInput {
   title: string;
@@ -239,6 +239,13 @@ export interface CreateFeatureInput {
   tags?: string[];
   /** Markdown body for the new DB-native item, or null/omitted for a blank body. */
   details?: string | null;
+}
+
+/** Options for deleting a work item (see Store.deleteFeature). */
+export interface DeleteFeatureOptions {
+  /** True when the caller has already deleted the item's spec file from git,
+   * which is what makes deleting a spec-backed item safe from re-import. */
+  specRemoved?: boolean;
 }
 
 /** A product (sibling backlog) as the UI consumes it. */
@@ -1199,12 +1206,15 @@ export interface FeatureStore {
     scope?: WorkspaceScope,
     emitType?: string,
   ): Promise<FeatureRecord>;
-  /** Delete a DB-native work item by id. Spec-backed items can't be deleted here.
+  /** Delete a work item by id. An item with a spec attached is refused unless
+   * the caller has already removed its git file and passes `specRemoved`, since
+   * a surviving file would be re-imported by the next sync (ADR 0003 D4).
    * `emit`, when given, records an outbox event in the same transaction. */
   deleteFeature(
     specId: string,
     scope?: WorkspaceScope,
     emit?: OutboxEmit,
+    opts?: DeleteFeatureOptions,
   ): Promise<void>;
   /**
    * Delete `specId` if, and only if, it is an auto-created Feature grouping

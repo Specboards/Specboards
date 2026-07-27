@@ -36,12 +36,18 @@ metadata. On first import of a spec without an `id`, the git service injects one
 single commit (`packages/git` → `injectSpecId`). Path + blob `sha` are cached in
 `spec_index` for fast lookup and drift/conflict detection.
 
-Only the **leaf** level (Work Item) is spec-backed; the grouping levels above it
-(Initiative / Epic / Feature) are **DB-native** rows with no git spec; each takes a
-synthetic `spec_id` equal to its row id so every item is uniformly routable. Item
-permalinks are type-segmented by level: `/{org}/{product}/backlog/{levelKey}/{specId}`
-(the bare `/backlog/{specId}` still redirects). See
-[`docs/adr/0002-work-item-leaf-and-typed-item-urls.md`](docs/adr/0002-work-item-leaf-and-typed-item-urls.md).
+Every item at every level is a `features` row. A spec is an **optional
+attachment** to a leaf item (Work Item), not its identity: agent work items have
+a spec, human work items may not, and both roll up the same way. An item "has a
+spec" exactly when a `spec_index` row exists for it, which is what `isDbNative`
+reports (it means "no attached spec", not "no repo"). Grouping levels
+(Initiative / Epic / Feature) never carry specs. Every row takes a `spec_id`,
+equal to the frontmatter id when a spec is attached and to its own row id
+otherwise, so every item is uniformly routable. Item permalinks are
+type-segmented by level: `/{org}/{product}/backlog/{levelKey}/{specId}` (the bare
+`/backlog/{specId}` still redirects). See
+[`docs/adr/0002-work-item-leaf-and-typed-item-urls.md`](docs/adr/0002-work-item-leaf-and-typed-item-urls.md)
+and [`docs/adr/0003-spec-as-attachment.md`](docs/adr/0003-spec-as-attachment.md).
 
 ## Components
 

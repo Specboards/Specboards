@@ -10,8 +10,10 @@ import {
   type PropertyDef,
 } from "@specboards/core";
 
+import { getDb } from "@/lib/db";
 import { RICE_IMPACT_VALUES } from "@/lib/feature-helpers";
 import { resolveWorkflowFor } from "@/lib/repo-config";
+import { deleteSpecFile } from "@/lib/spec-content";
 import { notifyOutbox } from "@/lib/webhooks/events";
 import {
   getStore,
@@ -1779,10 +1781,16 @@ export async function createWorkItem(
   return created;
 }
 
-/** Delete a DB-native work item by id. */
+/**
+ * Delete a work item by id. An item with a spec attached needs `removeSpec`,
+ * which deletes the spec file from git first: leaving it behind would let the
+ * next sync re-import the spec and recreate the item (ADR 0003 D4). Without
+ * the opt-in the store refuses and says so.
+ */
 export async function deleteWorkItem(
   specId: string,
   scope?: WorkspaceScope,
+  opts: { removeSpec?: boolean } = {},
 ): Promise<void> {
   const store = await getStore();
   // Read the item first so the event can describe what was removed; the store
@@ -1799,7 +1807,29 @@ export async function deleteWorkItem(
         },
       }
     : undefined;
-  await store.deleteFeature(specId, scope, emit);
+
+  // Remove the git file before the row. The other order would leave a spec in
+  // the repo with no item to re-import onto if the git call then failed; this
+  // order fails with the file already gone, which the next sync reconciles.
+  let specRemoved = false;
+  const hasSpec = existing != null && !existing.isDbNative;
+  if (hasSpec && opts.removeSpec) {
+    const db = getDb();
+    if (!db) {
+      throw new InvalidPatchError(
+        "Removing a spec file needs a connected repository, which local file " +
+          "mode has none of. Delete the file directly instead.",
+      );
+    }
+    await deleteSpecFile(db, scope!, specId);
+    specRemoved = true;
+  }
+
+  await store.deleteFeature(specId, scope, emit, {
+    // Local file mode owns its working tree and removes the file itself, so it
+    // just needs the confirmation; the DB store needs it to have already gone.
+    specRemoved: specRemoved || (hasSpec && opts.removeSpec === true),
+  });
   if (emit) notifyOutbox();
 }
 

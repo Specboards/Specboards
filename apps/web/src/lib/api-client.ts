@@ -321,10 +321,17 @@ export async function createWorkItem(
 }
 
 /** Delete a DB-native work item by id. */
-export async function deleteWorkItem(specId: string): Promise<void> {
-  const res = await apiFetch(`/api/v1/features/${encodeURIComponent(specId)}`, {
-    method: "DELETE",
-  });
+export async function deleteWorkItem(
+  specId: string,
+  opts: { removeSpec?: boolean } = {},
+): Promise<void> {
+  // removeSpec also deletes the item's spec file from git; required for an item
+  // that has one, since a surviving file is re-imported by the next sync.
+  const query = opts.removeSpec ? "?removeSpec=1" : "";
+  const res = await apiFetch(
+    `/api/v1/features/${encodeURIComponent(specId)}${query}`,
+    { method: "DELETE" },
+  );
   if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as {
@@ -1052,7 +1059,10 @@ export interface SyncResult {
   upserted: number;
   skipped: number;
   idsInjected: number;
-  featuresCreated: number;
+  /** Specs that attached to a work item that already existed. */
+  attached: number;
+  /** Imports that matched no existing grouping and landed unparented. */
+  unparented: number;
 }
 
 export interface ConnectRepoInput {
@@ -1158,7 +1168,8 @@ export async function createStarterSpec(input: {
       upserted: 0,
       skipped: 0,
       idsInjected: 0,
-      featuresCreated: 0,
+      attached: 0,
+      unparented: 0,
     },
   };
 }
@@ -1189,7 +1200,8 @@ export async function importWorkspaceSpecs(): Promise<ImportResult> {
       upserted: 0,
       skipped: 0,
       idsInjected: 0,
-      featuresCreated: 0,
+      attached: 0,
+      unparented: 0,
     },
     errors: body?.errors ?? [],
   };

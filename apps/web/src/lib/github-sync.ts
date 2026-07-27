@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 
 import {
-  featureTitleFor,
   leafLevel,
   parentLevelKey,
   parseRepoConfigYaml,
@@ -13,6 +12,8 @@ import {
   and,
   eq,
   features,
+  isNull,
+  or,
   productRepositories,
   repositories,
   specIndex,
@@ -94,8 +95,13 @@ export interface SyncSummary {
   skipped: number;
   /** Specs that had a stable id injected back into git during this sync. */
   idsInjected: number;
-  /** Feature groupings auto-created to home newly-synced work items. */
-  featuresCreated: number;
+  /** Specs attached to a work item that already existed (created in the app, or
+   * previously synced), rather than creating a new one. */
+  attached: number;
+  /** Imports that matched no existing Feature grouping and so landed
+   * unparented. Sync no longer invents a grouping for them (ADR 0003 D3);
+   * they surface in the Unassigned view to be placed by hand. */
+  unparented: number;
 }
 
 /**
@@ -459,7 +465,8 @@ export async function syncRepository(db: Database, repo: RepoRecord): Promise<Sy
     upserted: 0,
     skipped: 0,
     idsInjected: 0,
-    featuresCreated: 0,
+    attached: 0,
+    unparented: 0,
   };
 
   await db.transaction(async (tx) => {
@@ -472,42 +479,92 @@ export async function syncRepository(db: Database, repo: RepoRecord): Promise<Sy
         continue;
       }
 
-      // features holds user-managed metadata (status/priority/…) — only the
-      // git-derived title is reconciled here; the rest is preserved on update.
-      const [row] = await tx
-        .insert(features)
-        .values({
-          workspaceId: repo.workspaceId,
-          repoId: repo.id,
-          productId,
-          specId,
-          level: leafKey,
-          title: item.spec.frontmatter.title,
-        })
-        // productId is set only on insert; an item moved to another product
-        // later keeps its assignment across re-syncs. level is reconciled so a
-        // spec row always converges to the current leaf.
-        .onConflictDoUpdate({
-          target: [features.repoId, features.specId],
-          set: {
-            title: item.spec.frontmatter.title,
-            level: leafKey,
-            updatedAt: new Date(),
-          },
-        })
-        .returning({
+      // A spec is an attachment, not an identity (ADR 0003 D3), so there are
+      // exactly two cases: the frontmatter id already names a work item in this
+      // workspace, in which case the spec attaches to that row; or it names
+      // nothing, in which case sync creates the work item.
+      //
+      // The lookup is by (workspace, spec_id) rather than the old
+      // (repo_id, spec_id) upsert target, because the item being attached to
+      // may have been created in the app and so carry no repo at all. Rows
+      // belonging to a *different* connected repo are excluded, so two repos
+      // holding a copied spec file keep their own rows instead of one stealing
+      // the other's.
+      const [existingRow] = await tx
+        .select({
           id: features.id,
           parentId: features.parentId,
           parentSetBy: features.parentSetBy,
           syncedFeatureKey: features.syncedFeatureKey,
-        });
-      if (!row) throw new Error(`Upsert returned no feature row for spec ${specId}`);
+        })
+        .from(features)
+        .where(
+          and(
+            eq(features.workspaceId, repo.workspaceId),
+            eq(features.specId, specId),
+            or(isNull(features.repoId), eq(features.repoId, repo.id)),
+          ),
+        )
+        .limit(1);
+
+      // features holds user-managed metadata (status/priority/…) — only the
+      // git-derived title is reconciled here; the rest is preserved on update.
+      // productId is set only on create; an item moved to another product later
+      // keeps its assignment across re-syncs. level is reconciled so an
+      // attached row always converges to the current leaf.
+      let row: {
+        id: string;
+        parentId: string | null;
+        parentSetBy: string | null;
+        syncedFeatureKey: string | null;
+      };
+      if (existingRow) {
+        await tx
+          .update(features)
+          .set({
+            repoId: repo.id,
+            title: item.spec.frontmatter.title,
+            level: leafKey,
+            updatedAt: new Date(),
+          })
+          .where(eq(features.id, existingRow.id));
+        row = existingRow;
+        summary.attached += 1;
+      } else {
+        const [inserted] = await tx
+          .insert(features)
+          .values({
+            workspaceId: repo.workspaceId,
+            repoId: repo.id,
+            productId,
+            specId,
+            level: leafKey,
+            title: item.spec.frontmatter.title,
+          })
+          .returning({
+            id: features.id,
+            parentId: features.parentId,
+            parentSetBy: features.parentSetBy,
+            syncedFeatureKey: features.syncedFeatureKey,
+          });
+        if (!inserted)
+          throw new Error(`Insert returned no feature row for spec ${specId}`);
+        row = inserted;
+      }
 
       // Home the work item under a Feature grouping, keyed by a stable grouping
-      // key so re-syncs and sibling specs reuse it rather than spawning
-      // duplicates. decideReparent honors a parent a user set in the app: it
-      // re-homes only system-assigned parents when the `feature:` frontmatter
-      // changed, and tracks the last-synced key on the row (gh-51).
+      // key so re-syncs and sibling specs reuse it. decideReparent honors a
+      // parent a user set in the app: it re-homes only system-assigned parents
+      // when the `feature:` frontmatter changed, and tracks the last-synced key
+      // on the row (gh-51).
+      //
+      // Sync no longer *creates* the grouping when the key matches nothing
+      // (ADR 0003 D3). That mechanism existed because a spec was once the only
+      // way to bring a leaf item into existence, so every import needed a
+      // parent invented for it; it is also where the wrapper-orphan bug came
+      // from. An import that matches no existing grouping now lands unparented,
+      // where the Unassigned view surfaces it for someone to place. Groupings a
+      // workspace already has keep working exactly as before.
       if (featureLevelKey) {
         const key = featureKeyFor(item.spec.frontmatter.feature, item.path, specId);
         const action = decideReparent(
@@ -530,26 +587,22 @@ export async function syncRepository(db: Database, repo: RepoRecord): Promise<Sy
               ),
             )
             .limit(1);
-          let featureId = existing[0]?.id;
-          if (!featureId) {
-            const newId = randomUUID();
-            await tx.insert(features).values({
-              id: newId,
-              workspaceId: repo.workspaceId,
-              repoId: null,
-              productId,
-              specId: newId,
-              level: featureLevelKey,
-              externalKey: key,
-              title: featureTitleFor(key, item.spec.frontmatter.title),
-            });
-            featureId = newId;
-            summary.featuresCreated += 1;
+          const featureId = existing[0]?.id;
+          if (featureId) {
+            await tx
+              .update(features)
+              .set({ parentId: featureId, parentSetBy: "system", syncedFeatureKey: key })
+              .where(eq(features.id, row.id));
+          } else {
+            // No grouping to home it under. Record the key anyway so that if
+            // one is created with this key later, a re-sync sees an unchanged
+            // key rather than treating it as a frontmatter change.
+            await tx
+              .update(features)
+              .set({ syncedFeatureKey: key })
+              .where(eq(features.id, row.id));
+            summary.unparented += 1;
           }
-          await tx
-            .update(features)
-            .set({ parentId: featureId, parentSetBy: "system", syncedFeatureKey: key })
-            .where(eq(features.id, row.id));
         } else if (action.kind === "baseline") {
           // Record the current key without moving the parent, so a later
           // frontmatter change on this pre-tracking row is detectable.

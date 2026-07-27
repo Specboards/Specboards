@@ -34,7 +34,13 @@ export async function POST(req: Request) {
     .from(repositories)
     .where(eq(repositories.workspaceId, authz.scope.workspaceId));
 
-  const total: SyncSummary = { upserted: 0, skipped: 0, idsInjected: 0, featuresCreated: 0 };
+  const total: SyncSummary = {
+    upserted: 0,
+    skipped: 0,
+    idsInjected: 0,
+    attached: 0,
+    unparented: 0,
+  };
   const errors: { owner: string; name: string; error: string }[] = [];
 
   for (const repo of repos) {
@@ -43,7 +49,8 @@ export async function POST(req: Request) {
       total.upserted += summary.upserted;
       total.skipped += summary.skipped;
       total.idsInjected += summary.idsInjected;
-      total.featuresCreated += summary.featuresCreated;
+      total.attached += summary.attached;
+      total.unparented += summary.unparented;
     } catch (err) {
       console.error(`[repositories/import] sync failed for ${repo.owner}/${repo.name}:`, err);
       errors.push({

@@ -9,9 +9,13 @@ import { AuthRequiredError, deleteWorkItem } from "@/lib/api-client";
 import { useOrgProductPath } from "@/lib/use-org";
 
 /**
- * Delete control for a DB-native work item (initiative/epic/…). Deleting
- * orphans any children rather than cascading. Renaming is done inline on the
- * item's title (see {@link ItemTitle}), so this is delete-only.
+ * Delete control for a work item. Deleting orphans any children rather than
+ * cascading. Renaming is done inline on the item's title (see
+ * {@link ItemTitle}), so this is delete-only.
+ *
+ * When the item has a spec attached, deleting it also deletes that spec file
+ * from git, because a file left behind is re-imported by the next sync and the
+ * item comes back (ADR 0003 D4). The confirmation says so, and names the file.
  *
  * `redirectOnDelete` sends the user back to the backlog after deletion (used on
  * the full page); the flyout leaves navigation to its own close handling.
@@ -19,10 +23,13 @@ import { useOrgProductPath } from "@/lib/use-org";
 export function WorkItemDelete({
   specId,
   levelLabel,
+  specPath = null,
   redirectOnDelete = true,
 }: {
   specId: string;
   levelLabel: string;
+  /** Path of the attached spec file, or null when the item has no spec. */
+  specPath?: string | null;
   redirectOnDelete?: boolean;
 }) {
   const router = useRouter();
@@ -32,15 +39,13 @@ export function WorkItemDelete({
   const level = levelLabel.toLowerCase();
 
   function onDelete() {
-    if (
-      !window.confirm(
-        `Delete this ${level}? Any child items are kept (orphaned).`,
-      )
-    )
-      return;
+    const message = specPath
+      ? `Delete this ${level}? This also deletes ${specPath} from the connected repository, which cannot be undone here. Any child items are kept (orphaned).`
+      : `Delete this ${level}? Any child items are kept (orphaned).`;
+    if (!window.confirm(message)) return;
     startDelete(async () => {
       try {
-        await deleteWorkItem(specId);
+        await deleteWorkItem(specId, { removeSpec: specPath !== null });
         toast.success(`${levelLabel} deleted`);
         if (redirectOnDelete) router.push(orgHref("/backlog"));
         router.refresh();

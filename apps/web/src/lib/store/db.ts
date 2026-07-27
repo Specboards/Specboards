@@ -10,7 +10,6 @@ import {
   wouldCreateCycle,
   wouldExceedDepth,
   isGeneratedGroupingTitle,
-  isLeafLevel,
   isPropertyType,
   isTransitionMode,
   isValidParentLevel,
@@ -92,6 +91,7 @@ import {
   type BoardPreferences,
   type CreateFeatureInput,
   type CreateProductInput,
+  type DeleteFeatureOptions,
   type DetailTemplate,
   type DetailTemplateInput,
   type DetailTemplatePatch,
@@ -378,7 +378,10 @@ export class DbStore implements FeatureStore {
         specId: row.specId,
         title: row.title,
         level: row.level,
-        isDbNative: row.repoId === null,
+        // "No attached spec", derived from spec_index rather than repo_id: a
+        // work item with no spec has no repo either, so the two only look alike
+        // until human work items exist. See ADR 0003 D2.
+        isDbNative: row.index == null,
         productId: row.productId,
         status: row.status,
         rank: row.rank,
@@ -622,7 +625,8 @@ export class DbStore implements FeatureStore {
         specId: row.specId,
         title: row.title,
         level: row.level,
-        isDbNative: row.repoId === null,
+        // See listFeatures: "no attached spec", not "no repo" (ADR 0003 D2).
+        isDbNative: row.index == null,
         productId: row.productId,
         status: row.status,
         rank: row.rank,
@@ -954,10 +958,8 @@ export class DbStore implements FeatureStore {
       if (!title) throw new FeatureError("Title is required.");
       if (!levels.some((l) => l.key === input.level))
         throw new FeatureError(`Unknown level: ${input.level}`);
-      if (isLeafLevel(input.level, levels))
-        throw new FeatureError(
-          "Leaf-level items come from specs and can't be created here.",
-        );
+      // Leaf-level items are creatable here: a spec is an attachment, not an
+      // identity, so a work item with no spec is a first-class row. See ADR 0003.
 
       // Resolve + validate the parent (must be exactly one level up).
       let parentId: string | null = null;
@@ -1019,8 +1021,9 @@ export class DbStore implements FeatureStore {
         }
       }
 
-      // DB-native items have no repo/spec; spec_id mirrors the row id so every
-      // row stays uniformly routable by specId.
+      // An item created here has no spec attached, so it has no repo and no
+      // frontmatter id; spec_id mirrors the row id, keeping every row uniformly
+      // routable by specId. Attaching a spec later reuses this id (ADR 0003 D3).
       const id = randomUUID();
       const [row] = await tx
         .insert(features)
@@ -1094,16 +1097,18 @@ export class DbStore implements FeatureStore {
     specId: string,
     scope?: WorkspaceScope,
     emit?: OutboxEmit,
+    opts?: DeleteFeatureOptions,
   ): Promise<void> {
     await this.scoped(scope, async (tx) => {
       const ws = scope!.workspaceId;
       const row = await tx
         .select({
           id: features.id,
-          repoId: features.repoId,
           productId: features.productId,
+          specPath: specIndex.path,
         })
         .from(features)
+        .leftJoin(specIndex, eq(specIndex.featureId, features.id))
         .where(and(eq(features.specId, specId), eq(features.workspaceId, ws)));
       if (!row[0]) throw new FeatureError(`Unknown work item: ${specId}`);
       const access = await this.accessIn(tx, scope!);
@@ -1112,10 +1117,18 @@ export class DbStore implements FeatureStore {
           "Your role does not permit editing this product.",
         );
       }
-      if (row[0].repoId !== null)
+      // An item with a spec attached can be deleted, but only together with its
+      // git file: leaving the file behind would let the next sync re-import the
+      // spec and recreate the item with default metadata, silently undoing the
+      // delete. The caller removes the file first and passes `specRemoved`
+      // (ADR 0003 D4). `spec_index` is ON DELETE CASCADE, so the index row goes
+      // with the item either way.
+      if (row[0].specPath !== null && !opts?.specRemoved) {
         throw new FeatureError(
-          "Spec-backed items can't be deleted here. Remove the spec in git.",
+          "This work item has a spec attached. Deleting it also deletes " +
+            `${row[0].specPath} from git; pass removeSpec to confirm.`,
         );
+      }
       // Children's parent_id is ON DELETE SET NULL, so they're orphaned, not deleted.
       await tx
         .delete(features)

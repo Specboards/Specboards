@@ -6,7 +6,6 @@ import {
   DEFAULT_PRODUCT_KEY,
   descendantGroupIds,
   groupKeyFromName,
-  isLeafLevel,
   isPropertyType,
   isValidParentLevel,
   leafLevel,
@@ -47,6 +46,7 @@ import {
   type CreateFeatureInput,
   type CreateProductGroupInput,
   type CreateProductInput,
+  type DeleteFeatureOptions,
   type DetailTemplate,
   type DetailTemplateInput,
   type DetailTemplatePatch,
@@ -765,10 +765,8 @@ export class LocalFileStore implements FeatureStore {
     if (!title) throw new FeatureError("Title is required.");
     if (!levels.some((l) => l.key === input.level))
       throw new FeatureError(`Unknown level: ${input.level}`);
-    if (isLeafLevel(input.level, levels))
-      throw new FeatureError(
-        "Leaf-level items come from specs and can't be created here.",
-      );
+    // Leaf-level items are creatable here too: a spec is an attachment, not an
+    // identity, so a work item with no spec is a first-class row (ADR 0003).
 
     if (input.parentSpecId) {
       const all = await this.loadAll();
@@ -847,13 +845,33 @@ export class LocalFileStore implements FeatureStore {
     specId: string,
     _scope?: WorkspaceScope,
     _emit?: OutboxEmit, // webhooks are DB-only; ignored in local file mode
+    opts?: DeleteFeatureOptions,
   ): Promise<void> {
     const items = await this.readItems();
-    if (!items.some((i) => i.id === specId))
+    if (items.some((i) => i.id === specId)) {
+      // No spec attached: an ordinary delete of the tracking record.
+      await this.writeItems(items.filter((i) => i.id !== specId));
+      return;
+    }
+    // Otherwise it's a spec file. Deleting the record without the file would
+    // just re-read it on the next load, so the file goes too (ADR 0003 D4).
+    // This store owns the working tree, so it performs the removal itself
+    // rather than relying on a caller's prior git delete.
+    const all = await this.loadAll();
+    const feature = all.find((f) => f.specId === specId);
+    if (!feature) throw new FeatureError(`Unknown work item: ${specId}`);
+    if (!opts?.specRemoved) {
       throw new FeatureError(
-        "Spec-backed items can't be deleted here. Remove the spec in git.",
+        "This work item has a spec attached. Deleting it also deletes " +
+          `${feature.path}; pass removeSpec to confirm.`,
       );
-    await this.writeItems(items.filter((i) => i.id !== specId));
+    }
+    await fs.rm(path.join(this.root, feature.path), { force: true });
+    // Drop the item's sidecar metadata so a same-id spec restored later starts
+    // clean rather than inheriting a deleted item's status.
+    const meta = await this.readMetadata();
+    delete meta[specId];
+    await this.writeMetadata(meta);
   }
 
   /**

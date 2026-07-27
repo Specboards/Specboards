@@ -118,10 +118,19 @@ Nothing to copy by hand.
 
 - **Initial import:** the `sync` summary above should show `upserted > 0`; the
   board now lists the repo's specs (as **Work Items**, the spec-backed leaf).
-- **Feature grouping:** the summary's `featuresCreated` counts Feature groupings
-  auto-created to home new work items. Each spec lands under a Feature chosen by a
-  stable key: its `feature:` frontmatter when set, else its folder path (so specs
-  in the same directory share a Feature).
+- **Attachment:** the summary's `attached` counts specs whose frontmatter `id`
+  named a work item that already existed, so the spec joined that item rather
+  than creating a second card for the same work. The item keeps its status,
+  assignee, parent, and history; only its title and body come from git
+  (ADR 0003). This is what `create_spec(workItemId: …)` produces.
+- **Feature grouping:** each spec homes under a Feature chosen by a stable key:
+  its `feature:` frontmatter when set, else its folder path (so specs in the
+  same directory share a Feature). Sync **does not create** the grouping when
+  the key matches none; the summary's `unparented` counts those, and they land
+  in the **Unassigned** view for someone to place by hand. Auto-created wrapper
+  groupings were retired in v0.25.5: they existed only because a spec used to be
+  the sole way to create a leaf item, and they were the source of the orphaned
+  wrapper cards. Groupings a workspace already has keep working unchanged.
 - **Re-parenting on frontmatter change:** changing a spec's `feature:` and
   re-syncing moves the item under the new Feature grouping, but only when its
   parent was system-assigned. A parent you set by hand in the app (including

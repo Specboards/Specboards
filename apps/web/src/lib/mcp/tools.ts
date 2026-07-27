@@ -516,15 +516,23 @@ export const TOOLS: McpTool[] = [
   {
     name: "delete_item",
     description:
-      "Delete a DB-native work item (an initiative/epic/feature card created " +
-      "with create_item). Its children are re-parented to the root (not " +
-      "deleted) and its relations are cleared automatically. Spec-backed items " +
-      "cannot be deleted here - remove their specs/<slug>/spec.md in git " +
-      "instead. This is irreversible, so confirm the specId with read_item " +
-      "first.",
+      "Delete a work item. Its children are re-parented to the root (not " +
+      "deleted) and its relations are cleared automatically. An item that has " +
+      "a spec attached also needs `removeSpec: true`, which deletes its " +
+      "spec.md from git in the same operation - without that the spec would " +
+      "be re-imported on the next sync and the item would come back. This is " +
+      "irreversible, so confirm the specId with read_item first.",
     inputSchema: {
       type: "object",
-      properties: { specId: specIdSchema },
+      properties: {
+        specId: specIdSchema,
+        removeSpec: {
+          type: "boolean",
+          description:
+            "Required to delete an item that has a spec attached; also " +
+            "deletes the spec file from the connected repo.",
+        },
+      },
       required: ["specId"],
       additionalProperties: false,
     },
@@ -536,16 +544,26 @@ export const TOOLS: McpTool[] = [
       // error before attempting the delete if the id is unknown).
       const existing = await store.getFeature(specId, ctx.scope);
       if (!existing) throw new Error(`No item with spec id ${specId}.`);
-      await deleteWorkItem(specId, ctx.scope);
-      return { specId, title: existing.title, deleted: true };
+      const removeSpec = args.removeSpec === true;
+      await deleteWorkItem(specId, ctx.scope, { removeSpec });
+      return {
+        specId,
+        title: existing.title,
+        deleted: true,
+        specRemoved: removeSpec && !existing.isDbNative,
+      };
     },
   },
   {
     name: "create_item",
     description:
-      "Create a DB-native work item (a non-leaf card, e.g. an initiative or " +
-      "epic). Leaf specs come from git, not this tool. `level` must be a " +
-      "non-leaf level key (see whoami). Optionally set product (key), " +
+      "Create a work item at any level, including the leaf. Use it for a card " +
+      "(initiative/epic/feature) and for leaf work that has no spec - a task " +
+      "done by a person rather than by an agent. A spec is an optional " +
+      "attachment to a leaf item, not a requirement for one, so leaf items " +
+      "created here roll up into their parent exactly like spec-backed ones. " +
+      "Use create_spec instead when the work needs a git-backed document. " +
+      "`level` is any level key (see whoami). Optionally set product (key), " +
       "parentSpecId, status, assigneeId, tags, and details (Markdown body).",
     inputSchema: {
       type: "object",
@@ -553,7 +571,7 @@ export const TOOLS: McpTool[] = [
         title: { type: "string" },
         level: {
           type: "string",
-          description: "A non-leaf level key from whoami (e.g. 'epic').",
+          description: "A level key from whoami (e.g. 'epic' or 'work').",
         },
         product: {
           type: "string",
@@ -629,12 +647,15 @@ export const TOOLS: McpTool[] = [
   {
     name: "create_spec",
     description:
-      "Create a new spec-backed item: commit a new specs/<slug>/spec.md to the " +
-      "connected repo (a fresh id is assigned) and sync it onto the board. Use " +
-      "this to break a card down into concrete specs - create each spec here, " +
-      "then call update_item with parentSpecId to nest it under the card being " +
-      "broken down. Optionally target a repo by id (defaults to the workspace " +
-      "spec repo).",
+      "Commit a new specs/<slug>/spec.md to the connected repo and sync it " +
+      "onto the board. Two uses: without `workItemId` a fresh work item is " +
+      "created for the spec, which is how you break a card down into concrete " +
+      "specs (create each one here, then call update_item with parentSpecId to " +
+      "nest it under the card); with `workItemId` the spec ATTACHES to a work " +
+      "item that already exists, keeping its id, status, assignee, parent and " +
+      "history instead of creating a second card for the same work. Attach " +
+      "when someone has been tracking the work in the app and it now needs a " +
+      "document. Optionally target a repo by id (defaults to the spec repo).",
     inputSchema: {
       type: "object",
       properties: {
@@ -642,6 +663,12 @@ export const TOOLS: McpTool[] = [
         body: {
           type: "string",
           description: "Markdown body (no frontmatter). Defaults to a stub.",
+        },
+        workItemId: {
+          type: "string",
+          description:
+            "An existing leaf work item (specId) to attach this spec to. It " +
+            "must not already have one. Omit to create a new item.",
         },
         repoId: {
           type: "string",
@@ -663,6 +690,8 @@ export const TOOLS: McpTool[] = [
         title,
         body: typeof args.body === "string" ? args.body : undefined,
         repoId: typeof args.repoId === "string" ? args.repoId : undefined,
+        workItemId:
+          typeof args.workItemId === "string" ? args.workItemId : undefined,
         message: typeof args.message === "string" ? args.message : undefined,
       });
     },

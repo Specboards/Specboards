@@ -219,10 +219,13 @@ export function ItemDetailView({
         />
       </DetailSection>
 
-      {feature.isDbNative && canEdit ? (
+      {canEdit ? (
         <WorkItemDelete
           specId={feature.specId}
           levelLabel={levelLabel}
+          // `path` is set only when a spec is attached; passing it turns the
+          // delete into "item + its spec file" and says so in the confirm.
+          specPath={feature.isDbNative ? null : feature.path || null}
           redirectOnDelete={variant === "page"}
         />
       ) : null}

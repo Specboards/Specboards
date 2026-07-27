@@ -219,8 +219,11 @@ export async function BoardView({
   const quickAddProductId =
     activeProduct?.id ??
     (scopedProducts.length === 1 ? scopedProducts[0]?.id ?? null : null);
+  // Every level is creatable, leaf included: a work item with no spec is a
+  // first-class row (ADR 0003), so the quick add is gated on edit access and an
+  // unambiguous product, not on altitude.
   const quickAdd =
-    canEdit && !activeLevel.isLeaf && quickAddProductId
+    canEdit && quickAddProductId
       ? {
           levelKey: activeLevel.key,
           levelLabel: activeLevel.label,
@@ -229,7 +232,7 @@ export async function BoardView({
       : undefined;
 
   const newItemButton =
-    canEdit && !activeLevel.isLeaf ? (
+    canEdit ? (
       <WorkItemCreate
         levelKey={activeLevel.key}
         levelLabel={activeLevel.label}
@@ -289,7 +292,10 @@ export async function BoardView({
         ) : null}
         {featuresForLevel.length === 0 ? (
           activeLevel.isLeaf ? (
-            <NoSpecsEmptyState canConnect={canConnectRepos(access)} />
+            <NoSpecsEmptyState
+              canConnect={canConnectRepos(access)}
+              createAction={newItemButton}
+            />
           ) : (
             <EmptyState
               className="mt-8"

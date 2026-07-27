@@ -95,8 +95,10 @@ function syncMessage(sync: SyncResult | { error: string }): {
   const parts = [`${sync.upserted} imported`, `${sync.skipped} unchanged`];
   if (sync.idsInjected > 0)
     parts.push(`${sync.idsInjected} stable id(s) assigned`);
-  if (sync.featuresCreated > 0)
-    parts.push(`${sync.featuresCreated} feature(s) created`);
+  if (sync.attached > 0)
+    parts.push(`${sync.attached} attached to existing item(s)`);
+  if (sync.unparented > 0)
+    parts.push(`${sync.unparented} unassigned`);
   return { kind: "ok", message: parts.join(" · ") };
 }
 
@@ -380,17 +382,17 @@ function ImportResultView({
   onRescan: () => void;
 }) {
   const { summary } = result;
-  const created = summary.featuresCreated;
+  const unparented = summary.unparented;
   const imported = summary.upserted;
   return (
     <div className="space-y-3">
       <p className="text-sm">
         Imported <strong>{imported}</strong> spec{imported === 1 ? "" : "s"}
-        {created > 0 ? (
+        {unparented > 0 ? (
           <>
             {" "}
-            and created <strong>{created}</strong> feature group
-            {created === 1 ? "" : "s"}
+            (<strong>{unparented}</strong> not yet under a feature, waiting in
+            Unassigned)
           </>
         ) : null}
         .
