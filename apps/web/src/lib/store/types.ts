@@ -1,4 +1,7 @@
 import type {
+  CycleState,
+  GoalStatus,
+  MetricKind,
   DetailTemplate,
   DetailTemplateInput,
   DetailTemplatePatch,
@@ -15,6 +18,9 @@ import type {
 } from "@specboards/core";
 
 export type {
+  CycleState,
+  GoalStatus,
+  MetricKind,
   DetailTemplate,
   DetailTemplateInput,
   DetailTemplatePatch,
@@ -56,6 +62,9 @@ export interface FeatureRecord {
   tags: string[];
   /** Owning release, or null when unscheduled. */
   releaseId: string | null;
+  /** Owning cycle (sprint/iteration), or null when not in one. Orthogonal to
+   * releaseId: an item can hold both. */
+  cycleId: string | null;
   /** Assigned user id, or null when unassigned. */
   assigneeId: string | null;
   /** Values keyed by custom-property key (see PropertyDef). */
@@ -205,6 +214,7 @@ export type FeaturePatch = Partial<
     | "rank"
     | "tags"
     | "releaseId"
+    | "cycleId"
     | "assigneeId"
     | "customFields"
     | "parentSpecId"
@@ -219,9 +229,9 @@ export type FeaturePatch = Partial<
 };
 
 /**
- * Fields to create a DB-native work item (an initiative/epic — a non-leaf
- * level). Leaf items come from git/spec sync, not this path. `level` must be a
- * non-leaf level and `parentSpecId`, when set, the level immediately above.
+ * Fields to create a work item with no spec attached, at any level including
+ * the leaf (a spec is an attachment, not an identity - see ADR 0003).
+ * `parentSpecId`, when set, must be the level immediately above.
  */
 export interface CreateFeatureInput {
   title: string;
@@ -234,11 +244,21 @@ export interface CreateFeatureInput {
   /** Release to schedule the new item into; must belong to the item's product
    * or be a portfolio release. Null/omitted leaves it unscheduled. */
   releaseId?: string | null;
+  /** Cycle to schedule the new item into; must belong to the item's product or
+   * be workspace-wide. Null/omitted leaves it out of any cycle. */
+  cycleId?: string | null;
   /** Initial values for the workspace's custom properties, keyed by property key. */
   customFields?: Record<string, CustomFieldValue>;
   tags?: string[];
   /** Markdown body for the new DB-native item, or null/omitted for a blank body. */
   details?: string | null;
+}
+
+/** Options for deleting a work item (see Store.deleteFeature). */
+export interface DeleteFeatureOptions {
+  /** True when the caller has already deleted the item's spec file from git,
+   * which is what makes deleting a spec-backed item safe from re-import. */
+  specRemoved?: boolean;
 }
 
 /** A product (sibling backlog) as the UI consumes it. */
@@ -623,6 +643,163 @@ export type ReleasePatch = Partial<{
 /** Raised when a release can't be created/updated/deleted. */
 export class ReleaseError extends Error {}
 
+/**
+ * A cycle (sprint / iteration) as the UI consumes it: a date-bounded time box,
+ * orthogonal to releases. Note there is no stored status - `state` is derived
+ * from the dates on every read (see core `cycleState`), so a cycle can never be
+ * stale and nothing has to run to keep it current.
+ */
+export interface CycleRecord {
+  id: string;
+  name: string;
+  /** Product this cycle belongs to, or null for a workspace-wide cycle
+   * spanning every product. */
+  productId: string | null;
+  /** Inclusive first day, YYYY-MM-DD. */
+  startDate: string;
+  /** Inclusive last day, YYYY-MM-DD. */
+  endDate: string;
+  /** Free-form notes (Markdown), e.g. the cycle's goal. */
+  notes: string | null;
+  /** Derived from the dates against today; never stored. */
+  state: CycleState;
+  /** Count of items scheduled into this cycle. */
+  itemCount: number;
+  /** Of those items, how many are in a terminal ("done") status. Drives the
+   * cycle's progress and the rollover count. */
+  doneCount: number;
+}
+
+export interface CycleInput {
+  name: string;
+  /** Product to scope the cycle to, or null/omitted for a workspace-wide one. */
+  productId?: string | null;
+  startDate: string;
+  endDate: string;
+  notes?: string | null;
+}
+
+export type CyclePatch = Partial<{
+  name: string;
+  productId: string | null;
+  startDate: string;
+  endDate: string;
+  notes: string | null;
+}>;
+
+/** Outcome of rolling a cycle's unfinished work into another cycle. */
+export interface CycleRolloverResult {
+  /** Number of items moved. */
+  moved: number;
+  /** The cycle they were moved into. */
+  toCycleId: string;
+}
+
+/** Raised when a cycle can't be created/updated/deleted. */
+export class CycleError extends Error {}
+
+/** One key result under a goal, with its progress computed on read. */
+export interface KeyResultRecord {
+  id: string;
+  goalId: string;
+  title: string;
+  metricKind: MetricKind;
+  startValue: number;
+  targetValue: number;
+  currentValue: number;
+  position: number;
+  /** Computed from start/current/target; null when the measure is degenerate.
+   * Never stored (see core `keyResultProgress`). */
+  progress: number | null;
+}
+
+/**
+ * A goal (objective) as the UI consumes it. Note the two progress numbers,
+ * which stay separate on purpose: `progress` measures the outcome (key
+ * results), `deliveryProgress` measures how much of the linked work has
+ * shipped. Shipping everything and moving no metric is precisely what OKRs
+ * exist to surface, so they are never merged.
+ */
+export interface GoalRecord {
+  id: string;
+  title: string;
+  description: string | null;
+  /** Product this goal belongs to, or null for an org-wide goal. */
+  productId: string | null;
+  periodStart: string | null;
+  periodEnd: string | null;
+  /** Parent goal, or null at the root of the goal tree. */
+  parentGoalId: string | null;
+  /** The owner's confidence call; distinct from computed progress. */
+  status: GoalStatus;
+  keyResults: KeyResultRecord[];
+  /** Mean of the key results' progress; null when there are none. */
+  progress: number | null;
+  /** Count of work items linked to this goal that the caller can read. */
+  linkedItemCount: number;
+  /** Share of those linked items in a terminal status; null when none. */
+  deliveryProgress: number | null;
+}
+
+export interface GoalInput {
+  title: string;
+  description?: string | null;
+  productId?: string | null;
+  periodStart?: string | null;
+  periodEnd?: string | null;
+  parentGoalId?: string | null;
+  status?: GoalStatus;
+}
+
+export type GoalPatch = Partial<{
+  title: string;
+  description: string | null;
+  productId: string | null;
+  periodStart: string | null;
+  periodEnd: string | null;
+  parentGoalId: string | null;
+  status: GoalStatus;
+}>;
+
+export interface KeyResultInput {
+  title: string;
+  metricKind?: MetricKind;
+  startValue?: number;
+  targetValue: number;
+  currentValue?: number;
+}
+
+export type KeyResultPatch = Partial<{
+  title: string;
+  metricKind: MetricKind;
+  startValue: number;
+  targetValue: number;
+  currentValue: number;
+  position: number;
+}>;
+
+/** A work item contributing to a goal, as the goal detail lists it. */
+export interface GoalContribution {
+  specId: string;
+  title: string;
+  status: string;
+  level: string;
+  productId: string | null;
+  /** True when the item's status is terminal (feeds deliveryProgress). */
+  done: boolean;
+}
+
+/** A goal an item ladders up to, as the item detail lists it. */
+export interface ItemGoalRef {
+  goalId: string;
+  title: string;
+  status: GoalStatus;
+  productId: string | null;
+}
+
+/** Raised when a goal or key result can't be created/updated/deleted. */
+export class GoalError extends Error {}
+
 /** A comment on a feature, with its author resolved for display. */
 export interface CommentRecord {
   id: string;
@@ -677,6 +854,33 @@ export interface NotificationList {
   items: NotificationRecord[];
   unreadCount: number;
 }
+
+// Cycle helpers live in core (they are pure date logic shared with the CLI);
+// re-exported here so UI code imports its scoping helpers from one place,
+// alongside releasesForProduct / selectableReleases below.
+export {
+  compareGoals,
+  deliveryProgress,
+  formatMetric,
+  goalProgress,
+  goalStatusLabel,
+  goalsForProduct,
+  isGoalClosed,
+  keyResultProgress,
+  GOAL_STATUSES,
+  METRIC_KINDS,
+} from "@specboards/core";
+
+export {
+  compareCycles,
+  cycleDaysRemaining,
+  cycleLengthDays,
+  cycleState,
+  cycleStateLabel,
+  cyclesForProduct,
+  isCycleActive,
+  selectableCycles,
+} from "@specboards/core";
 
 /** The releases a single product's roadmap should show: that product's own
  * releases plus workspace-wide (portfolio) releases, which apply everywhere. */
@@ -1095,6 +1299,78 @@ export interface FeatureStore {
   ): Promise<ReleaseRecord>;
   /** Delete a release; its items are unscheduled, not deleted. */
   deleteRelease(id: string, scope?: WorkspaceScope): Promise<void>;
+
+  /** The workspace's cycles, ordered active → upcoming → most recently
+   * complete. `state` on each is derived from its dates, never stored. */
+  listCycles(scope?: WorkspaceScope): Promise<CycleRecord[]>;
+  createCycle(input: CycleInput, scope?: WorkspaceScope): Promise<CycleRecord>;
+  updateCycle(
+    id: string,
+    patch: CyclePatch,
+    scope?: WorkspaceScope,
+  ): Promise<CycleRecord>;
+  /** Delete a cycle. `features.cycle_id` is ON DELETE SET NULL, so its items
+   * are unscheduled rather than deleted. */
+  deleteCycle(id: string, scope?: WorkspaceScope): Promise<void>;
+  /**
+   * Move every unfinished item out of `fromId` and into `toId`. An explicit
+   * user action, never a background job: what carries over is a planning
+   * decision the team makes when they close a cycle, and a cron that guessed
+   * would be wrong as often as right. Items already done stay where they are,
+   * so the finished cycle keeps an honest record of what it delivered.
+   */
+  rolloverCycle(
+    fromId: string,
+    toId: string,
+    scope?: WorkspaceScope,
+  ): Promise<CycleRolloverResult>;
+
+  /** The workspace's goals with their key results and computed progress,
+   * ordered open first, then by soonest period end. */
+  listGoals(scope?: WorkspaceScope): Promise<GoalRecord[]>;
+  createGoal(input: GoalInput, scope?: WorkspaceScope): Promise<GoalRecord>;
+  updateGoal(
+    id: string,
+    patch: GoalPatch,
+    scope?: WorkspaceScope,
+  ): Promise<GoalRecord>;
+  /** Delete a goal. Its key results cascade; its links to work items are
+   * removed, and the work items themselves are untouched. */
+  deleteGoal(id: string, scope?: WorkspaceScope): Promise<void>;
+
+  createKeyResult(
+    goalId: string,
+    input: KeyResultInput,
+    scope?: WorkspaceScope,
+  ): Promise<GoalRecord>;
+  updateKeyResult(
+    id: string,
+    patch: KeyResultPatch,
+    scope?: WorkspaceScope,
+  ): Promise<GoalRecord>;
+  deleteKeyResult(id: string, scope?: WorkspaceScope): Promise<GoalRecord>;
+
+  /** Work items linked to a goal, filtered to those the caller can read. The
+   * goal itself stays visible even when some of its work does not. */
+  listGoalContributions(
+    goalId: string,
+    scope?: WorkspaceScope,
+  ): Promise<GoalContribution[]>;
+  /** Goals an item ladders up to (many-to-many; any level can link). */
+  listItemGoals(
+    specId: string,
+    scope?: WorkspaceScope,
+  ): Promise<ItemGoalRef[]>;
+  linkGoal(
+    goalId: string,
+    specId: string,
+    scope?: WorkspaceScope,
+  ): Promise<void>;
+  unlinkGoal(
+    goalId: string,
+    specId: string,
+    scope?: WorkspaceScope,
+  ): Promise<void>;
   /** Comments on a feature (by stable specId), oldest first, author resolved.
    * Requires read access to the feature's product. */
   listComments(
@@ -1199,12 +1475,15 @@ export interface FeatureStore {
     scope?: WorkspaceScope,
     emitType?: string,
   ): Promise<FeatureRecord>;
-  /** Delete a DB-native work item by id. Spec-backed items can't be deleted here.
+  /** Delete a work item by id. An item with a spec attached is refused unless
+   * the caller has already removed its git file and passes `specRemoved`, since
+   * a surviving file would be re-imported by the next sync (ADR 0003 D4).
    * `emit`, when given, records an outbox event in the same transaction. */
   deleteFeature(
     specId: string,
     scope?: WorkspaceScope,
     emit?: OutboxEmit,
+    opts?: DeleteFeatureOptions,
   ): Promise<void>;
   /**
    * Delete `specId` if, and only if, it is an auto-created Feature grouping

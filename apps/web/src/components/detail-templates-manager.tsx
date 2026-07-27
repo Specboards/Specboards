@@ -283,9 +283,10 @@ function LevelTemplateAssign({
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  // Only non-leaf levels are created in-app (leaf items come from specs), so
-  // only they can seed a template.
-  const assignable = levels.filter((l) => !l.isLeaf);
+  // Every level can be created in-app now (ADR 0003), so every level can seed
+  // a template. A leaf item that gets a spec attached takes its body from git
+  // and the template only ever seeds the item's own details.
+  const assignable = levels;
   const [choice, setChoice] = useState<Record<string, string>>(() =>
     Object.fromEntries(
       assignable.map((l) => [l.key, l.detailTemplateId ?? ""]),

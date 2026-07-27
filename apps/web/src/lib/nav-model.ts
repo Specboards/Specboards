@@ -6,7 +6,9 @@ import {
   Lightbulb,
   Map,
   Microscope,
+  Repeat,
   Settings,
+  Target,
   TrendingUp,
   type LucideIcon,
 } from "lucide-react";
@@ -43,6 +45,7 @@ export const GROUPS: NavGroup[] = [
     label: "Plan",
     items: [
       { href: "/strategy", label: "Strategy", icon: Compass, productScoped: true },
+      { href: "/goals", label: "Goals", icon: Target, productScoped: true },
       { href: "/research", label: "Research", icon: Microscope, productScoped: true },
       {
         href: "/architecture",
@@ -57,6 +60,7 @@ export const GROUPS: NavGroup[] = [
     items: [
       { href: "/ideas", label: "Ideas", icon: Lightbulb, productScoped: true },
       { href: "/backlog", label: "Backlog", icon: KanbanSquare, productScoped: true },
+      { href: "/cycles", label: "Cycles", icon: Repeat, productScoped: true },
     ],
   },
   {

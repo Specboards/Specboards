@@ -82,17 +82,21 @@ export async function PATCH(req: Request, { params }: Params) {
 }
 
 /**
- * DELETE /api/v1/features/:specId — delete a DB-native work item
- * (initiative/epic). Spec-backed items can't be deleted here (the store
- * rejects them); their children are orphaned, not cascade-deleted.
+ * DELETE /api/v1/features/:specId — delete a work item. Children are orphaned,
+ * not cascade-deleted. An item with a spec attached needs `?removeSpec=1`,
+ * which also deletes its spec file from git; without it the store rejects the
+ * delete, since a surviving file would be re-imported by the next sync.
  */
 export async function DELETE(req: Request, { params }: Params) {
   const authz = await authorizeWrite(req);
   if (!authz.ok) return authz.response;
 
   const { specId } = await params;
+  const removeSpec = ["1", "true"].includes(
+    new URL(req.url).searchParams.get("removeSpec") ?? "",
+  );
   try {
-    await deleteWorkItem(specId, authz.scope ?? undefined);
+    await deleteWorkItem(specId, authz.scope ?? undefined, { removeSpec });
     for (const path of ["/[org]/[product]/backlog", "/[org]/[product]/roadmap"])
       revalidatePath(path, "page");
     revalidatePath("/[org]/[product]/backlog/[...slug]", "page");

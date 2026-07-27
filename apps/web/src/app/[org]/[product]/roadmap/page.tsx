@@ -251,7 +251,7 @@ export default async function RoadmapPage({
   // over the relevant button so the next step sits where the user is looking;
   // the toolbar hides its twin so each affordance renders exactly once.
   const itemCtaInEmptyState =
-    features.length === 0 && !activeLevel.isLeaf && !showShipped && !showTimeline;
+    features.length === 0 && !showShipped && !showTimeline;
   const releaseCtaInEmptyState =
     itemCtaInEmptyState && scopedReleases.length === 0;
   // A product roadmap creates a release for that product (admins/contributors);
@@ -261,8 +261,9 @@ export default async function RoadmapPage({
     canCreateRelease && !showShipped ? (
       <ReleaseCreate productId={activeProduct?.id ?? null} />
     ) : null;
+  // Every level is creatable, leaf included (ADR 0003).
   const newItemButton =
-    canEdit && !activeLevel.isLeaf ? (
+    canEdit ? (
       <WorkItemCreate
         levelKey={activeLevel.key}
         levelLabel={activeLevel.label}
@@ -284,13 +285,13 @@ export default async function RoadmapPage({
 
   // Per-column quick add: same single-product gate as the backlog board (a
   // release column can only create into an unambiguous product). Off in the
-  // shipped view and on leaf levels. The new item inherits the column's release;
-  // status defaults to the workflow's first stage.
+  // shipped view. The new item inherits the column's release; status defaults
+  // to the workflow's first stage.
   const quickAddProductId =
     activeProduct?.id ??
     (scopedProducts.length === 1 ? scopedProducts[0]?.id ?? null : null);
   const quickAdd =
-    canEdit && !activeLevel.isLeaf && !showShipped && quickAddProductId
+    canEdit && !showShipped && quickAddProductId
       ? {
           levelKey: activeLevel.key,
           levelLabel: activeLevel.label,
@@ -587,7 +588,10 @@ export default async function RoadmapPage({
         ) : features.length === 0 && scopedReleases.length === 0 ? (
           // Nothing at all yet: no items at this level and no releases.
           activeLevel.isLeaf ? (
-            <NoSpecsEmptyState canConnect={canConnectRepos(access)} />
+            <NoSpecsEmptyState
+              canConnect={canConnectRepos(access)}
+              createAction={newItemButton}
+            />
           ) : (
             <EmptyState
               className="mt-8"
@@ -612,6 +616,7 @@ export default async function RoadmapPage({
                 variant="inline"
                 className="py-4"
                 canConnect={canConnectRepos(access)}
+                createAction={newItemButton}
               />
             ) : (
               <EmptyState

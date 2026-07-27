@@ -73,6 +73,9 @@ interface RepositoriesManagerProps {
   products?: RepoProductOption[];
   /** Each repo's product links, keyed by repo id (absent repo = link-less). */
   links?: Record<string, RepoProductLinksPayload>;
+  /** The workspace's leaf level key, so post-import links land on the level
+   * imported specs actually occupy rather than the board's default. */
+  leafLevelKey?: string;
 }
 
 /** The workspace's organization installation to target for repo creation. */
@@ -95,8 +98,10 @@ function syncMessage(sync: SyncResult | { error: string }): {
   const parts = [`${sync.upserted} imported`, `${sync.skipped} unchanged`];
   if (sync.idsInjected > 0)
     parts.push(`${sync.idsInjected} stable id(s) assigned`);
-  if (sync.featuresCreated > 0)
-    parts.push(`${sync.featuresCreated} feature(s) created`);
+  if (sync.attached > 0)
+    parts.push(`${sync.attached} attached to existing item(s)`);
+  if (sync.unparented > 0)
+    parts.push(`${sync.unparented} unassigned`);
   return { kind: "ok", message: parts.join(" · ") };
 }
 
@@ -110,6 +115,7 @@ export function RepositoriesManager({
   installations,
   products = [],
   links = {},
+  leafLevelKey,
 }: RepositoriesManagerProps) {
   // Bumped after a repo is connected so the import panel re-scans for new specs.
   const [scanNonce, setScanNonce] = useState(0);
@@ -147,6 +153,7 @@ export function RepositoriesManager({
 
       {canConnect && configured && repos.length > 0 ? (
         <SpecImportPanel
+          leafLevelKey={leafLevelKey}
           scanNonce={scanNonce}
           repos={repos}
           installUrl={installUrl}
@@ -190,6 +197,7 @@ function SpecImportPanel({
   installUrl,
   orgInstallationId,
   onRepoCreated,
+  leafLevelKey,
 }: {
   scanNonce: number;
   repos: ConnectedRepo[];
@@ -198,9 +206,18 @@ function SpecImportPanel({
   orgInstallationId: string | null;
   /** Called when the nudge creates a repo, so the panel re-scans. */
   onRepoCreated: () => void;
+  /** The workspace's leaf level key; see RepositoriesManagerProps. */
+  leafLevelKey?: string;
 }) {
   const router = useRouter();
   const boardPath = useOrgProductPath();
+  // Imported specs are leaf work items, and sync no longer invents a Feature
+  // grouping to home them under (ADR 0003 D3), so the board's default level
+  // would be empty right after an import. Send people to the level their
+  // specs actually occupy.
+  const importedBoardHref = leafLevelKey
+    ? boardPath(`/backlog?level=${encodeURIComponent(leafLevelKey)}`)
+    : boardPath("/backlog");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [scan, setScan] = useState<{
@@ -280,13 +297,13 @@ function SpecImportPanel({
         ) : result ? (
           <ImportResultView
             result={result}
-            boardHref={boardPath("/backlog")}
+            boardHref={importedBoardHref}
             onRescan={() => void rescan()}
           />
         ) : totalSpecs === 0 ? (
           <EmptySpecsState
             repos={repos}
-            boardHref={boardPath("/backlog")}
+            boardHref={importedBoardHref}
             onRescan={() => void rescan()}
             loading={loading}
             installUrl={installUrl}
@@ -380,17 +397,17 @@ function ImportResultView({
   onRescan: () => void;
 }) {
   const { summary } = result;
-  const created = summary.featuresCreated;
+  const unparented = summary.unparented;
   const imported = summary.upserted;
   return (
     <div className="space-y-3">
       <p className="text-sm">
         Imported <strong>{imported}</strong> spec{imported === 1 ? "" : "s"}
-        {created > 0 ? (
+        {unparented > 0 ? (
           <>
             {" "}
-            and created <strong>{created}</strong> feature group
-            {created === 1 ? "" : "s"}
+            (<strong>{unparented}</strong> not yet under a feature, waiting in
+            Unassigned)
           </>
         ) : null}
         .

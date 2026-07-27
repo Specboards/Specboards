@@ -3,13 +3,16 @@ import type { FeatureRecord } from "@/lib/store/types";
 /**
  * Backlog filter state. Each dimension is single-valued and round-trips through
  * the URL query string so a filtered view is shareable/bookmarkable. Special
- * sentinels: `assignee="unassigned"`, `parent="none"` (top-level only), and
- * `release="none"` (unscheduled only).
+ * sentinels: `assignee="unassigned"`, `parent="none"` (top-level only),
+ * `release="none"` (unscheduled only), and `cycle="none"` (in no cycle).
  */
 export interface FeatureFilters {
   status?: string;
   assignee?: string;
   release?: string;
+  /** Owning cycle id, or "none" for items in no cycle. Independent of
+   * `release`: both can be set, and they narrow on different axes. */
+  cycle?: string;
   tag?: string;
   parent?: string;
   /** Owning product id; only meaningful in the cross-product view. */
@@ -35,6 +38,7 @@ export const FILTER_KEYS = [
   "status",
   "assignee",
   "release",
+  "cycle",
   "tag",
   "parent",
   "product",
@@ -66,6 +70,8 @@ export function parseFeatureFilters(params: RawParams): FeatureFilters {
   if (assignee) filters.assignee = assignee;
   const release = first(params.release);
   if (release) filters.release = release;
+  const cycle = first(params.cycle);
+  if (cycle) filters.cycle = cycle;
   const tag = first(params.tag);
   if (tag) filters.tag = tag;
   const parent = first(params.parent);
@@ -158,6 +164,13 @@ export function applyFeatureFilters(
       if (filters.release === "none") {
         if (f.releaseId !== null) return false;
       } else if (f.releaseId !== filters.release) {
+        return false;
+      }
+    }
+    if (filters.cycle) {
+      if (filters.cycle === "none") {
+        if (f.cycleId !== null) return false;
+      } else if (f.cycleId !== filters.cycle) {
         return false;
       }
     }

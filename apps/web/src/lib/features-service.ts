@@ -7,11 +7,22 @@ import {
   isPropertyType,
   isValidParentLevel,
   propertyKeyFromLabel,
+  isGoalStatus,
+  isMetricKind,
+  validateCycleDates,
+  validateGoalPeriod,
+  validateKeyResult,
+  GOAL_STATUSES,
+  METRIC_KINDS,
+  type GoalStatus,
+  type MetricKind,
   type PropertyDef,
 } from "@specboards/core";
 
+import { getDb } from "@/lib/db";
 import { RICE_IMPACT_VALUES } from "@/lib/feature-helpers";
 import { resolveWorkflowFor } from "@/lib/repo-config";
+import { deleteSpecFile } from "@/lib/spec-content";
 import { notifyOutbox } from "@/lib/webhooks/events";
 import {
   getStore,
@@ -46,6 +57,17 @@ import {
   type PropertyInput,
   type PropertyPatch,
   type RelationInput,
+  type GoalContribution,
+  type GoalInput,
+  type GoalPatch,
+  type GoalRecord,
+  type ItemGoalRef,
+  type KeyResultInput,
+  type KeyResultPatch,
+  type CycleInput,
+  type CyclePatch,
+  type CycleRecord,
+  type CycleRolloverResult,
   type ReleaseInput,
   type ReleaseNotesMode,
   type ReleasePatch,
@@ -104,6 +126,12 @@ export function parseFeaturePatch(body: unknown): FeaturePatch {
     }
     patch.releaseId = raw.releaseId as string | null;
   }
+  if ("cycleId" in raw) {
+    if (raw.cycleId !== null && !isUuid(raw.cycleId)) {
+      throw new InvalidPatchError("cycleId must be a UUID or null.");
+    }
+    patch.cycleId = raw.cycleId as string | null;
+  }
   if ("tags" in raw) {
     if (!Array.isArray(raw.tags) || raw.tags.some((t) => typeof t !== "string")) {
       throw new InvalidPatchError("tags must be an array of strings.");
@@ -158,7 +186,7 @@ export function parseFeaturePatch(body: unknown): FeaturePatch {
 
   if (Object.keys(patch).length === 0) {
     throw new InvalidPatchError(
-      "Patch must set at least one of: title, status, rank, tags, releaseId, assigneeId, customFields, parentSpecId, details.",
+      "Patch must set at least one of: title, status, rank, tags, releaseId, cycleId, assigneeId, customFields, parentSpecId, details.",
     );
   }
   return patch;
@@ -430,7 +458,7 @@ async function applyFeaturePatch(
 /** The fields a bulk edit may set directly. Tags are handled separately (add /
  * clear) so a mixed selection isn't clobbered by a single replacement; other
  * per-item concerns (title, rank, parent, details, customFields) are excluded. */
-const BULK_PATCH_KEYS = ["status", "assigneeId", "releaseId"] as const;
+const BULK_PATCH_KEYS = ["status", "assigneeId", "releaseId", "cycleId"] as const;
 
 /** Cap a single batch so one request can't fan out unbounded work. */
 const BULK_MAX_ITEMS = 200;
@@ -512,7 +540,7 @@ export function parseBulkPatchRequest(body: unknown): BulkPatchRequest {
 
   if (Object.keys(patch).length === 0 && !tagOps.addTags && !tagOps.clearTags) {
     throw new InvalidPatchError(
-      "A bulk edit must change at least one of: status, assigneeId, releaseId, addTags, clearTags.",
+      "A bulk edit must change at least one of: status, assigneeId, releaseId, cycleId, addTags, clearTags.",
     );
   }
   if (tagOps.clearTags && tagOps.addTags) {
@@ -688,6 +716,12 @@ export function parseCreateFeatureInput(body: unknown): CreateFeatureInput {
       throw new InvalidPatchError("releaseId must be a UUID or null.");
     }
     input.releaseId = raw.releaseId;
+  }
+  if ("cycleId" in raw && raw.cycleId !== null) {
+    if (!isUuid(raw.cycleId)) {
+      throw new InvalidPatchError("cycleId must be a UUID or null.");
+    }
+    input.cycleId = raw.cycleId;
   }
   if ("customFields" in raw && raw.customFields !== null) {
     input.customFields = parseCustomFields(raw.customFields);
@@ -1432,6 +1466,374 @@ export function parseReleasePatch(body: unknown): ReleasePatch {
   return patch;
 }
 
+// ── Cycles ────────────────────────────────────────────────────────────────
+// Thin service wrappers, mirroring the release ones. Cycles carry no derived
+// invariant of their own the way releases do (clampReleaseTarget): the
+// start/end ordering is enforced by validateCycleDates in core, so both stores
+// and both parsers reject the same thing with the same wording.
+
+export async function listCycles(
+  scope?: WorkspaceScope,
+): Promise<CycleRecord[]> {
+  const store = await getStore();
+  return store.listCycles(scope);
+}
+
+export async function createCycle(
+  input: CycleInput,
+  scope?: WorkspaceScope,
+): Promise<CycleRecord> {
+  const store = await getStore();
+  return store.createCycle(input, scope);
+}
+
+export async function updateCycle(
+  id: string,
+  patch: CyclePatch,
+  scope?: WorkspaceScope,
+): Promise<CycleRecord> {
+  const store = await getStore();
+  return store.updateCycle(id, patch, scope);
+}
+
+export async function deleteCycle(
+  id: string,
+  scope?: WorkspaceScope,
+): Promise<void> {
+  const store = await getStore();
+  await store.deleteCycle(id, scope);
+}
+
+export async function rolloverCycle(
+  fromId: string,
+  toId: string,
+  scope?: WorkspaceScope,
+): Promise<CycleRolloverResult> {
+  const store = await getStore();
+  return store.rolloverCycle(fromId, toId, scope);
+}
+
+/** Parse and validate an untrusted cycle POST body. */
+export function parseCycleInput(body: unknown): CycleInput {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    throw new InvalidPatchError("Request body must be a JSON object.");
+  }
+  const raw = body as Record<string, unknown>;
+  if (typeof raw.name !== "string" || raw.name.trim() === "") {
+    throw new InvalidPatchError("name is required.");
+  }
+  const startDate = parseDate(raw.startDate, "startDate");
+  const endDate = parseDate(raw.endDate, "endDate");
+  if (!startDate || !endDate) {
+    throw new InvalidPatchError("startDate and endDate are required.");
+  }
+  const dateError = validateCycleDates(startDate, endDate);
+  if (dateError) throw new InvalidPatchError(dateError);
+  const input: CycleInput = { name: raw.name.trim(), startDate, endDate };
+  if ("productId" in raw) input.productId = parseProductId(raw.productId);
+  if ("notes" in raw) input.notes = parseReleaseNotes(raw.notes);
+  return input;
+}
+
+/** Parse and validate an untrusted cycle PATCH body. */
+export function parseCyclePatch(body: unknown): CyclePatch {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    throw new InvalidPatchError("Request body must be a JSON object.");
+  }
+  const raw = body as Record<string, unknown>;
+  const patch: CyclePatch = {};
+  if ("name" in raw) {
+    if (typeof raw.name !== "string" || raw.name.trim() === "") {
+      throw new InvalidPatchError("name must be a non-empty string.");
+    }
+    patch.name = raw.name.trim();
+  }
+  if ("productId" in raw) patch.productId = parseProductId(raw.productId);
+  if ("startDate" in raw) {
+    const value = parseDate(raw.startDate, "startDate");
+    if (!value) throw new InvalidPatchError("startDate cannot be cleared.");
+    patch.startDate = value;
+  }
+  if ("endDate" in raw) {
+    const value = parseDate(raw.endDate, "endDate");
+    if (!value) throw new InvalidPatchError("endDate cannot be cleared.");
+    patch.endDate = value;
+  }
+  if ("notes" in raw) patch.notes = parseReleaseNotes(raw.notes);
+  // Only checked when both ends are in the patch; a patch moving one end is
+  // validated by the store against the stored value it leaves alone.
+  if (patch.startDate && patch.endDate) {
+    const dateError = validateCycleDates(patch.startDate, patch.endDate);
+    if (dateError) throw new InvalidPatchError(dateError);
+  }
+  if (Object.keys(patch).length === 0) {
+    throw new InvalidPatchError(
+      "Patch must set at least one of: name, productId, startDate, endDate, notes.",
+    );
+  }
+  return patch;
+}
+
+// ── Goals ─────────────────────────────────────────────────────────────────
+// Thin wrappers plus the untrusted-body parsers. The measurement rules
+// (period ordering, target-differs-from-start) live in core so both stores and
+// both parsers reject the same thing with the same wording.
+
+export async function listGoals(
+  scope?: WorkspaceScope,
+): Promise<GoalRecord[]> {
+  const store = await getStore();
+  return store.listGoals(scope);
+}
+
+export async function createGoal(
+  input: GoalInput,
+  scope?: WorkspaceScope,
+): Promise<GoalRecord> {
+  const store = await getStore();
+  return store.createGoal(input, scope);
+}
+
+export async function updateGoal(
+  id: string,
+  patch: GoalPatch,
+  scope?: WorkspaceScope,
+): Promise<GoalRecord> {
+  const store = await getStore();
+  return store.updateGoal(id, patch, scope);
+}
+
+export async function deleteGoal(
+  id: string,
+  scope?: WorkspaceScope,
+): Promise<void> {
+  const store = await getStore();
+  await store.deleteGoal(id, scope);
+}
+
+export async function createKeyResult(
+  goalId: string,
+  input: KeyResultInput,
+  scope?: WorkspaceScope,
+): Promise<GoalRecord> {
+  const store = await getStore();
+  return store.createKeyResult(goalId, input, scope);
+}
+
+export async function updateKeyResult(
+  id: string,
+  patch: KeyResultPatch,
+  scope?: WorkspaceScope,
+): Promise<GoalRecord> {
+  const store = await getStore();
+  return store.updateKeyResult(id, patch, scope);
+}
+
+export async function deleteKeyResult(
+  id: string,
+  scope?: WorkspaceScope,
+): Promise<GoalRecord> {
+  const store = await getStore();
+  return store.deleteKeyResult(id, scope);
+}
+
+export async function listGoalContributions(
+  goalId: string,
+  scope?: WorkspaceScope,
+): Promise<GoalContribution[]> {
+  const store = await getStore();
+  return store.listGoalContributions(goalId, scope);
+}
+
+export async function listItemGoals(
+  specId: string,
+  scope?: WorkspaceScope,
+): Promise<ItemGoalRef[]> {
+  const store = await getStore();
+  return store.listItemGoals(specId, scope);
+}
+
+export async function linkGoal(
+  goalId: string,
+  specId: string,
+  scope?: WorkspaceScope,
+): Promise<void> {
+  const store = await getStore();
+  await store.linkGoal(goalId, specId, scope);
+}
+
+export async function unlinkGoal(
+  goalId: string,
+  specId: string,
+  scope?: WorkspaceScope,
+): Promise<void> {
+  const store = await getStore();
+  await store.unlinkGoal(goalId, specId, scope);
+}
+
+/** Parse and validate an untrusted goal POST body. */
+export function parseGoalInput(body: unknown): GoalInput {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    throw new InvalidPatchError("Request body must be a JSON object.");
+  }
+  const raw = body as Record<string, unknown>;
+  if (typeof raw.title !== "string" || raw.title.trim() === "") {
+    throw new InvalidPatchError("title is required.");
+  }
+  const input: GoalInput = { title: raw.title.trim() };
+  if ("description" in raw) input.description = parseReleaseNotes(raw.description);
+  if ("productId" in raw) input.productId = parseProductId(raw.productId);
+  if ("periodStart" in raw)
+    input.periodStart = parseDate(raw.periodStart, "periodStart");
+  if ("periodEnd" in raw)
+    input.periodEnd = parseDate(raw.periodEnd, "periodEnd");
+  if ("parentGoalId" in raw && raw.parentGoalId !== null) {
+    if (!isUuid(raw.parentGoalId)) {
+      throw new InvalidPatchError("parentGoalId must be a UUID or null.");
+    }
+    input.parentGoalId = raw.parentGoalId;
+  } else if ("parentGoalId" in raw) {
+    input.parentGoalId = null;
+  }
+  if ("status" in raw) input.status = parseGoalStatus(raw.status);
+  const periodError = validateGoalPeriod(
+    input.periodStart ?? null,
+    input.periodEnd ?? null,
+  );
+  if (periodError) throw new InvalidPatchError(periodError);
+  return input;
+}
+
+/** Parse and validate an untrusted goal PATCH body. */
+export function parseGoalPatch(body: unknown): GoalPatch {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    throw new InvalidPatchError("Request body must be a JSON object.");
+  }
+  const raw = body as Record<string, unknown>;
+  const patch: GoalPatch = {};
+  if ("title" in raw) {
+    if (typeof raw.title !== "string" || raw.title.trim() === "") {
+      throw new InvalidPatchError("title must be a non-empty string.");
+    }
+    patch.title = raw.title.trim();
+  }
+  if ("description" in raw) patch.description = parseReleaseNotes(raw.description);
+  if ("productId" in raw) patch.productId = parseProductId(raw.productId);
+  if ("periodStart" in raw)
+    patch.periodStart = parseDate(raw.periodStart, "periodStart");
+  if ("periodEnd" in raw)
+    patch.periodEnd = parseDate(raw.periodEnd, "periodEnd");
+  if ("parentGoalId" in raw) {
+    if (raw.parentGoalId !== null && !isUuid(raw.parentGoalId)) {
+      throw new InvalidPatchError("parentGoalId must be a UUID or null.");
+    }
+    patch.parentGoalId = raw.parentGoalId as string | null;
+  }
+  if ("status" in raw) patch.status = parseGoalStatus(raw.status);
+  // Only checked when both ends are in the patch; a patch moving one end is
+  // validated by the store against the stored value it leaves alone.
+  if (patch.periodStart !== undefined && patch.periodEnd !== undefined) {
+    const periodError = validateGoalPeriod(
+      patch.periodStart,
+      patch.periodEnd,
+    );
+    if (periodError) throw new InvalidPatchError(periodError);
+  }
+  if (Object.keys(patch).length === 0) {
+    throw new InvalidPatchError(
+      "Patch must set at least one of: title, description, productId, " +
+        "periodStart, periodEnd, parentGoalId, status.",
+    );
+  }
+  return patch;
+}
+
+/** Parse and validate an untrusted key-result POST body. */
+export function parseKeyResultInput(body: unknown): KeyResultInput {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    throw new InvalidPatchError("Request body must be a JSON object.");
+  }
+  const raw = body as Record<string, unknown>;
+  if (typeof raw.title !== "string" || raw.title.trim() === "") {
+    throw new InvalidPatchError("title is required.");
+  }
+  const targetValue = parseFiniteNumber(raw.targetValue, "targetValue");
+  if (targetValue === null) {
+    throw new InvalidPatchError("targetValue is required.");
+  }
+  const input: KeyResultInput = { title: raw.title.trim(), targetValue };
+  if ("metricKind" in raw) input.metricKind = parseMetricKind(raw.metricKind);
+  const startValue = parseFiniteNumber(raw.startValue, "startValue");
+  if (startValue !== null) input.startValue = startValue;
+  const currentValue = parseFiniteNumber(raw.currentValue, "currentValue");
+  if (currentValue !== null) input.currentValue = currentValue;
+  const error = validateKeyResult({
+    metricKind: input.metricKind ?? "number",
+    startValue: input.startValue ?? 0,
+    targetValue,
+  });
+  if (error) throw new InvalidPatchError(error);
+  return input;
+}
+
+/** Parse and validate an untrusted key-result PATCH body. */
+export function parseKeyResultPatch(body: unknown): KeyResultPatch {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    throw new InvalidPatchError("Request body must be a JSON object.");
+  }
+  const raw = body as Record<string, unknown>;
+  const patch: KeyResultPatch = {};
+  if ("title" in raw) {
+    if (typeof raw.title !== "string" || raw.title.trim() === "") {
+      throw new InvalidPatchError("title must be a non-empty string.");
+    }
+    patch.title = raw.title.trim();
+  }
+  if ("metricKind" in raw) patch.metricKind = parseMetricKind(raw.metricKind);
+  for (const key of ["startValue", "targetValue", "currentValue", "position"] as const) {
+    if (!(key in raw)) continue;
+    const value = parseFiniteNumber(raw[key], key);
+    if (value === null) {
+      throw new InvalidPatchError(`${key} must be a number.`);
+    }
+    patch[key] = value;
+  }
+  if (Object.keys(patch).length === 0) {
+    throw new InvalidPatchError(
+      "Patch must set at least one of: title, metricKind, startValue, " +
+        "targetValue, currentValue, position.",
+    );
+  }
+  return patch;
+}
+
+function parseGoalStatus(value: unknown): GoalStatus {
+  if (!isGoalStatus(value)) {
+    throw new InvalidPatchError(
+      `status must be one of: ${GOAL_STATUSES.join(", ")}.`,
+    );
+  }
+  return value;
+}
+
+function parseMetricKind(value: unknown): MetricKind {
+  if (!isMetricKind(value)) {
+    throw new InvalidPatchError(
+      `metricKind must be one of: ${METRIC_KINDS.join(", ")}.`,
+    );
+  }
+  return value;
+}
+
+/** A finite number, or null when the key is absent/null (not an error). */
+function parseFiniteNumber(value: unknown, label: string): number | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new InvalidPatchError(`${label} must be a finite number.`);
+  }
+  return value;
+}
+
 /** Validate a productId: a non-empty string (product uuid) or null (portfolio). */
 function parseProductId(value: unknown): string | null {
   if (value === null || value === undefined || value === "") return null;
@@ -1779,10 +2181,16 @@ export async function createWorkItem(
   return created;
 }
 
-/** Delete a DB-native work item by id. */
+/**
+ * Delete a work item by id. An item with a spec attached needs `removeSpec`,
+ * which deletes the spec file from git first: leaving it behind would let the
+ * next sync re-import the spec and recreate the item (ADR 0003 D4). Without
+ * the opt-in the store refuses and says so.
+ */
 export async function deleteWorkItem(
   specId: string,
   scope?: WorkspaceScope,
+  opts: { removeSpec?: boolean } = {},
 ): Promise<void> {
   const store = await getStore();
   // Read the item first so the event can describe what was removed; the store
@@ -1799,7 +2207,29 @@ export async function deleteWorkItem(
         },
       }
     : undefined;
-  await store.deleteFeature(specId, scope, emit);
+
+  // Remove the git file before the row. The other order would leave a spec in
+  // the repo with no item to re-import onto if the git call then failed; this
+  // order fails with the file already gone, which the next sync reconciles.
+  let specRemoved = false;
+  const hasSpec = existing != null && !existing.isDbNative;
+  if (hasSpec && opts.removeSpec) {
+    const db = getDb();
+    if (!db) {
+      throw new InvalidPatchError(
+        "Removing a spec file needs a connected repository, which local file " +
+          "mode has none of. Delete the file directly instead.",
+      );
+    }
+    await deleteSpecFile(db, scope!, specId);
+    specRemoved = true;
+  }
+
+  await store.deleteFeature(specId, scope, emit, {
+    // Local file mode owns its working tree and removes the file itself, so it
+    // just needs the confirmation; the DB store needs it to have already gone.
+    specRemoved: specRemoved || (hasSpec && opts.removeSpec === true),
+  });
   if (emit) notifyOutbox();
 }
 

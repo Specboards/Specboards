@@ -15,6 +15,8 @@ import {
   outboxEvents,
   productGroups,
   products,
+  cycles,
+  goals,
   releases,
   repositories,
   schema,
@@ -76,6 +78,16 @@ export async function resetBoard(workspaceId: string): Promise<void> {
 /** Remove every release in the workspace (items are unscheduled by SET NULL). */
 export async function resetReleases(workspaceId: string): Promise<void> {
   await db().delete(releases).where(eq(releases.workspaceId, workspaceId));
+}
+
+/** Remove every cycle in the workspace (items are unscheduled by SET NULL). */
+export async function resetCycles(workspaceId: string): Promise<void> {
+  await db().delete(cycles).where(eq(cycles.workspaceId, workspaceId));
+}
+
+/** Remove every goal in the workspace (key results and links cascade). */
+export async function resetGoals(workspaceId: string): Promise<void> {
+  await db().delete(goals).where(eq(goals.workspaceId, workspaceId));
 }
 
 /** Remove every product group and every non-default product (test-created

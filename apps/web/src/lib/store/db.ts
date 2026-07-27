@@ -3,6 +3,13 @@ import { randomUUID } from "node:crypto";
 import {
   canReadProduct,
   canWriteProduct,
+  compareCycles,
+  compareGoals,
+  cycleState,
+  deliveryProgress,
+  goalProgress,
+  isGoalStatus,
+  keyResultProgress,
   DEFAULT_PRODUCT_KEY,
   descendantGroupIds,
   extractSections,
@@ -10,7 +17,6 @@ import {
   wouldCreateCycle,
   wouldExceedDepth,
   isGeneratedGroupingTitle,
-  isLeafLevel,
   isPropertyType,
   isTransitionMode,
   isValidParentLevel,
@@ -20,7 +26,14 @@ import {
   resolveIdeaStages,
   resolveLevels,
   resolveLevelUpdate,
+  todayDateOnly,
+  validateCycleDates,
+  validateGoalPeriod,
+  validateKeyResult,
+  wouldCreateGoalCycle,
+  type GoalStatus,
   type IdeaStage,
+  type MetricKind,
   type PropertyDef,
   type PropertyEntity,
   type TransitionMode,
@@ -33,6 +46,10 @@ import {
   asc,
   boardPreferences,
   comments,
+  cycles,
+  goalLinks,
+  goals,
+  keyResults,
   count,
   createDb,
   desc,
@@ -49,6 +66,7 @@ import {
   ideas,
   inArray,
   isNull,
+  not,
   lt,
   members,
   ne,
@@ -91,7 +109,21 @@ import {
   type BoardKey,
   type BoardPreferences,
   type CreateFeatureInput,
+  CycleError,
+  GoalError,
+  type GoalContribution,
+  type GoalInput,
+  type GoalPatch,
+  type GoalRecord,
+  type ItemGoalRef,
+  type KeyResultInput,
+  type KeyResultPatch,
+  type CycleInput,
+  type CyclePatch,
+  type CycleRecord,
+  type CycleRolloverResult,
   type CreateProductInput,
+  type DeleteFeatureOptions,
   type DetailTemplate,
   type DetailTemplateInput,
   type DetailTemplatePatch,
@@ -193,6 +225,15 @@ function directionFor(link: LinkRow, featureId: string): RelationDirection {
 function isDone(status: string): boolean {
   return status === "done";
 }
+
+/**
+ * Statuses a cycle rollover leaves behind. Done work stays in the cycle that
+ * delivered it, so the closed cycle keeps an honest record; archived work is
+ * not carried into a new cycle either, since archiving is how a team says they
+ * are not doing it. Broader than `isDone`, which answers a different question
+ * (how much of this is finished) and must not count archived items as done.
+ */
+const NOT_ROLLED_OVER = ["done", "archived"];
 
 /** Normalize the jsonb custom-fields column into the UI's value map. */
 function toCustomFields(value: unknown): Record<string, CustomFieldValue> {
@@ -378,12 +419,16 @@ export class DbStore implements FeatureStore {
         specId: row.specId,
         title: row.title,
         level: row.level,
-        isDbNative: row.repoId === null,
+        // "No attached spec", derived from spec_index rather than repo_id: a
+        // work item with no spec has no repo either, so the two only look alike
+        // until human work items exist. See ADR 0003 D2.
+        isDbNative: row.index == null,
         productId: row.productId,
         status: row.status,
         rank: row.rank,
         tags: row.tags,
         releaseId: row.releaseId,
+        cycleId: row.cycleId,
         assigneeId: row.assigneeId,
         customFields: toCustomFields(row.customFields),
         ...riceFields({
@@ -622,12 +667,14 @@ export class DbStore implements FeatureStore {
         specId: row.specId,
         title: row.title,
         level: row.level,
-        isDbNative: row.repoId === null,
+        // See listFeatures: "no attached spec", not "no repo" (ADR 0003 D2).
+        isDbNative: row.index == null,
         productId: row.productId,
         status: row.status,
         rank: row.rank,
         tags: row.tags,
         releaseId: row.releaseId,
+        cycleId: row.cycleId,
         assigneeId: row.assigneeId,
         assigneeName,
         customFields: toCustomFields(row.customFields),
@@ -954,10 +1001,8 @@ export class DbStore implements FeatureStore {
       if (!title) throw new FeatureError("Title is required.");
       if (!levels.some((l) => l.key === input.level))
         throw new FeatureError(`Unknown level: ${input.level}`);
-      if (isLeafLevel(input.level, levels))
-        throw new FeatureError(
-          "Leaf-level items come from specs and can't be created here.",
-        );
+      // Leaf-level items are creatable here: a spec is an attachment, not an
+      // identity, so a work item with no spec is a first-class row. See ADR 0003.
 
       // Resolve + validate the parent (must be exactly one level up).
       let parentId: string | null = null;
@@ -1019,8 +1064,25 @@ export class DbStore implements FeatureStore {
         }
       }
 
-      // DB-native items have no repo/spec; spec_id mirrors the row id so every
-      // row stays uniformly routable by specId.
+      // Cycles follow the same rule on their own axis: a workspace-wide cycle
+      // takes anything, a product cycle only that product's work.
+      if (input.cycleId) {
+        const cycle = await tx
+          .select({ id: cycles.id, productId: cycles.productId })
+          .from(cycles)
+          .where(and(eq(cycles.id, input.cycleId), eq(cycles.workspaceId, ws)))
+          .limit(1);
+        if (!cycle[0]) {
+          throw new FeatureError(`Unknown cycle: ${input.cycleId}`);
+        }
+        if (cycle[0].productId !== null && cycle[0].productId !== productId) {
+          throw new FeatureError("Cycle belongs to a different product.");
+        }
+      }
+
+      // An item created here has no spec attached, so it has no repo and no
+      // frontmatter id; spec_id mirrors the row id, keeping every row uniformly
+      // routable by specId. Attaching a spec later reuses this id (ADR 0003 D3).
       const id = randomUUID();
       const [row] = await tx
         .insert(features)
@@ -1035,6 +1097,7 @@ export class DbStore implements FeatureStore {
           status: input.status ?? "backlog",
           assigneeId: input.assigneeId ?? null,
           releaseId: input.releaseId ?? null,
+          cycleId: input.cycleId ?? null,
           customFields: input.customFields ?? {},
           tags: input.tags ?? [],
           details: input.details?.trim() ? input.details : null,
@@ -1071,6 +1134,7 @@ export class DbStore implements FeatureStore {
         rank: row.rank,
         tags: row.tags,
         releaseId: row.releaseId,
+        cycleId: row.cycleId,
         assigneeId: row.assigneeId,
         customFields: toCustomFields(row.customFields),
         ...riceFields({
@@ -1094,16 +1158,18 @@ export class DbStore implements FeatureStore {
     specId: string,
     scope?: WorkspaceScope,
     emit?: OutboxEmit,
+    opts?: DeleteFeatureOptions,
   ): Promise<void> {
     await this.scoped(scope, async (tx) => {
       const ws = scope!.workspaceId;
       const row = await tx
         .select({
           id: features.id,
-          repoId: features.repoId,
           productId: features.productId,
+          specPath: specIndex.path,
         })
         .from(features)
+        .leftJoin(specIndex, eq(specIndex.featureId, features.id))
         .where(and(eq(features.specId, specId), eq(features.workspaceId, ws)));
       if (!row[0]) throw new FeatureError(`Unknown work item: ${specId}`);
       const access = await this.accessIn(tx, scope!);
@@ -1112,10 +1178,18 @@ export class DbStore implements FeatureStore {
           "Your role does not permit editing this product.",
         );
       }
-      if (row[0].repoId !== null)
+      // An item with a spec attached can be deleted, but only together with its
+      // git file: leaving the file behind would let the next sync re-import the
+      // spec and recreate the item with default metadata, silently undoing the
+      // delete. The caller removes the file first and passes `specRemoved`
+      // (ADR 0003 D4). `spec_index` is ON DELETE CASCADE, so the index row goes
+      // with the item either way.
+      if (row[0].specPath !== null && !opts?.specRemoved) {
         throw new FeatureError(
-          "Spec-backed items can't be deleted here. Remove the spec in git.",
+          "This work item has a spec attached. Deleting it also deletes " +
+            `${row[0].specPath} from git; pass removeSpec to confirm.`,
         );
+      }
       // Children's parent_id is ON DELETE SET NULL, so they're orphaned, not deleted.
       await tx
         .delete(features)
@@ -1272,6 +1346,24 @@ export class DbStore implements FeatureStore {
           throw new RelationError(
             "Release belongs to a different product.",
           );
+        }
+      }
+      // Same rule for the cycle axis; the two are independent, so setting one
+      // never validates or clears the other.
+      if (typeof rest.cycleId === "string" && rest.cycleId) {
+        const cycle = await tx
+          .select({ id: cycles.id, productId: cycles.productId })
+          .from(cycles)
+          .where(and(eq(cycles.id, rest.cycleId), eq(cycles.workspaceId, ws)))
+          .limit(1);
+        if (!cycle[0]) {
+          throw new RelationError(`Unknown cycle: ${rest.cycleId}`);
+        }
+        if (
+          cycle[0].productId !== null &&
+          cycle[0].productId !== current[0].productId
+        ) {
+          throw new RelationError("Cycle belongs to a different product.");
         }
       }
       const set: Record<string, unknown> = { ...rest, updatedAt: new Date() };
@@ -2387,6 +2479,798 @@ export class DbStore implements FeatureStore {
     });
   }
 
+  // ── Cycles ────────────────────────────────────────────────────────────
+  //
+  // Deliberately parallel to the release methods above: same product-scoped
+  // authorization (canWriteProductId handles both the per-product and the
+  // workspace-wide/owner-only case), same name-uniqueness pre-check against
+  // the two partial unique indexes, same set-null unscheduling on delete. The
+  // one difference is that a cycle has no stored status: `state` is computed
+  // from the dates on every read, so nothing can go stale.
+
+  async listCycles(scope?: WorkspaceScope): Promise<CycleRecord[]> {
+    return this.scoped(scope, async (tx) => {
+      const ws = scope!.workspaceId;
+      const [rows, counts] = await Promise.all([
+        tx.select().from(cycles).where(eq(cycles.workspaceId, ws)),
+        tx
+          .select({
+            cycleId: features.cycleId,
+            status: features.status,
+            n: count(),
+          })
+          .from(features)
+          .where(eq(features.workspaceId, ws))
+          .groupBy(features.cycleId, features.status),
+      ]);
+      const totals = new Map<string, { items: number; done: number }>();
+      for (const c of counts) {
+        if (!c.cycleId) continue;
+        const acc = totals.get(c.cycleId) ?? { items: 0, done: 0 };
+        acc.items += Number(c.n);
+        if (isDone(c.status)) acc.done += Number(c.n);
+        totals.set(c.cycleId, acc);
+      }
+      const today = todayDateOnly();
+      return rows
+        .map((r) => toCycleRecord(r, totals.get(r.id), today))
+        .sort((a, b) => compareCycles(a, b, today));
+    });
+  }
+
+  async createCycle(
+    input: CycleInput,
+    scope?: WorkspaceScope,
+  ): Promise<CycleRecord> {
+    return this.scoped(scope, async (tx) => {
+      const ws = scope!.workspaceId;
+      const name = input.name.trim();
+      if (!name) throw new CycleError("Cycle name is required.");
+      const dateError = validateCycleDates(input.startDate, input.endDate);
+      if (dateError) throw new CycleError(dateError);
+      const productId = input.productId ?? null;
+      const access = await this.accessIn(tx, scope!);
+      if (!canWriteProductId(access, productId)) {
+        throw new CycleError(
+          productId === null
+            ? "Only the workspace owner can create workspace-wide cycles."
+            : "Your role does not permit creating cycles for this product.",
+        );
+      }
+      if (productId !== null) {
+        await this.requireProductId(tx, ws, productId);
+      }
+      await this.assertCycleNameFree(tx, ws, name, productId, null);
+      const [row] = await tx
+        .insert(cycles)
+        .values({
+          workspaceId: ws,
+          productId,
+          name,
+          startDate: input.startDate,
+          endDate: input.endDate,
+          notes: input.notes ?? null,
+        })
+        .returning();
+      if (!row) throw new CycleError(`A cycle named "${name}" already exists.`);
+      return toCycleRecord(row, undefined, todayDateOnly());
+    });
+  }
+
+  async updateCycle(
+    id: string,
+    patch: CyclePatch,
+    scope?: WorkspaceScope,
+  ): Promise<CycleRecord> {
+    return this.scoped(scope, async (tx) => {
+      const ws = scope!.workspaceId;
+      const [current] = await tx
+        .select({
+          productId: cycles.productId,
+          name: cycles.name,
+          startDate: cycles.startDate,
+          endDate: cycles.endDate,
+        })
+        .from(cycles)
+        .where(and(eq(cycles.id, id), eq(cycles.workspaceId, ws)))
+        .limit(1);
+      if (!current) throw new CycleError(`Unknown cycle: ${id}`);
+      const access = await this.accessIn(tx, scope!);
+      if (!canWriteProductId(access, current.productId)) {
+        throw new CycleError(
+          current.productId === null
+            ? "Only the workspace owner can edit workspace-wide cycles."
+            : "Your role does not permit editing cycles for this product.",
+        );
+      }
+
+      // Validate the dates as they will be *after* the patch, so moving one end
+      // can't produce a cycle that ends before it starts.
+      const startDate = patch.startDate ?? current.startDate;
+      const endDate = patch.endDate ?? current.endDate;
+      const dateError = validateCycleDates(startDate, endDate);
+      if (dateError) throw new CycleError(dateError);
+
+      const set: Record<string, unknown> = { updatedAt: new Date() };
+      if (patch.name !== undefined) {
+        const name = patch.name.trim();
+        if (!name) throw new CycleError("Cycle name is required.");
+        set.name = name;
+      }
+      if (patch.startDate !== undefined) set.startDate = patch.startDate;
+      if (patch.endDate !== undefined) set.endDate = patch.endDate;
+      if (patch.notes !== undefined) set.notes = patch.notes;
+
+      // Moving to a different product needs write access to the destination
+      // too, and unschedules items that no longer match (mirrors updateRelease).
+      let targetProductId = current.productId;
+      if (
+        patch.productId !== undefined &&
+        patch.productId !== current.productId
+      ) {
+        targetProductId = patch.productId;
+        if (!canWriteProductId(access, targetProductId)) {
+          throw new CycleError(
+            targetProductId === null
+              ? "Only the workspace owner can move a cycle to the workspace scope."
+              : "Your role does not permit moving a cycle to that product.",
+          );
+        }
+        if (targetProductId !== null) {
+          await this.requireProductId(tx, ws, targetProductId);
+        }
+        set.productId = targetProductId;
+      }
+
+      if (set.name !== undefined || set.productId !== undefined) {
+        await this.assertCycleNameFree(
+          tx,
+          ws,
+          (set.name as string | undefined) ?? current.name,
+          targetProductId,
+          id,
+        );
+      }
+
+      const [row] = await tx
+        .update(cycles)
+        .set(set)
+        .where(and(eq(cycles.id, id), eq(cycles.workspaceId, ws)))
+        .returning();
+      if (!row) throw new CycleError(`Unknown cycle: ${id}`);
+      if (set.productId !== undefined && targetProductId !== null) {
+        await tx
+          .update(features)
+          .set({ cycleId: null, updatedAt: new Date() })
+          .where(
+            and(
+              eq(features.workspaceId, ws),
+              eq(features.cycleId, id),
+              ne(features.productId, targetProductId),
+            ),
+          );
+      }
+      return toCycleRecord(row, await this.cycleTotals(tx, ws, id), todayDateOnly());
+    });
+  }
+
+  async deleteCycle(id: string, scope?: WorkspaceScope): Promise<void> {
+    await this.scoped(scope, async (tx) => {
+      const ws = scope!.workspaceId;
+      const [current] = await tx
+        .select({ productId: cycles.productId })
+        .from(cycles)
+        .where(and(eq(cycles.id, id), eq(cycles.workspaceId, ws)))
+        .limit(1);
+      if (!current) throw new CycleError(`Unknown cycle: ${id}`);
+      const access = await this.accessIn(tx, scope!);
+      if (!canWriteProductId(access, current.productId)) {
+        throw new CycleError(
+          current.productId === null
+            ? "Only the workspace owner can delete workspace-wide cycles."
+            : "Your role does not permit deleting cycles for this product.",
+        );
+      }
+      // features.cycle_id is ON DELETE SET NULL, so items are unscheduled.
+      await tx
+        .delete(cycles)
+        .where(and(eq(cycles.id, id), eq(cycles.workspaceId, ws)));
+    });
+  }
+
+  async rolloverCycle(
+    fromId: string,
+    toId: string,
+    scope?: WorkspaceScope,
+  ): Promise<CycleRolloverResult> {
+    return this.scoped(scope, async (tx) => {
+      const ws = scope!.workspaceId;
+      if (fromId === toId) {
+        throw new CycleError("Pick a different cycle to roll work into.");
+      }
+      const rows = await tx
+        .select({
+          id: cycles.id,
+          productId: cycles.productId,
+          endDate: cycles.endDate,
+        })
+        .from(cycles)
+        .where(and(eq(cycles.workspaceId, ws), inArray(cycles.id, [fromId, toId])));
+      const from = rows.find((r) => r.id === fromId);
+      const to = rows.find((r) => r.id === toId);
+      if (!from) throw new CycleError(`Unknown cycle: ${fromId}`);
+      if (!to) throw new CycleError(`Unknown cycle: ${toId}`);
+      const access = await this.accessIn(tx, scope!);
+      // Both ends are written to, so both need write access.
+      if (!canWriteProductId(access, from.productId) ||
+          !canWriteProductId(access, to.productId)) {
+        throw new CycleError(
+          "Your role does not permit moving work between these cycles.",
+        );
+      }
+      // A product cycle can only take work from that product. A workspace-wide
+      // destination takes anything, matching the scheduling rule.
+      const productGuard =
+        to.productId === null
+          ? undefined
+          : eq(features.productId, to.productId);
+
+      const moved = await tx
+        .update(features)
+        .set({ cycleId: toId, updatedAt: new Date() })
+        .where(
+          and(
+            eq(features.workspaceId, ws),
+            eq(features.cycleId, fromId),
+            // Finished (and archived) work stays put, so the closed cycle
+            // keeps an honest record of what it actually delivered.
+            not(inArray(features.status, NOT_ROLLED_OVER)),
+            ...(productGuard ? [productGuard] : []),
+          ),
+        )
+        .returning({ id: features.id });
+      return { moved: moved.length, toCycleId: toId };
+    });
+  }
+
+  /** Item and done counts for one cycle (used after a write). */
+  private async cycleTotals(
+    tx: Tx,
+    ws: string,
+    cycleId: string,
+  ): Promise<{ items: number; done: number }> {
+    const rows = await tx
+      .select({ status: features.status, n: count() })
+      .from(features)
+      .where(and(eq(features.workspaceId, ws), eq(features.cycleId, cycleId)))
+      .groupBy(features.status);
+    let items = 0;
+    let done = 0;
+    for (const r of rows) {
+      items += Number(r.n);
+      if (isDone(r.status)) done += Number(r.n);
+    }
+    return { items, done };
+  }
+
+  /**
+   * Guard the scoped unique name. Pre-checked rather than relying on ON
+   * CONFLICT because the partial unique indexes can't be named as an arbiter
+   * without their predicate, which drizzle omits (same reason as releases).
+   */
+  private async assertCycleNameFree(
+    tx: Tx,
+    ws: string,
+    name: string,
+    productId: string | null,
+    excludeId: string | null,
+  ): Promise<void> {
+    const clash = await tx
+      .select({ id: cycles.id })
+      .from(cycles)
+      .where(
+        and(
+          eq(cycles.workspaceId, ws),
+          eq(cycles.name, name),
+          productId === null
+            ? isNull(cycles.productId)
+            : eq(cycles.productId, productId),
+          ...(excludeId ? [ne(cycles.id, excludeId)] : []),
+        ),
+      )
+      .limit(1);
+    if (clash[0]) {
+      throw new CycleError(`A cycle named "${name}" already exists.`);
+    }
+  }
+
+  // ── Goals ─────────────────────────────────────────────────────────────
+  //
+  // Authorization mirrors releases and cycles (canWriteProductId covers both
+  // the per-product and the org-wide/owner-only case). What is different here
+  // is visibility on the *link* side: a goal can be served by work in products
+  // the caller cannot read, so contributions are filtered to the readable set
+  // while the goal itself stays visible. Hiding the goal because one of its
+  // contributors is out of reach would make org-wide goals invisible to almost
+  // everyone.
+
+  async listGoals(scope?: WorkspaceScope): Promise<GoalRecord[]> {
+    return this.scoped(scope, async (tx) => {
+      const ws = scope!.workspaceId;
+      const [goalRows, krRows, access, productById] = await Promise.all([
+        tx.select().from(goals).where(eq(goals.workspaceId, ws)),
+        tx.select().from(keyResults).where(eq(keyResults.workspaceId, ws)),
+        this.accessIn(tx, scope!),
+        this.productVisibilityIn(tx, ws),
+      ]);
+      // Link counts are computed over readable work only, so a goal never
+      // advertises progress from items the caller cannot see.
+      const linkRows = await tx
+        .select({
+          goalId: goalLinks.goalId,
+          status: features.status,
+          productId: features.productId,
+        })
+        .from(goalLinks)
+        .innerJoin(features, eq(features.id, goalLinks.featureId))
+        .where(eq(goalLinks.workspaceId, ws));
+
+      const byGoal = new Map<string, { done: boolean }[]>();
+      for (const row of linkRows) {
+        if (!canReadProductId(access, productById, row.productId)) continue;
+        const list = byGoal.get(row.goalId) ?? [];
+        list.push({ done: isDone(row.status) });
+        byGoal.set(row.goalId, list);
+      }
+
+      const krByGoal = new Map<string, typeof krRows>();
+      for (const kr of krRows) {
+        const list = krByGoal.get(kr.goalId) ?? [];
+        list.push(kr);
+        krByGoal.set(kr.goalId, list);
+      }
+
+      return goalRows
+        .filter((g) => canReadProductId(access, productById, g.productId))
+        .map((g) => toGoalRecord(g, krByGoal.get(g.id) ?? [], byGoal.get(g.id) ?? []))
+        .sort(compareGoals);
+    });
+  }
+
+  async createGoal(
+    input: GoalInput,
+    scope?: WorkspaceScope,
+  ): Promise<GoalRecord> {
+    return this.scoped(scope, async (tx) => {
+      const ws = scope!.workspaceId;
+      const title = input.title.trim();
+      if (!title) throw new GoalError("Goal title is required.");
+      const periodError = validateGoalPeriod(
+        input.periodStart ?? null,
+        input.periodEnd ?? null,
+      );
+      if (periodError) throw new GoalError(periodError);
+      const productId = input.productId ?? null;
+      const access = await this.accessIn(tx, scope!);
+      if (!canWriteProductId(access, productId)) {
+        throw new GoalError(
+          productId === null
+            ? "Only the workspace owner can create org-wide goals."
+            : "Your role does not permit creating goals for this product.",
+        );
+      }
+      if (productId !== null) await this.requireProductId(tx, ws, productId);
+      if (input.parentGoalId) {
+        await this.requireGoalId(tx, ws, input.parentGoalId);
+      }
+      const status = input.status ?? "on_track";
+      if (!isGoalStatus(status)) {
+        throw new GoalError(`Unknown goal status: ${status}`);
+      }
+      const [row] = await tx
+        .insert(goals)
+        .values({
+          workspaceId: ws,
+          productId,
+          title,
+          description: input.description ?? null,
+          periodStart: input.periodStart ?? null,
+          periodEnd: input.periodEnd ?? null,
+          parentGoalId: input.parentGoalId ?? null,
+          status,
+        })
+        .returning();
+      if (!row) throw new GoalError("Failed to create the goal.");
+      return toGoalRecord(row, [], []);
+    });
+  }
+
+  async updateGoal(
+    id: string,
+    patch: GoalPatch,
+    scope?: WorkspaceScope,
+  ): Promise<GoalRecord> {
+    return this.scoped(scope, async (tx) => {
+      const ws = scope!.workspaceId;
+      const [current] = await tx
+        .select()
+        .from(goals)
+        .where(and(eq(goals.id, id), eq(goals.workspaceId, ws)))
+        .limit(1);
+      if (!current) throw new GoalError(`Unknown goal: ${id}`);
+      const access = await this.accessIn(tx, scope!);
+      if (!canWriteProductId(access, current.productId)) {
+        throw new GoalError(
+          current.productId === null
+            ? "Only the workspace owner can edit org-wide goals."
+            : "Your role does not permit editing goals for this product.",
+        );
+      }
+
+      // Validate the period as it will be after the patch, so moving one end
+      // cannot produce a period that ends before it starts.
+      const periodStart =
+        patch.periodStart !== undefined ? patch.periodStart : current.periodStart;
+      const periodEnd =
+        patch.periodEnd !== undefined ? patch.periodEnd : current.periodEnd;
+      const periodError = validateGoalPeriod(periodStart, periodEnd);
+      if (periodError) throw new GoalError(periodError);
+
+      const set: Record<string, unknown> = { updatedAt: new Date() };
+      if (patch.title !== undefined) {
+        const title = patch.title.trim();
+        if (!title) throw new GoalError("Goal title is required.");
+        set.title = title;
+      }
+      if (patch.description !== undefined) set.description = patch.description;
+      if (patch.periodStart !== undefined) set.periodStart = patch.periodStart;
+      if (patch.periodEnd !== undefined) set.periodEnd = patch.periodEnd;
+      if (patch.status !== undefined) {
+        if (!isGoalStatus(patch.status)) {
+          throw new GoalError(`Unknown goal status: ${patch.status}`);
+        }
+        set.status = patch.status;
+      }
+      if (patch.parentGoalId !== undefined) {
+        if (patch.parentGoalId !== null) {
+          await this.requireGoalId(tx, ws, patch.parentGoalId);
+          const all = await tx
+            .select({ id: goals.id, parentGoalId: goals.parentGoalId })
+            .from(goals)
+            .where(eq(goals.workspaceId, ws));
+          if (wouldCreateGoalCycle(all, id, patch.parentGoalId)) {
+            throw new GoalError("A goal cannot be nested under itself.");
+          }
+        }
+        set.parentGoalId = patch.parentGoalId;
+      }
+      if (patch.productId !== undefined && patch.productId !== current.productId) {
+        if (!canWriteProductId(access, patch.productId)) {
+          throw new GoalError(
+            patch.productId === null
+              ? "Only the workspace owner can make a goal org-wide."
+              : "Your role does not permit moving a goal to that product.",
+          );
+        }
+        if (patch.productId !== null) {
+          await this.requireProductId(tx, ws, patch.productId);
+        }
+        set.productId = patch.productId;
+        // Deliberately NOT unlinking work from other products, unlike a release
+        // or cycle move. A goal is many-to-many and cross-product by design;
+        // narrowing its scope does not make the work that served it untrue.
+      }
+
+      const [row] = await tx
+        .update(goals)
+        .set(set)
+        .where(and(eq(goals.id, id), eq(goals.workspaceId, ws)))
+        .returning();
+      if (!row) throw new GoalError(`Unknown goal: ${id}`);
+      return this.hydrateGoal(tx, scope!, row);
+    });
+  }
+
+  async deleteGoal(id: string, scope?: WorkspaceScope): Promise<void> {
+    await this.scoped(scope, async (tx) => {
+      const ws = scope!.workspaceId;
+      const [current] = await tx
+        .select({ productId: goals.productId })
+        .from(goals)
+        .where(and(eq(goals.id, id), eq(goals.workspaceId, ws)))
+        .limit(1);
+      if (!current) throw new GoalError(`Unknown goal: ${id}`);
+      const access = await this.accessIn(tx, scope!);
+      if (!canWriteProductId(access, current.productId)) {
+        throw new GoalError(
+          current.productId === null
+            ? "Only the workspace owner can delete org-wide goals."
+            : "Your role does not permit deleting goals for this product.",
+        );
+      }
+      // key_results and goal_links cascade; child goals are ON DELETE SET NULL,
+      // so they are orphaned to the root rather than deleted with their parent.
+      // The work items on the other end of the links are untouched.
+      await tx.delete(goals).where(and(eq(goals.id, id), eq(goals.workspaceId, ws)));
+    });
+  }
+
+  async createKeyResult(
+    goalId: string,
+    input: KeyResultInput,
+    scope?: WorkspaceScope,
+  ): Promise<GoalRecord> {
+    return this.scoped(scope, async (tx) => {
+      const ws = scope!.workspaceId;
+      const goal = await this.requireWritableGoal(tx, scope!, goalId);
+      const title = input.title.trim();
+      if (!title) throw new GoalError("Key result title is required.");
+      const metricKind = input.metricKind ?? "number";
+      const startValue = input.startValue ?? 0;
+      const error = validateKeyResult({
+        metricKind,
+        startValue,
+        targetValue: input.targetValue,
+      });
+      if (error) throw new GoalError(error);
+      const [existing] = await tx
+        .select({ n: count() })
+        .from(keyResults)
+        .where(eq(keyResults.goalId, goalId));
+      await tx.insert(keyResults).values({
+        workspaceId: ws,
+        goalId,
+        title,
+        metricKind,
+        startValue,
+        targetValue: input.targetValue,
+        currentValue: input.currentValue ?? startValue,
+        position: Number(existing?.n ?? 0),
+      });
+      return this.hydrateGoal(tx, scope!, goal);
+    });
+  }
+
+  async updateKeyResult(
+    id: string,
+    patch: KeyResultPatch,
+    scope?: WorkspaceScope,
+  ): Promise<GoalRecord> {
+    return this.scoped(scope, async (tx) => {
+      const ws = scope!.workspaceId;
+      const [current] = await tx
+        .select()
+        .from(keyResults)
+        .where(and(eq(keyResults.id, id), eq(keyResults.workspaceId, ws)))
+        .limit(1);
+      if (!current) throw new GoalError(`Unknown key result: ${id}`);
+      const goal = await this.requireWritableGoal(tx, scope!, current.goalId);
+
+      // Validate the measure as it will be, so patching one value can't leave a
+      // key result whose progress is undefined.
+      const metricKind = patch.metricKind ?? (current.metricKind as MetricKind);
+      const startValue = patch.startValue ?? current.startValue;
+      const targetValue = patch.targetValue ?? current.targetValue;
+      const error = validateKeyResult({ metricKind, startValue, targetValue });
+      if (error) throw new GoalError(error);
+
+      const set: Record<string, unknown> = { updatedAt: new Date() };
+      if (patch.title !== undefined) {
+        const title = patch.title.trim();
+        if (!title) throw new GoalError("Key result title is required.");
+        set.title = title;
+      }
+      if (patch.metricKind !== undefined) set.metricKind = patch.metricKind;
+      if (patch.startValue !== undefined) set.startValue = patch.startValue;
+      if (patch.targetValue !== undefined) set.targetValue = patch.targetValue;
+      if (patch.currentValue !== undefined) set.currentValue = patch.currentValue;
+      if (patch.position !== undefined) set.position = patch.position;
+
+      await tx
+        .update(keyResults)
+        .set(set)
+        .where(and(eq(keyResults.id, id), eq(keyResults.workspaceId, ws)));
+      return this.hydrateGoal(tx, scope!, goal);
+    });
+  }
+
+  async deleteKeyResult(
+    id: string,
+    scope?: WorkspaceScope,
+  ): Promise<GoalRecord> {
+    return this.scoped(scope, async (tx) => {
+      const ws = scope!.workspaceId;
+      const [current] = await tx
+        .select({ goalId: keyResults.goalId })
+        .from(keyResults)
+        .where(and(eq(keyResults.id, id), eq(keyResults.workspaceId, ws)))
+        .limit(1);
+      if (!current) throw new GoalError(`Unknown key result: ${id}`);
+      const goal = await this.requireWritableGoal(tx, scope!, current.goalId);
+      await tx
+        .delete(keyResults)
+        .where(and(eq(keyResults.id, id), eq(keyResults.workspaceId, ws)));
+      return this.hydrateGoal(tx, scope!, goal);
+    });
+  }
+
+  async listGoalContributions(
+    goalId: string,
+    scope?: WorkspaceScope,
+  ): Promise<GoalContribution[]> {
+    return this.scoped(scope, async (tx) => {
+      const ws = scope!.workspaceId;
+      const [access, productById] = await Promise.all([
+        this.accessIn(tx, scope!),
+        this.productVisibilityIn(tx, ws),
+      ]);
+      const rows = await tx
+        .select({
+          specId: features.specId,
+          title: features.title,
+          status: features.status,
+          level: features.level,
+          productId: features.productId,
+        })
+        .from(goalLinks)
+        .innerJoin(features, eq(features.id, goalLinks.featureId))
+        .where(and(eq(goalLinks.workspaceId, ws), eq(goalLinks.goalId, goalId)));
+      // A viewer sees only the linked items they can read; the goal stays
+      // visible regardless (see the section comment).
+      return rows
+        .filter((r) => canReadProductId(access, productById, r.productId))
+        .map((r) => ({ ...r, done: isDone(r.status) }));
+    });
+  }
+
+  async listItemGoals(
+    specId: string,
+    scope?: WorkspaceScope,
+  ): Promise<ItemGoalRef[]> {
+    return this.scoped(scope, async (tx) => {
+      const ws = scope!.workspaceId;
+      const [access, productById] = await Promise.all([
+        this.accessIn(tx, scope!),
+        this.productVisibilityIn(tx, ws),
+      ]);
+      const rows = await tx
+        .select({
+          goalId: goals.id,
+          title: goals.title,
+          status: goals.status,
+          productId: goals.productId,
+        })
+        .from(goalLinks)
+        .innerJoin(goals, eq(goals.id, goalLinks.goalId))
+        .innerJoin(features, eq(features.id, goalLinks.featureId))
+        .where(and(eq(goalLinks.workspaceId, ws), eq(features.specId, specId)));
+      return rows
+        .filter((r) => canReadProductId(access, productById, r.productId))
+        .map((r) => ({ ...r, status: r.status as GoalStatus }));
+    });
+  }
+
+  async linkGoal(
+    goalId: string,
+    specId: string,
+    scope?: WorkspaceScope,
+  ): Promise<void> {
+    await this.scoped(scope, async (tx) => {
+      const ws = scope!.workspaceId;
+      await this.requireWritableGoal(tx, scope!, goalId);
+      const [feature] = await tx
+        .select({ id: features.id, productId: features.productId })
+        .from(features)
+        .where(and(eq(features.specId, specId), eq(features.workspaceId, ws)))
+        .limit(1);
+      if (!feature) throw new GoalError(`Unknown work item: ${specId}`);
+      const access = await this.accessIn(tx, scope!);
+      // Linking writes to the item's side of the relationship as much as the
+      // goal's, so it needs write access to the item's product too. Note there
+      // is deliberately NO check that the two products match: cross-product
+      // linkage is the point of the join table.
+      if (!canWriteProductId(access, feature.productId)) {
+        throw new GoalError(
+          "Your role does not permit linking work from this product.",
+        );
+      }
+      await tx
+        .insert(goalLinks)
+        .values({ workspaceId: ws, goalId, featureId: feature.id })
+        // Linking twice is a no-op rather than an error: the caller's intent
+        // ("this work serves that goal") is already true.
+        .onConflictDoNothing({
+          target: [goalLinks.goalId, goalLinks.featureId],
+        });
+    });
+  }
+
+  async unlinkGoal(
+    goalId: string,
+    specId: string,
+    scope?: WorkspaceScope,
+  ): Promise<void> {
+    await this.scoped(scope, async (tx) => {
+      const ws = scope!.workspaceId;
+      await this.requireWritableGoal(tx, scope!, goalId);
+      const [feature] = await tx
+        .select({ id: features.id })
+        .from(features)
+        .where(and(eq(features.specId, specId), eq(features.workspaceId, ws)))
+        .limit(1);
+      if (!feature) throw new GoalError(`Unknown work item: ${specId}`);
+      await tx
+        .delete(goalLinks)
+        .where(
+          and(
+            eq(goalLinks.workspaceId, ws),
+            eq(goalLinks.goalId, goalId),
+            eq(goalLinks.featureId, feature.id),
+          ),
+        );
+    });
+  }
+
+  /** Resolve a goal the caller may write, or throw. */
+  private async requireWritableGoal(
+    tx: Tx,
+    scope: WorkspaceScope,
+    goalId: string,
+  ): Promise<typeof goals.$inferSelect> {
+    const [goal] = await tx
+      .select()
+      .from(goals)
+      .where(and(eq(goals.id, goalId), eq(goals.workspaceId, scope.workspaceId)))
+      .limit(1);
+    if (!goal) throw new GoalError(`Unknown goal: ${goalId}`);
+    const access = await this.accessIn(tx, scope);
+    if (!canWriteProductId(access, goal.productId)) {
+      throw new GoalError(
+        goal.productId === null
+          ? "Only the workspace owner can edit org-wide goals."
+          : "Your role does not permit editing goals for this product.",
+      );
+    }
+    return goal;
+  }
+
+  /** Confirm a goal id belongs to this workspace. */
+  private async requireGoalId(
+    tx: Tx,
+    ws: string,
+    goalId: string,
+  ): Promise<void> {
+    const [row] = await tx
+      .select({ id: goals.id })
+      .from(goals)
+      .where(and(eq(goals.id, goalId), eq(goals.workspaceId, ws)))
+      .limit(1);
+    if (!row) throw new GoalError(`Unknown goal: ${goalId}`);
+  }
+
+  /** Re-read one goal's key results + readable links and build its record. */
+  private async hydrateGoal(
+    tx: Tx,
+    scope: WorkspaceScope,
+    goal: typeof goals.$inferSelect,
+  ): Promise<GoalRecord> {
+    const ws = scope.workspaceId;
+    const [krs, linkRows, access, productById] = await Promise.all([
+      tx.select().from(keyResults).where(eq(keyResults.goalId, goal.id)),
+      tx
+        .select({ status: features.status, productId: features.productId })
+        .from(goalLinks)
+        .innerJoin(features, eq(features.id, goalLinks.featureId))
+        .where(and(eq(goalLinks.workspaceId, ws), eq(goalLinks.goalId, goal.id))),
+      this.accessIn(tx, scope),
+      this.productVisibilityIn(tx, ws),
+    ]);
+    const links = linkRows
+      .filter((r) => canReadProductId(access, productById, r.productId))
+      .map((r) => ({ done: isDone(r.status) }));
+    return toGoalRecord(goal, krs, links);
+  }
+
   // ── Comments ──────────────────────────────────────────────────────────
 
   /**
@@ -3029,6 +3913,7 @@ export class DbStore implements FeatureStore {
         rank: featureRow.rank,
         tags: featureRow.tags,
         releaseId: featureRow.releaseId,
+        cycleId: featureRow.cycleId,
         assigneeId: featureRow.assigneeId,
         customFields: toCustomFields(featureRow.customFields),
         ...riceFields({
@@ -4436,9 +5321,96 @@ function normalizeReleaseStatus(status: string | undefined): ReleaseStatus {
   return status as ReleaseStatus;
 }
 
-/** Today's date as a date-only `YYYY-MM-DD` string (UTC), for ship stamps. */
-function todayDateOnly(): string {
-  return new Date().toISOString().slice(0, 10);
+/**
+ * Map a goals row (+ its key results and readable links) to the record the UI
+ * consumes. Both progress figures are computed here and never stored: the
+ * key-result mean measures the outcome, the delivery share measures how much of
+ * the linked work has shipped, and they stay separate because a goal where
+ * everything shipped and nothing moved is exactly what OKRs exist to surface.
+ */
+function toGoalRecord(
+  row: {
+    id: string;
+    title: string;
+    description: string | null;
+    productId: string | null;
+    periodStart: string | null;
+    periodEnd: string | null;
+    parentGoalId: string | null;
+    status: string;
+  },
+  krRows: {
+    id: string;
+    goalId: string;
+    title: string;
+    metricKind: string;
+    startValue: number;
+    targetValue: number;
+    currentValue: number;
+    position: number;
+  }[],
+  links: { done: boolean }[],
+): GoalRecord {
+  const measures = krRows
+    .slice()
+    .sort((a, b) => a.position - b.position || a.title.localeCompare(b.title))
+    .map((kr) => ({
+      id: kr.id,
+      goalId: kr.goalId,
+      title: kr.title,
+      metricKind: kr.metricKind as MetricKind,
+      startValue: kr.startValue,
+      targetValue: kr.targetValue,
+      currentValue: kr.currentValue,
+      position: kr.position,
+    }));
+  return {
+    id: row.id,
+    title: row.title,
+    description: row.description,
+    productId: row.productId,
+    periodStart: row.periodStart,
+    periodEnd: row.periodEnd,
+    parentGoalId: row.parentGoalId,
+    status: row.status as GoalStatus,
+    keyResults: measures.map((kr) => ({
+      ...kr,
+      progress: keyResultProgress(kr),
+    })),
+    progress: goalProgress(measures),
+    linkedItemCount: links.length,
+    deliveryProgress: deliveryProgress(links),
+  };
+}
+
+/**
+ * Map a cycles row to the record the UI consumes, computing `state` from the
+ * dates rather than reading a column (there isn't one). `totals` is omitted on
+ * a freshly created cycle, which by definition holds nothing yet.
+ */
+function toCycleRecord(
+  row: {
+    id: string;
+    name: string;
+    productId: string | null;
+    startDate: string;
+    endDate: string;
+    notes: string | null;
+  },
+  totals: { items: number; done: number } | undefined,
+  today: string,
+): CycleRecord {
+  return {
+    id: row.id,
+    name: row.name,
+    productId: row.productId,
+    startDate: row.startDate,
+    endDate: row.endDate,
+    notes: row.notes,
+    state: cycleState(row, today),
+    itemCount: totals?.items ?? 0,
+    doneCount: totals?.done ?? 0,
+  };
 }
 
 function toReleaseRecord(

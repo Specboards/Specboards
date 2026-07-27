@@ -14,7 +14,9 @@ import { listLinkableRepos } from "@/lib/github-links-service";
 import { resolveWorkflowFor } from "@/lib/repo-config";
 import { getStore } from "@/lib/store";
 import type {
+  CycleRecord,
   FeatureDetail,
+  ItemGoalRef,
   ReleaseRecord,
   StageGate,
   WorkspaceScope,
@@ -50,6 +52,12 @@ export interface ItemDetailData {
   /** Custom properties that apply at this item's level. */
   properties: PropertyDef[];
   releases: ReleaseRecord[];
+  /** Cycles (sprints) offered by the item's cycle picker. */
+  cycles: CycleRecord[];
+  /** Goals this item ladders up to (many-to-many; any level can link). */
+  goals: ItemGoalRef[];
+  /** Goals the item could be linked to, for the "Link goal" picker. */
+  linkableGoals: { id: string; title: string }[];
   workflow: StatusWorkflow;
   /** Exit-criteria gates for the item's *current* stage, in checklist order. */
   stageGates: StageGate[];
@@ -94,10 +102,13 @@ export async function getItemDetailData(
     access && db ? await listWorkspaceMembers(db, access.workspaceId) : [];
   const workflow = await resolveWorkflowFor(access);
 
-  const [allProperties, releases, allFeatures, levels, products, allGates, allCompletedGateIds] =
+  const [allProperties, releases, cycles, itemGoals, allGoals, allFeatures, levels, products, allGates, allCompletedGateIds] =
     await Promise.all([
       store.listProperties(access ?? undefined, "item"),
       store.listReleases(access ?? undefined),
+      store.listCycles(access ?? undefined),
+      store.listItemGoals(feature.specId, access ?? undefined),
+      store.listGoals(access ?? undefined),
       store.listFeatures(access ?? undefined),
       store.listLevels(access ?? undefined),
       store.listProducts(access ?? undefined),
@@ -151,6 +162,13 @@ export async function getItemDetailData(
     members,
     properties,
     releases,
+    cycles,
+    goals: itemGoals,
+    // A goal can be served by work from any product, so the picker is not
+    // narrowed to the item's own: cross-product linkage is the point.
+    linkableGoals: allGoals
+      .filter((g) => !itemGoals.some((ig) => ig.goalId === g.id))
+      .map((g) => ({ id: g.id, title: g.title })),
     workflow,
     stageGates,
     completedGateIds,

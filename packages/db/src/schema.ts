@@ -619,6 +619,15 @@ export const features = pgTable(
     releaseId: uuid("release_id").references(() => releases.id, {
       onDelete: "set null",
     }),
+    /**
+     * Owning cycle (sprint/iteration), or null when not in one. Orthogonal to
+     * `release_id`: an item can be scheduled into both, and clearing one leaves
+     * the other alone. `set null` on delete mirrors releases exactly, so
+     * deleting a cycle unschedules its items and destroys no work.
+     */
+    cycleId: uuid("cycle_id").references(() => cycles.id, {
+      onDelete: "set null",
+    }),
     /** Fractional/lexical rank for manual backlog ordering. */
     rank: text("rank"),
     tags: text("tags").array().notNull().default([]),
@@ -658,6 +667,7 @@ export const features = pgTable(
     index("features_workspace_level_idx").on(t.workspaceId, t.level),
     index("features_external_key_idx").on(t.workspaceId, t.externalKey),
     index("features_release_idx").on(t.releaseId),
+    index("features_cycle_idx").on(t.cycleId),
     foreignKey({
       columns: [t.workspaceId, t.level],
       foreignColumns: [workspaceLevels.workspaceId, workspaceLevels.key],
@@ -868,6 +878,186 @@ export const releases = pgTable(
       .where(sql`${t.productId} is null`),
     index("releases_ws_idx").on(t.workspaceId),
     index("releases_product_idx").on(t.productId),
+  ],
+);
+
+/**
+ * A cycle (sprint / iteration): a date-bounded time box a team works in
+ * (`features.cycle_id`). Deliberately a *second, orthogonal axis* to releases,
+ * not a flavour of one: an item can be in release v1.0 and in cycle "Sprint 14"
+ * at the same time. A release is the customer-facing ship vehicle with an
+ * explicit planned/in_progress/shipped lifecycle; a cycle is the team-facing
+ * time box whose state is a function of today's date.
+ *
+ * There is deliberately **no status column**. A cycle is upcoming, active, or
+ * complete purely from `start_date`/`end_date` against today, which avoids the
+ * reopen/re-stamp problem `releases.shipped_date` needed migration 0043 to fix
+ * and means a cycle can never be stale. See `core/cycles.ts`.
+ */
+export const cycles = pgTable(
+  "cycles",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    /** Product this cycle belongs to, or null for a workspace-wide cycle
+     * spanning every product. Mirrors the releases convention exactly: product
+     * cycles are managed by that product's admins/contributors, workspace-wide
+     * ones are owner-only. Cycles default to per-product in the UI. */
+    productId: uuid("product_id").references(() => products.id, {
+      onDelete: "cascade",
+    }),
+    name: text("name").notNull(),
+    /** Inclusive first day of the cycle (date-only). */
+    startDate: text("start_date").notNull(),
+    /** Inclusive last day of the cycle (date-only); must be >= startDate. */
+    endDate: text("end_date").notNull(),
+    /** Free-form notes (Markdown), e.g. the cycle's goal. */
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    // Names unique within a product, and independently within the
+    // workspace-wide scope, so two products can both run "Sprint 1".
+    uniqueIndex("cycles_product_name_uq")
+      .on(t.productId, t.name)
+      .where(sql`${t.productId} is not null`),
+    uniqueIndex("cycles_ws_global_name_uq")
+      .on(t.workspaceId, t.name)
+      .where(sql`${t.productId} is null`),
+    index("cycles_ws_idx").on(t.workspaceId),
+    index("cycles_product_idx").on(t.productId),
+    index("cycles_dates_idx").on(t.workspaceId, t.startDate, t.endDate),
+  ],
+);
+
+/**
+ * A goal (objective): a statement of intent with a measurable target and a
+ * period. Deliberately NOT a hierarchy level, for two reasons that the
+ * `features` table cannot satisfy: a goal is *measured* (a level is not), and
+ * work laddering up to a goal is many-to-many and crosses products, while
+ * `features.parent_id` is strictly single-parent and the roll-ups depend on
+ * that. See the goal_links join table below.
+ *
+ * `parent_goal_id` gives goals their own shallow tree (a company objective
+ * holding product objectives), separate from the item hierarchy.
+ */
+export const goals = pgTable(
+  "goals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    /** Product this goal belongs to, or null for an org-wide goal. Matches the
+     * portfolio-release convention: product goals are managed by that product's
+     * admins/contributors, org-wide ones are owner-only. */
+    productId: uuid("product_id").references(() => products.id, {
+      onDelete: "cascade",
+    }),
+    title: text("title").notNull(),
+    description: text("description"),
+    /** Period the goal is measured over (date-only), or null when open-ended. */
+    periodStart: text("period_start"),
+    periodEnd: text("period_end"),
+    /** Optional parent goal, so a company objective can hold product ones.
+     * `set null` on delete orphans children rather than cascading them away. */
+    parentGoalId: uuid("parent_goal_id").references((): AnyPgColumn => goals.id, {
+      onDelete: "set null",
+    }),
+    /** The owner's confidence call (see core GOAL_STATUSES). Distinct from
+     * computed progress: progress is arithmetic, status is judgement. */
+    status: text("status").notNull().default("on_track"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("goals_ws_idx").on(t.workspaceId),
+    index("goals_product_idx").on(t.productId),
+    index("goals_parent_idx").on(t.parentGoalId),
+  ],
+);
+
+/**
+ * A key result: one measurable outcome under a goal. Progress is **computed**
+ * from start/current/target on read and never stored, following the RICE
+ * precedent, so it cannot drift from its inputs.
+ */
+export const keyResults = pgTable(
+  "key_results",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    goalId: uuid("goal_id")
+      .notNull()
+      .references(() => goals.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    /** number | percent | boolean (core METRIC_KINDS). */
+    metricKind: text("metric_kind").notNull().default("number"),
+    /** The baseline the measurement started from. */
+    startValue: doublePrecision("start_value").notNull().default(0),
+    /** The value that counts as done. */
+    targetValue: doublePrecision("target_value").notNull(),
+    /** Where it stands now; entered by a human in v1. */
+    currentValue: doublePrecision("current_value").notNull().default(0),
+    /** Manual ordering under the goal; ascending. */
+    position: integer("position").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("key_results_goal_idx").on(t.goalId),
+    index("key_results_ws_idx").on(t.workspaceId),
+  ],
+);
+
+/**
+ * Work laddering up to a goal: many-to-many, and reachable from ANY hierarchy
+ * level, so an initiative and a single work item can both contribute. This is
+ * the table that makes goals un-modellable as a hierarchy level: a feature can
+ * serve several goals, and a goal can be served by work in several products,
+ * neither of which the single-parent `features.parent_id` can express.
+ *
+ * Both sides cascade: deleting a feature removes its links and leaves the goal
+ * intact (and vice versa).
+ */
+export const goalLinks = pgTable(
+  "goal_links",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    goalId: uuid("goal_id")
+      .notNull()
+      .references(() => goals.id, { onDelete: "cascade" }),
+    featureId: uuid("feature_id")
+      .notNull()
+      .references(() => features.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    unique("goal_links_goal_feature_uq").on(t.goalId, t.featureId),
+    index("goal_links_goal_idx").on(t.goalId),
+    index("goal_links_feature_idx").on(t.featureId),
   ],
 );
 

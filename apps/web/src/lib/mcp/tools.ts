@@ -4,17 +4,35 @@ import { eq, users, workspaces } from "@specboards/db";
 import { getDb } from "@/lib/db";
 import { resolveWorkflowFor } from "@/lib/repo-config";
 import {
+  createCycle,
+  createGoal,
+  createKeyResult,
   createRelease,
   createWorkItem,
   deleteWorkItem,
   getTransitionMode,
+  listCycles,
+  listGoalContributions,
+  listGoals,
   listReleases,
   parseCreateFeatureInput,
   parseFeaturePatch,
+  linkGoal,
+  parseCycleInput,
+  parseCyclePatch,
+  parseGoalInput,
+  parseGoalPatch,
+  parseKeyResultInput,
+  parseKeyResultPatch,
   parseReleaseInput,
   parseReleaseNotesPatch,
   parseReleasePatch,
   patchFeature,
+  rolloverCycle,
+  unlinkGoal,
+  updateCycle,
+  updateGoal,
+  updateKeyResult,
   updateRelease,
 } from "@/lib/features-service";
 import {
@@ -381,6 +399,7 @@ export const TOOLS: McpTool[] = [
           product: f.productId ? (keyById.get(f.productId) ?? null) : null,
           assigneeId: f.assigneeId,
           releaseId: f.releaseId,
+          cycleId: f.cycleId,
           parentSpecId: f.parentSpecId,
           childCount: f.childCount,
           childDoneCount: f.childDoneCount,
@@ -420,6 +439,7 @@ export const TOOLS: McpTool[] = [
         allowedTransitions: workflow.transitions[f.status] ?? [],
         tags: f.tags,
         releaseId: f.releaseId,
+        cycleId: f.cycleId,
         assigneeId: f.assigneeId,
         assigneeName: f.assigneeName,
         customFields: f.customFields,
@@ -456,7 +476,7 @@ export const TOOLS: McpTool[] = [
     name: "update_item",
     description:
       "Update an item's metadata and (for DB-native cards) its content. " +
-      "Set any of: status, tags, releaseId, assigneeId, customFields, " +
+      "Set any of: status, tags, releaseId, cycleId, assigneeId, customFields, " +
       "parentSpecId, and - for DB-native cards only - title and details " +
       "(Markdown body). Status changes are validated against the workspace " +
       "workflow and its stage gates. On a workspace whose transitions are " +
@@ -478,6 +498,12 @@ export const TOOLS: McpTool[] = [
         },
         tags: { type: "array", items: { type: "string" } },
         releaseId: { type: ["string", "null"] },
+        cycleId: {
+          type: ["string", "null"],
+          description:
+            "Cycle (sprint) to schedule into, from list_cycles. Independent " +
+            "of releaseId: setting one never changes the other.",
+        },
         assigneeId: { type: ["string", "null"] },
         parentSpecId: { type: ["string", "null"] },
         title: {
@@ -509,6 +535,8 @@ export const TOOLS: McpTool[] = [
         title: updated.title,
         status: updated.status,
         tags: updated.tags,
+        releaseId: updated.releaseId,
+        cycleId: updated.cycleId,
         isDbNative: updated.isDbNative,
       };
     },
@@ -516,15 +544,23 @@ export const TOOLS: McpTool[] = [
   {
     name: "delete_item",
     description:
-      "Delete a DB-native work item (an initiative/epic/feature card created " +
-      "with create_item). Its children are re-parented to the root (not " +
-      "deleted) and its relations are cleared automatically. Spec-backed items " +
-      "cannot be deleted here - remove their specs/<slug>/spec.md in git " +
-      "instead. This is irreversible, so confirm the specId with read_item " +
-      "first.",
+      "Delete a work item. Its children are re-parented to the root (not " +
+      "deleted) and its relations are cleared automatically. An item that has " +
+      "a spec attached also needs `removeSpec: true`, which deletes its " +
+      "spec.md from git in the same operation - without that the spec would " +
+      "be re-imported on the next sync and the item would come back. This is " +
+      "irreversible, so confirm the specId with read_item first.",
     inputSchema: {
       type: "object",
-      properties: { specId: specIdSchema },
+      properties: {
+        specId: specIdSchema,
+        removeSpec: {
+          type: "boolean",
+          description:
+            "Required to delete an item that has a spec attached; also " +
+            "deletes the spec file from the connected repo.",
+        },
+      },
       required: ["specId"],
       additionalProperties: false,
     },
@@ -536,16 +572,26 @@ export const TOOLS: McpTool[] = [
       // error before attempting the delete if the id is unknown).
       const existing = await store.getFeature(specId, ctx.scope);
       if (!existing) throw new Error(`No item with spec id ${specId}.`);
-      await deleteWorkItem(specId, ctx.scope);
-      return { specId, title: existing.title, deleted: true };
+      const removeSpec = args.removeSpec === true;
+      await deleteWorkItem(specId, ctx.scope, { removeSpec });
+      return {
+        specId,
+        title: existing.title,
+        deleted: true,
+        specRemoved: removeSpec && !existing.isDbNative,
+      };
     },
   },
   {
     name: "create_item",
     description:
-      "Create a DB-native work item (a non-leaf card, e.g. an initiative or " +
-      "epic). Leaf specs come from git, not this tool. `level` must be a " +
-      "non-leaf level key (see whoami). Optionally set product (key), " +
+      "Create a work item at any level, including the leaf. Use it for a card " +
+      "(initiative/epic/feature) and for leaf work that has no spec - a task " +
+      "done by a person rather than by an agent. A spec is an optional " +
+      "attachment to a leaf item, not a requirement for one, so leaf items " +
+      "created here roll up into their parent exactly like spec-backed ones. " +
+      "Use create_spec instead when the work needs a git-backed document. " +
+      "`level` is any level key (see whoami). Optionally set product (key), " +
       "parentSpecId, status, assigneeId, tags, and details (Markdown body).",
     inputSchema: {
       type: "object",
@@ -553,7 +599,7 @@ export const TOOLS: McpTool[] = [
         title: { type: "string" },
         level: {
           type: "string",
-          description: "A non-leaf level key from whoami (e.g. 'epic').",
+          description: "A level key from whoami (e.g. 'epic' or 'work').",
         },
         product: {
           type: "string",
@@ -629,12 +675,15 @@ export const TOOLS: McpTool[] = [
   {
     name: "create_spec",
     description:
-      "Create a new spec-backed item: commit a new specs/<slug>/spec.md to the " +
-      "connected repo (a fresh id is assigned) and sync it onto the board. Use " +
-      "this to break a card down into concrete specs - create each spec here, " +
-      "then call update_item with parentSpecId to nest it under the card being " +
-      "broken down. Optionally target a repo by id (defaults to the workspace " +
-      "spec repo).",
+      "Commit a new specs/<slug>/spec.md to the connected repo and sync it " +
+      "onto the board. Two uses: without `workItemId` a fresh work item is " +
+      "created for the spec, which is how you break a card down into concrete " +
+      "specs (create each one here, then call update_item with parentSpecId to " +
+      "nest it under the card); with `workItemId` the spec ATTACHES to a work " +
+      "item that already exists, keeping its id, status, assignee, parent and " +
+      "history instead of creating a second card for the same work. Attach " +
+      "when someone has been tracking the work in the app and it now needs a " +
+      "document. Optionally target a repo by id (defaults to the spec repo).",
     inputSchema: {
       type: "object",
       properties: {
@@ -642,6 +691,12 @@ export const TOOLS: McpTool[] = [
         body: {
           type: "string",
           description: "Markdown body (no frontmatter). Defaults to a stub.",
+        },
+        workItemId: {
+          type: "string",
+          description:
+            "An existing leaf work item (specId) to attach this spec to. It " +
+            "must not already have one. Omit to create a new item.",
         },
         repoId: {
           type: "string",
@@ -663,6 +718,8 @@ export const TOOLS: McpTool[] = [
         title,
         body: typeof args.body === "string" ? args.body : undefined,
         repoId: typeof args.repoId === "string" ? args.repoId : undefined,
+        workItemId:
+          typeof args.workItemId === "string" ? args.workItemId : undefined,
         message: typeof args.message === "string" ? args.message : undefined,
       });
     },
@@ -894,6 +951,406 @@ export const TOOLS: McpTool[] = [
         releaseNotesUrl: release.releaseNotesUrl,
         customFields: release.customFields,
         itemCount: release.itemCount,
+      };
+    },
+  },
+  {
+    name: "list_cycles",
+    description:
+      "List the workspace's cycles (sprints / iterations): the time boxes a " +
+      "team works in. A cycle is a SECOND, ORTHOGONAL axis to releases, not a " +
+      "kind of release: a release answers 'what ships together', a cycle " +
+      "answers 'what is the team working on for the next two weeks'. An item " +
+      "can be in a release AND a cycle at once, and setting one never touches " +
+      "the other. Each cycle reports a derived `state` (upcoming / active / " +
+      "complete) computed from its dates, so it is never stale, plus its item " +
+      "and done counts. Ordered active first, then upcoming by soonest start, " +
+      "then most recently complete. Pass a cycle `id` to update_item's " +
+      "`cycleId` to schedule an item into it.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    write: false,
+    run: async (_args, ctx) => {
+      const cycles = await listCycles(ctx.scope);
+      return cycles.map((c) => ({
+        id: c.id,
+        name: c.name,
+        productId: c.productId,
+        startDate: c.startDate,
+        endDate: c.endDate,
+        state: c.state,
+        notes: c.notes,
+        itemCount: c.itemCount,
+        doneCount: c.doneCount,
+      }));
+    },
+  },
+  {
+    name: "create_cycle",
+    description:
+      'Create a cycle (a sprint / iteration like "Sprint 14"). Provide a ' +
+      "`name` (unique within its product), `startDate` and `endDate` " +
+      "(YYYY-MM-DD, both inclusive; the end cannot precede the start); " +
+      "optionally `productId` to scope it to a product (omit or pass null for " +
+      "a workspace-wide cycle spanning every product) and `notes` (Markdown, " +
+      "e.g. the cycle's goal). There is deliberately no status to set: a " +
+      "cycle is upcoming, active, or complete purely from its dates. A " +
+      "product cycle requires admin/contributor access to that product; a " +
+      "workspace-wide one requires the workspace owner.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          description: "Cycle name, unique within its product.",
+        },
+        startDate: {
+          type: "string",
+          description: "First day of the cycle, YYYY-MM-DD (inclusive).",
+        },
+        endDate: {
+          type: "string",
+          description: "Last day of the cycle, YYYY-MM-DD (inclusive).",
+        },
+        productId: {
+          type: ["string", "null"],
+          description:
+            "Product to scope the cycle to (from list_products); null or " +
+            "omitted for a workspace-wide cycle.",
+        },
+        notes: {
+          type: ["string", "null"],
+          description: "Free-form notes (Markdown), e.g. the cycle's goal.",
+        },
+      },
+      required: ["name", "startDate", "endDate"],
+      additionalProperties: false,
+    },
+    write: true,
+    run: async (args, ctx) => {
+      const cycle = await createCycle(parseCycleInput(args), ctx.scope);
+      return {
+        id: cycle.id,
+        name: cycle.name,
+        productId: cycle.productId,
+        startDate: cycle.startDate,
+        endDate: cycle.endDate,
+        state: cycle.state,
+        notes: cycle.notes,
+        itemCount: cycle.itemCount,
+      };
+    },
+  },
+  {
+    name: "update_cycle",
+    description:
+      "Update a cycle's name, dates, notes, or owning product. Pass the cycle " +
+      "`id` (from list_cycles) plus any of `name`, `startDate`, `endDate`, " +
+      "`notes`, `productId`. Moving a cycle to a product unschedules items " +
+      "belonging to other products, mirroring releases. There is no status " +
+      "to set: moving the dates is what changes a cycle's state.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Cycle id from list_cycles." },
+        name: { type: "string" },
+        startDate: { type: "string", description: "YYYY-MM-DD." },
+        endDate: { type: "string", description: "YYYY-MM-DD." },
+        notes: { type: ["string", "null"] },
+        productId: {
+          type: ["string", "null"],
+          description: "Move to a product, or null for workspace-wide.",
+        },
+      },
+      required: ["id"],
+      additionalProperties: false,
+    },
+    write: true,
+    run: async (args, ctx) => {
+      const id = requireString(args, "id");
+      const { id: _omit, ...rest } = args;
+      const cycle = await updateCycle(id, parseCyclePatch(rest), ctx.scope);
+      return {
+        id: cycle.id,
+        name: cycle.name,
+        productId: cycle.productId,
+        startDate: cycle.startDate,
+        endDate: cycle.endDate,
+        state: cycle.state,
+        notes: cycle.notes,
+        itemCount: cycle.itemCount,
+        doneCount: cycle.doneCount,
+      };
+    },
+  },
+  {
+    name: "rollover_cycle",
+    description:
+      "Move a cycle's UNFINISHED work into another cycle, which is how a team " +
+      "closes one cycle and opens the next. Items already done or archived " +
+      "stay where they are, so the finished cycle keeps an honest record of " +
+      "what it actually delivered. Deliberately an explicit action rather " +
+      "than something that happens when a cycle's end date passes: what " +
+      "carries over is a decision, not a rule. Pass `fromCycleId` and " +
+      "`toCycleId` (both from list_cycles); returns how many items moved.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        fromCycleId: {
+          type: "string",
+          description: "The cycle being closed.",
+        },
+        toCycleId: {
+          type: "string",
+          description: "The cycle its unfinished work moves into.",
+        },
+      },
+      required: ["fromCycleId", "toCycleId"],
+      additionalProperties: false,
+    },
+    write: true,
+    run: async (args, ctx) => {
+      const fromCycleId = requireString(args, "fromCycleId");
+      const toCycleId = requireString(args, "toCycleId");
+      return rolloverCycle(fromCycleId, toCycleId, ctx.scope);
+    },
+  },
+  {
+    name: "list_goals",
+    description:
+      "List the workspace's goals (objectives) with their key results. A goal " +
+      "says WHY work exists in a form that can be measured; it is NOT a " +
+      "hierarchy level, because a goal is measured and the work serving it is " +
+      "many-to-many and crosses products, neither of which the single-parent " +
+      "item hierarchy can carry. Each goal reports TWO progress figures, both " +
+      "computed on read and never stored: `progress` is the mean of its key " +
+      "results (did the outcome move?) and `deliveryProgress` is the share of " +
+      "linked work that is done (did we ship it?). They are deliberately " +
+      "separate - everything shipping while no metric moves is exactly what " +
+      "goals exist to make visible, so do not average them together. " +
+      "`status` is the owner's confidence call, not arithmetic.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    write: false,
+    run: async (_args, ctx) => {
+      const goals = await listGoals(ctx.scope);
+      return goals.map((g) => ({
+        id: g.id,
+        title: g.title,
+        description: g.description,
+        productId: g.productId,
+        parentGoalId: g.parentGoalId,
+        periodStart: g.periodStart,
+        periodEnd: g.periodEnd,
+        status: g.status,
+        progress: g.progress,
+        deliveryProgress: g.deliveryProgress,
+        linkedItemCount: g.linkedItemCount,
+        keyResults: g.keyResults.map((kr) => ({
+          id: kr.id,
+          title: kr.title,
+          metricKind: kr.metricKind,
+          startValue: kr.startValue,
+          currentValue: kr.currentValue,
+          targetValue: kr.targetValue,
+          progress: kr.progress,
+        })),
+      }));
+    },
+  },
+  {
+    name: "create_goal",
+    description:
+      "Create a goal (objective). Provide a `title`; optionally " +
+      "`description`, `productId` (omit or null for an org-wide goal spanning " +
+      "every product), `periodStart` / `periodEnd` (YYYY-MM-DD; either may be " +
+      "omitted for an open-ended goal), `parentGoalId` to nest it under a " +
+      "wider objective, and `status`. Add key results with create_key_result " +
+      "and link the work that serves it with link_goal. A goal with no key " +
+      "results yet is a valid state and reads as 'not measured', not 0%.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        description: { type: ["string", "null"] },
+        productId: {
+          type: ["string", "null"],
+          description:
+            "Product to scope the goal to (from list_products); null or " +
+            "omitted for an org-wide goal.",
+        },
+        periodStart: { type: ["string", "null"], description: "YYYY-MM-DD." },
+        periodEnd: { type: ["string", "null"], description: "YYYY-MM-DD." },
+        parentGoalId: { type: ["string", "null"] },
+        status: {
+          type: "string",
+          description:
+            "on_track | at_risk | off_track | achieved | missed (default on_track).",
+        },
+      },
+      required: ["title"],
+      additionalProperties: false,
+    },
+    write: true,
+    run: async (args, ctx) => {
+      const goal = await createGoal(parseGoalInput(args), ctx.scope);
+      return { id: goal.id, title: goal.title, status: goal.status };
+    },
+  },
+  {
+    name: "update_goal",
+    description:
+      "Update a goal's title, description, period, product, parent, or " +
+      "status. Pass the goal `id` (from list_goals). Note that `status` is " +
+      "the owner's confidence call and is independent of the computed " +
+      "progress: a goal can be 80% of the way to target and still be " +
+      "off_track, or at 20% early in its period and perfectly on_track. To " +
+      "move progress, update a key result's currentValue instead.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Goal id from list_goals." },
+        title: { type: "string" },
+        description: { type: ["string", "null"] },
+        productId: { type: ["string", "null"] },
+        periodStart: { type: ["string", "null"] },
+        periodEnd: { type: ["string", "null"] },
+        parentGoalId: { type: ["string", "null"] },
+        status: { type: "string" },
+      },
+      required: ["id"],
+      additionalProperties: false,
+    },
+    write: true,
+    run: async (args, ctx) => {
+      const id = requireString(args, "id");
+      const { id: _omit, ...rest } = args;
+      const goal = await updateGoal(id, parseGoalPatch(rest), ctx.scope);
+      return {
+        id: goal.id,
+        title: goal.title,
+        status: goal.status,
+        progress: goal.progress,
+      };
+    },
+  },
+  {
+    name: "create_key_result",
+    description:
+      "Add a key result (a measurable outcome) to a goal. Provide `goalId`, " +
+      "`title` and `targetValue`; optionally `metricKind` (number / percent / " +
+      "boolean), `startValue` (the baseline, default 0) and `currentValue`. " +
+      "Progress is measured as the distance travelled from start to target, " +
+      "so ALWAYS set `startValue` to the real baseline: a metric that starts " +
+      "at 40 and targets 60 reads 0% at 40, not 67%. Decreasing metrics work " +
+      "with no special case (start 8, target 3). The target must differ from " +
+      "the start. Returns the goal with its recomputed progress.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        goalId: { type: "string" },
+        title: { type: "string" },
+        targetValue: { type: "number" },
+        metricKind: {
+          type: "string",
+          description: "number | percent | boolean (default number).",
+        },
+        startValue: { type: "number", description: "Baseline; default 0." },
+        currentValue: { type: "number", description: "Defaults to startValue." },
+      },
+      required: ["goalId", "title", "targetValue"],
+      additionalProperties: false,
+    },
+    write: true,
+    run: async (args, ctx) => {
+      const goalId = requireString(args, "goalId");
+      const { goalId: _omit, ...rest } = args;
+      const goal = await createKeyResult(
+        goalId,
+        parseKeyResultInput(rest),
+        ctx.scope,
+      );
+      return { id: goal.id, title: goal.title, progress: goal.progress };
+    },
+  },
+  {
+    name: "update_key_result",
+    description:
+      "Update a key result, most often its `currentValue` as you check in on " +
+      "the metric. Pass the key result `id` (from list_goals) plus any of " +
+      "`title`, `metricKind`, `startValue`, `targetValue`, `currentValue`. " +
+      "Returns the goal with its recomputed progress.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        title: { type: "string" },
+        metricKind: { type: "string" },
+        startValue: { type: "number" },
+        targetValue: { type: "number" },
+        currentValue: { type: "number" },
+      },
+      required: ["id"],
+      additionalProperties: false,
+    },
+    write: true,
+    run: async (args, ctx) => {
+      const id = requireString(args, "id");
+      const { id: _omit, ...rest } = args;
+      const goal = await updateKeyResult(
+        id,
+        parseKeyResultPatch(rest),
+        ctx.scope,
+      );
+      return {
+        id: goal.id,
+        title: goal.title,
+        progress: goal.progress,
+        keyResults: goal.keyResults.map((kr) => ({
+          id: kr.id,
+          title: kr.title,
+          currentValue: kr.currentValue,
+          progress: kr.progress,
+        })),
+      };
+    },
+  },
+  {
+    name: "link_goal",
+    description:
+      "Record that a work item ladders up to a goal, which is how you say " +
+      "WHY the work exists. Many-to-many and reachable from ANY level: an " +
+      "initiative and a single work item can both contribute, one item can " +
+      "serve several goals, and the item may belong to a different product " +
+      "than the goal (cross-product linkage is the point). Pass `goalId` and " +
+      "the item's `specId`. Linking something already linked is a no-op. Use " +
+      "`unlink: true` to remove the link instead.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        goalId: { type: "string" },
+        specId: specIdSchema,
+        unlink: {
+          type: "boolean",
+          description: "Remove the link rather than create it.",
+        },
+      },
+      required: ["goalId", "specId"],
+      additionalProperties: false,
+    },
+    write: true,
+    run: async (args, ctx) => {
+      const goalId = requireString(args, "goalId");
+      const specId = requireString(args, "specId");
+      if (args.unlink === true) {
+        await unlinkGoal(goalId, specId, ctx.scope);
+      } else {
+        await linkGoal(goalId, specId, ctx.scope);
+      }
+      const contributions = await listGoalContributions(goalId, ctx.scope);
+      return {
+        goalId,
+        specId,
+        linked: args.unlink !== true,
+        contributionCount: contributions.length,
       };
     },
   },

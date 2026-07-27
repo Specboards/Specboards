@@ -31,6 +31,9 @@ export interface FilterOptions {
   tags: string[];
   epics: { specId: string; title: string }[];
   releases: { id: string; name: string }[];
+  /** Cycles to filter by; a second axis alongside releases, so both can be set
+   * at once and each narrows independently. */
+  cycles?: { id: string; name: string }[];
   /** Products to filter by; provided only in the cross-product view. */
   products?: { id: string; name: string }[];
   /** Date-typed custom fields, each offering a from/to range filter. */
@@ -158,6 +161,17 @@ export function BacklogFilters({
       value: filters.release ?? "",
       leading: [{ value: "none", label: "No release" }],
       options: options.releases.map((r) => ({ value: r.id, label: r.name })),
+      desktopWidth: "sm:w-40",
+    });
+  }
+  if (options.cycles && options.cycles.length > 0) {
+    controls.push({
+      key: "cycle",
+      label: "Cycle",
+      placeholder: "Any cycle",
+      value: filters.cycle ?? "",
+      leading: [{ value: "none", label: "No cycle" }],
+      options: options.cycles.map((c) => ({ value: c.id, label: c.name })),
       desktopWidth: "sm:w-40",
     });
   }

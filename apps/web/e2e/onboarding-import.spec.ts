@@ -37,24 +37,33 @@ test.describe("onboarding: scan + import", () => {
     await expect(createButton).toBeVisible();
     await createButton.click();
 
-    // Import summary, then off to the board.
+    // Import summary, then off to the board. The summary now reports that both
+    // specs landed without a parent, since sync no longer invents a Feature
+    // grouping per spec folder (ADR 0003 D3).
     await expect(page.getByText(/Imported\s+2\s+specs/i)).toBeVisible();
+    await expect(page.getByText(/not yet under a feature/i)).toBeVisible();
     await page.getByRole("link", { name: /View your board/i }).click();
 
-    // The board opens on the Feature level: import auto-created one Feature
-    // grouping per spec folder (titled from the folder name). Match the card
-    // link specifically — the board's parent-epic filter also lists these
-    // titles as <option>s, so a plain getByText is ambiguous.
+    // "View your board" lands on the Work Item level, where imported specs
+    // actually are. Previously it opened on Feature and relied on auto-created
+    // wrapper cards being there; with the wrapper retired, that level would be
+    // empty, so the link points at the leaf instead. Match the card link
+    // specifically — the board's parent filter also lists these titles as
+    // <option>s, so a plain getByText is ambiguous.
     await expect(
-      page.getByRole("link", { name: "Checkout", exact: true }),
+      page.getByRole("link", { name: "Checkout Flow", exact: true }),
     ).toBeVisible();
     await expect(
-      page.getByRole("link", { name: "Search", exact: true }),
+      page.getByRole("link", { name: "Search Ranking", exact: true }),
     ).toBeVisible();
 
-    // Switching to the leaf level shows the imported specs themselves.
-    await page.getByRole("link", { name: "Work Items" }).click();
-    await expect(page.getByText("Checkout Flow")).toBeVisible();
-    await expect(page.getByText("Search Ranking")).toBeVisible();
+    // No grouping card was invented for either spec's folder.
+    await page.getByRole("link", { name: "Features" }).click();
+    await expect(
+      page.getByRole("link", { name: "Checkout", exact: true }),
+    ).toBeHidden();
+    await expect(
+      page.getByRole("link", { name: "Search", exact: true }),
+    ).toBeHidden();
   });
 });

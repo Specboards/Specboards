@@ -25,10 +25,12 @@ import { statusLabel } from "@/lib/feature-helpers";
 import type { WorkspaceMember } from "@/lib/workspace";
 
 /**
- * "New {level}" button + drawer for creating a DB-native work item (an
- * initiative/epic — a non-leaf level). Leaf items come from spec sync, so this
- * is only rendered for non-leaf levels. `parents` are the items one level up
- * that the new item may sit under (empty when there's no parent level).
+ * "New {level}" button + drawer for creating a work item with no spec attached.
+ * Rendered at every level including the leaf: a spec is an attachment, not an
+ * identity, so leaf work someone is doing by hand is created here (ADR 0003),
+ * while work needing a git-backed document comes from spec sync instead.
+ * `parents` are the items one level up that the new item may sit under (empty
+ * when there's no parent level).
  */
 export function WorkItemCreate({
   levelKey,

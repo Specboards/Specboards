@@ -90,6 +90,10 @@ test.describe("a11y: authenticated app", () => {
       path: () => `/${slug}/all/roadmap?view=timeline&ladder=1`,
     },
     { name: "leadership dashboard", path: () => `/${slug}/dashboard` },
+    // The two new planning entities: both render forms, progress readouts and
+    // status badges, so they exercise tokens the boards do not.
+    { name: "cycles", path: () => `/${slug}/all/cycles` },
+    { name: "goals", path: () => `/${slug}/all/goals` },
     { name: "ideas", path: () => `/${slug}/all/ideas` },
     { name: "settings: profile", path: () => `/${slug}/settings/profile` },
     { name: "settings: products", path: () => `/${slug}/settings/products` },
@@ -114,6 +118,9 @@ test.describe("a11y: authenticated app", () => {
       path: () => `/${slug}/all/roadmap?view=timeline`,
     },
     { name: "settings: profile", path: () => `/${slug}/settings/profile` },
+    // Goal progress bars are drawn from tokens against the card surface, so
+    // they are a likely contrast regression in the second token set.
+    { name: "goals", path: () => `/${slug}/all/goals` },
   ];
 
   for (const p of DARK_PAGES) {

@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 
-import { canWriteProduct, rewriteSpecBody } from "@specboards/core";
+import {
+  canWriteProduct,
+  isLeafLevel,
+  leafLevel,
+  rewriteSpecBody,
+} from "@specboards/core";
 import {
   and,
   eq,
@@ -129,6 +134,32 @@ export async function updateSpecContent(
   return { specId, path, commitSha };
 }
 
+/**
+ * Delete a work item's attached spec file from its repo, returning the path
+ * removed. Used by the delete path: an item with a spec can only be deleted
+ * together with its file, since a surviving file is re-imported by the next
+ * sync (ADR 0003 D4). Authorization is the same product-write check as any
+ * other spec write.
+ *
+ * The sync deliberately is *not* run afterwards. The caller deletes the
+ * `features` row immediately after this returns, and a sync in between would
+ * see a spec that no longer exists on disk while its row still does.
+ */
+export async function deleteSpecFile(
+  db: Database,
+  scope: WorkspaceScope,
+  specId: string,
+  opts: { message?: string } = {},
+): Promise<{ path: string; commitSha: string }> {
+  const { repo, path } = await authorizeSpecWrite(db, scope, specId);
+  const client = await resolveRepoClient(db, repo);
+  const { commitSha } = await client.deleteFile({
+    path,
+    message: opts.message?.trim() || `docs(specboard): remove spec ${path}`,
+  });
+  return { path, commitSha };
+}
+
 /** The spec file body committed for a brand-new spec (fresh id in frontmatter). */
 function newSpecFile(id: string, title: string, body: string | undefined): string {
   const trimmed = (body ?? "").trim();
@@ -138,16 +169,31 @@ function newSpecFile(id: string, title: string, body: string | undefined): strin
 }
 
 /**
- * Create a new leaf spec file in a connected repo, commit it, and sync so a
- * card appears on the board. Returns the new spec's id (generated up front, so
- * it is known before the sync). Callers that want the spec parented under a
- * particular card follow up with an update_item on `parentSpecId` - this keeps
- * the git write focused and lets the store enforce the hierarchy rules.
+ * Create a spec file in a connected repo, commit it, and sync so it appears on
+ * the board.
+ *
+ * With `workItemId`, the spec **attaches** to that existing work item: the file
+ * carries the item's own id in frontmatter, so the sync recognises it and links
+ * a `spec_index` row to the row that is already there, rather than creating a
+ * second one (ADR 0003 D3). This is how work tracked in the app first and
+ * documented later keeps one identity throughout.
+ *
+ * Without it, a fresh id is generated and the sync creates the work item.
+ * Callers that want it parented under a particular card follow up with an
+ * update_item on `parentSpecId` - this keeps the git write focused and lets the
+ * store enforce the hierarchy rules.
  */
 export async function createSpec(
   db: Database,
   scope: WorkspaceScope,
-  input: { title: string; body?: string; repoId?: string; message?: string },
+  input: {
+    title: string;
+    body?: string;
+    repoId?: string;
+    message?: string;
+    /** An existing work item to attach the new spec to, by its specId. */
+    workItemId?: string;
+  },
 ): Promise<SpecWriteResult> {
   const title = input.title.trim();
   if (!title) throw new SpecContentError("title is required.");
@@ -204,11 +250,55 @@ export async function createSpec(
     );
   }
 
-  const id = randomUUID();
+  // Attaching: reuse the target item's own id as the spec's frontmatter id, so
+  // sync links the file to that row instead of creating a new one. Validated
+  // through the RLS-scoped store, so an id from another tenant reads as unknown.
+  let id: string;
+  if (input.workItemId) {
+    const target = await store.getFeature(input.workItemId, scope);
+    if (!target) {
+      throw new SpecContentError(`No item with spec id ${input.workItemId}.`);
+    }
+    if (!target.isDbNative) {
+      throw new SpecContentError(
+        `${target.title} already has a spec attached (${target.path}). ` +
+          "Edit it with update_spec_content instead.",
+      );
+    }
+    // Only the leaf level carries specs. Attaching to a grouping would let the
+    // sync reconcile that row down to the leaf level on its next run, silently
+    // demoting an initiative or epic and stranding its children.
+    const levels = await store.listLevels(scope);
+    if (!isLeafLevel(target.level, levels)) {
+      const leaf = leafLevel(levels);
+      throw new SpecContentError(
+        `Specs attach to ${leaf.label.toLowerCase()} only; ` +
+          `${target.title} is a ${target.level}. Create the spec on one of ` +
+          "its children instead.",
+      );
+    }
+    const targetAllowed =
+      target.productId === null
+        ? access.isOrgAdmin
+        : access.isOrgAdmin || canWriteProduct(access, target.productId);
+    if (!targetAllowed) {
+      throw new SpecContentError(
+        "Your role does not permit attaching a spec to this item.",
+      );
+    }
+    id = input.workItemId;
+  } else {
+    id = randomUUID();
+  }
+
   const { commitSha } = await client.writeFile({
     path,
     content: newSpecFile(id, title, input.body),
-    message: input.message?.trim() || `docs(specboard): add spec ${path}`,
+    message:
+      input.message?.trim() ||
+      (input.workItemId
+        ? `docs(specboard): attach spec ${path}`
+        : `docs(specboard): add spec ${path}`),
     mode: "direct",
   });
   await syncRepository(db, repo);

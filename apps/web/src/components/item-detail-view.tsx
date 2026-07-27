@@ -11,6 +11,7 @@ import { FeatureParentSelect } from "@/components/feature-parent-select";
 import { FeatureRelations } from "@/components/feature-relations";
 import { GateChecklist } from "@/components/gate-checklist";
 import { GenerateChildButton } from "@/components/generate-child-button";
+import { ItemGoals } from "@/components/item-goals";
 import { ItemProperties } from "@/components/item-properties";
 import { ItemTitle } from "@/components/item-title";
 import { StatusDot } from "@/components/status-dot";
@@ -39,6 +40,9 @@ export function ItemDetailView({
     members,
     properties,
     releases,
+    cycles,
+    goals,
+    linkableGoals,
     workflow,
     stageGates,
     completedGateIds,
@@ -88,6 +92,7 @@ export function ItemDetailView({
         members={members}
         properties={properties}
         releases={releases}
+        cycles={cycles}
         workflow={workflow}
         canEdit={canEdit}
         availableFields={availableFields}
@@ -128,6 +133,18 @@ export function ItemDetailView({
           </div>
         )}
       </div>
+
+      {/* Why this work exists. Sits above the containment relationships below,
+          because a goal is a different kind of link: many-to-many, measured,
+          and reachable from any level. */}
+      <DetailSection id="goals" title="Goals" defaultCollapsed>
+        <ItemGoals
+          specId={feature.specId}
+          goals={goals}
+          linkable={linkableGoals}
+          canEdit={canEdit}
+        />
+      </DetailSection>
 
       <DetailSection id="relationships" title="Relationships" defaultCollapsed>
         <div className="space-y-5">
@@ -219,10 +236,13 @@ export function ItemDetailView({
         />
       </DetailSection>
 
-      {feature.isDbNative && canEdit ? (
+      {canEdit ? (
         <WorkItemDelete
           specId={feature.specId}
           levelLabel={levelLabel}
+          // `path` is set only when a spec is attached; passing it turns the
+          // delete into "item + its spec file" and says so in the confirm.
+          specPath={feature.isDbNative ? null : feature.path || null}
           redirectOnDelete={variant === "page"}
         />
       ) : null}
