@@ -48,7 +48,7 @@
   "devDependencies": {
     "@axe-core/playwright": "^4.12.1",
     "@eslint/eslintrc": "^3.3.6",
-    "@playwright/test": "^1.49.1",
+    "@playwright/test": "^1.62.0",
     "@tailwindcss/typography": "^0.5.20",
     "@types/node": "^22.20.0",
     "@types/react": "^19.0.2",
