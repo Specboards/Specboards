@@ -14,7 +14,10 @@ for how and when the version is bumped.
 
 ## [Unreleased]
 
-Where goals surface once they exist, and a deploy fix.
+## [0.26.0] - 2026-08-07
+
+Where goals surface once they exist, a board you can actually drop a card on,
+and scoring that explains itself.
 
 ### Added
 
@@ -37,8 +40,40 @@ Where goals surface once they exist, and a deploy fix.
   is promoted to the top level and says whose it is; editing it no longer
   silently detaches it from that parent.
 
+### Changed
+
+- **RICE is scored in a flyout, one scale per input.** The four values used to
+  sit in the item's properties row as look-alike boxes whose units and scales
+  you had to already know, and which mean nothing apart from each other. They
+  now open from the RICE row: Reach on a magnitude ladder plus a free field,
+  Impact on the canonical five-step scale, Confidence on a slider with the
+  Low/Medium/High anchors, Effort on a person-month ladder, with the running
+  score and its formula underneath. The row reads as the score plus a compact
+  breakdown.
+
 ### Fixed
 
+- **Board cards can be grabbed, and drops land where you aim.** The whole card
+  was a click target, so the zone that opened an item was far larger than the
+  title it looked like, and a drag that fell short of the threshold opened the
+  drawer instead. The card body is now the drag handle and only the title opens
+  the item (below md, where drag is off, the whole card stays a tap target).
+  Dropping is more forgiving in three ways: cards tile their column with no dead
+  gaps between them, a drop on a card's lower half inserts after it, and a
+  within-column drag commits what the preview showed rather than landing one
+  slot above it. Desktop columns stop at the bottom of the viewport and scroll
+  inside, and a column taller than it can show floats "Drop at top" / "Drop at
+  end" bars over its edges so both ends stay one move away instead of a
+  drag-scroll away. A cancelled drag (Escape, a resize, the tab going
+  background) no longer leaves the overlay card stuck to the cursor, and the
+  Roadmap column's drop target fills the column rather than stopping at its last
+  card.
+- **New items pick up their level's detail template on every path.** An item
+  created from a column quick add came out blank even where the level had a
+  template assigned: the quick add posts a title and nothing else, and the
+  template was only ever applied by the "New item" drawer. It is seeded on
+  create now, so the REST API and the MCP tools behave like the UI. Clearing the
+  drawer's editor still creates a blank body.
 - **`GIT_SHA` is passed on every deploy path.** /legal's "Source code" link
   pins to the running commit (the AGPL section 13 offer), but the build arg that
   bakes it in was only ever passed by hand, so three releases shipped pointing

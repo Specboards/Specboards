@@ -1,6 +1,6 @@
 {
   "name": "specboards",
-  "version": "0.25.5",
+  "version": "0.26.0",
   "private": true,
   "description": "Lightweight, spec-based product management layer over git-native specs. Open-core self-host (AGPL-3.0) + hosted SaaS.",
   "license": "AGPL-3.0-only",
