@@ -341,4 +341,119 @@ describe.skipIf(!OWNER_URL)("cycles (store + RLS)", () => {
     expect(ok.startDate).toBe("2099-01-05");
     expect(ok.endDate).toBe("2099-01-20");
   });
+
+  // ── Schedule generation ────────────────────────────────────────────────
+
+  it("generates a contiguous, correctly numbered run in one call", async () => {
+    const created = await store.generateCycles(
+      {
+        productId: product.alpha,
+        startDate: "2098-01-05",
+        endDate: "2098-03-01",
+        lengthDays: 14,
+        nameTemplate: `Gen ${suffix} {n}`,
+        startNumber: 1,
+      },
+      asOwner,
+    );
+    // 2098-01-05 to 2098-03-01 is 56 days: exactly four fortnights.
+    expect(created).toHaveLength(4);
+    expect(created.map((c) => c.name)).toEqual([
+      `Gen ${suffix} 1`,
+      `Gen ${suffix} 2`,
+      `Gen ${suffix} 3`,
+      `Gen ${suffix} 4`,
+    ]);
+    expect(created[0]!.startDate).toBe("2098-01-05");
+    expect(created[3]!.endDate).toBe("2098-03-01");
+    for (let i = 1; i < created.length; i++) {
+      const prevEnd = Date.parse(`${created[i - 1]!.endDate}T00:00:00Z`);
+      const start = Date.parse(`${created[i]!.startDate}T00:00:00Z`);
+      expect(start - prevEnd).toBe(86_400_000);
+    }
+    // They are really persisted, not just returned.
+    const listed = await store.listCycles(asOwner);
+    for (const c of created) {
+      expect(listed.some((l) => l.id === c.id)).toBe(true);
+    }
+  });
+
+  it("rolls the whole run back when any generated name collides", async () => {
+    // Occupy the name the third cycle of the run would take.
+    await store.createCycle(
+      {
+        name: `Clash ${suffix} 3`,
+        productId: product.alpha,
+        startDate: "2097-06-01",
+        endDate: "2097-06-14",
+      },
+      asOwner,
+    );
+    const before = (await store.listCycles(asOwner)).length;
+    await expect(
+      store.generateCycles(
+        {
+          productId: product.alpha,
+          startDate: "2097-01-05",
+          endDate: "2097-03-01",
+          lengthDays: 14,
+          nameTemplate: `Clash ${suffix} {n}`,
+          startNumber: 1,
+        },
+        asOwner,
+      ),
+    ).rejects.toThrow(/already exists/);
+    // The two that would have preceded the clash must not have landed: a
+    // half-built schedule is worse than none, since re-running would collide
+    // with whatever did persist.
+    expect((await store.listCycles(asOwner)).length).toBe(before);
+  });
+
+  it("refuses to generate for a product the caller cannot write", async () => {
+    await expect(
+      store.generateCycles(
+        {
+          productId: product.beta,
+          startDate: "2096-01-05",
+          endDate: "2096-03-01",
+          lengthDays: 14,
+          nameTemplate: `Denied ${suffix} {n}`,
+          startNumber: 1,
+        },
+        asContributor,
+      ),
+    ).rejects.toThrow(/does not permit/);
+  });
+
+  it("refuses a workspace-wide run from a non-owner", async () => {
+    await expect(
+      store.generateCycles(
+        {
+          productId: null,
+          startDate: "2096-01-05",
+          endDate: "2096-03-01",
+          lengthDays: 14,
+          nameTemplate: `Global ${suffix} {n}`,
+          startNumber: 1,
+        },
+        asContributor,
+      ),
+    ).rejects.toThrow(/workspace owner/);
+  });
+
+  it("applies the core schedule validation", async () => {
+    await expect(
+      store.generateCycles(
+        {
+          productId: product.alpha,
+          startDate: "2095-01-05",
+          endDate: "2095-01-10",
+          lengthDays: 14,
+          nameTemplate: `Short ${suffix} {n}`,
+          startNumber: 1,
+        },
+        asOwner,
+      ),
+    ).rejects.toThrow(/end after the end date/);
+  });
 });

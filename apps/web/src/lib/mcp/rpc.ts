@@ -3,7 +3,8 @@ import { orgSlugFromRequest, resolveReadAccess } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
 import { resolveApiMembership } from "@/lib/workspace";
 
-import { TOOLS, type McpContext } from "./tools";
+import { TOOLS } from "./tools";
+import { type McpContext } from "./types";
 import { boundWorkspaceSlug } from "./workspace-binding";
 
 /**
@@ -55,9 +56,12 @@ const INSTRUCTIONS =
   "unfinished work into the next one (finished work stays put). A cycle has " +
   "no status: it is upcoming, active or complete purely from its dates. " +
   "Goals (objectives) say WHY work exists, in a form that can be measured: " +
-  "list_goals / create_goal / update_goal, create_key_result and " +
-  "update_key_result for the measurements, and link_goal to record that an " +
-  "item ladders up to a goal. Goals are deliberately NOT a hierarchy level - " +
+  "list_goals / read_goal / create_goal / update_goal / delete_goal, " +
+  "create_key_result, update_key_result and delete_key_result for the " +
+  "measurements, and link_goal to record that an " +
+  "item ladders up to a goal. read_goal adds what list_goals omits: the work " +
+  "items linked to the goal. read_item reports the same edge from the item's " +
+  "side, as its `goals`. Goals are deliberately NOT a hierarchy level - " +
   "they are measured, and the work serving them is many-to-many across " +
   "products - so link_goal works from any level and an item can serve several " +
   "goals. Each goal reports two separate progress figures: `progress` (the " +
@@ -65,6 +69,17 @@ const INSTRUCTIONS =
   "`deliveryProgress` (the share of linked work done, i.e. did we ship it). " +
   "Never average them: shipping everything while no metric moves is precisely " +
   "what goals exist to reveal. " +
+  "Alongside the work items and the goals sits the narrative plan: each " +
+  "product's Strategy (why it exists and the current targets), Research " +
+  "(discovery, interviews, synthesis) and Architecture (engineering " +
+  "constitution, service boundaries, contracts) areas. Manage them with " +
+  "list_docs / read_doc / create_doc / update_doc / delete_doc, which take a " +
+  "product key plus the area. One set of tools covers every backing an area " +
+  "can have: pages Specboards holds, or Markdown files in a connected GitHub " +
+  "repo (where the page's docId IS the file path and every edit is a commit); " +
+  "an area that merely links out to an external repository is read-only here " +
+  "and list_docs returns its link. Read the Architecture area before " +
+  "designing, and the Strategy area before arguing about priority. " +
   "Products can be collected into " +
   "product groups " +
   "(nested management roll-ups): list_product_groups shows them, " +

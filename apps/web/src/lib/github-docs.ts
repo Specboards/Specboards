@@ -100,6 +100,28 @@ export function validateDocPath(raw: unknown): string {
 }
 
 /**
+ * Read ONE Markdown file from the docs repo. `loadGithubDocs` fetches every
+ * file for the editor's tree; an agent editing a single page needs only that
+ * page plus its current sha (the guard `saveGithubDocFile` wants back), so
+ * this stays a single blob read rather than a whole-repo listing.
+ */
+export async function readGithubDocFile(
+  db: Database,
+  workspaceId: string,
+  space: DocSpace,
+  path: string,
+): Promise<GithubDocFile> {
+  const repo = await requireDocRepo(db, workspaceId, space);
+  const client = await resolveRepoClient(db, repo);
+  try {
+    const file = await client.readFile(path);
+    return { path, content: file.raw, blobSha: file.blobSha };
+  } catch {
+    throw new DocError(`No page at "${path}" in the docs repository.`);
+  }
+}
+
+/**
  * Commit one Markdown file to the docs repo's default branch. `expectedBlobSha`
  * is the concurrent-edit guard: the sha the editor loaded (update), or null for
  * a new page (create). Rejects with GitWriteConflictError when the file moved.

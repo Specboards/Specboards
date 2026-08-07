@@ -1,5 +1,7 @@
 import type {
+  CycleScheduleInput,
   CycleState,
+  PlannedCycle,
   GoalStatus,
   MetricKind,
   DetailTemplate,
@@ -18,7 +20,9 @@ import type {
 } from "@specboards/core";
 
 export type {
+  CycleScheduleInput,
   CycleState,
+  PlannedCycle,
   GoalStatus,
   MetricKind,
   DetailTemplate,
@@ -687,6 +691,18 @@ export type CyclePatch = Partial<{
   notes: string | null;
 }>;
 
+/**
+ * Generate a whole run of cycles at once: a cadence, a horizon, and a naming
+ * pattern. The date and name arithmetic is the core `CycleScheduleInput`; this
+ * adds only the scoping a store needs.
+ */
+export interface CycleGenerateInput extends CycleScheduleInput {
+  /** Product to scope every generated cycle to, or null for workspace-wide. */
+  productId?: string | null;
+  /** Notes applied to every generated cycle. Usually left empty. */
+  notes?: string | null;
+}
+
 /** Outcome of rolling a cycle's unfinished work into another cycle. */
 export interface CycleRolloverResult {
   /** Number of items moved. */
@@ -882,14 +898,22 @@ export {
 export type { GoalTreeNode, GoalTreeRow } from "@specboards/core";
 
 export {
+  addDaysDateOnly,
   compareCycles,
   cycleDaysRemaining,
   cycleLengthDays,
+  cycleScheduleRemainderDays,
   cycleState,
   cycleStateLabel,
   cyclesForProduct,
+  generateCycleSchedule,
   isCycleActive,
+  nextCycleNumber,
   selectableCycles,
+  todayDateOnly,
+  validateCycleScheduleInput,
+  CYCLE_NUMBER_TOKEN,
+  MAX_GENERATED_CYCLES,
 } from "@specboards/core";
 
 /** The releases a single product's roadmap should show: that product's own
@@ -1319,6 +1343,16 @@ export interface FeatureStore {
     patch: CyclePatch,
     scope?: WorkspaceScope,
   ): Promise<CycleRecord>;
+  /**
+   * Create a whole run of cycles in one go from a cadence and a horizon, e.g.
+   * fortnightly sprints to the end of the year. All or nothing: a name that
+   * collides with an existing cycle aborts the run rather than leaving a
+   * half-built schedule someone has to finish or unpick by hand.
+   */
+  generateCycles(
+    input: CycleGenerateInput,
+    scope?: WorkspaceScope,
+  ): Promise<CycleRecord[]>;
   /** Delete a cycle. `features.cycle_id` is ON DELETE SET NULL, so its items
    * are unscheduled rather than deleted. */
   deleteCycle(id: string, scope?: WorkspaceScope): Promise<void>;

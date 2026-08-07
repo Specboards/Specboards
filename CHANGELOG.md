@@ -14,6 +14,24 @@ for how and when the version is bumped.
 
 ## [Unreleased]
 
+### Added
+
+- **MCP tools for the Plan doc areas.** Strategy, Research and Architecture are
+  now managed by agents, not just read by people: `list_docs`, `read_doc`,
+  `create_doc`, `update_doc` and `delete_doc`. One set of tools covers every way
+  an area can be backed, because which one a team picked is a setup detail an
+  agent should not have to reason about: pages Specboards holds, or Markdown in
+  a connected GitHub repo (there a page's id **is** its repo path, edits are
+  commits, and a rename moves the file). An area that only links out is
+  read-only, and one with no source chosen yet adopts Specboards-held pages on
+  the first `create_doc`, so a page an agent writes is visible in the app
+  instead of hidden behind the setup chooser. Deleting a folder that still holds
+  pages needs an explicit `deleteChildren: true`.
+- **The missing goal verbs**: `read_goal` (a goal with its key results *and* the
+  work linked to it, which `list_goals` omits), `delete_goal` and
+  `delete_key_result`. `read_item` now reports the goals an item ladders up to,
+  so the "why does this exist" edge reads from both ends.
+
 ## [0.26.0] - 2026-08-07
 
 Where goals surface once they exist, a board you can actually drop a card on,

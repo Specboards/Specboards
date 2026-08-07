@@ -21,15 +21,24 @@ import {
   AuthRequiredError,
   createCycle,
   deleteCycle,
+  generateCycles,
   rolloverCycle,
   updateCycle,
 } from "@/lib/api-client";
 import { statusLabel } from "@/lib/feature-helpers";
 import { orgProductPath } from "@/lib/org-path";
 import {
+  addDaysDateOnly,
   cycleDaysRemaining,
+  cycleScheduleRemainderDays,
   cycleStateLabel,
+  generateCycleSchedule,
+  nextCycleNumber,
+  todayDateOnly,
+  validateCycleScheduleInput,
+  CYCLE_NUMBER_TOKEN,
   type CycleRecord,
+  type CycleScheduleInput,
   type CycleState,
 } from "@/lib/store/types";
 import { cn } from "@/lib/utils";
@@ -94,6 +103,7 @@ export function CyclesView({
   products: { id: string; name: string }[];
 }) {
   const [creating, setCreating] = useState(false);
+  const [generating, setGenerating] = useState(false);
 
   const itemsByCycle = new Map<string, CycleItem[]>();
   for (const item of items) {
@@ -114,10 +124,23 @@ export function CyclesView({
             be marked done.
           </p>
         </div>
-        {canEdit && !creating ? (
-          <Button size="sm" variant="outline" onClick={() => setCreating(true)}>
-            New cycle
-          </Button>
+        {canEdit && !creating && !generating ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setGenerating(true)}
+            >
+              Generate schedule
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setCreating(true)}
+            >
+              New cycle
+            </Button>
+          </div>
         ) : null}
       </div>
 
@@ -130,20 +153,38 @@ export function CyclesView({
         />
       ) : null}
 
-      {cycles.length === 0 && !creating ? (
+      {generating ? (
+        <GenerateScheduleForm
+          existing={cycles}
+          defaultProductId={defaultProductId}
+          products={products}
+          onDone={() => setGenerating(false)}
+        />
+      ) : null}
+
+      {cycles.length === 0 && !creating && !generating ? (
         <EmptyState
           className="mt-8"
           title="No cycles yet"
           description={
             canEdit
-              ? "A cycle is the time box your team plans into, usually a week or two. Create one, then schedule work into it from any item's detail panel. Releases keep answering what ships together; cycles answer what the team is doing now."
+              ? "A cycle is the time box your team plans into, usually a week or two. If you run a fixed cadence, generate the whole run at once rather than adding them one by one. Releases keep answering what ships together; cycles answer what the team is doing now."
               : "A cycle is the time box the team plans into. Once someone with edit access creates one, it appears here."
           }
           action={
             canEdit ? (
-              <Button size="sm" onClick={() => setCreating(true)}>
-                New cycle
-              </Button>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <Button size="sm" onClick={() => setGenerating(true)}>
+                  Generate schedule
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setCreating(true)}
+                >
+                  New cycle
+                </Button>
+              </div>
             ) : null
           }
         />
@@ -344,6 +385,281 @@ function CycleCard({
         </p>
       )}
     </Card>
+  );
+}
+
+/** Cadence choices offered in the picker, in days. Covers the sprint lengths
+ * teams actually run; anything else is still creatable one cycle at a time. */
+const CADENCES = [
+  { days: 7, label: "1 week" },
+  { days: 14, label: "2 weeks" },
+  { days: 21, label: "3 weeks" },
+  { days: 28, label: "4 weeks" },
+] as const;
+
+/** Default horizon: the end of the year the start date falls in, which is the
+ * "two-week sprints until the end of the year" case this exists for. */
+function endOfYear(from: string): string {
+  return `${from.slice(0, 4)}-12-31`;
+}
+
+/**
+ * Generate a whole run of cycles from a cadence: "two-week sprints from Monday
+ * until the end of the year", rather than creating twenty by hand.
+ *
+ * The preview is computed with the same `generateCycleSchedule` the server
+ * uses, so what is listed here is exactly what gets created. That is the point
+ * of the function living in core rather than in the route: a preview that
+ * reimplemented the date maths would eventually disagree with the result, and
+ * the user would only find out after twenty rows landed.
+ */
+function GenerateScheduleForm({
+  existing,
+  defaultProductId,
+  products,
+  onDone,
+}: {
+  existing: CycleRecord[];
+  defaultProductId: string | null;
+  products: { id: string; name: string }[];
+  onDone: () => void;
+}) {
+  const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  const [nameTemplate, setNameTemplate] = useState(`Sprint ${CYCLE_NUMBER_TOKEN}`);
+  const [lengthDays, setLengthDays] = useState(14);
+  // Runs client-side only (the form is behind a state toggle), so reading the
+  // clock here cannot cause a hydration mismatch.
+  const [startDate, setStartDate] = useState(() => todayDateOnly());
+  const [endDate, setEndDate] = useState(() => endOfYear(todayDateOnly()));
+  const [productId, setProductId] = useState(defaultProductId ?? "");
+
+  const targetProductId = productId || null;
+  // Only names in the same scope can collide, since uniqueness is per product.
+  const scopedNames = existing
+    .filter((c) => (c.productId ?? null) === targetProductId)
+    .map((c) => c.name);
+  // Continue the numbering rather than colliding: a team that hand-made
+  // Sprint 1 to 5 and now wants the rest of the year should get Sprint 6.
+  const startNumber = nextCycleNumber(scopedNames, nameTemplate);
+
+  const input: CycleScheduleInput = {
+    startDate,
+    endDate,
+    lengthDays,
+    nameTemplate,
+    startNumber,
+  };
+  const invalid = validateCycleScheduleInput(input);
+  const planned = invalid ? [] : generateCycleSchedule(input);
+  const remainder = invalid ? 0 : cycleScheduleRemainderDays(input);
+
+  // Warn rather than block: overlapping cycles are legal (a workspace-wide
+  // cycle deliberately spans product ones), but overlapping your own existing
+  // sprints is nearly always a mistake worth catching before twenty land.
+  const overlapping = existing.filter(
+    (c) =>
+      (c.productId ?? null) === targetProductId &&
+      planned.some((p) => p.startDate <= c.endDate && c.startDate <= p.endDate),
+  );
+
+  function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (invalid) return setError(invalid);
+    startTransition(async () => {
+      setError(null);
+      try {
+        const created = await generateCycles({
+          ...input,
+          productId: targetProductId,
+        });
+        toast.success(
+          `${created.length} cycle${created.length === 1 ? "" : "s"} created`,
+        );
+        onDone();
+        router.refresh();
+      } catch (err) {
+        if (err instanceof AuthRequiredError) {
+          router.push(
+            `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
+          );
+          return;
+        }
+        setError(err instanceof Error ? err.message : "Generate failed.");
+      }
+    });
+  }
+
+  return (
+    <form onSubmit={onSubmit} className="space-y-3 rounded-md border bg-card p-4">
+      <div className="space-y-1">
+        <h2 className="text-sm font-medium">Generate a schedule</h2>
+        <p className="text-xs text-muted-foreground">
+          Create a run of back-to-back cycles at a fixed cadence. Each one starts
+          the day after the last ends, and they are numbered in sequence.
+        </p>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block space-y-1.5">
+          <span className="text-xs font-medium text-muted-foreground">
+            Name pattern
+          </span>
+          <Input
+            value={nameTemplate}
+            onChange={(e) => setNameTemplate(e.target.value)}
+            placeholder={`Sprint ${CYCLE_NUMBER_TOKEN}`}
+            className="h-8"
+          />
+          <span className="block text-2xs text-muted-foreground">
+            {CYCLE_NUMBER_TOKEN} is replaced by the cycle number, starting at{" "}
+            {startNumber}.
+          </span>
+        </label>
+        <label className="block space-y-1.5">
+          <span className="text-xs font-medium text-muted-foreground">
+            Cycle length
+          </span>
+          <Select
+            value={String(lengthDays)}
+            onChange={(e) => setLengthDays(Number(e.target.value))}
+            className="h-8"
+          >
+            {CADENCES.map((c) => (
+              <option key={c.days} value={c.days}>
+                {c.label}
+              </option>
+            ))}
+          </Select>
+        </label>
+        <label className="block space-y-1.5">
+          <span className="text-xs font-medium text-muted-foreground">
+            First cycle starts
+          </span>
+          <Input
+            type="date"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+            className="h-8"
+          />
+        </label>
+        <label className="block space-y-1.5">
+          <span className="text-xs font-medium text-muted-foreground">
+            Generate until
+          </span>
+          <Input
+            type="date"
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
+            className="h-8"
+          />
+        </label>
+        {products.length > 0 ? (
+          <label className="block space-y-1.5">
+            <span className="text-xs font-medium text-muted-foreground">
+              Product
+            </span>
+            <Select
+              value={productId}
+              onChange={(e) => setProductId(e.target.value)}
+              className="h-8"
+            >
+              <option value="">Workspace-wide (all products)</option>
+              {products.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </Select>
+          </label>
+        ) : null}
+      </div>
+
+      <SchedulePreview
+        planned={planned}
+        invalid={invalid}
+        remainder={remainder}
+        endDate={endDate}
+        overlapping={overlapping}
+      />
+
+      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+      <div className="flex items-center gap-2">
+        <Button
+          type="submit"
+          size="sm"
+          disabled={pending || planned.length === 0}
+        >
+          {pending
+            ? "Generating…"
+            : `Create ${planned.length} cycle${planned.length === 1 ? "" : "s"}`}
+        </Button>
+        <Button type="button" size="sm" variant="ghost" onClick={onDone}>
+          Cancel
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+/** Exactly what "Create" will produce, listed before anyone commits to it. */
+function SchedulePreview({
+  planned,
+  invalid,
+  remainder,
+  endDate,
+  overlapping,
+}: {
+  planned: { name: string; startDate: string; endDate: string }[];
+  invalid: string | null;
+  remainder: number;
+  endDate: string;
+  overlapping: CycleRecord[];
+}) {
+  if (invalid) {
+    return (
+      <p className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
+        {invalid}
+      </p>
+    );
+  }
+  const last = planned[planned.length - 1];
+  return (
+    <div className="space-y-2 rounded-md border bg-muted/30 p-3">
+      <p className="text-xs font-medium">
+        {planned.length} cycle{planned.length === 1 ? "" : "s"}, {planned[0]!.startDate}{" "}
+        to {last!.endDate}
+      </p>
+      <ul className="max-h-48 space-y-0.5 overflow-y-auto text-xs text-muted-foreground">
+        {planned.map((p) => (
+          <li key={p.name} className="flex items-baseline gap-2">
+            <span className="font-medium text-foreground">{p.name}</span>
+            <span>
+              {p.startDate} to {p.endDate}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {remainder > 0 ? (
+        <p className="text-2xs text-muted-foreground">
+          The last {remainder} day{remainder === 1 ? "" : "s"} before {endDate}{" "}
+          are not covered: another full cycle would run past your end date.
+        </p>
+      ) : null}
+      {overlapping.length > 0 ? (
+        <p className="text-2xs text-warning-fg">
+          Overlaps {overlapping.length} existing cycle
+          {overlapping.length === 1 ? "" : "s"} ({overlapping
+            .slice(0, 3)
+            .map((c) => c.name)
+            .join(", ")}
+          {overlapping.length > 3 ? ", …" : ""}). You can still generate these,
+          but two cycles will claim the same days.
+        </p>
+      ) : null}
+    </div>
   );
 }
 

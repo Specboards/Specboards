@@ -10,6 +10,7 @@ import {
   isGoalStatus,
   isMetricKind,
   validateCycleDates,
+  validateCycleScheduleInput,
   validateGoalPeriod,
   validateKeyResult,
   GOAL_STATUSES,
@@ -65,6 +66,7 @@ import {
   type ItemGoalRef,
   type KeyResultInput,
   type KeyResultPatch,
+  type CycleGenerateInput,
   type CycleInput,
   type CyclePatch,
   type CycleRecord,
@@ -1519,6 +1521,54 @@ export async function rolloverCycle(
 ): Promise<CycleRolloverResult> {
   const store = await getStore();
   return store.rolloverCycle(fromId, toId, scope);
+}
+
+export async function generateCycles(
+  input: CycleGenerateInput,
+  scope?: WorkspaceScope,
+): Promise<CycleRecord[]> {
+  const store = await getStore();
+  return store.generateCycles(input, scope);
+}
+
+/**
+ * Parse and validate an untrusted generate-schedule POST body. The date and
+ * naming rules themselves live in core's `validateCycleScheduleInput`, which
+ * the store applies again, so this only has to establish the shape.
+ */
+export function parseCycleGenerateInput(body: unknown): CycleGenerateInput {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    throw new InvalidPatchError("Request body must be a JSON object.");
+  }
+  const raw = body as Record<string, unknown>;
+  const startDate = parseDate(raw.startDate, "startDate");
+  const endDate = parseDate(raw.endDate, "endDate");
+  if (!startDate || !endDate) {
+    throw new InvalidPatchError("startDate and endDate are required.");
+  }
+  if (typeof raw.lengthDays !== "number") {
+    throw new InvalidPatchError("lengthDays must be a number of days.");
+  }
+  if (typeof raw.nameTemplate !== "string" || raw.nameTemplate.trim() === "") {
+    throw new InvalidPatchError("nameTemplate is required.");
+  }
+  // Absent means "start at one", which is what a first run wants.
+  const startNumber = "startNumber" in raw ? raw.startNumber : 1;
+  if (typeof startNumber !== "number") {
+    throw new InvalidPatchError("startNumber must be a number.");
+  }
+  const input: CycleGenerateInput = {
+    startDate,
+    endDate,
+    lengthDays: raw.lengthDays,
+    nameTemplate: raw.nameTemplate.trim(),
+    startNumber,
+  };
+  const error = validateCycleScheduleInput(input);
+  if (error) throw new InvalidPatchError(error);
+  if ("productId" in raw) input.productId = parseProductId(raw.productId);
+  if ("notes" in raw) input.notes = parseReleaseNotes(raw.notes);
+  return input;
 }
 
 /** Parse and validate an untrusted cycle POST body. */

@@ -159,10 +159,26 @@ endpoint at `POST /api/mcp` (e.g. `https://app.specboards.ai/api/mcp`) with OAut
 approve the browser consent screen, and the connection binds to your user and
 the workspace you pick.
 
-Tools: `whoami`, `list_products`, `list_items`, `read_item`, `get_relations`,
-`create_item`, `update_item`, `delete_item`, `update_spec_content` and
-`create_spec` (both commit to git), and `list_releases` / `create_release` /
-`update_release`.
+Tools, by what they manage:
+
+- **Orientation:** `whoami`, `list_statuses`, `list_products`,
+  `list_product_groups`, `group_summary`.
+- **Work items:** `list_items`, `read_item`, `get_relations`, `create_item`,
+  `update_item`, `delete_item`, plus `create_spec` and `update_spec_content`
+  (both commit to git) and `list_github_links` / `link_github` /
+  `unlink_github`.
+- **Releases and cycles:** `list_releases` / `create_release` /
+  `update_release` / `update_release_notes`, and `list_cycles` /
+  `create_cycle` / `update_cycle` / `rollover_cycle`.
+- **Goals:** `list_goals`, `read_goal`, `create_goal`, `update_goal`,
+  `delete_goal`, `create_key_result`, `update_key_result`,
+  `delete_key_result`, and `link_goal` to record that work ladders up.
+- **Strategy, Research and Architecture:** `list_docs`, `read_doc`,
+  `create_doc`, `update_doc`, `delete_doc`. One set of tools whichever way the
+  area is backed: pages Specboards holds, or Markdown in a connected GitHub
+  repo, where a page's id is its repo path and every edit is a commit. An area
+  that only links out (SharePoint, Notion) is read-only, and `list_docs`
+  returns the link.
 
 **Local stdio server (self-host / offline).**
 

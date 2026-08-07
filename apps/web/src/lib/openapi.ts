@@ -162,6 +162,9 @@ export function buildOpenApiDocument(baseUrl: string): Record<string, unknown> {
         get: listOp("cycles", "cycles", "List cycles (active first, then upcoming, then most recently complete). Each carries a derived state."),
         post: { tags: ["cycles"], summary: "Create a cycle.", requestBody: { required: true, content: { "application/json": { schema: { type: "object" } } } }, responses: { "201": ok("The created cycle.") } },
       },
+      "/api/v1/cycles/generate": {
+        post: { tags: ["cycles"], summary: "Generate a run of cycles from a cadence (e.g. fortnightly to the end of the year). All or nothing: a name clash creates none.", requestBody: { required: true, content: { "application/json": { schema: { type: "object" } } } }, responses: { "201": ok("The cycles created, in date order.") } },
+      },
       "/api/v1/cycles/{id}": {
         parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
         patch: { tags: ["cycles"], summary: "Update a cycle's name, product, dates or notes.", requestBody: { required: true, content: { "application/json": { schema: { type: "object" } } } }, responses: { "200": ok("The updated cycle.") } },
