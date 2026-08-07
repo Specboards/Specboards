@@ -5,6 +5,10 @@ import { parentLevelKey } from "@specboards/core";
 import { BoardClient } from "./board-client";
 import { BoardPrefsProvider } from "./board-prefs";
 import { BacklogFilters, type FilterOptions } from "./backlog-filters";
+import {
+  BoardSelectToggle,
+  BoardSelectionProvider,
+} from "@/components/board-selection";
 import { CardFieldsMenu } from "@/components/card-fields-menu";
 import { EmptyState } from "@/components/empty-state";
 import { NoSpecsEmptyState } from "@/components/no-specs-empty-state";
@@ -34,7 +38,11 @@ import { resolveWorkflowFor } from "@/lib/repo-config";
 import { getStore } from "@/lib/store";
 import { selectableCycles, selectableReleases } from "@/lib/store/types";
 import { listWorkspaceMembers, type WorkspaceMember } from "@/lib/workspace";
-import { canConnectRepos, canEditProducts, requireWorkspaceAccess } from "@/lib/workspace-access";
+import {
+  canConnectRepos,
+  canEditProducts,
+  requireWorkspaceAccess,
+} from "@/lib/workspace-access";
 
 /**
  * Board view of the backlog: a kanban where you drag cards to reorder / change
@@ -150,10 +158,13 @@ export async function BoardView({
   const parents = parentKey
     ? scoped
         .filter((f) => f.level === parentKey)
-        .map((f) => ({ specId: f.specId, title: f.title, productId: f.productId }))
+        .map((f) => ({
+          specId: f.specId,
+          title: f.title,
+          productId: f.productId,
+        }))
     : [];
-  const parentLabel =
-    levels.find((l) => l.key === parentKey)?.label ?? null;
+  const parentLabel = levels.find((l) => l.key === parentKey)?.label ?? null;
   // Seed the new-item Details editor with the active level's assigned template.
   const templateBody =
     detailTemplates.find((t) => t.id === activeLevel.detailTemplateId)?.body ??
@@ -162,7 +173,9 @@ export async function BoardView({
   const db = getDb();
   const members: WorkspaceMember[] =
     access && db ? await listWorkspaceMembers(db, access.workspaceId) : [];
-  const memberNames = Object.fromEntries(members.map((m) => [m.userId, m.name]));
+  const memberNames = Object.fromEntries(
+    members.map((m) => [m.userId, m.name]),
+  );
 
   const prefs = await getBoardPreferences(access ?? undefined);
   const catalog = cardFieldCatalog(properties);
@@ -198,10 +211,12 @@ export async function BoardView({
     epics: filterableFeatures
       .filter((f) => f.childCount > 0)
       .map((f) => ({ specId: f.specId, title: f.title })),
-    releases: selectableReleases(releases, filters.release ?? null).map((r) => ({
-      id: r.id,
-      name: r.name,
-    })),
+    releases: selectableReleases(releases, filters.release ?? null).map(
+      (r) => ({
+        id: r.id,
+        name: r.name,
+      }),
+    ),
     // Finished cycles drop out of the picker, except the one currently
     // filtered on, so an existing filter never disappears from its own bar.
     cycles: selectableCycles(cycles, filters.cycle ?? null).map((c) => ({
@@ -225,7 +240,7 @@ export async function BoardView({
   // drawer's product picker instead.
   const quickAddProductId =
     activeProduct?.id ??
-    (scopedProducts.length === 1 ? scopedProducts[0]?.id ?? null : null);
+    (scopedProducts.length === 1 ? (scopedProducts[0]?.id ?? null) : null);
   // Every level is creatable, leaf included: a work item with no spec is a
   // first-class row (ADR 0003), so the quick add is gated on edit access and an
   // unambiguous product, not on altitude.
@@ -238,26 +253,25 @@ export async function BoardView({
         }
       : undefined;
 
-  const newItemButton =
-    canEdit ? (
-      <WorkItemCreate
-        levelKey={activeLevel.key}
-        levelLabel={activeLevel.label}
-        parentLabel={parentLabel}
-        parents={parents}
-        productId={activeProduct?.id ?? null}
-        products={scopedProducts.map((p) => ({ id: p.id, name: p.name }))}
-        releases={selectableReleases(releases).map((r) => ({
-          id: r.id,
-          name: r.name,
-          productId: r.productId,
-        }))}
-        properties={properties}
-        workflow={workflow}
-        members={members}
-        templateBody={templateBody}
-      />
-    ) : null;
+  const newItemButton = canEdit ? (
+    <WorkItemCreate
+      levelKey={activeLevel.key}
+      levelLabel={activeLevel.label}
+      parentLabel={parentLabel}
+      parents={parents}
+      productId={activeProduct?.id ?? null}
+      products={scopedProducts.map((p) => ({ id: p.id, name: p.name }))}
+      releases={selectableReleases(releases).map((r) => ({
+        id: r.id,
+        name: r.name,
+        productId: r.productId,
+      }))}
+      properties={properties}
+      workflow={workflow}
+      members={members}
+      templateBody={templateBody}
+    />
+  ) : null;
 
   return (
     <BoardPrefsProvider
@@ -265,107 +279,113 @@ export async function BoardView({
       initialFeatured={featured}
       orderedKeys={catalog.map((f) => f.key)}
     >
-      <section className="space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <WorkViewTabs />
-            <LevelSwitcher levels={levels} active={activeLevel.key} />
-          </div>
-          <div className="flex items-center gap-2">
-            {/* On an empty board the empty state carries this button instead,
-                so the affordance renders exactly once. */}
-            {featuresForLevel.length === 0 ? null : newItemButton}
-            {featuresForLevel.length > 0 && canEdit ? (
-              <CardFieldsMenu
-                catalog={catalog}
-                customFields={properties.map((f) => ({
-                  key: f.key,
-                  label: f.label,
-                }))}
-              />
-            ) : null}
-          </div>
-        </div>
-        {/* Filter bar: shown whenever the level has cards, so a filter that
-            empties the board can still be cleared here. Same URL-driven bar as
-            the list view (it preserves the `view=board` param). Sort sits at the
-            row's right end, grouped with the filters rather than in the button
-            toolbar, so it lines up with the other view controls. */}
-        {featuresForLevel.length > 0 ? (
+      <BoardSelectionProvider canSelect={canEdit && features.length > 0}>
+        <section className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <BacklogFilters filters={filters} options={filterOptions} />
-            <SortControl sort={sort} customSorts={customSorts} />
+            <div className="flex flex-wrap items-center gap-2">
+              <WorkViewTabs />
+              <LevelSwitcher levels={levels} active={activeLevel.key} />
+            </div>
+            {/* One action cluster, not three stacked right-aligned rows. Every
+              control in here is the shared h-8 control height (see Button's
+              `default` size), so the row reads as a single toolbar. */}
+            <div className="flex flex-wrap items-center gap-2">
+              {/* On an empty board the empty state carries this button instead,
+                so the affordance renders exactly once. */}
+              {featuresForLevel.length === 0 ? null : newItemButton}
+              {featuresForLevel.length > 0 && canEdit ? (
+                <CardFieldsMenu
+                  catalog={catalog}
+                  customFields={properties.map((f) => ({
+                    key: f.key,
+                    label: f.label,
+                  }))}
+                />
+              ) : null}
+              {featuresForLevel.length > 0 ? (
+                <SortControl sort={sort} customSorts={customSorts} />
+              ) : null}
+              <BoardSelectToggle />
+            </div>
           </div>
-        ) : null}
-        {featuresForLevel.length === 0 ? (
-          activeLevel.isLeaf ? (
-            <NoSpecsEmptyState
-              canConnect={canConnectRepos(access)}
-              createAction={newItemButton}
+          {/* Filter bar: shown whenever the level has cards, so a filter that
+            empties the board can still be cleared here. Same URL-driven bar as
+            the list view (it preserves the `view=board` param). It gets its own
+            full-width row because the set of filters grows with the workspace's
+            custom properties. */}
+          {featuresForLevel.length > 0 ? (
+            <BacklogFilters filters={filters} options={filterOptions} />
+          ) : null}
+          {featuresForLevel.length === 0 ? (
+            activeLevel.isLeaf ? (
+              <NoSpecsEmptyState
+                canConnect={canConnectRepos(access)}
+                createAction={newItemButton}
+              />
+            ) : (
+              <EmptyState
+                className="mt-8"
+                title={`No ${activeLevel.label.toLowerCase()} items yet`}
+                description={
+                  canEdit
+                    ? `${activeLevel.label} items collect the work one level down so this board can show progress at a higher altitude. Create the first one and it appears here, ready to move through your workflow.`
+                    : `${activeLevel.label} items collect the work one level down. Once someone with edit access creates one, it appears here.`
+                }
+                action={newItemButton}
+              />
+            )
+          ) : features.length === 0 ? (
+            <EmptyState
+              variant="inline"
+              title="No items match these filters"
+              description={`All ${featuresForLevel.length} ${featuresForLevel.length === 1 ? "item is" : "items are"} hidden by the current filters. Adjust or clear the filters above.`}
             />
           ) : (
-            <EmptyState
-              className="mt-8"
-              title={`No ${activeLevel.label.toLowerCase()} items yet`}
-              description={
+            <BoardClient
+              // Remount when the board's data set changes (level, product scope,
+              // or active filters). BoardClient seeds drag-and-drop state from
+              // `features` once on mount, so without a fresh key it would keep
+              // showing the prior filter's cards.
+              key={`${
+                scope.kind === "product"
+                  ? scope.product.id
+                  : scope.kind === "group"
+                    ? `group:${scope.group.id}`
+                    : ALL_PRODUCTS
+              }:${activeLevel.key}:${filtersToQuery(filters)}:${sort}`}
+              features={features}
+              columns={columns}
+              workflow={workflow}
+              sortMode={sort}
+              customFieldTypes={customFieldTypes}
+              customFieldLabels={customFieldLabels}
+              memberNames={memberNames}
+              releases={releases}
+              productsById={productsById}
+              quickAdd={quickAdd}
+              bulkOptions={
                 canEdit
-                  ? `${activeLevel.label} items collect the work one level down so this board can show progress at a higher altitude. Create the first one and it appears here, ready to move through your workflow.`
-                  : `${activeLevel.label} items collect the work one level down. Once someone with edit access creates one, it appears here.`
+                  ? {
+                      statuses: allColumns,
+                      assignees: members.map((m) => ({
+                        userId: m.userId,
+                        name: m.name,
+                      })),
+                      releases: selectableReleases(releases).map((r) => ({
+                        id: r.id,
+                        name: r.name,
+                      })),
+                      cycles: selectableCycles(cycles, null).map((c) => ({
+                        id: c.id,
+                        name: c.name,
+                      })),
+                    }
+                  : undefined
               }
-              action={newItemButton}
             />
-          )
-        ) : features.length === 0 ? (
-          <EmptyState
-            variant="inline"
-            title="No items match these filters"
-            description={`All ${featuresForLevel.length} ${featuresForLevel.length === 1 ? "item is" : "items are"} hidden by the current filters. Adjust or clear the filters above.`}
-          />
-        ) : (
-          <BoardClient
-            // Remount when the board's data set changes (level, product scope,
-            // or active filters). BoardClient seeds drag-and-drop state from
-            // `features` once on mount, so without a fresh key it would keep
-            // showing the prior filter's cards.
-            key={`${
-              scope.kind === "product"
-                ? scope.product.id
-                : scope.kind === "group"
-                  ? `group:${scope.group.id}`
-                  : ALL_PRODUCTS
-            }:${activeLevel.key}:${filtersToQuery(filters)}:${sort}`}
-            features={features}
-            columns={columns}
-            workflow={workflow}
-            sortMode={sort}
-            customFieldTypes={customFieldTypes}
-            customFieldLabels={customFieldLabels}
-            memberNames={memberNames}
-            releases={releases}
-            productsById={productsById}
-            quickAdd={quickAdd}
-            bulkOptions={
-              canEdit
-                ? {
-                    statuses: allColumns,
-                    assignees: members.map((m) => ({
-                      userId: m.userId,
-                      name: m.name,
-                    })),
-                    releases: selectableReleases(releases).map((r) => ({
-                      id: r.id,
-                      name: r.name,
-                    })),
-                    cycles: selectableCycles(cycles, null).map((c) => ({
-                      id: c.id,
-                      name: c.name,
-                    })),
-                  }
-                : undefined
-            }
-          />
-        )}
-      </section>
+          )}
+        </section>
+      </BoardSelectionProvider>
     </BoardPrefsProvider>
   );
 }

@@ -41,7 +41,6 @@ export function CardFieldsMenu({
       <Button
         type="button"
         variant="outline"
-        size="sm"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
       >

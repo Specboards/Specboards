@@ -3,6 +3,10 @@ import { notFound } from "next/navigation";
 
 import { childLevelKey, parentLevelKey } from "@specboards/core";
 
+import {
+  BoardSelectToggle,
+  BoardSelectionProvider,
+} from "@/components/board-selection";
 import { EmptyState } from "@/components/empty-state";
 import { LevelSwitcher } from "@/components/level-switcher";
 import { NoSpecsEmptyState } from "@/components/no-specs-empty-state";
@@ -170,10 +174,12 @@ export async function ListView({
     epics: features
       .filter((f) => f.childCount > 0)
       .map((f) => ({ specId: f.specId, title: f.title })),
-    releases: selectableReleases(releases, filters.release ?? null).map((r) => ({
-      id: r.id,
-      name: r.name,
-    })),
+    releases: selectableReleases(releases, filters.release ?? null).map(
+      (r) => ({
+        id: r.id,
+        name: r.name,
+      }),
+    ),
     // Finished cycles drop out of the picker, except the one currently
     // filtered on, so an existing filter never disappears from its own bar.
     cycles: selectableCycles(cycles, filters.cycle ?? null).map((c) => ({
@@ -244,26 +250,25 @@ export async function ListView({
   // a work item with no spec is a first-class row (ADR 0003). In a multi-product
   // scope with no single product in context, the drawer's product picker
   // resolves the target.
-  const newItemButton =
-    canEdit ? (
-      <WorkItemCreate
-        levelKey={activeLevel.key}
-        levelLabel={activeLevel.label}
-        parentLabel={parentLabel}
-        parents={parents}
-        productId={activeProduct?.id ?? null}
-        products={scopedProducts.map((p) => ({ id: p.id, name: p.name }))}
-        releases={selectableReleases(releases).map((r) => ({
-          id: r.id,
-          name: r.name,
-          productId: r.productId,
-        }))}
-        properties={properties}
-        workflow={workflow}
-        members={members}
-        templateBody={templateBody}
-      />
-    ) : null;
+  const newItemButton = canEdit ? (
+    <WorkItemCreate
+      levelKey={activeLevel.key}
+      levelLabel={activeLevel.label}
+      parentLabel={parentLabel}
+      parents={parents}
+      productId={activeProduct?.id ?? null}
+      products={scopedProducts.map((p) => ({ id: p.id, name: p.name }))}
+      releases={selectableReleases(releases).map((r) => ({
+        id: r.id,
+        name: r.name,
+        productId: r.productId,
+      }))}
+      properties={properties}
+      workflow={workflow}
+      members={members}
+      templateBody={templateBody}
+    />
+  ) : null;
 
   // "Clear filters" returns to this same view and level, dropping only filters.
   const clearFiltersHref = orgProductPath(
@@ -273,87 +278,98 @@ export async function ListView({
   );
 
   return (
-    <section className="space-y-4">
-      <div className="space-y-2">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <WorkViewTabs />
-            <LevelSwitcher levels={levels} active={activeLevel.key} />
-          </div>
-          {/* An empty level carries this button in its empty state instead. */}
-          {featuresForLevel.length === 0 ? null : newItemButton}
-        </div>
-        <p className="text-sm text-muted-foreground">
-          Your work items in a filterable table. Metadata edits land in the
-          database; spec content stays in git.
-        </p>
-      </div>
-      {featuresForLevel.length === 0 ? (
-        activeLevel.isLeaf ? (
-          <NoSpecsEmptyState
-            canConnect={canConnectRepos(access)}
-            createAction={newItemButton}
-          />
-        ) : (
-          <EmptyState
-            className="mt-8"
-            title={`No ${activeLevel.label.toLowerCase()} items yet`}
-            description={
-              canEdit
-                ? `${activeLevel.label} items collect the work one level down so this table can show progress at a higher altitude. Create the first one and it appears here, ready to move through your workflow.`
-                : `${activeLevel.label} items collect the work one level down. Once someone with edit access creates one, it appears here.`
-            }
-            action={newItemButton}
-          />
-        )
-      ) : (
-        <>
+    <BoardSelectionProvider canSelect={canEdit && rows.length > 0}>
+      <section className="space-y-4">
+        <div className="space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <BacklogFilters filters={filters} options={options} />
-            <SortControl sort={sort} customSorts={customSorts} />
+            <div className="flex flex-wrap items-center gap-2">
+              <WorkViewTabs />
+              <LevelSwitcher levels={levels} active={activeLevel.key} />
+            </div>
+            {/* One action cluster, not several stacked right-aligned rows. Every
+              control here is the shared h-8 control height (see Button's
+              `default` size), so the row reads as a single toolbar. */}
+            <div className="flex flex-wrap items-center gap-2">
+              {/* An empty level carries this button in its empty state instead. */}
+              {featuresForLevel.length === 0 ? null : newItemButton}
+              {featuresForLevel.length > 0 ? (
+                <SortControl sort={sort} customSorts={customSorts} />
+              ) : null}
+              <BoardSelectToggle />
+            </div>
           </div>
-          <SavedViews
-            views={savedViews}
-            currentFilters={filters}
-            canEdit={canEdit}
-          />
-          {rows.length === 0 ? (
-            <EmptyState
-              variant="inline"
-              title="No items match these filters"
-              description={`All ${featuresForLevel.length} ${featuresForLevel.length === 1 ? "item is" : "items are"} hidden by the current filters.`}
-              action={
-                <Link
-                  href={clearFiltersHref}
-                  className={buttonVariants({ size: "sm", variant: "outline" })}
-                >
-                  Clear filters
-                </Link>
-              }
+          <p className="text-sm text-muted-foreground">
+            Your work items in a filterable table. Metadata edits land in the
+            database; spec content stays in git.
+          </p>
+        </div>
+        {featuresForLevel.length === 0 ? (
+          activeLevel.isLeaf ? (
+            <NoSpecsEmptyState
+              canConnect={canConnectRepos(access)}
+              createAction={newItemButton}
             />
           ) : (
-            <Box>
-              <BoxHeader>
-                <span>{pluralizeLevelLabel(activeLevel.label)}</span>
-                <Badge variant="counter">{rows.length}</Badge>
-              </BoxHeader>
-              <BacklogTable
-                rows={rows}
-                canEdit={canEdit}
-                workflow={workflow}
-                productsById={productsById}
-                releaseNames={releaseNames}
-                bulkOptions={{
-                  statuses: options.statuses,
-                  assignees: options.assignees,
-                  releases: options.releases,
-                  cycles: options.cycles,
-                }}
+            <EmptyState
+              className="mt-8"
+              title={`No ${activeLevel.label.toLowerCase()} items yet`}
+              description={
+                canEdit
+                  ? `${activeLevel.label} items collect the work one level down so this table can show progress at a higher altitude. Create the first one and it appears here, ready to move through your workflow.`
+                  : `${activeLevel.label} items collect the work one level down. Once someone with edit access creates one, it appears here.`
+              }
+              action={newItemButton}
+            />
+          )
+        ) : (
+          <>
+            <BacklogFilters filters={filters} options={options} />
+            <SavedViews
+              views={savedViews}
+              currentFilters={filters}
+              canEdit={canEdit}
+            />
+            {rows.length === 0 ? (
+              <EmptyState
+                variant="inline"
+                title="No items match these filters"
+                description={`All ${featuresForLevel.length} ${featuresForLevel.length === 1 ? "item is" : "items are"} hidden by the current filters.`}
+                action={
+                  <Link
+                    href={clearFiltersHref}
+                    className={buttonVariants({
+                      size: "sm",
+                      variant: "outline",
+                    })}
+                  >
+                    Clear filters
+                  </Link>
+                }
               />
-            </Box>
-          )}
-        </>
-      )}
-    </section>
+            ) : (
+              <Box>
+                <BoxHeader>
+                  <span>{pluralizeLevelLabel(activeLevel.label)}</span>
+                  <Badge variant="counter">{rows.length}</Badge>
+                </BoxHeader>
+                <BacklogTable
+                  rows={rows}
+                  canEdit={canEdit}
+                  workflow={workflow}
+                  productsById={productsById}
+                  releaseNames={releaseNames}
+                  bulkOptions={{
+                    statuses: options.statuses,
+                    assignees: options.assignees,
+                    releases: options.releases,
+                    cycles: options.cycles,
+                  }}
+                />
+              </Box>
+            )}
+          </>
+        )}
+      </section>
+    </BoardSelectionProvider>
   );
 }
