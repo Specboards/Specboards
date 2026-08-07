@@ -512,6 +512,83 @@ export function parseSpecContentInput(body: unknown): SpecContentInput {
   return input;
 }
 
+/**
+ * A validated spec-create request. Mirrors `createSpec`'s input, plus
+ * `parentSpecId`, which the route applies as a follow-up patch so the caller
+ * gets "create it and nest it" as one action.
+ */
+export interface SpecCreateInput {
+  title: string;
+  body?: string;
+  /** Existing leaf work item to attach the spec to (keeps its identity). */
+  workItemId?: string;
+  /** Card to nest the newly created item under. Not valid when attaching. */
+  parentSpecId?: string;
+  repoId?: string;
+  message?: string;
+}
+
+/**
+ * Parse an untrusted spec-create body:
+ * `{ title, body?, workItemId?, parentSpecId?, repoId?, message? }`.
+ *
+ * `workItemId` and `parentSpecId` are mutually exclusive, and the rejection is
+ * the point rather than a technicality: attaching a spec to an item that
+ * already exists must not move it. That item has a parent, a status and a
+ * history someone is relying on, and quietly re-parenting it because the
+ * request happened to carry the field would be a silent edit to tracked work.
+ * A caller that genuinely wants both does the move itself, visibly.
+ */
+export function parseSpecCreateInput(body: unknown): SpecCreateInput {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    throw new InvalidPatchError("Request body must be a JSON object.");
+  }
+  const raw = body as Record<string, unknown>;
+  if (typeof raw.title !== "string" || !raw.title.trim()) {
+    throw new InvalidPatchError("title is required and must be a string.");
+  }
+  const input: SpecCreateInput = { title: raw.title.trim() };
+
+  // The body may legitimately be empty (start from the stub), so this is a type
+  // check, not an emptiness one.
+  if (raw.body !== null && raw.body !== undefined) {
+    if (typeof raw.body !== "string") {
+      throw new InvalidPatchError("body must be a string.");
+    }
+    input.body = raw.body;
+  }
+
+  for (const key of ["workItemId", "parentSpecId"] as const) {
+    if (raw[key] === null || raw[key] === undefined) continue;
+    if (!isUuid(raw[key])) {
+      throw new InvalidPatchError(`${key} must be a UUID.`);
+    }
+    input[key] = raw[key] as string;
+  }
+  if (input.workItemId && input.parentSpecId) {
+    throw new InvalidPatchError(
+      "Pass workItemId or parentSpecId, not both: attaching a spec to an " +
+        "existing item keeps that item where it already is.",
+    );
+  }
+
+  if (raw.repoId !== null && raw.repoId !== undefined) {
+    if (typeof raw.repoId !== "string" || !raw.repoId.trim()) {
+      throw new InvalidPatchError("repoId must be a non-empty string.");
+    }
+    input.repoId = raw.repoId;
+  }
+  // A blank message is dropped rather than rejected: `createSpec` falls back to
+  // a generated commit message.
+  if (raw.message !== null && raw.message !== undefined) {
+    if (typeof raw.message !== "string") {
+      throw new InvalidPatchError("message must be a string.");
+    }
+    if (raw.message.trim()) input.message = raw.message;
+  }
+  return input;
+}
+
 /** Outcome for one item in a bulk edit. */
 export interface BulkPatchItemResult {
   specId: string;

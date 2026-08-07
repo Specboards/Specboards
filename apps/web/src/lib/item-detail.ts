@@ -10,7 +10,10 @@ import {
 
 import { ALL_PRODUCTS } from "@/lib/active-product";
 import { getDb } from "@/lib/db";
-import { listLinkableRepos } from "@/lib/github-links-service";
+import {
+  listLinkableRepos,
+  type LinkableRepo,
+} from "@/lib/github-links-service";
 import { resolveWorkflowFor } from "@/lib/repo-config";
 import { getStore } from "@/lib/store";
 import type {
@@ -76,6 +79,19 @@ export interface ItemDetailData {
    * commit.
    */
   canEditSpec: boolean;
+  /**
+   * Whether this item can have a spec *attached* to it: it is tracked in the
+   * app only, sits at the leaf level (the sync would reconcile a grouping back
+   * down and silently demote it), the caller can write its product, and there
+   * is a connected repo to commit the file to. Offering the action anywhere
+   * else would show a button the server is going to refuse.
+   */
+  canAttachSpec: boolean;
+  /**
+   * Whether a brand-new spec can be created *beneath* this item, i.e. its
+   * children are at the leaf level and there is a repo to write to.
+   */
+  canCreateChildSpec: boolean;
   /** The acting user's id (for author-only affordances like deleting a
    * comment); null in local file mode where there is no authenticated user. */
   currentUserId: string | null;
@@ -92,8 +108,11 @@ export interface ItemDetailData {
   parentCandidates: ItemRef[];
   /** Other items this one can relate to (everything but itself). */
   relationCandidates: ItemRef[];
-  /** Connected repos, for the GitHub link form when a card's repo is ambiguous. */
-  repos: { owner: string; name: string }[];
+  /**
+   * Connected repos, for the GitHub link form when a card's repo is ambiguous
+   * and for choosing where a new spec file is committed. Spec repo first.
+   */
+  repos: LinkableRepo[];
 }
 
 /**
@@ -172,7 +191,24 @@ export async function getItemDetailData(
 
   // Offered to the link form so a DB-native card in a multi-repo workspace can
   // say which repo a PR lives in; the form hides the picker for a single repo.
+  // Also gates the spec-create affordances: with no connected repo there is
+  // nowhere to commit a spec file, so the server would refuse.
   const repos = access ? await listLinkableRepos(access.workspaceId) : [];
+
+  // Specs live at the leaf level only, so "attach" is offered on a leaf card
+  // and "new spec" on the level directly above one.
+  const canAttachSpec =
+    canEdit &&
+    feature.isDbNative &&
+    childKey === null &&
+    access !== null &&
+    repos.length > 0;
+  const canCreateChildSpec =
+    canEdit &&
+    childKey !== null &&
+    childLevelKey(childKey, levels) === null &&
+    access !== null &&
+    repos.length > 0;
 
   return {
     feature,
@@ -191,6 +227,8 @@ export async function getItemDetailData(
     completedGateIds,
     canEdit,
     canEditSpec,
+    canAttachSpec,
+    canCreateChildSpec,
     currentUserId: access?.userId ?? null,
     availableFields,
     levelLabel,

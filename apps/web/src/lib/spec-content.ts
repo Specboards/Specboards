@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import {
   canWriteProduct,
+  featureSlug,
   isLeafLevel,
   leafLevel,
   rewriteSpecBody,
@@ -16,7 +17,6 @@ import {
 } from "@specboards/db";
 
 import {
-  featureSlug,
   resolveRepoClient,
   resolveRepoDefaultProduct,
   syncRepository,

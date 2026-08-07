@@ -78,18 +78,33 @@ export function parseGithubLinkInput(body: unknown): GithubLinkInput {
   return { kind, number: raw.number, repo };
 }
 
+/** A connected repo as the item detail's forms need to see it. */
+export interface LinkableRepo {
+  id: string;
+  owner: string;
+  name: string;
+  /** The designated home for specs, which spec creation defaults to. */
+  isSpecRepo: boolean;
+}
+
 /**
- * The workspace's connected repos, for the link form's repo picker. Returned
- * ordered so the spec repo (the usual home of specs) comes first. Empty in
- * local file mode or when nothing is connected.
+ * The workspace's connected repos, for the link form's repo picker and the
+ * spec-create form's target. Returned ordered so the spec repo (the usual home
+ * of specs) comes first, which makes `repos[0]` the sensible default target.
+ * Empty in local file mode or when nothing is connected.
  */
 export async function listLinkableRepos(
   workspaceId: string,
-): Promise<{ owner: string; name: string }[]> {
+): Promise<LinkableRepo[]> {
   const db = getDb();
   if (!db) return [];
   return db
-    .select({ owner: repositories.owner, name: repositories.name })
+    .select({
+      id: repositories.id,
+      owner: repositories.owner,
+      name: repositories.name,
+      isSpecRepo: repositories.isSpecRepo,
+    })
     .from(repositories)
     .where(eq(repositories.workspaceId, workspaceId))
     .orderBy(desc(repositories.isSpecRepo), repositories.owner, repositories.name);

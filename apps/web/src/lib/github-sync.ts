@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import {
+  featureSlug,
   leafLevel,
   parentLevelKey,
   parseRepoConfigYaml,
@@ -290,14 +291,6 @@ export async function scanWorkspaceSpecs(db: Database, workspaceId: string): Pro
     }
   }
   return scans;
-}
-
-/** Slugify a feature name into a path segment (lowercase, hyphen-separated). */
-export function featureSlug(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
 }
 
 /** The starter spec.md body we commit on a user's first walkthrough. */
