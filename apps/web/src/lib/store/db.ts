@@ -13,6 +13,7 @@ import {
   DEFAULT_PRODUCT_KEY,
   descendantGroupIds,
   extractSections,
+  generateCycleSchedule,
   groupKeyFromName,
   wouldCreateCycle,
   wouldExceedDepth,
@@ -28,6 +29,7 @@ import {
   resolveLevelUpdate,
   todayDateOnly,
   validateCycleDates,
+  validateCycleScheduleInput,
   validateGoalPeriod,
   validateKeyResult,
   wouldCreateGoalCycle,
@@ -118,6 +120,7 @@ import {
   type ItemGoalRef,
   type KeyResultInput,
   type KeyResultPatch,
+  type CycleGenerateInput,
   type CycleInput,
   type CyclePatch,
   type CycleRecord,
@@ -2554,6 +2557,61 @@ export class DbStore implements FeatureStore {
         .returning();
       if (!row) throw new CycleError(`A cycle named "${name}" already exists.`);
       return toCycleRecord(row, undefined, todayDateOnly());
+    });
+  }
+
+  async generateCycles(
+    input: CycleGenerateInput,
+    scope?: WorkspaceScope,
+  ): Promise<CycleRecord[]> {
+    return this.scoped(scope, async (tx) => {
+      const ws = scope!.workspaceId;
+      const error = validateCycleScheduleInput(input);
+      if (error) throw new CycleError(error);
+      const productId = input.productId ?? null;
+      const access = await this.accessIn(tx, scope!);
+      if (!canWriteProductId(access, productId)) {
+        throw new CycleError(
+          productId === null
+            ? "Only the workspace owner can create workspace-wide cycles."
+            : "Your role does not permit creating cycles for this product.",
+        );
+      }
+      if (productId !== null) {
+        await this.requireProductId(tx, ws, productId);
+      }
+
+      const planned = generateCycleSchedule(input);
+      if (planned.length === 0) {
+        throw new CycleError(
+          "That start date, cycle length and end date produce no cycles.",
+        );
+      }
+      // Check every name before inserting any. `scoped` runs this in a
+      // transaction, so a clash rolls the whole run back: a half-generated
+      // schedule is worse than none, because the user cannot tell which cycles
+      // are theirs and re-running would collide with what did land.
+      for (const p of planned) {
+        await this.assertCycleNameFree(tx, ws, p.name, productId, null);
+      }
+
+      const rows = await tx
+        .insert(cycles)
+        .values(
+          planned.map((p) => ({
+            workspaceId: ws,
+            productId,
+            name: p.name,
+            startDate: p.startDate,
+            endDate: p.endDate,
+            notes: input.notes ?? null,
+          })),
+        )
+        .returning();
+      const today = todayDateOnly();
+      return rows
+        .map((r) => toCycleRecord(r, undefined, today))
+        .sort((a, b) => a.startDate.localeCompare(b.startDate));
     });
   }
 

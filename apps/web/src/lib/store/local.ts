@@ -6,6 +6,7 @@ import {
   compareCycles,
   compareGoals,
   cycleState,
+  generateCycleSchedule,
   deliveryProgress,
   goalProgress,
   isGoalStatus,
@@ -27,6 +28,7 @@ import {
   resolveLevels,
   resolveLevelUpdate,
   todayDateOnly,
+  validateCycleScheduleInput,
   validateCycleDates,
   validateGoalPeriod,
   validateKeyResult,
@@ -68,6 +70,7 @@ import {
   type ItemGoalRef,
   type KeyResultInput,
   type KeyResultPatch,
+  type CycleGenerateInput,
   type CycleInput,
   type CyclePatch,
   type CycleRecord,
@@ -1805,6 +1808,54 @@ export class LocalFileStore implements FeatureStore {
       itemCount: 0,
       doneCount: 0,
     };
+  }
+
+  async generateCycles(
+    input: CycleGenerateInput,
+    _scope?: WorkspaceScope,
+  ): Promise<CycleRecord[]> {
+    const error = validateCycleScheduleInput(input);
+    if (error) throw new CycleError(error);
+    const productId = input.productId ?? null;
+    const planned = generateCycleSchedule(input);
+    if (planned.length === 0) {
+      throw new CycleError(
+        "That start date, cycle length and end date produce no cycles.",
+      );
+    }
+    const rows = await this.readCycles();
+    // Check every name up front so the file is written once, all or nothing.
+    // Local mode has no transaction, so a mid-run failure would otherwise
+    // leave a partially generated schedule on disk.
+    for (const p of planned) {
+      if (
+        rows.some(
+          (c) => c.name === p.name && (c.productId ?? null) === productId,
+        )
+      ) {
+        throw new CycleError(`A cycle named "${p.name}" already exists.`);
+      }
+    }
+    const created: LocalCycle[] = planned.map((p) => ({
+      id: randomUUID(),
+      name: p.name,
+      productId,
+      startDate: p.startDate,
+      endDate: p.endDate,
+      notes: input.notes ?? null,
+    }));
+    await this.writeCycles([...rows, ...created]);
+    return created.map((c) => ({
+      id: c.id,
+      name: c.name,
+      productId,
+      startDate: c.startDate,
+      endDate: c.endDate,
+      notes: c.notes ?? null,
+      state: cycleState(c),
+      itemCount: 0,
+      doneCount: 0,
+    }));
   }
 
   async updateCycle(
