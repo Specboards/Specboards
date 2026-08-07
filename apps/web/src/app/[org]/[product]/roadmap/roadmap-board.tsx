@@ -321,6 +321,10 @@ export function RoadmapBoard({
         collisionDetection={pointerWithin}
         onDragStart={onDragStart}
         onDragEnd={onDragEnd}
+        // A cancelled drag (Escape, the window resizing, the tab going
+        // background) never reaches onDragEnd, so without this the overlay card
+        // would stay stuck to the cursor.
+        onDragCancel={() => setActiveId(null)}
       >
         <div
           ref={scrollRef}
@@ -450,7 +454,7 @@ function Column({
   return (
     <div
       data-board-column
-      className="w-72 shrink-0 space-y-2 rounded-md bg-muted/35 p-2.5 max-md:w-[calc(100vw-3rem)] max-md:snap-start"
+      className="flex w-72 shrink-0 flex-col gap-2 rounded-md bg-muted/35 p-2.5 max-md:w-[calc(100vw-3rem)] max-md:snap-start"
     >
       {/* Heading: release name on top, dates (and non-default status) beneath. */}
       <div className="space-y-0.5 px-1">
@@ -492,10 +496,13 @@ function Column({
         </p>
       </div>
 
+      {/* The drop target runs the full height of the column, not just as far as
+          its cards: columns stretch to the tallest one, so a short column's open
+          space is where a card is most naturally aimed. */}
       <div
         ref={setNodeRef}
         className={cn(
-          "min-h-16 space-y-2 rounded-md p-1 transition-colors",
+          "min-h-16 flex-1 space-y-2 rounded-md p-1 transition-colors",
           isOver ? "bg-muted/60" : "",
         )}
       >

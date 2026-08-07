@@ -20,17 +20,20 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-import type { PropertyDef, PropertyType, StatusWorkflow } from "@specboards/core";
+import type {
+  PropertyDef,
+  PropertyType,
+  StatusWorkflow,
+} from "@specboards/core";
 
 import { AuthRequiredError, patchFeature } from "@/lib/api-client";
+import { RiceEditor, type RiceStrings } from "@/components/rice-editor";
 import { StatusDot } from "@/components/status-dot";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { isFieldAvailable } from "@/lib/card-fields";
 import {
-  computeRiceScore,
   formatRiceScore,
-  RICE_IMPACT_OPTIONS,
   statusLabel,
   statusOptions,
 } from "@/lib/feature-helpers";
@@ -123,9 +126,17 @@ export function ItemProperties({
   const [statusValue, setStatusValue] = useState(feature.status);
 
   // RICE inputs are controlled (as strings) so the score can update live as you
-  // type; empty string means "unset". Seeded from the record and re-synced when
-  // it changes.
+  // set them; empty string means "unset". Seeded from the record and re-synced
+  // when it changes. The values are edited in a flyout outside this form, so
+  // they ride in state rather than in FormData, and `riceRef` holds the latest:
+  // a debounced save would otherwise run against the closure it was scheduled
+  // in and miss the change that scheduled it.
   const [rice, setRice] = useState(() => riceStrings(feature));
+  const riceRef = useRef(rice);
+  function updateRice(next: RiceStrings) {
+    riceRef.current = next;
+    setRice(next);
+  }
 
   // Re-sync when the parent hands us a different item, or fresh server truth
   // for the same one (e.g. after a refresh following a save elsewhere).
@@ -133,7 +144,9 @@ export function ItemProperties({
     setStatusValue(feature.status);
   }, [feature.status]);
   useEffect(() => {
-    setRice(riceStrings(feature));
+    const next = riceStrings(feature);
+    riceRef.current = next;
+    setRice(next);
   }, [
     feature.specId,
     feature.riceReach,
@@ -141,12 +154,6 @@ export function ItemProperties({
     feature.riceConfidence,
     feature.riceEffort,
   ]);
-  const liveScore = computeRiceScore({
-    riceReach: numOrNull(rice.reach),
-    riceImpact: numOrNull(rice.impact),
-    riceConfidence: numOrNull(rice.confidence),
-    riceEffort: numOrNull(rice.effort),
-  });
 
   useEffect(() => {
     return () => {
@@ -197,10 +204,10 @@ export function ItemProperties({
               ),
             }
           : {}),
-        riceReach: numOrNull(rice.reach),
-        riceImpact: numOrNull(rice.impact),
-        riceConfidence: numOrNull(rice.confidence),
-        riceEffort: numOrNull(rice.effort),
+        riceReach: numOrNull(riceRef.current.reach),
+        riceImpact: numOrNull(riceRef.current.impact),
+        riceConfidence: numOrNull(riceRef.current.confidence),
+        riceEffort: numOrNull(riceRef.current.effort),
       });
       setStatus("saved");
       router.refresh();
@@ -348,60 +355,17 @@ export function ItemProperties({
         </PropertyRow>
       ))}
 
+      {/* Scoring lives in its own flyout: the four inputs mean nothing apart
+          from each other, use four different scales, and as four look-alike
+          boxes in this row they read as unrelated fields. */}
       <PropertyRow icon={Target} label="RICE">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <label className="flex items-center gap-1 text-xs text-muted-foreground">
-            <span className="sr-only">Reach</span>
-            <Input
-              type="number"
-              min={0}
-              aria-label="Reach"
-              placeholder="Reach"
-              value={rice.reach}
-              onChange={(e) => setRice((r) => ({ ...r, reach: e.target.value }))}
-              className="h-7 w-20 px-2"
-            />
-          </label>
-          <Select
-            aria-label="Impact"
-            value={rice.impact}
-            onChange={(e) => setRice((r) => ({ ...r, impact: e.target.value }))}
-            className="h-7 w-auto px-2"
-          >
-            <option value="">Impact</option>
-            {RICE_IMPACT_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </Select>
-          <Input
-            type="number"
-            min={0}
-            max={100}
-            aria-label="Confidence (%)"
-            placeholder="Conf %"
-            value={rice.confidence}
-            onChange={(e) => setRice((r) => ({ ...r, confidence: e.target.value }))}
-            className="h-7 w-20 px-2"
-          />
-          <Input
-            type="number"
-            min={0}
-            step="0.5"
-            aria-label="Effort (person-months)"
-            placeholder="Effort"
-            value={rice.effort}
-            onChange={(e) => setRice((r) => ({ ...r, effort: e.target.value }))}
-            className="h-7 w-20 px-2"
-          />
-          <span className="ml-1 whitespace-nowrap text-sm">
-            <span className="text-muted-foreground">= </span>
-            <span className="font-medium tabular-nums">
-              {formatRiceScore(liveScore)}
-            </span>
-          </span>
-        </div>
+        <RiceEditor
+          value={rice}
+          onChange={(next, commit) => {
+            updateRice(next);
+            queueSave(commit ? 0 : 600);
+          }}
+        />
       </PropertyRow>
 
       {error ? <p className="pt-1 text-xs text-destructive">{error}</p> : null}
@@ -463,7 +427,11 @@ export function CustomFieldInput({
         ? members.map((m) => ({ value: m.userId, label: m.name }))
         : property.options.map((o) => ({ value: o, label: o }));
     return (
-      <Select name={name} defaultValue={asString(value)} className={INLINE_SELECT}>
+      <Select
+        name={name}
+        defaultValue={asString(value)}
+        className={INLINE_SELECT}
+      >
         <option value="">—</option>
         {options.map((o) => (
           <option key={o.value} value={o.value}>
@@ -595,7 +563,11 @@ function ReadOnlyProperties({
       ) : null}
       {properties.map((property) => {
         const raw = feature.customFields[property.key] ?? null;
-        const text = Array.isArray(raw) ? raw.join(", ") : raw == null ? "" : String(raw);
+        const text = Array.isArray(raw)
+          ? raw.join(", ")
+          : raw == null
+            ? ""
+            : String(raw);
         return (
           <PropertyRow
             key={property.key}
@@ -613,7 +585,10 @@ function ReadOnlyProperties({
               </a>
             ) : (
               <span
-                className={cn("px-2 py-1 text-sm", !text && "text-muted-foreground")}
+                className={cn(
+                  "px-2 py-1 text-sm",
+                  !text && "text-muted-foreground",
+                )}
               >
                 {text || "—"}
               </span>

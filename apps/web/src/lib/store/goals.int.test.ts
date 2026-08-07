@@ -242,6 +242,47 @@ describe.skipIf(!OWNER_URL)("goals, key results and linkage (store + RLS)", () =
     expect(asSeenByViewer!.linkedItemCount).toBe(1);
   });
 
+  it("returns the whole link graph in one call, filtered the same way", async () => {
+    // The roadmap's goal swimlanes need every edge at once; it must obey the
+    // same visibility rule as the per-goal read, or a lane would draw work the
+    // caller is not allowed to see.
+    const alphaGoal = await store.createGoal(
+      { title: "Graph alpha", productId: product.alpha },
+      asOwner,
+    );
+    const orgGoal = await store.createGoal(
+      { title: "Graph org-wide", productId: null },
+      asOwner,
+    );
+    const alphaItem = await store.createFeature(
+      { title: "Graph readable", level: "epic", productId: product.alpha },
+      asOwner,
+    );
+    const betaItem = await store.createFeature(
+      { title: "Graph unreadable", level: "epic", productId: product.beta },
+      asOwner,
+    );
+    // One item serving two goals: the many-to-many case the swimlanes rest on.
+    await store.linkGoal(alphaGoal.id, alphaItem.specId, asOwner);
+    await store.linkGoal(orgGoal.id, alphaItem.specId, asOwner);
+    await store.linkGoal(orgGoal.id, betaItem.specId, asOwner);
+
+    const forOwner = (await store.listGoalLinks(asOwner)).filter((l) =>
+      [alphaGoal.id, orgGoal.id].includes(l.goalId),
+    );
+    expect(forOwner).toHaveLength(3);
+    expect(
+      forOwner.filter((l) => l.specId === alphaItem.specId).map((l) => l.goalId).sort(),
+    ).toEqual([alphaGoal.id, orgGoal.id].sort());
+
+    // The viewer has a grant on Alpha only, so the Beta edge is gone.
+    const forViewer = (await store.listGoalLinks(asViewer)).filter((l) =>
+      [alphaGoal.id, orgGoal.id].includes(l.goalId),
+    );
+    expect(forViewer).toHaveLength(2);
+    expect(forViewer.every((l) => l.specId === alphaItem.specId)).toBe(true);
+  });
+
   it("removes a deleted feature's links and leaves the goal intact", async () => {
     const goal = await store.createGoal(
       { title: "Survives", productId: product.alpha },

@@ -789,6 +789,12 @@ export interface GoalContribution {
   done: boolean;
 }
 
+/** One goal-to-item edge, as a view that needs the whole graph reads it. */
+export interface GoalLinkRef {
+  goalId: string;
+  specId: string;
+}
+
 /** A goal an item ladders up to, as the item detail lists it. */
 export interface ItemGoalRef {
   goalId: string;
@@ -859,17 +865,21 @@ export interface NotificationList {
 // re-exported here so UI code imports its scoping helpers from one place,
 // alongside releasesForProduct / selectableReleases below.
 export {
+  buildGoalTree,
   compareGoals,
   deliveryProgress,
+  flattenGoalTree,
   formatMetric,
   goalProgress,
   goalStatusLabel,
   goalsForProduct,
   isGoalClosed,
+  isGoalStatus,
   keyResultProgress,
   GOAL_STATUSES,
   METRIC_KINDS,
 } from "@specboards/core";
+export type { GoalTreeNode, GoalTreeRow } from "@specboards/core";
 
 export {
   compareCycles,
@@ -1356,6 +1366,12 @@ export interface FeatureStore {
     goalId: string,
     scope?: WorkspaceScope,
   ): Promise<GoalContribution[]>;
+  /**
+   * Every goal-to-item link in the workspace, filtered to readable work. One
+   * call for a view that needs them all (the roadmap's goal swimlanes), where
+   * a `listGoalContributions` per goal would be a query per lane.
+   */
+  listGoalLinks(scope?: WorkspaceScope): Promise<GoalLinkRef[]>;
   /** Goals an item ladders up to (many-to-many; any level can link). */
   listItemGoals(
     specId: string,

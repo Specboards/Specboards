@@ -63,6 +63,7 @@ import {
   GoalError,
   type GoalContribution,
   type GoalInput,
+  type GoalLinkRef,
   type GoalPatch,
   type GoalRecord,
   type ItemGoalRef,
@@ -2154,6 +2155,18 @@ export class LocalFileStore implements FeatureStore {
         productId: f.productId,
         done: isDone(f.status),
       }));
+  }
+
+  async listGoalLinks(_scope?: WorkspaceScope): Promise<GoalLinkRef[]> {
+    const [rows, all] = await Promise.all([this.readGoals(), this.loadAll()]);
+    // Links to items that no longer exist are dropped, matching how the two
+    // progress figures already ignore them.
+    const known = new Set(all.map((f) => f.specId));
+    return rows.flatMap((goal) =>
+      (goal.linkedSpecIds ?? [])
+        .filter((specId) => known.has(specId))
+        .map((specId) => ({ goalId: goal.id, specId })),
+    );
   }
 
   async listItemGoals(
