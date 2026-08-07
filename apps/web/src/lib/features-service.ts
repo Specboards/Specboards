@@ -480,6 +480,38 @@ export interface BulkPatchRequest {
   tagOps: BulkTagOps;
 }
 
+/** A validated spec-body write: the Markdown, plus an optional commit message. */
+export interface SpecContentInput {
+  content: string;
+  message?: string;
+}
+
+/**
+ * Parse an untrusted spec-content body: `{ content, message? }`.
+ *
+ * `content` is the Markdown *after* the frontmatter and may legitimately be
+ * empty (someone clearing a spec back to a stub), so it is checked for type
+ * rather than emptiness. A blank `message` is dropped rather than rejected: the
+ * write already falls back to a generated commit message.
+ */
+export function parseSpecContentInput(body: unknown): SpecContentInput {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    throw new InvalidPatchError("Request body must be a JSON object.");
+  }
+  const raw = body as Record<string, unknown>;
+  if (typeof raw.content !== "string") {
+    throw new InvalidPatchError("content is required and must be a string.");
+  }
+  const input: SpecContentInput = { content: raw.content };
+  if ("message" in raw && raw.message !== null && raw.message !== undefined) {
+    if (typeof raw.message !== "string") {
+      throw new InvalidPatchError("message must be a string.");
+    }
+    if (raw.message.trim()) input.message = raw.message;
+  }
+  return input;
+}
+
 /** Outcome for one item in a bulk edit. */
 export interface BulkPatchItemResult {
   specId: string;

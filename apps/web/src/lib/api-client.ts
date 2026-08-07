@@ -143,6 +143,45 @@ export async function getItemDetail(specId: string): Promise<ItemDetailData> {
   return body.data;
 }
 
+/** The result of committing a spec body: where it landed and in which commit. */
+export interface SpecWriteResult {
+  specId: string;
+  path: string;
+  commitSha: string;
+}
+
+/**
+ * Replace a spec's Markdown body and commit it to the connected repo. `content`
+ * is the Markdown after the frontmatter; the frontmatter (and so the stable
+ * `id`) is preserved by the write.
+ *
+ * The server's error messages are written for a human to read, so they are
+ * surfaced as-is rather than replaced with a generic failure.
+ */
+export async function updateSpecBody(
+  specId: string,
+  content: string,
+  message?: string,
+): Promise<SpecWriteResult> {
+  const res = await apiFetch(
+    `/api/v1/features/${encodeURIComponent(specId)}/content`,
+    {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(message ? { content, message } : { content }),
+    },
+  );
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as {
+    spec?: SpecWriteResult;
+    error?: string;
+  } | null;
+  if (!res.ok || !body?.spec) {
+    throw new Error(body?.error ?? `Saving the spec failed (${res.status}).`);
+  }
+  return body.spec;
+}
+
 /** Load a feature's full detail (metadata + spec content) for in-context edit. */
 export async function getFeature(specId: string): Promise<FeatureDetail> {
   const res = await apiFetch(`/api/v1/features/${encodeURIComponent(specId)}`);

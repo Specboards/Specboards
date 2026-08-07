@@ -1,0 +1,88 @@
+import { revalidatePath } from "next/cache";
+
+import { readJsonBody } from "@/lib/api/body";
+import { authorizeWrite } from "@/lib/auth-session";
+import { getDb } from "@/lib/db";
+import {
+  InvalidPatchError,
+  parseSpecContentInput,
+} from "@/lib/features-service";
+import { SpecContentError, updateSpecContent } from "@/lib/spec-content";
+
+export const dynamic = "force-dynamic";
+
+type Params = { params: Promise<{ specId: string }> };
+
+/**
+ * PUT /api/v1/features/:specId/content — replace a spec's Markdown body and
+ * commit it to the connected repo. Body: `{ content, message? }`, where
+ * `content` is the Markdown *after* the frontmatter (the shape `GET
+ * /features/:specId` returns). The frontmatter, and so the stable `id`, is
+ * preserved by the write.
+ *
+ * This is the browser's way into `updateSpecContent`, which until now was
+ * reachable only over MCP. Authorization is deliberately not repeated here:
+ * that function checks read access through the RLS-scoped store and then makes
+ * an explicit product-write check, because the git write itself runs on the
+ * owner connection. Duplicating the check here would be two places to keep in
+ * step; weakening it would hand an editor a path to specs their role cannot
+ * touch. This route establishes the session and hands off.
+ */
+export async function PUT(req: Request, { params }: Params) {
+  const authz = await authorizeWrite(req);
+  if (!authz.ok) return authz.response;
+
+  const { specId } = await params;
+  const parsed = await readJsonBody(req);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.body;
+
+  let input;
+  try {
+    input = parseSpecContentInput(body);
+  } catch (err) {
+    if (err instanceof InvalidPatchError) {
+      return Response.json({ error: err.message }, { status: 422 });
+    }
+    throw err;
+  }
+
+  // A spec write is a commit to a connected GitHub repo, so it needs the
+  // database-backed deployment. Local file mode has neither the repo record nor
+  // a scope to authorize against; say so rather than failing obscurely.
+  const db = getDb();
+  if (!db || !authz.scope) {
+    return Response.json(
+      {
+        error:
+          "Editing spec content needs a database-backed deployment with a " +
+          "connected GitHub repository; it is unavailable in local file mode.",
+      },
+      { status: 422 },
+    );
+  }
+
+  try {
+    const result = await updateSpecContent(
+      db,
+      authz.scope,
+      specId,
+      input.content,
+      { message: input.message },
+    );
+    // The write re-syncs the repo, so the item's cached body has already
+    // changed by the time this returns; drop the pages that render it.
+    revalidatePath("/[org]/[product]/backlog/[...slug]", "page");
+    for (const path of ["/[org]/[product]/backlog", "/[org]/[product]/roadmap"])
+      revalidatePath(path, "page");
+    return Response.json({ spec: result });
+  } catch (err) {
+    // SpecContentError messages are already written for a human ("This spec has
+    // no connected repository file to edit", "Your role does not permit editing
+    // this spec"), so they go through to the UI unchanged.
+    if (err instanceof SpecContentError) {
+      return Response.json({ error: err.message }, { status: 422 });
+    }
+    throw err;
+  }
+}
