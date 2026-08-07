@@ -16,6 +16,7 @@ import { formatSpan, projectDay } from "@/lib/roadmap-timeline";
 import { TimelineCollapseAll } from "./roadmap-timeline";
 import { COLUMN_PX, GUTTER_PX, MIN_TRACK_PX } from "./timeline-geometry";
 import { TimelineScroller } from "./timeline-scroller";
+import { UndatedTray } from "./undated-tray";
 
 /** Row height in px. Fixed, because the edge overlay positions by row index. */
 const ROW_PX = 32;
@@ -407,34 +408,20 @@ export function RoadmapLadder({
         ) : null}
       </div>
 
-      {undated.length > 0 ? (
-        <section className="rounded-md border border-dashed p-3">
-          <h2 className="text-xs font-medium text-muted-foreground">
-            Undated ({undated.length})
-          </h2>
-          <p className="mt-0.5 text-2xs text-muted-foreground">
-            Not on the axis: neither these items nor anything beneath them has
-            dates to plot.
-          </p>
-          <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
-            {undated.map((item) => (
-              <li key={item.specId} className="flex items-center gap-1.5">
-                <StatusDot status={item.status} />
-                <Link
-                  href={orgProductPath(
-                    org,
-                    productSlug,
-                    `/backlog/${item.level}/${item.specId}`,
-                  )}
-                  className="truncate text-xs text-link hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  {item.title}
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
+      <UndatedTray
+        items={undated.map((item) => ({
+          specId: item.specId,
+          title: item.title,
+          status: item.status,
+          href: orgProductPath(
+            org,
+            productSlug,
+            `/backlog/${item.level}/${item.specId}`,
+          ),
+        }))}
+        description="Not on the axis: neither these items nor anything beneath them has dates to plot."
+        stateKey={`ladder.${stateKey}`}
+      />
     </div>
   );
 }

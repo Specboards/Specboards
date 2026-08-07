@@ -1,3 +1,5 @@
+import { WidePage } from "@/components/page-width";
+
 import { BoardView } from "./board-view";
 import { ListView } from "./list-view";
 
@@ -18,9 +20,13 @@ export default async function BacklogPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const view = (await searchParams).view;
-  return view === "list" ? (
-    <ListView params={params} searchParams={searchParams} />
-  ) : (
-    <BoardView params={params} searchParams={searchParams} />
+  return (
+    <WidePage>
+      {view === "list" ? (
+        <ListView params={params} searchParams={searchParams} />
+      ) : (
+        <BoardView params={params} searchParams={searchParams} />
+      )}
+    </WidePage>
   );
 }

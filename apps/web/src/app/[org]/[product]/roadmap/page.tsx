@@ -8,6 +8,7 @@ import { CardFieldsMenu } from "@/components/card-fields-menu";
 import { EmptyState } from "@/components/empty-state";
 import { NoSpecsEmptyState } from "@/components/no-specs-empty-state";
 import { LevelSwitcher } from "@/components/level-switcher";
+import { widePage } from "@/components/page-width";
 import { ReleaseCreate } from "@/components/release-controls";
 import { WorkItemCreate } from "@/components/work-item-create";
 import { resolveActiveLevel } from "@/lib/active-level";
@@ -524,7 +525,7 @@ export default async function RoadmapPage({
       initialFeatured={featured}
       orderedKeys={catalog.map((f) => f.key)}
     >
-      <section className="space-y-4">
+      <section {...widePage} className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-lg font-semibold tracking-tight">
