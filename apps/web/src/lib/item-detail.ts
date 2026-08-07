@@ -4,6 +4,7 @@ import {
   childLevelKey,
   parentLevelKey,
   propertyAppliesToLevel,
+  type DetailTemplate,
   type PropertyDef,
   type StatusWorkflow,
 } from "@specboards/core";
@@ -113,6 +114,11 @@ export interface ItemDetailData {
    * and for choosing where a new spec file is committed. Spec repo first.
    */
   repos: LinkableRepo[];
+  /**
+   * Templates a new spec can start from, for the "New spec" picker. Empty when
+   * no spec can be created here, so its absence is not "none configured".
+   */
+  specTemplates: DetailTemplate[];
 }
 
 /**
@@ -210,6 +216,15 @@ export async function getItemDetailData(
     access !== null &&
     repos.length > 0;
 
+  // Starting points for a new spec, offered only where one can be created. The
+  // same templates admins already maintain in Settings -> Cards, not a second
+  // parallel set: "the team's sections" is one idea, wherever the Markdown ends
+  // up. Skipped entirely when no create affordance shows, so an ordinary item
+  // read does not pay for a query nothing renders.
+  const specTemplates = canCreateChildSpec
+    ? await store.listDetailTemplates(access ?? undefined)
+    : [];
+
   return {
     feature,
     members,
@@ -240,6 +255,7 @@ export async function getItemDetailData(
     parentCandidates,
     relationCandidates,
     repos,
+    specTemplates,
   };
 }
 

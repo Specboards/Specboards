@@ -211,6 +211,8 @@ export async function createSpec(input: {
   body?: string;
   workItemId?: string;
   parentSpecId?: string;
+  /** Detail template to start from; only used when the spec would be blank. */
+  templateId?: string;
   repoId?: string;
   message?: string;
 }): Promise<SpecCreateResult> {

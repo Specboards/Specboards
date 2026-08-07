@@ -1,6 +1,11 @@
 import { expect, test } from "@playwright/test";
 
-import { getWorkspace, resetBoard, seedRepository } from "./helpers/db";
+import {
+  getWorkspace,
+  resetBoard,
+  resetDetailTemplates,
+  seedRepository,
+} from "./helpers/db";
 import { getRepoFiles, resetFixture } from "./helpers/github";
 
 /**
@@ -180,6 +185,131 @@ test.describe("spec creation: bring a spec into existence from the app", () => {
     );
     expect(child.ok()).toBeTruthy();
     expect((await child.json()).feature.parentSpecId).toBe(parentSpecId);
+  });
+
+  test("starts a new spec from the picked template, and from the level default", async ({
+    page,
+  }) => {
+    const ws = await getWorkspace();
+    await resetDetailTemplates(ws.id);
+
+    // Two templates: one the author picks, one the workspace has assigned to
+    // the leaf level as its default.
+    const picked = await page.request.post("/api/v1/detail-templates", {
+      data: { name: "Bug report", body: "## Steps to reproduce\n\n1. \n" },
+    });
+    expect(picked.ok(), await picked.text()).toBeTruthy();
+    const pickedId = (await picked.json()).template.id as string;
+
+    const fallback = await page.request.post("/api/v1/detail-templates", {
+      data: { name: "House style", body: "## Problem\n\n## Out of scope\n" },
+    });
+    expect(fallback.ok(), await fallback.text()).toBeTruthy();
+    const fallbackId = (await fallback.json()).template.id as string;
+
+    const assign = await page.request.put("/api/v1/levels/templates", {
+      data: { templates: { work: fallbackId } },
+    });
+    expect(assign.ok(), await assign.text()).toBeTruthy();
+
+    const parent = await page.request.post("/api/v1/features", {
+      data: { title: "Payments", level: "feature" },
+    });
+    const parentSpecId = (await parent.json()).feature.specId as string;
+
+    await page.goto(`/${ws.slug}/all/backlog/feature/${parentSpecId}`);
+    await page.getByRole("button", { name: /Relationships/i }).click();
+    await page.getByRole("button", { name: /New spec/i }).click();
+
+    const form = page
+      .locator("form")
+      .filter({ hasText: /Creates a spec and nests it under/ });
+    await form.getByRole("textbox").fill("Card declines");
+    await form.getByLabel(/Start from/i).selectOption({ label: "Bug report" });
+
+    const [resp] = await Promise.all([
+      page.waitForResponse(
+        (r) => r.url().includes("/api/v1/specs") && r.request().method() === "POST",
+      ),
+      form.getByRole("button", { name: /^Create spec$/i }).click(),
+    ]);
+    expect(resp.ok(), await resp.text()).toBeTruthy();
+
+    const withTemplate = getRepoFiles(OWNER, REPO)["specs/card-declines/spec.md"];
+    expect(withTemplate).toContain("## Steps to reproduce");
+    // The template replaced the stub rather than being tacked on beside it.
+    expect(withTemplate).not.toContain("Describe this spec.");
+    // And the picked template won over the level's default.
+    expect(withTemplate).not.toContain("## Out of scope");
+    expect(pickedId).not.toBe(fallbackId);
+
+    // Leaving the picker on "Workspace default" falls through to the template
+    // the level is configured with, which is the whole point of the default:
+    // an author who chooses nothing still gets the team's sections.
+    await page.getByRole("button", { name: /New spec/i }).click();
+    const second = page
+      .locator("form")
+      .filter({ hasText: /Creates a spec and nests it under/ });
+    await second.getByRole("textbox").fill("Refund latency");
+    const [resp2] = await Promise.all([
+      page.waitForResponse(
+        (r) => r.url().includes("/api/v1/specs") && r.request().method() === "POST",
+      ),
+      second.getByRole("button", { name: /^Create spec$/i }).click(),
+    ]);
+    expect(resp2.ok(), await resp2.text()).toBeTruthy();
+
+    const withDefault = getRepoFiles(OWNER, REPO)["specs/refund-latency/spec.md"];
+    expect(withDefault).toContain("## Problem");
+    expect(withDefault).toContain("## Out of scope");
+    expect(withDefault).not.toContain("Describe this spec.");
+  });
+
+  test("a template never displaces what the author already wrote", async ({
+    page,
+  }) => {
+    const ws = await getWorkspace();
+    await resetDetailTemplates(ws.id);
+
+    const tpl = await page.request.post("/api/v1/detail-templates", {
+      data: { name: "House style", body: "## Problem\n\n## Out of scope\n" },
+    });
+    const tplId = (await tpl.json()).template.id as string;
+    const assign = await page.request.put("/api/v1/levels/templates", {
+      data: { templates: { work: tplId } },
+    });
+    expect(assign.ok(), await assign.text()).toBeTruthy();
+
+    // A card with a real description, attached. The level default must not
+    // overwrite it: a skeleton replacing someone's writing would be far worse
+    // than no template at all.
+    const created = await page.request.post("/api/v1/features", {
+      data: {
+        title: "Chargeback SLA",
+        level: "work",
+        details: "We answer chargebacks within five working days.",
+      },
+    });
+    const specId = (await created.json()).feature.specId as string;
+
+    await page.goto(`/${ws.slug}/all/backlog/work/${specId}`);
+    await page.getByRole("button", { name: /Attach a spec/i }).click();
+    const form = page.locator("form").filter({ hasText: /Commits a spec file/ });
+    // No template picker on attach: the card's description is the body, so a
+    // control that could not change the outcome is not offered.
+    await expect(form.getByLabel(/Start from/i)).toHaveCount(0);
+
+    const [resp] = await Promise.all([
+      page.waitForResponse(
+        (r) => r.url().includes("/api/v1/specs") && r.request().method() === "POST",
+      ),
+      form.getByRole("button", { name: /^Attach spec$/i }).click(),
+    ]);
+    expect(resp.ok(), await resp.text()).toBeTruthy();
+
+    const raw = getRepoFiles(OWNER, REPO)["specs/chargeback-sla/spec.md"];
+    expect(raw).toContain("We answer chargebacks within five working days.");
+    expect(raw).not.toContain("## Out of scope");
   });
 
   test("refuses a title whose file already exists, and says to rename it", async ({

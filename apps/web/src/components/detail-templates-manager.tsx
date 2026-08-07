@@ -24,6 +24,12 @@ import type { WorkspaceLevel } from "@/lib/store/types";
  * Settings -> Cards: admin-defined "Details Templates". Each template is a
  * Markdown skeleton that seeds a new card's details; admins can assign one per
  * hierarchy level. Built-in examples give a starting point to copy from.
+ *
+ * These seed **specs** too, not just cards: "the team's sections" is one idea
+ * wherever the Markdown ends up, and a second set of templates that said the
+ * same thing in a different screen would only be somewhere else to keep in
+ * step. The copy here says so, because a PM hunting for "spec templates" would
+ * otherwise have no reason to look under Cards.
  */
 export function DetailTemplatesManager({
   templates,
@@ -41,7 +47,7 @@ export function DetailTemplatesManager({
         <EmptyState
           variant="inline"
           title="No detail templates yet"
-          description="A detail template is a Markdown skeleton that seeds a new card's details, so every card of a kind starts consistent."
+          description="A template is a Markdown skeleton with your team's sections in it. New cards start from one, and so do new specs, so work of a kind starts consistent instead of from a blank page."
           action={
             canEdit ? (
               <Button size="sm" onClick={() => setAdding(true)}>
@@ -312,7 +318,9 @@ function LevelTemplateAssign({
     <fieldset className="space-y-3 rounded-md border p-4">
       <legend className="px-1 text-sm font-medium">Default per level</legend>
       <p className="text-xs text-muted-foreground">
-        Pick which template seeds a new card&apos;s details at each level.
+        Pick which template seeds a new card&apos;s details at each level. The
+        leaf level&apos;s template also seeds a new spec, unless the author picks
+        another one.
       </p>
       <div className="space-y-2">
         {assignable.map((level) => (

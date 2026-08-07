@@ -5,7 +5,7 @@ import { useState } from "react";
 import { FileText, Plus } from "lucide-react";
 import { toast } from "sonner";
 
-import { specFilePath } from "@specboards/core";
+import { specFilePath, type DetailTemplate } from "@specboards/core";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -52,11 +52,18 @@ export type SpecCreateTarget =
 export function CreateSpecButton({
   target,
   repos,
+  templates = [],
   onCreated,
 }: {
   target: SpecCreateTarget;
   /** Connected repos, spec repo first; `repos[0]` is the default target. */
   repos: LinkableRepo[];
+  /**
+   * Starting points offered for a brand-new spec. Not offered when attaching:
+   * there the card's own description becomes the body, so a template would be
+   * a control that quietly does nothing.
+   */
+  templates?: DetailTemplate[];
   /** Called after a successful create, for views holding state locally. */
   onCreated?: () => void;
 }) {
@@ -65,15 +72,20 @@ export function CreateSpecButton({
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState(attaching ? target.itemTitle : "");
   const [repoId, setRepoId] = useState(repos[0]?.id ?? "");
+  // "" means "whatever the workspace has set for this level", which the server
+  // resolves; it is not the same as picking a template called nothing.
+  const [templateId, setTemplateId] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const path = specFilePath(title);
   const repo = repos.find((r) => r.id === repoId) ?? repos[0];
+  const showTemplates = !attaching && templates.length > 0;
 
   function expand() {
     setTitle(attaching ? target.itemTitle : "");
     setRepoId(repos[0]?.id ?? "");
+    setTemplateId("");
     setError(null);
     setOpen(true);
   }
@@ -95,7 +107,10 @@ export function CreateSpecButton({
         // description, which this component may not have seen yet.
         ...(target.kind === "attach"
           ? { workItemId: target.workItemId }
-          : { parentSpecId: target.parentSpecId }),
+          : {
+              parentSpecId: target.parentSpecId,
+              templateId: templateId || undefined,
+            }),
       });
       toast.success(
         attaching
@@ -168,6 +183,29 @@ export function CreateSpecButton({
           }}
         />
       </label>
+      {showTemplates ? (
+        <label className="block space-y-1.5">
+          <span className="text-xs font-medium text-muted-foreground">
+            Start from
+          </span>
+          <Select
+            value={templateId}
+            className="h-8"
+            onChange={(e) => setTemplateId(e.target.value)}
+          >
+            {/* The workspace's own default for this level, resolved server-side.
+                Named vaguely on purpose: this component does not know which
+                template the level points at, and guessing would be worse than
+                not saying. */}
+            <option value="">Workspace default</option>
+            {templates.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </Select>
+        </label>
+      ) : null}
       {repos.length > 1 ? (
         <label className="block space-y-1.5">
           <span className="text-xs font-medium text-muted-foreground">
