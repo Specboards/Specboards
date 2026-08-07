@@ -20,6 +20,10 @@ type Params = { params: Promise<{ specId: string }> };
  * /features/:specId` returns). The frontmatter, and so the stable `id`, is
  * preserved by the write.
  *
+ * Where the change lands depends on the repo's write mode. The response carries
+ * `spec.pullRequest` when it was proposed for review instead of committed to the
+ * default branch, and its absence is how a client knows the text is live.
+ *
  * This is the browser's way into `updateSpecContent`, which until now was
  * reachable only over MCP. Authorization is deliberately not repeated here:
  * that function checks read access through the RLS-scoped store and then makes
@@ -70,11 +74,16 @@ export async function PUT(req: Request, { params }: Params) {
       input.content,
       { message: input.message },
     );
-    // The write re-syncs the repo, so the item's cached body has already
-    // changed by the time this returns; drop the pages that render it.
-    revalidatePath("/[org]/[product]/backlog/[...slug]", "page");
-    for (const path of ["/[org]/[product]/backlog", "/[org]/[product]/roadmap"])
-      revalidatePath(path, "page");
+    // A direct write re-syncs the repo, so the item's cached body has already
+    // changed by the time this returns; drop the pages that render it. A change
+    // proposed as a pull request has not touched the default branch, so there is
+    // nothing yet to re-read: throwing the cache away would only make every
+    // reader refetch the same text they already have.
+    if (!result.pullRequest) {
+      revalidatePath("/[org]/[product]/backlog/[...slug]", "page");
+      for (const path of ["/[org]/[product]/backlog", "/[org]/[product]/roadmap"])
+        revalidatePath(path, "page");
+    }
     return Response.json({ spec: result });
   } catch (err) {
     // SpecContentError messages are already written for a human ("This spec has

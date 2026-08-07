@@ -51,7 +51,14 @@ test.describe("spec editing: edit a spec body in the app", () => {
     resetFixture();
 
     await seedRepository({ workspaceId: ws.id, owner: OWNER, name: REPO });
-    setRepoFiles(OWNER, REPO, { [SPEC_PATH]: checkoutSpec() });
+    // `writeMode: direct` is what makes this the commit-straight-to-the-branch
+    // path; the default is `pr` (see spec-pull-requests.spec.ts). It is set in
+    // the repo's own config file rather than on the row, so the chain this
+    // asserts starts where a customer sets it: config.yml, read by the sync.
+    setRepoFiles(OWNER, REPO, {
+      ".specboards/config.yml": "version: 1\nwriteMode: direct\n",
+      [SPEC_PATH]: checkoutSpec(),
+    });
 
     // Import the spec so there is a board row pointing at the file.
     await page.goto(`/${ws.slug}/settings/repositories`);

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { MAX_REPO_CONFIG_LENGTH, parseRepoConfigYaml, safeParseRepoConfig } from "./config.js";
+import {
+  MAX_REPO_CONFIG_LENGTH,
+  parseRepoConfigYaml,
+  resolveWriteMode,
+  safeParseRepoConfig,
+} from "./config.js";
 
 describe("parseRepoConfigYaml", () => {
   it("parses a config.yml with globs and write mode", () => {
@@ -53,6 +58,57 @@ describe("parseRepoConfigYaml", () => {
     const config = parseRepoConfigYaml(raw);
     expect("fields" in config).toBe(false);
     expect("estimate" in config).toBe(false);
+  });
+});
+
+describe("resolveWriteMode", () => {
+  it("defaults to pr when nothing is configured", () => {
+    expect(resolveWriteMode(null)).toEqual({ mode: "pr", source: "default" });
+    expect(resolveWriteMode(undefined, null)).toEqual({
+      mode: "pr",
+      source: "default",
+    });
+  });
+
+  it("reads the repo's own config", () => {
+    expect(resolveWriteMode({ version: 1, writeMode: "direct" })).toEqual({
+      mode: "direct",
+      source: "config",
+    });
+  });
+
+  it("lets an admin's override win over the repo config", () => {
+    // The point of the override: a Specboard admin may have no way to commit to
+    // `.specboards/config.yml` in a repo somebody else owns.
+    expect(resolveWriteMode({ version: 1, writeMode: "pr" }, "direct")).toEqual({
+      mode: "direct",
+      source: "override",
+    });
+  });
+
+  it("reads a writeMode the rest of the config has outgrown", () => {
+    // Deliberately not schema-validated: a config stored under another version
+    // still names a mode, and ignoring it would drop the team back to writing
+    // straight onto their default branch.
+    expect(resolveWriteMode({ version: 99, writeMode: "direct" })).toEqual({
+      mode: "direct",
+      source: "config",
+    });
+  });
+
+  it("ignores values that are not a mode", () => {
+    expect(resolveWriteMode({ writeMode: "branch" })).toEqual({
+      mode: "pr",
+      source: "default",
+    });
+    expect(resolveWriteMode({ writeMode: "direct" }, "")).toEqual({
+      mode: "direct",
+      source: "config",
+    });
+    expect(resolveWriteMode("not an object")).toEqual({
+      mode: "pr",
+      source: "default",
+    });
   });
 });
 

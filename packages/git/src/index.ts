@@ -18,9 +18,34 @@ export interface GitRepoClient {
   /** Read a single file's contents + sha at the current ref. */
   readFile(path: string): Promise<SpecFile>;
   /** Write a file back, returning the new commit sha and the new blob sha. */
-  writeFile(input: WriteFileInput): Promise<{ commitSha: string; blobSha: string }>;
+  writeFile(input: WriteFileInput): Promise<WriteFileResult>;
   /** Delete a file with a commit, returning the commit sha. */
   deleteFile(input: DeleteFileInput): Promise<{ commitSha: string }>;
+}
+
+/** The pull request a `mode: "pr"` write proposed the change through. */
+export interface WritePullRequest {
+  number: number;
+  url: string;
+  /** The head branch the commit landed on. */
+  branch: string;
+  /**
+   * False when the commit joined a pull request that was already open for this
+   * file. Callers use it to tell an author their change was added to the review
+   * already in flight rather than starting a second one.
+   */
+  created: boolean;
+}
+
+export interface WriteFileResult {
+  commitSha: string;
+  blobSha: string;
+  /**
+   * Set only for a `mode: "pr"` write. Its absence is what tells a caller the
+   * change is already on the default branch: in PR mode nothing the board reads
+   * has changed yet, so re-syncing or reporting "saved" would both be wrong.
+   */
+  pullRequest?: WritePullRequest;
 }
 
 export interface WriteFileInput {

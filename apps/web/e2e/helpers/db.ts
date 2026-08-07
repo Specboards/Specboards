@@ -193,6 +193,12 @@ export async function seedRepository(input: {
   name: string;
   defaultBranch?: string;
   githubInstallationId?: string;
+  /**
+   * The repo's `.specboards/config.yml` as sync would have stored it. Mainly a
+   * way to pin `writeMode`: with no config a repo takes the default, which is
+   * `pr`, so a test that wants a direct commit has to say so.
+   */
+  config?: Record<string, unknown>;
 }): Promise<string> {
   const [row] = await db()
     .insert(repositories)
@@ -202,6 +208,7 @@ export async function seedRepository(input: {
       name: input.name,
       defaultBranch: input.defaultBranch ?? "main",
       githubInstallationId: input.githubInstallationId ?? "e2e-installation",
+      config: input.config,
     })
     .returning({ id: repositories.id });
   if (!row) throw new Error("Failed to seed repository row.");

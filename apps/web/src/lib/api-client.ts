@@ -149,6 +149,18 @@ export interface SpecWriteResult {
   specId: string;
   path: string;
   commitSha: string;
+  /**
+   * Present when the repo takes spec changes as pull requests. The change is
+   * then *proposed*, not live: the board still shows the previous text until
+   * someone reviews and merges it.
+   */
+  pullRequest?: {
+    number: number;
+    url: string;
+    branch: string;
+    /** False when the change joined a review that was already open. */
+    created: boolean;
+  };
 }
 
 /**

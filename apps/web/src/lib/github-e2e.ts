@@ -3,11 +3,14 @@ import { readFileSync, writeFileSync } from "node:fs";
 
 import {
   GitWriteConflictError,
+  writeBranchName,
   type DeleteFileInput,
   type GitRepoClient,
   type InstallationRepo,
   type SpecFile,
   type WriteFileInput,
+  type WriteFileResult,
+  type WritePullRequest,
 } from "@specboards/git";
 
 import { e2eGithubFixturePath } from "@/lib/e2e";
@@ -21,9 +24,37 @@ import type { RepoRecord } from "@/lib/github-sync";
  * seeds; writes (id injection, starter specs) persist back to that file so a
  * later scan in the same or a later request sees them.
  *
- * Fixture shape: `{ "owner/name": { "specs/foo/spec.md": "<raw>", ... }, ... }`.
+ * Fixture shape: `{ "owner/name": { files, branches, pulls }, ... }`, where
+ * `files` is the default branch. Branches and pull requests are modelled rather
+ * than flattened away, because the difference between "committed" and "proposed"
+ * is exactly what the PR write path exists to make: a fake that wrote both to
+ * the same place would let a test pass while the board silently published an
+ * unreviewed change.
  */
-type Fixture = Record<string, Record<string, string>>;
+type RepoFiles = Record<string, string>;
+
+interface FakePull {
+  number: number;
+  /** The head branch, which is how a later edit finds the review to join. */
+  branch: string;
+  title: string;
+  state: "open" | "closed";
+}
+
+interface FakeRepo {
+  /** Contents of the default branch. */
+  files: RepoFiles;
+  /** Working branches, each a full snapshot taken when it was cut. */
+  branches: Record<string, RepoFiles>;
+  pulls: FakePull[];
+}
+
+type Fixture = Record<string, FakeRepo>;
+
+/** Fill in a repo the fixture knows nothing about yet. */
+function emptyRepo(): FakeRepo {
+  return { files: {}, branches: {}, pulls: [] };
+}
 
 function readFixture(): Fixture {
   try {
@@ -62,24 +93,32 @@ export function fakeRepoClient(repo: Pick<RepoRecord, "owner" | "name">): GitRep
 
   return {
     async listSpecFiles(globs: string[]): Promise<SpecFile[]> {
-      const files = readFixture()[key] ?? {};
+      const files = readFixture()[key]?.files ?? {};
       return Object.entries(files)
         .filter(([path]) => matchesAnyGlob(path, globs))
         .map(([path, raw]) => ({ path, raw, blobSha: blobShaOf(raw) }));
     },
 
     async readFile(path: string): Promise<SpecFile> {
-      const raw = readFixture()[key]?.[path];
+      // The default branch, like the real client reading at its configured ref.
+      // A change waiting in a pull request is deliberately not visible here.
+      const raw = readFixture()[key]?.files[path];
       if (raw === undefined) {
         throw new Error(`E2E fake: ${key} has no file at ${path}`);
       }
       return { path, raw, blobSha: blobShaOf(raw) };
     },
 
-    async writeFile(input: WriteFileInput): Promise<{ commitSha: string; blobSha: string }> {
+    async writeFile(input: WriteFileInput): Promise<WriteFileResult> {
       const data = readFixture();
-      const files = (data[key] ??= {});
+      const repo = (data[key] ??= emptyRepo());
+      const target =
+        input.mode === "pr" ? resolveBranch(repo, input.path) : null;
+      const files = target ? repo.branches[target]! : repo.files;
+
       // Mirror the real client's guard: null = must not exist, sha = must match.
+      // Checked against the branch being written, which in PR mode is the
+      // working branch rather than the default one.
       if (input.expectedBlobSha !== undefined) {
         const existing = files[input.path];
         const conflict =
@@ -89,28 +128,71 @@ export function fakeRepoClient(repo: Pick<RepoRecord, "owner" | "name">): GitRep
         if (conflict) throw new GitWriteConflictError(input.path);
       }
       files[input.path] = input.content;
+
+      const pullRequest = target
+        ? openOrJoinPull(repo, target, input.message)
+        : undefined;
       writeFixture(data);
       return {
-        commitSha: blobShaOf(`${input.path}\n${input.content}`),
+        commitSha: blobShaOf(`${target ?? "main"}\n${input.path}\n${input.content}`),
         blobSha: blobShaOf(input.content),
+        ...(pullRequest ? { pullRequest } : {}),
       };
     },
 
     async deleteFile(input: DeleteFileInput): Promise<{ commitSha: string }> {
       const data = readFixture();
-      const files = data[key] ?? {};
-      const existing = files[input.path];
+      const repo = data[key] ?? emptyRepo();
+      const existing = repo.files[input.path];
       if (
         existing === undefined ||
         (input.expectedBlobSha !== undefined && blobShaOf(existing) !== input.expectedBlobSha)
       ) {
         throw new GitWriteConflictError(input.path);
       }
-      delete files[input.path];
+      delete repo.files[input.path];
       writeFixture(data);
       return { commitSha: blobShaOf(`delete ${input.path}\n${existing}`) };
     },
   };
+}
+
+/**
+ * The working branch a PR-mode write to `path` belongs on, cutting a new one
+ * from the default branch when there is no review already open for the file.
+ * Mirrors the real client's rule, not its exact naming: only an *open* pull
+ * request's branch is joined, so a branch left behind by a closed one is never
+ * written to again. The disambiguating suffix differs (a counter here, the base
+ * sha there) because the fake has no commit graph to take a sha from.
+ */
+function resolveBranch(repo: FakeRepo, path: string): string {
+  const stem = writeBranchName(path);
+  const open = repo.pulls.find((p) => p.state === "open" && p.branch === stem);
+  if (open) return stem;
+
+  let branch = stem;
+  for (let n = 2; repo.branches[branch] !== undefined; n++) branch = `${stem}-${n}`;
+  repo.branches[branch] = { ...repo.files };
+  return branch;
+}
+
+/** The open pull request for `branch`, opening one if there is none. */
+function openOrJoinPull(
+  repo: FakeRepo,
+  branch: string,
+  title: string,
+): WritePullRequest {
+  const existing = repo.pulls.find((p) => p.state === "open" && p.branch === branch);
+  if (existing) {
+    return { number: existing.number, url: pullUrl(existing.number), branch, created: false };
+  }
+  const number = repo.pulls.length + 1;
+  repo.pulls.push({ number, branch, title, state: "open" });
+  return { number, url: pullUrl(number), branch, created: true };
+}
+
+function pullUrl(number: number): string {
+  return `https://github.test/pull/${number}`;
 }
 
 /**

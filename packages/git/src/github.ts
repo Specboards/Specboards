@@ -7,6 +7,8 @@ import {
   type GitRepoClient,
   type SpecFile,
   type WriteFileInput,
+  type WriteFileResult,
+  type WritePullRequest,
 } from "./index.js";
 
 /** Cached-display metadata for a linked GitHub artifact (PR/issue/branch). */
@@ -234,26 +236,19 @@ export class GitHubRepoClient implements GitRepoClient {
 
   /**
    * Write `content` to `path`. "direct" commits straight onto `ref`; "pr"
-   * branches off `ref`, commits there, and opens a PR. Returns the new commit
-   * sha and the new blob sha (the latter is what `spec_index.blobSha` tracks
-   * for drift detection).
+   * commits to a working branch for this file and proposes it, joining the pull
+   * request already open for that file rather than opening a second one.
+   * Returns the new commit sha, the new blob sha (what `spec_index.blobSha`
+   * tracks for drift detection), and in PR mode the pull request.
    */
-  async writeFile(input: WriteFileInput): Promise<{ commitSha: string; blobSha: string }> {
-    const branch = input.mode === "pr" ? await this.createWriteBranch(input.path) : this.ref;
+  async writeFile(input: WriteFileInput): Promise<WriteFileResult> {
+    if (input.mode !== "pr") return this.commitFile(input, this.ref);
+
+    const open = await this.openSpecboardsPull(input.path);
+    const branch = open?.branch ?? (await this.createWriteBranch(input.path));
     const result = await this.commitFile(input, branch);
-
-    if (input.mode === "pr") {
-      await this.octokit.rest.pulls.create({
-        owner: this.owner,
-        repo: this.repo,
-        head: branch,
-        base: this.ref,
-        title: input.message,
-        body: `Automated by Specboards.\n\n${input.message}`,
-      });
-    }
-
-    return result;
+    const pullRequest = open ?? (await this.openPull(branch, input.message));
+    return { ...result, pullRequest };
   }
 
   /** Fetch a pull request's cached-display metadata (title/state/url). */
@@ -385,7 +380,64 @@ export class GitHubRepoClient implements GitRepoClient {
     }
   }
 
-  /** Create a fresh branch off `ref` for a PR write, returning its name. */
+  /**
+   * The pull request already open for `path`, or null.
+   *
+   * This is what stops a customer who fixes three typos from filing three pull
+   * requests. Only an *open* one counts: a branch left behind by a merged or
+   * closed pull request must never be revived, or the next edit arrives carrying
+   * changes the team already turned down.
+   */
+  private openSpecboardsPull(path: string): Promise<WritePullRequest | null> {
+    return this.pullForBranch(writeBranchName(path));
+  }
+
+  /** Open a pull request from `branch` onto `ref`. */
+  private async openPull(branch: string, message: string): Promise<WritePullRequest> {
+    try {
+      const { data } = await this.octokit.rest.pulls.create({
+        owner: this.owner,
+        repo: this.repo,
+        head: branch,
+        base: this.ref,
+        title: message,
+        body: `Automated by Specboards.\n\n${message}`,
+      });
+      return { number: data.number, url: data.html_url, branch, created: true };
+    } catch (err) {
+      // GitHub rejects a second pull request for the same head with a 422. The
+      // commit has already landed by this point, so losing that race must not
+      // read as a failed save: find the pull request that beat us and report it.
+      if (!isAlreadyExists(err)) throw err;
+      const existing = await this.pullForBranch(branch);
+      if (!existing) throw err;
+      return existing;
+    }
+  }
+
+  /** The open pull request whose head is `branch`, or null. */
+  private async pullForBranch(branch: string): Promise<WritePullRequest | null> {
+    const { data } = await this.octokit.rest.pulls.list({
+      owner: this.owner,
+      repo: this.repo,
+      state: "open",
+      head: `${this.owner}:${branch}`,
+      per_page: 1,
+    });
+    const pull = data[0];
+    return pull
+      ? { number: pull.number, url: pull.html_url, branch, created: false }
+      : null;
+  }
+
+  /**
+   * Create a fresh branch off `ref` for a PR write, returning its name.
+   *
+   * Prefers the stable per-file name, so the next edit finds it by construction.
+   * When that name is taken by a branch with no open pull request behind it, the
+   * base sha (and, failing that, a counter) disambiguates rather than reusing
+   * somebody else's leftovers.
+   */
   private async createWriteBranch(path: string): Promise<string> {
     const base = await this.octokit.rest.git.getRef({
       owner: this.owner,
@@ -393,21 +445,58 @@ export class GitHubRepoClient implements GitRepoClient {
       ref: `heads/${this.ref}`,
     });
     const baseSha = base.data.object.sha;
-    const slug = path.replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-    const branch = `specboards/${slug}-${baseSha.slice(0, 8)}`;
-    await this.octokit.rest.git.createRef({
-      owner: this.owner,
-      repo: this.repo,
-      ref: `refs/heads/${branch}`,
-      sha: baseSha,
-    });
-    return branch;
+    const stem = writeBranchName(path);
+    const candidates = [
+      stem,
+      `${stem}-${baseSha.slice(0, 8)}`,
+      ...[2, 3, 4].map((n) => `${stem}-${baseSha.slice(0, 8)}-${n}`),
+    ];
+    for (const branch of candidates) {
+      try {
+        await this.octokit.rest.git.createRef({
+          owner: this.owner,
+          repo: this.repo,
+          ref: `refs/heads/${branch}`,
+          sha: baseSha,
+        });
+        return branch;
+      } catch (err) {
+        // 422 is "reference already exists"; anything else is a real failure.
+        if (!isAlreadyExists(err)) throw err;
+      }
+    }
+    throw new Error(
+      `Couldn't create a branch for ${path}: ${candidates.length} candidate names are already taken.`,
+    );
   }
+}
+
+/**
+ * The working branch a spec file's proposed changes accumulate on. Derived from
+ * the path alone, with no sha or timestamp in it, precisely so a later edit to
+ * the same file resolves to the same branch and joins the review in flight.
+ */
+export function writeBranchName(path: string): string {
+  const slug = path.replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return `specboards/${slug}`;
 }
 
 /** True for a GitHub 404 (Octokit RequestError shape). */
 function isNotFound(err: unknown): boolean {
   return typeof err === "object" && err !== null && "status" in err && err.status === 404;
+}
+
+/**
+ * True for GitHub's 422, which is how both "reference already exists" and "a
+ * pull request already exists for this head" come back. Kept apart from
+ * {@link isWriteConflict} because there 422 means something else entirely (a
+ * guarded create that lost a race), and one helper covering both would make a
+ * branch collision and a lost write indistinguishable.
+ */
+function isAlreadyExists(err: unknown): boolean {
+  return (
+    typeof err === "object" && err !== null && "status" in err && err.status === 422
+  );
 }
 
 /** True for the statuses GitHub uses for contents-API sha conflicts. */

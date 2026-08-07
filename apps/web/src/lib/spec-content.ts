@@ -5,8 +5,10 @@ import {
   featureSlug,
   isLeafLevel,
   leafLevel,
+  resolveWriteMode,
   rewriteSpecBody,
 } from "@specboards/core";
+import type { WritePullRequest } from "@specboards/git";
 import {
   and,
   eq,
@@ -16,6 +18,7 @@ import {
   type Database,
 } from "@specboards/db";
 
+import { recordWritePullRequest } from "@/lib/github-links-service";
 import {
   resolveRepoClient,
   resolveRepoDefaultProduct,
@@ -105,13 +108,37 @@ export interface SpecWriteResult {
   specId: string;
   path: string;
   commitSha: string;
+  /**
+   * The pull request the change was proposed through, when the repo's write
+   * mode is `pr`. Its presence means the change is *not* on the default branch
+   * and the board still shows the old text, which is the single most important
+   * thing to tell whoever made the edit.
+   */
+  pullRequest?: WritePullRequest;
 }
 
 /**
  * Replace an existing spec's Markdown body, preserving its frontmatter (and so
- * its stable `id`), commit it to the repo's default branch, and re-sync so the
- * board reflects the change. `body` is the Markdown after the frontmatter, as
- * returned by read_item's `content`.
+ * its stable `id`), and write it back to the connected repo. `body` is the
+ * Markdown after the frontmatter, as returned by read_item's `content`.
+ *
+ * How the write reaches the repo depends on the repo's resolved write mode:
+ *
+ * - `direct` commits onto the default branch and re-syncs, so the board shows
+ *   the new text immediately.
+ * - `pr` commits to a working branch for this file and proposes it, joining the
+ *   pull request already open for that file if there is one. Nothing on the
+ *   default branch changed, so there is nothing to sync: the board keeps showing
+ *   the current text until the change is reviewed and merged. The pull request
+ *   is recorded on the item and returned, so the proposal is traceable from the
+ *   card and the author can be told where their change went.
+ *
+ * Note the gap PR mode leaves open until the concurrency guard lands: an author
+ * who reloads the page reads the *default branch* text, not what they proposed,
+ * so a second edit made from a fresh session would be written on top of a base
+ * that is missing their own open proposal. Guarding the write with the blob sha
+ * the editor loaded turns that into a conflict the author can resolve, which is
+ * what the next feature in this release is for.
  */
 export async function updateSpecContent(
   db: Database,
@@ -124,14 +151,32 @@ export async function updateSpecContent(
   const client = await resolveRepoClient(db, repo);
   const existing = await client.readFile(path);
   const content = rewriteSpecBody(existing.raw, body, { id: specId, title });
-  const { commitSha } = await client.writeFile({
+  const message = opts.message?.trim() || `docs(specboard): update ${path}`;
+  const { mode } = resolveWriteMode(repo.config);
+  const { commitSha, pullRequest } = await client.writeFile({
     path,
     content,
-    message: opts.message?.trim() || `docs(specboard): update ${path}`,
-    mode: "direct",
+    message,
+    mode,
   });
-  await syncRepository(db, repo);
-  return { specId, path, commitSha };
+
+  if (!pullRequest) {
+    await syncRepository(db, repo);
+    return { specId, path, commitSha };
+  }
+
+  // The commit has already landed on the working branch, so a link that fails
+  // to record is a traceability problem, not a failed save. Say so in the log
+  // and return anyway: the caller still gets the pull request url to show.
+  try {
+    await recordWritePullRequest(specId, repo.id, pullRequest, message, scope);
+  } catch (err) {
+    console.warn(
+      `[specboards] couldn't link pull request #${pullRequest.number} to ${specId}:`,
+      err instanceof Error ? err.message : err,
+    );
+  }
+  return { specId, path, commitSha, pullRequest };
 }
 
 /**
@@ -144,6 +189,14 @@ export async function updateSpecContent(
  * The sync deliberately is *not* run afterwards. The caller deletes the
  * `features` row immediately after this returns, and a sync in between would
  * see a spec that no longer exists on disk while its row still does.
+ *
+ * Unlike {@link updateSpecContent} this does not honour the repo's write mode,
+ * and the omission is deliberate rather than pending. Removing the file is only
+ * half of a delete: the caller drops the item the moment this returns, and a
+ * removal sitting unmerged on a branch would leave the file on the default
+ * branch for the next sync to re-import as a brand-new item (ADR 0003 D4). A
+ * reviewable delete has to keep the item alive until the pull request merges,
+ * which is a different feature from this one, not a parameter on it.
  */
 export async function deleteSpecFile(
   db: Database,
@@ -359,6 +412,13 @@ export async function createSpec(
     body = (await resolveTemplateBody(store, scope, input.templateId, levels)) ?? body;
   }
 
+  // Creating a spec commits to the default branch whatever the repo's write
+  // mode, for the same reason deleting one does (see deleteSpecFile). The card
+  // for a new spec is created by the sync that reads the file back, so a file
+  // parked on an unmerged branch would produce no card at all, and an attach
+  // would leave its item tracked in the app with the spec it is waiting for
+  // invisible. Proposing a *new* spec for review means showing it as pending
+  // until it merges, which this release does not build.
   const { commitSha } = await client.writeFile({
     path,
     content: newSpecFile(id, title, body),

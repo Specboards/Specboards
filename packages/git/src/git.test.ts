@@ -225,6 +225,9 @@ function fakeOctokit(behavior: {
   getContent?: () => Promise<{ data: unknown }>;
   createOrUpdateFileContents?: (params: Record<string, unknown>) => Promise<{ data: unknown }>;
   deleteFile?: (params: Record<string, unknown>) => Promise<{ data: unknown }>;
+  listPulls?: (params: Record<string, unknown>) => Promise<{ data: unknown[] }>;
+  createPull?: (params: Record<string, unknown>) => Promise<{ data: unknown }>;
+  createRef?: (params: Record<string, unknown>) => Promise<{ data: unknown }>;
 }) {
   return {
     rest: {
@@ -238,11 +241,165 @@ function fakeOctokit(behavior: {
         deleteFile:
           behavior.deleteFile ?? (() => Promise.resolve({ data: { commit: { sha: "c2" } } })),
       },
+      pulls: {
+        list: behavior.listPulls ?? (() => Promise.resolve({ data: [] })),
+        create:
+          behavior.createPull ??
+          (() => Promise.resolve({ data: { number: 1, html_url: "https://pr/1" } })),
+      },
+      git: {
+        getRef: () => Promise.resolve({ data: { object: { sha: "basesha0deadbeef" } } }),
+        createRef: behavior.createRef ?? (() => Promise.resolve({ data: {} })),
+      },
     },
   } as unknown as ConstructorParameters<typeof GitHubRepoClient>[0];
 }
 
+/** A `pulls.list` response entry, trimmed to the fields the client reads. */
+function openPull(number: number, url: string) {
+  return { number, html_url: url };
+}
+
 const REPO = { owner: "acme", name: "docs", ref: "main" };
+
+describe("GitHubRepoClient pull request writes", () => {
+  const SPEC = { path: "specs/auth/spec.md", content: "hi", message: "docs: auth" } as const;
+  const BRANCH = "specboards/specs-auth-spec-md";
+
+  it("commits to the file's own branch and opens a pull request", async () => {
+    const commits: Record<string, unknown>[] = [];
+    const refs: Record<string, unknown>[] = [];
+    const pulls: Record<string, unknown>[] = [];
+    const octokit = fakeOctokit({
+      createOrUpdateFileContents: (params) => {
+        commits.push(params);
+        return Promise.resolve({ data: { commit: { sha: "c1" }, content: { sha: "b1" } } });
+      },
+      createRef: (params) => {
+        refs.push(params);
+        return Promise.resolve({ data: {} });
+      },
+      createPull: (params) => {
+        pulls.push(params);
+        return Promise.resolve({ data: { number: 42, html_url: "https://gh/pull/42" } });
+      },
+    });
+
+    const result = await new GitHubRepoClient(octokit, REPO).writeFile({
+      ...SPEC,
+      mode: "pr",
+    });
+
+    expect(refs[0]!.ref).toBe(`refs/heads/${BRANCH}`);
+    expect(commits[0]!.branch).toBe(BRANCH);
+    expect(pulls[0]).toMatchObject({ head: BRANCH, base: "main", title: "docs: auth" });
+    expect(result.pullRequest).toEqual({
+      number: 42,
+      url: "https://gh/pull/42",
+      branch: BRANCH,
+      created: true,
+    });
+  });
+
+  it("adds a second edit to the pull request already open for the file", async () => {
+    // The whole point of the stable branch name: three typo fixes are one
+    // review, not three.
+    const commits: Record<string, unknown>[] = [];
+    let branched = false;
+    let opened = false;
+    const octokit = fakeOctokit({
+      listPulls: (params) => {
+        expect(params.head).toBe(`acme:${BRANCH}`);
+        expect(params.state).toBe("open");
+        return Promise.resolve({ data: [openPull(42, "https://gh/pull/42")] });
+      },
+      createOrUpdateFileContents: (params) => {
+        commits.push(params);
+        return Promise.resolve({ data: { commit: { sha: "c2" }, content: { sha: "b2" } } });
+      },
+      createRef: () => {
+        branched = true;
+        return Promise.resolve({ data: {} });
+      },
+      createPull: () => {
+        opened = true;
+        return Promise.resolve({ data: { number: 43, html_url: "https://gh/pull/43" } });
+      },
+    });
+
+    const result = await new GitHubRepoClient(octokit, REPO).writeFile({
+      ...SPEC,
+      mode: "pr",
+    });
+
+    expect(branched).toBe(false);
+    expect(opened).toBe(false);
+    expect(commits[0]!.branch).toBe(BRANCH);
+    expect(result.pullRequest).toEqual({
+      number: 42,
+      url: "https://gh/pull/42",
+      branch: BRANCH,
+      created: false,
+    });
+  });
+
+  it("never revives a leftover branch whose pull request is closed", async () => {
+    // The branch survived a merged or rejected pull request. Committing onto it
+    // would carry those changes into the new proposal, so branch elsewhere.
+    const octokit = fakeOctokit({
+      listPulls: () => Promise.resolve({ data: [] }),
+      createRef: (params) =>
+        params.ref === `refs/heads/${BRANCH}`
+          ? Promise.reject(Object.assign(new Error("exists"), { status: 422 }))
+          : Promise.resolve({ data: {} }),
+      createPull: (params) =>
+        Promise.resolve({ data: { number: 44, html_url: `https://gh/pull/44?h=${params.head}` } }),
+    });
+
+    const result = await new GitHubRepoClient(octokit, REPO).writeFile({
+      ...SPEC,
+      mode: "pr",
+    });
+
+    expect(result.pullRequest?.branch).toBe(`${BRANCH}-basesha0`);
+    expect(result.pullRequest?.created).toBe(true);
+  });
+
+  it("reports the pull request that won a create race rather than failing", async () => {
+    // The commit has already landed by then, so a 422 here is not a failed save.
+    let listed = 0;
+    const octokit = fakeOctokit({
+      listPulls: () =>
+        Promise.resolve({ data: listed++ === 0 ? [] : [openPull(45, "https://gh/pull/45")] }),
+      createPull: () => Promise.reject(Object.assign(new Error("already exists"), { status: 422 })),
+    });
+
+    const result = await new GitHubRepoClient(octokit, REPO).writeFile({
+      ...SPEC,
+      mode: "pr",
+    });
+
+    expect(result.pullRequest).toMatchObject({ number: 45, created: false });
+  });
+
+  it("direct mode commits to the ref and proposes nothing", async () => {
+    const commits: Record<string, unknown>[] = [];
+    const octokit = fakeOctokit({
+      createOrUpdateFileContents: (params) => {
+        commits.push(params);
+        return Promise.resolve({ data: { commit: { sha: "c1" }, content: { sha: "b1" } } });
+      },
+    });
+
+    const result = await new GitHubRepoClient(octokit, REPO).writeFile({
+      ...SPEC,
+      mode: "direct",
+    });
+
+    expect(commits[0]!.branch).toBe("main");
+    expect(result.pullRequest).toBeUndefined();
+  });
+});
 
 describe("GitHubRepoClient guarded writes", () => {
   it("sends the expected blob sha and skips the lookup on a guarded update", async () => {

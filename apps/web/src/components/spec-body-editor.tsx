@@ -6,7 +6,11 @@ import { toast } from "sonner";
 
 import { MarkdownEditor } from "@/components/markdown-editor";
 import { Button } from "@/components/ui/button";
-import { AuthRequiredError, updateSpecBody } from "@/lib/api-client";
+import {
+  AuthRequiredError,
+  updateSpecBody,
+  type SpecWriteResult,
+} from "@/lib/api-client";
 
 /**
  * Edit a spec-backed item's Markdown body. Saving commits the change to the
@@ -29,6 +33,7 @@ export function SpecBodyEditor({
   specId,
   path,
   initial,
+  writeMode,
   minHeightClass,
   onSaved,
 }: {
@@ -37,6 +42,13 @@ export function SpecBodyEditor({
   path: string;
   /** Current Markdown body, frontmatter already stripped. */
   initial: string;
+  /**
+   * How this repo takes spec changes. `pr` means saving asks for review rather
+   * than publishing, which the author needs to know *before* they save: the
+   * board will keep showing the old text afterwards, and that reads as a lost
+   * edit to anyone who was not told.
+   */
+  writeMode?: "pr" | "direct" | null;
   /** Min-height utility for the editor surface (e.g. "min-h-[15rem]"). */
   minHeightClass?: string;
   /** Called after a successful commit, for views that hold the item in local
@@ -52,6 +64,10 @@ export function SpecBodyEditor({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [commitSha, setCommitSha] = useState<string | null>(null);
+  const [proposed, setProposed] = useState<SpecWriteResult["pullRequest"]>();
+  // What this save is going to do. The server decides for real; this only sets
+  // expectations, so an unknown mode falls back to the plainer commit wording.
+  const proposes = writeMode === "pr";
 
   // With an explicit save, a closed tab loses the edit. Drafts are a later
   // feature; until then the browser's own guard is what stands between an
@@ -79,6 +95,19 @@ export function SpecBodyEditor({
       savedRef.current = value;
       setDirty(false);
       setCommitSha(result.commitSha);
+      setProposed(result.pullRequest);
+      if (result.pullRequest) {
+        toast.success(
+          result.pullRequest.created
+            ? `Sent for review as #${result.pullRequest.number}`
+            : `Added to review #${result.pullRequest.number}`,
+        );
+        // Deliberately no refresh. The change is on a working branch, so the
+        // server would answer with the *previous* text and the author would
+        // watch their writing revert in front of them. What is on screen is
+        // what they proposed; leave it there.
+        return;
+      }
       toast.success(`Committed ${result.commitSha.slice(0, 7)}`);
       // updateSpecContent re-syncs the repo before returning, so the cache is
       // already current: re-render from it, so what the author reads back is
@@ -110,17 +139,46 @@ export function SpecBodyEditor({
       />
       <div className="flex flex-wrap items-center gap-3">
         <Button size="sm" onClick={save} disabled={!dirty || saving}>
-          {saving ? "Committing…" : "Commit changes"}
+          {saving
+            ? proposes
+              ? "Sending…"
+              : "Committing…"
+            : proposes
+              ? "Send for review"
+              : "Commit changes"}
         </Button>
         <p className="text-2xs text-muted-foreground" role="status" aria-live="polite">
           {saving
-            ? `Committing to ${path}…`
+            ? proposes
+              ? `Proposing a change to ${path}…`
+              : `Committing to ${path}…`
             : dirty
-              ? `Unsaved changes. Committing writes ${path} to the repo.`
-              : commitSha
-                ? `Committed ${commitSha.slice(0, 7)} to ${path}.`
-                : `Saved changes are committed to ${path}.`}
+              ? proposes
+                ? `Unsaved changes. Sending asks for a review of ${path}.`
+                : `Unsaved changes. Committing writes ${path} to the repo.`
+              : proposed
+                ? `Waiting for review. ${path} keeps its current text on the board until this is approved.`
+                : commitSha
+                  ? `Committed ${commitSha.slice(0, 7)} to ${path}.`
+                  : proposes
+                    ? `Changes to ${path} go for review before they reach the board.`
+                    : `Saved changes are committed to ${path}.`}
         </p>
+        {/* The link is the whole point of saying a change is under review: an
+            author who cannot reach the review has been told to wait with no way
+            to find out what for. */}
+        {proposed ? (
+          <a
+            className="text-2xs font-medium underline underline-offset-2"
+            href={proposed.url}
+            target="_blank"
+            rel="noreferrer"
+          >
+            {proposed.created
+              ? `Review #${proposed.number}`
+              : `Added to review #${proposed.number}`}
+          </a>
+        ) : null}
       </div>
       {error ? <p className="text-xs text-destructive">{error}</p> : null}
     </div>

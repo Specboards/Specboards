@@ -7,7 +7,22 @@ import { dirname } from "node:path";
  * server's scan/import sees them. Same file path on both sides via
  * SPECBOARDS_E2E_GITHUB_FIXTURE.
  */
-type Fixture = Record<string, Record<string, string>>;
+type RepoFiles = Record<string, string>;
+
+interface FakePull {
+  number: number;
+  branch: string;
+  title: string;
+  state: "open" | "closed";
+}
+
+interface FakeRepo {
+  files: RepoFiles;
+  branches: Record<string, RepoFiles>;
+  pulls: FakePull[];
+}
+
+type Fixture = Record<string, FakeRepo>;
 
 function fixturePath(): string {
   const path = process.env.SPECBOARDS_E2E_GITHUB_FIXTURE;
@@ -33,16 +48,43 @@ export function resetFixture(): void {
   write({});
 }
 
-/** Set the files (path -> raw content) the fake reports for one repo. */
-export function setRepoFiles(owner: string, name: string, files: Record<string, string>): void {
+/** Set the files (path -> raw content) on one repo's default branch. */
+export function setRepoFiles(owner: string, name: string, files: RepoFiles): void {
   const data = read();
-  data[`${owner}/${name}`] = files;
+  data[`${owner}/${name}`] = { files, branches: {}, pulls: [] };
   write(data);
 }
 
-/** Read back a repo's files (e.g. to assert a starter spec was committed). */
-export function getRepoFiles(owner: string, name: string): Record<string, string> {
-  return read()[`${owner}/${name}`] ?? {};
+/** Read back a repo's default-branch files (e.g. to assert what was committed). */
+export function getRepoFiles(owner: string, name: string): RepoFiles {
+  return read()[`${owner}/${name}`]?.files ?? {};
+}
+
+/**
+ * Read back a working branch's files. The distinction from
+ * {@link getRepoFiles} is the assertion the PR write path lives or dies on: a
+ * proposed change must be on the branch and *not* on the default branch.
+ */
+export function getRepoBranchFiles(
+  owner: string,
+  name: string,
+  branch: string,
+): RepoFiles {
+  return read()[`${owner}/${name}`]?.branches[branch] ?? {};
+}
+
+/** The pull requests the fake has opened for a repo, in the order opened. */
+export function getRepoPulls(owner: string, name: string): FakePull[] {
+  return read()[`${owner}/${name}`]?.pulls ?? [];
+}
+
+/** Close a pull request, as a reviewer turning the change down would. */
+export function closeRepoPull(owner: string, name: string, number: number): void {
+  const data = read();
+  const pull = data[`${owner}/${name}`]?.pulls.find((p) => p.number === number);
+  if (!pull) throw new Error(`No pull request #${number} in ${owner}/${name}.`);
+  pull.state = "closed";
+  write(data);
 }
 
 /** A minimal spec.md body with a stable id (so import skips id injection). */

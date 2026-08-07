@@ -33,9 +33,10 @@ const suffix = randomUUID().slice(0, 8);
 const fixturePath = join(tmpdir(), `specboard-attach-${suffix}.json`);
 const REPO_KEY = "acme/specs";
 
-/** Write the fake repo's file set, replacing whatever was there. */
+/** Write the fake repo's default-branch file set, replacing what was there. */
 function seedRepo(files: Record<string, string>): void {
-  writeFileSync(fixturePath, JSON.stringify({ [REPO_KEY]: files }, null, 2));
+  const repo = { files, branches: {}, pulls: [] };
+  writeFileSync(fixturePath, JSON.stringify({ [REPO_KEY]: repo }, null, 2));
 }
 
 function specFile(id: string, title: string, feature?: string): string {
