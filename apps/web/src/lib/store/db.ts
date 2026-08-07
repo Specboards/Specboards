@@ -115,6 +115,7 @@ import {
   GoalError,
   type GoalContribution,
   type GoalInput,
+  type GoalLinkRef,
   type GoalPatch,
   type GoalRecord,
   type ItemGoalRef,
@@ -3178,6 +3179,30 @@ export class DbStore implements FeatureStore {
       return rows
         .filter((r) => canReadProductId(access, productById, r.productId))
         .map((r) => ({ ...r, done: isDone(r.status) }));
+    });
+  }
+
+  async listGoalLinks(scope?: WorkspaceScope): Promise<GoalLinkRef[]> {
+    return this.scoped(scope, async (tx) => {
+      const ws = scope!.workspaceId;
+      const [access, productById] = await Promise.all([
+        this.accessIn(tx, scope!),
+        this.productVisibilityIn(tx, ws),
+      ]);
+      const rows = await tx
+        .select({
+          goalId: goalLinks.goalId,
+          specId: features.specId,
+          productId: features.productId,
+        })
+        .from(goalLinks)
+        .innerJoin(features, eq(features.id, goalLinks.featureId))
+        .where(eq(goalLinks.workspaceId, ws));
+      // Same rule as listGoalContributions: the link is dropped when its work
+      // is unreadable, and the goal stays visible regardless.
+      return rows
+        .filter((r) => canReadProductId(access, productById, r.productId))
+        .map((r) => ({ goalId: r.goalId, specId: r.specId }));
     });
   }
 

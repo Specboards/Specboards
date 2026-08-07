@@ -217,6 +217,113 @@ export function validateKeyResult(kr: {
   return null;
 }
 
+/** The fields the goal tree is built and ordered from. */
+export interface GoalTreeFields {
+  id: string;
+  parentGoalId: string | null;
+  status: GoalStatus;
+  periodEnd: string | null;
+  title: string;
+}
+
+/** One goal in the tree, with its position in it. */
+export interface GoalTreeNode<T> {
+  goal: T;
+  /** 0 at the top level; +1 per generation. */
+  depth: number;
+  children: GoalTreeNode<T>[];
+  /**
+   * True when the goal names a parent that is not in this set, so it is drawn
+   * at the top level despite having one. The view says so rather than silently
+   * presenting it as a root: the parent usually exists, it is just out of
+   * scope (another product's goal), and a reader who cannot see that would
+   * misread the ladder.
+   */
+  orphaned: boolean;
+}
+
+/**
+ * Arrange goals into the tree `parentGoalId` describes, ordered by
+ * `compareGoals` among siblings at every level.
+ *
+ * A goal whose parent is absent from `goals` becomes a top-level node flagged
+ * `orphaned` rather than disappearing: this set is nearly always a scoped
+ * subset (one product's goals plus the org-wide ones), so a parent out of view
+ * is the normal case, not corruption.
+ *
+ * Cycle-safe. A corrupt tree (a under b under a, which the write path's
+ * `wouldCreateGoalCycle` guard exists to prevent) is broken at the repeat and
+ * its members still appear exactly once, because a goal nobody can see is
+ * worse than one drawn in the wrong place.
+ */
+export function buildGoalTree<T extends GoalTreeFields>(
+  goals: readonly T[],
+): GoalTreeNode<T>[] {
+  const byId = new Map(goals.map((g) => [g.id, g]));
+  const childrenOf = new Map<string, T[]>();
+  const roots: T[] = [];
+  for (const goal of goals) {
+    const parent = goal.parentGoalId ? byId.get(goal.parentGoalId) : undefined;
+    if (!parent || parent.id === goal.id) {
+      roots.push(goal);
+      continue;
+    }
+    const list = childrenOf.get(parent.id);
+    if (list) list.push(goal);
+    else childrenOf.set(parent.id, [goal]);
+  }
+
+  const seen = new Set<string>();
+  const build = (goal: T, depth: number): GoalTreeNode<T> => {
+    seen.add(goal.id);
+    // Filtering on `seen` is what breaks a cycle: an ancestor cannot reappear
+    // as its own descendant.
+    const children = (childrenOf.get(goal.id) ?? [])
+      .filter((child) => !seen.has(child.id))
+      .sort(compareGoals);
+    return {
+      goal,
+      depth,
+      orphaned: depth === 0 && goal.parentGoalId !== null,
+      children: children.map((child) => build(child, depth + 1)),
+    };
+  };
+
+  const nodes = roots.slice().sort(compareGoals).map((goal) => build(goal, 0));
+  // Anything in a cycle is reachable from no root, so it is still unplaced
+  // here. Surface it at the top level rather than dropping it.
+  for (const goal of goals.slice().sort(compareGoals)) {
+    if (!seen.has(goal.id)) nodes.push(build(goal, 0));
+  }
+  return nodes;
+}
+
+/** One row of a rendered goal tree: the goal, and where it sits. */
+export interface GoalTreeRow<T> {
+  goal: T;
+  depth: number;
+  orphaned: boolean;
+}
+
+/**
+ * Walk a goal tree into the order it is read in, each row carrying its depth.
+ *
+ * Flat rather than nested so the view can indent by depth without nesting the
+ * cards inside one another, which would shrink every generation and make a
+ * three-deep goal unreadable.
+ */
+export function flattenGoalTree<T>(
+  nodes: readonly GoalTreeNode<T>[],
+): GoalTreeRow<T>[] {
+  const rows: GoalTreeRow<T>[] = [];
+  const walk = (node: GoalTreeNode<T>): void => {
+    rows.push({ goal: node.goal, depth: node.depth, orphaned: node.orphaned });
+    for (const child of node.children) walk(child);
+  };
+  for (const node of nodes) walk(node);
+  return rows;
+}
+
 /**
  * Would linking `childId` under `parentId` create a cycle in the goal tree?
  * Goals nest (a company objective holding product ones), so the same guard the

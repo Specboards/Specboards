@@ -76,6 +76,22 @@ describe("parseCreateFeatureInput", () => {
     });
   });
 
+  // The level's detail template is seeded on create only when the caller says
+  // nothing about details, so these two cases must stay distinguishable.
+  it("leaves details undefined when the key is absent (template applies)", () => {
+    const input = parseCreateFeatureInput({ title: "A", level: "epic" });
+    expect(input.details).toBeUndefined();
+  });
+
+  it("keeps an explicit null details (create blank, no template)", () => {
+    const input = parseCreateFeatureInput({
+      title: "A",
+      level: "epic",
+      details: null,
+    });
+    expect(input.details).toBeNull();
+  });
+
   it("rejects customFields with a non-scalar value", () => {
     expect(() =>
       parseCreateFeatureInput({
