@@ -60,6 +60,9 @@ test.describe("board drag-and-drop", () => {
     const card = backlog
       .locator("div.group")
       .filter({ has: page.getByText(bottomTitle, { exact: true }) });
+    // A column taller than the viewport scrolls inside its own drop area now, so
+    // the bottom card has to be brought into view before its box means anything.
+    await card.scrollIntoViewIfNeeded();
     const cardBox = (await card.boundingBox())!;
     const startX = cardBox.x + 24;
     const startY = cardBox.y + cardBox.height - 8;

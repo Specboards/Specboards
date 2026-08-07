@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { Target } from "lucide-react";
 
 import { EmptyState } from "@/components/empty-state";
+import { GoalProgressPair } from "@/components/goal-progress";
 import { StatusDot } from "@/components/status-dot";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,10 +26,12 @@ import {
   updateGoal,
   updateKeyResult,
 } from "@/lib/api-client";
+import { goalStatusLabel, goalStatusTone } from "@/lib/goal-status";
 import { orgProductPath } from "@/lib/org-path";
 import {
+  buildGoalTree,
+  flattenGoalTree,
   formatMetric,
-  goalStatusLabel,
   GOAL_STATUSES,
   METRIC_KINDS,
   type GoalContribution,
@@ -47,15 +50,16 @@ export interface GoalLinkCandidate {
   productId: string | null;
 }
 
-/** Tone per status. Uses the shared semantic tokens rather than a new palette,
- * so the design system needs no change. */
-const STATUS_TONE: Record<GoalStatus, string> = {
-  on_track: "text-[var(--success)]",
-  at_risk: "text-[var(--warning)]",
-  off_track: "text-destructive",
-  achieved: "text-[var(--success)]",
-  missed: "text-muted-foreground",
-};
+/**
+ * Indent per generation, and the depth past which indenting stops.
+ *
+ * Capped because the cards keep their full width at every level: the indent is
+ * there to show the ladder, and a deep goal tree that kept indenting would
+ * squeeze its own contents off the right edge to say something the connecting
+ * rule already says.
+ */
+const INDENT_REM = 1.5;
+const MAX_INDENT_DEPTH = 3;
 
 /**
  * The Goals page: objectives, their key results, and the work laddering up.
@@ -77,6 +81,7 @@ export function GoalsView({
   levels,
   defaultProductId,
   products,
+  goalTitles,
 }: {
   goals: GoalRecord[];
   contributionsByGoal: Record<string, GoalContribution[]>;
@@ -87,8 +92,20 @@ export function GoalsView({
   levels: { key: string; label: string }[];
   defaultProductId: string | null;
   products: { id: string; name: string }[];
+  /**
+   * Every readable goal's title by id, including goals outside this scope. A
+   * goal here can name a parent that is not in `goals` (another product's), and
+   * both the "under X" note and the parent picker have to be able to say which.
+   */
+  goalTitles: Record<string, string>;
 }) {
   const [creating, setCreating] = useState(false);
+
+  // Goals nest, so they are drawn as a tree rather than a flat list: a company
+  // objective and the product goals under it read as one ladder. The rows are
+  // flattened with their depth instead of nested in the DOM, so a third-level
+  // goal's card is the same width as a top-level one (see INDENT_REM).
+  const rows = flattenGoalTree(buildGoalTree(goals));
 
   return (
     <section className="space-y-4">
@@ -115,6 +132,7 @@ export function GoalsView({
           defaultProductId={defaultProductId}
           products={products}
           goals={goals}
+          goalTitles={goalTitles}
           onDone={() => setCreating(false)}
         />
       ) : null}
@@ -139,19 +157,30 @@ export function GoalsView({
       ) : null}
 
       <div className="space-y-3">
-        {goals.map((goal) => (
-          <GoalCard
+        {rows.map(({ goal, depth, orphaned }) => (
+          <div
             key={goal.id}
-            goal={goal}
-            goals={goals}
-            contributions={contributionsByGoal[goal.id] ?? []}
-            linkCandidates={linkCandidates}
-            canEdit={canEdit}
-            org={org}
-            productSlug={productSlug}
-            levels={levels}
-            products={products}
-          />
+            style={{
+              marginLeft: `${Math.min(depth, MAX_INDENT_DEPTH) * INDENT_REM}rem`,
+            }}
+            // A rule down the left edge carries the ladder past the indent cap,
+            // where two generations sit at the same offset.
+            className={cn(depth > 0 && "border-l-2 border-border/70 pl-3")}
+          >
+            <GoalCard
+              goal={goal}
+              goals={goals}
+              goalTitles={goalTitles}
+              orphaned={orphaned}
+              contributions={contributionsByGoal[goal.id] ?? []}
+              linkCandidates={linkCandidates}
+              canEdit={canEdit}
+              org={org}
+              productSlug={productSlug}
+              levels={levels}
+              products={products}
+            />
+          </div>
         ))}
       </div>
     </section>
@@ -161,6 +190,8 @@ export function GoalsView({
 function GoalCard({
   goal,
   goals,
+  goalTitles,
+  orphaned,
   contributions,
   linkCandidates,
   canEdit,
@@ -171,6 +202,10 @@ function GoalCard({
 }: {
   goal: GoalRecord;
   goals: GoalRecord[];
+  goalTitles: Record<string, string>;
+  /** Drawn at the top level despite having a parent, because the parent is out
+   * of this scope. The card then has to name it in words. */
+  orphaned: boolean;
   contributions: GoalContribution[];
   linkCandidates: GoalLinkCandidate[];
   canEdit: boolean;
@@ -186,9 +221,11 @@ function GoalCard({
   const [pending, startTransition] = useTransition();
 
   const levelLabel = new Map(levels.map((l) => [l.key, l.label]));
-  const parentTitle = goal.parentGoalId
-    ? goals.find((g) => g.id === goal.parentGoalId)?.title
-    : null;
+  // Nesting states the parent for every goal drawn under one, so this only
+  // covers the case nesting cannot: a parent outside the current scope, whose
+  // title has to come from the workspace-wide map rather than these rows.
+  const parentTitle =
+    orphaned && goal.parentGoalId ? goalTitles[goal.parentGoalId] ?? null : null;
 
   function onDelete() {
     if (
@@ -215,7 +252,11 @@ function GoalCard({
           <div className="flex flex-wrap items-center gap-2">
             <Target className="size-4 text-muted-foreground" aria-hidden />
             <h2 className="font-medium">{goal.title}</h2>
-            <Badge variant="outline" size="sm" className={STATUS_TONE[goal.status]}>
+            <Badge
+              variant="outline"
+              size="sm"
+              className={goalStatusTone(goal.status)}
+            >
               {goalStatusLabel(goal.status)}
             </Badge>
             {goal.productId === null ? (
@@ -268,6 +309,7 @@ function GoalCard({
           mode="edit"
           goal={goal}
           goals={goals}
+          goalTitles={goalTitles}
           defaultProductId={goal.productId}
           products={products}
           onDone={() => setEditing(false)}
@@ -275,19 +317,8 @@ function GoalCard({
       ) : null}
 
       {/* The two figures, side by side and labelled, never merged. */}
-      <div className="grid gap-3 border-t pt-3 sm:grid-cols-2">
-        <ProgressReadout
-          label="Outcome"
-          hint="Mean of this goal's key results: did the metric move?"
-          value={goal.progress}
-          empty="No key results yet"
-        />
-        <ProgressReadout
-          label="Delivery"
-          hint={`Share of the ${goal.linkedItemCount} linked item${goal.linkedItemCount === 1 ? "" : "s"} that are done: did the work ship?`}
-          value={goal.deliveryProgress}
-          empty="No work linked yet"
-        />
+      <div className="border-t pt-3">
+        <GoalProgressPair goal={goal} />
       </div>
 
       <div className="space-y-2 border-t pt-3">
@@ -368,45 +399,6 @@ function GoalCard({
         ) : null}
       </div>
     </Card>
-  );
-}
-
-/** One labelled progress figure. `null` reads as "not measured", not 0%. */
-function ProgressReadout({
-  label,
-  hint,
-  value,
-  empty,
-}: {
-  label: string;
-  hint: string;
-  value: number | null;
-  empty: string;
-}) {
-  return (
-    <div className="space-y-1">
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="text-xs font-medium text-muted-foreground">{label}</span>
-        <span className="text-sm font-medium">
-          {value === null ? "—" : `${value}%`}
-        </span>
-      </div>
-      <div
-        className="h-1.5 overflow-hidden rounded-full bg-muted"
-        role="img"
-        aria-label={`${label}: ${value === null ? empty : `${value} percent`}`}
-      >
-        {value !== null ? (
-          <div
-            className="h-full rounded-full bg-primary"
-            style={{ width: `${value}%` }}
-          />
-        ) : null}
-      </div>
-      <p className="text-2xs text-muted-foreground">
-        {value === null ? empty : hint}
-      </p>
-    </div>
   );
 }
 
@@ -698,6 +690,7 @@ function GoalForm({
   mode,
   goal,
   goals,
+  goalTitles,
   defaultProductId,
   products,
   onDone,
@@ -705,6 +698,7 @@ function GoalForm({
   mode: "create" | "edit";
   goal?: GoalRecord;
   goals: GoalRecord[];
+  goalTitles: Record<string, string>;
   defaultProductId: string | null;
   products: { id: string; name: string }[];
   onDone: () => void;
@@ -715,7 +709,21 @@ function GoalForm({
 
   // A goal cannot be its own parent, nor sit under its own descendant; the
   // server enforces this too, but offering the choice would be misleading.
-  const parentOptions = goals.filter((g) => g.id !== goal?.id);
+  const parentOptions: { id: string; title: string }[] = goals
+    .filter((g) => g.id !== goal?.id)
+    .map((g) => ({ id: g.id, title: g.title }));
+  // The current parent may sit outside this scope (another product's goal).
+  // It has to be an option, or the select falls back to its first entry and
+  // saving quietly detaches the goal from a parent nobody meant to touch.
+  if (
+    goal?.parentGoalId &&
+    !parentOptions.some((g) => g.id === goal.parentGoalId)
+  ) {
+    parentOptions.unshift({
+      id: goal.parentGoalId,
+      title: goalTitles[goal.parentGoalId] ?? "Goal outside this view",
+    });
+  }
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();

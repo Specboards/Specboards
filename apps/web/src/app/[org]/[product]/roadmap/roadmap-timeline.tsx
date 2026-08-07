@@ -43,8 +43,11 @@ const SCALE_LABELS: Record<AxisScale, string> = {
  * The scrolling time track for one row: the column grid, the today marker, and
  * whatever bar the row draws on top. Purely presentational, so it is hidden
  * from assistive tech; every row states its dates as text in the gutter.
+ *
+ * Exported so the goal-swimlane view draws on exactly the same grid rather than
+ * a second copy of it that could drift.
  */
-function Track({
+export function Track({
   axis,
   widthPx,
   todayPct,
@@ -546,23 +549,27 @@ export function TimelineZoom({
   );
 }
 
+/** The three ways the same bars can be grouped. */
+export type TimelineRows = "releases" | "ladder" | "goals";
+
 /**
- * How the timeline's rows are organized: grouped under release bands (the
- * single-product reading) or laddered down the hierarchy (the portfolio one).
+ * How the timeline's rows are organized: grouped under release bands (what
+ * ships when), laddered down the hierarchy (what sits under what), or grouped
+ * into goal swimlanes (what the work is for). One axis, three readings.
  * Links, for the same reasons as the zoom control.
  */
 export function TimelineRowsToggle({
-  ladder,
+  active,
   hrefs,
 }: {
-  ladder: boolean;
-  hrefs: { releases: string; ladder: string };
+  active: TimelineRows;
+  hrefs: Record<TimelineRows, string>;
 }) {
-  const options: { key: "releases" | "ladder"; label: string }[] = [
+  const options: { key: TimelineRows; label: string }[] = [
     { key: "releases", label: "By release" },
     { key: "ladder", label: "Laddered" },
+    { key: "goals", label: "By goal" },
   ];
-  const active = ladder ? "ladder" : "releases";
   return (
     <div className="flex items-center gap-2 text-xs">
       <span className="text-muted-foreground">Rows</span>

@@ -23,7 +23,7 @@ import { sortFeatures } from "@/lib/feature-helpers";
 import { getDb } from "@/lib/db";
 import { resolveWorkflowFor } from "@/lib/repo-config";
 import { getStore } from "@/lib/store";
-import { compareShippedReleases } from "@/lib/store/types";
+import { compareShippedReleases, goalsForProduct } from "@/lib/store/types";
 import { listWorkspaceMembers, type WorkspaceMember } from "@/lib/workspace";
 import {
   canConnectRepos,
@@ -39,7 +39,9 @@ import {
   type AxisScale,
 } from "@/lib/roadmap-timeline";
 import { buildLadder } from "@/lib/roadmap-ladder";
+import { buildGoalTimeline } from "@/lib/roadmap-goals";
 import { DateSourcePicker } from "./date-source-picker";
+import { GoalTimelineEmptyState, RoadmapGoalLanes } from "./roadmap-goal-lanes";
 import { RoadmapLadder } from "./roadmap-ladder";
 import { RoadmapBoard, type RoadmapColumn } from "./roadmap-board";
 import {
@@ -48,6 +50,7 @@ import {
   TimelineRowsToggle,
   TimelineShippedToggle,
   TimelineZoom,
+  type TimelineRows,
 } from "./roadmap-timeline";
 
 export const dynamic = "force-dynamic";
@@ -333,10 +336,22 @@ export default async function RoadmapPage({
   const plottedByField =
     dateSources.start.kind === "property" || dateSources.end.kind === "property";
   const axisScale = parseAxisScale(sp.zoom);
-  // The portfolio reading of the timeline: rows ladder down the hierarchy from
-  // the active level instead of being grouped under release bands. Same axis,
-  // same date sources, same zoom (see lib/roadmap-ladder.ts).
-  const showLadder = showTimeline && first(sp.ladder) === "1";
+  // How the rows are grouped. Three readings of the same bars on the same axis:
+  // release bands (what ships when), the hierarchy ladder (what sits under
+  // what, lib/roadmap-ladder.ts), and goal swimlanes (what the work is for,
+  // lib/roadmap-goals.ts).
+  //
+  // `?ladder=1` was the spelling before this became a three-way choice; it is
+  // still read so links shared back then keep landing on the ladder.
+  const rowsParam = first(sp.rows);
+  const rows: TimelineRows =
+    rowsParam === "goals"
+      ? "goals"
+      : rowsParam === "ladder" || first(sp.ladder) === "1"
+        ? "ladder"
+        : "releases";
+  const showLadder = showTimeline && rows === "ladder";
+  const showGoals = showTimeline && rows === "goals";
   // Shipped history is on by default (the timeline is the one view where past
   // and future belong side by side) and hidden with `?shipped=0`.
   const hideShipped = first(sp.shipped) === "0";
@@ -353,7 +368,7 @@ export default async function RoadmapPage({
   // is on the board).
   const statusOrder = workflow.statuses.filter((s) => s !== "archived");
   const timeline =
-    showTimeline && !showLadder
+    showTimeline && !showLadder && !showGoals
       ? buildTimeline(
           features.map((f) => ({
             specId: f.specId,
@@ -410,6 +425,54 @@ export default async function RoadmapPage({
         levelOrder: levels.map((l) => l.key),
         statusOrder,
         blockingEdges: await store.listBlockingEdges(access ?? undefined),
+        today,
+        sources: dateSources,
+        scale: axisScale,
+      })
+    : null;
+
+  // Goal swimlanes. Scoped the same way the Goals page scopes them: a product
+  // sees its own goals plus org-wide ones, a broader scope sees every goal
+  // whose product it covers. Fetched only for this view, since neither the
+  // board nor the other two timelines need the link graph.
+  const [scopedGoals, goalLinks] = showGoals
+    ? await Promise.all([
+        store.listGoals(access ?? undefined).then((all) =>
+          activeProduct
+            ? goalsForProduct(all, activeProduct.id)
+            : all.filter((g) => g.productId === null || inScope(g.productId)),
+        ),
+        store.listGoalLinks(access ?? undefined),
+      ])
+    : [[], []];
+
+  // A lane draws work at every level, not just the active one: a goal is served
+  // by an initiative and by a single work item alike, and filtering to the
+  // level switcher's choice would silently empty the lanes that matter most.
+  const goalTimeline = showGoals
+    ? buildGoalTimeline({
+        goals: scopedGoals.map((g) => ({
+          id: g.id,
+          title: g.title,
+          status: g.status,
+          productId: g.productId,
+          periodStart: g.periodStart,
+          periodEnd: g.periodEnd,
+          progress: g.progress,
+          deliveryProgress: g.deliveryProgress,
+          linkedItemCount: g.linkedItemCount,
+        })),
+        items: ladderItems.map((f) => ({
+          specId: f.specId,
+          title: f.title,
+          status: f.status,
+          level: f.level,
+          releaseId: f.releaseId,
+          productId: f.productId,
+          customFields: f.customFields,
+        })),
+        releases: ladderReleases,
+        links: goalLinks,
         today,
         sources: dateSources,
         scale: axisScale,
@@ -522,13 +585,21 @@ export default async function RoadmapPage({
                   end={dateSources.end}
                 />
                 <TimelineRowsToggle
-                  ladder={showLadder}
+                  active={rows}
+                  // Every href clears the legacy `ladder` param, so switching
+                  // rows from an old link cannot leave the two disagreeing.
                   hrefs={{
                     releases: roadmapParamHref(org, productSlug, sp, {
+                      rows: null,
                       ladder: null,
                     }),
                     ladder: roadmapParamHref(org, productSlug, sp, {
-                      ladder: "1",
+                      rows: "ladder",
+                      ladder: null,
+                    }),
+                    goals: roadmapParamHref(org, productSlug, sp, {
+                      rows: "goals",
+                      ladder: null,
                     }),
                   }}
                 />
@@ -544,11 +615,32 @@ export default async function RoadmapPage({
                 ) : null}
               </div>
               {/* Zoom is offered whenever there is an axis to zoom. */}
-              {timeline || ladder ? (
+              {timeline || ladder || goalTimeline ? (
                 <TimelineZoom active={axisScale} hrefs={zoomHrefs} />
               ) : null}
             </div>
-            {ladder ? (
+            {showGoals ? (
+              goalTimeline ? (
+                <RoadmapGoalLanes
+                  model={goalTimeline}
+                  org={org}
+                  productSlug={productSlug}
+                  productNamesById={productsById ? productNamesById : undefined}
+                  productKeysById={Object.fromEntries(
+                    products.map((p) => [p.id, p.key]),
+                  )}
+                  today={today}
+                  levelLabels={Object.fromEntries(
+                    levels.map((l) => [l.key, l.label]),
+                  )}
+                  // Lanes are goals, not levels, so the collapse state is per
+                  // scope only: the level switcher does not reshape this view.
+                  stateKey={productSlug}
+                />
+              ) : (
+                <GoalTimelineEmptyState hasGoals={scopedGoals.length > 0} />
+              )
+            ) : ladder ? (
               <RoadmapLadder
                 model={ladder}
                 org={org}
