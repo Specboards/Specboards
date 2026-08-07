@@ -37,6 +37,7 @@ import type {
   OrgMemberRecord,
   OrgRole,
   ProductGroupPatch,
+  CycleGenerateInput,
   CycleInput,
   GoalContribution,
   GoalInput,
@@ -879,6 +880,29 @@ export async function createCycle(input: CycleInput): Promise<CycleRecord> {
     throw new Error(body?.error ?? `Create cycle failed with ${res.status}`);
   }
   return body.cycle;
+}
+
+/**
+ * Generate a run of cycles from a cadence and a horizon. Returns every cycle
+ * created, in date order. All or nothing: a name clash creates none of them.
+ */
+export async function generateCycles(
+  input: CycleGenerateInput,
+): Promise<CycleRecord[]> {
+  const res = await apiFetch("/api/v1/cycles/generate", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as {
+    cycles?: CycleRecord[];
+    error?: string;
+  } | null;
+  if (!res.ok || !body?.cycles) {
+    throw new Error(body?.error ?? `Generate cycles failed with ${res.status}`);
+  }
+  return body.cycles;
 }
 
 /** Update a cycle's name, dates, notes or product; returns the updated record. */

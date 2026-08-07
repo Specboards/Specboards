@@ -1,15 +1,21 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  addDaysDateOnly,
   compareCycles,
   cycleDaysRemaining,
   cycleLengthDays,
+  cycleScheduleRemainderDays,
   cycleState,
   cyclesForProduct,
+  generateCycleSchedule,
   isCycleActive,
+  MAX_GENERATED_CYCLES,
+  nextCycleNumber,
   selectableCycles,
   todayDateOnly,
   validateCycleDates,
+  validateCycleScheduleInput,
 } from "./cycles.js";
 
 const sprint = { startDate: "2026-07-20", endDate: "2026-07-31" };
@@ -167,5 +173,184 @@ describe("todayDateOnly", () => {
 
   it("does not shift the day for a late-UTC instant", () => {
     expect(todayDateOnly(new Date("2026-01-01T00:00:01Z"))).toBe("2026-01-01");
+  });
+});
+
+/** The card's worked example: fortnightly sprints from today to end of year. */
+const fortnightly = {
+  startDate: "2026-08-10",
+  endDate: "2026-12-31",
+  lengthDays: 14,
+  nameTemplate: "Sprint {n}",
+  startNumber: 1,
+};
+
+describe("addDaysDateOnly", () => {
+  it("advances a date-only string", () => {
+    expect(addDaysDateOnly("2026-08-10", 13)).toBe("2026-08-23");
+  });
+
+  it("crosses a month boundary", () => {
+    expect(addDaysDateOnly("2026-08-24", 13)).toBe("2026-09-06");
+  });
+
+  it("crosses a year boundary", () => {
+    expect(addDaysDateOnly("2026-12-28", 7)).toBe("2027-01-04");
+  });
+
+  it("handles a leap day", () => {
+    expect(addDaysDateOnly("2028-02-28", 1)).toBe("2028-02-29");
+    expect(addDaysDateOnly("2028-02-28", 2)).toBe("2028-03-01");
+  });
+});
+
+describe("generateCycleSchedule", () => {
+  it("generates back-to-back cycles that never overlap", () => {
+    const planned = generateCycleSchedule(fortnightly);
+    for (let i = 1; i < planned.length; i++) {
+      // The next cycle starts the day after the previous ends. If this ever
+      // becomes >= rather than >, two sprints claim the same day.
+      expect(planned[i]!.startDate).toBe(
+        addDaysDateOnly(planned[i - 1]!.endDate, 1),
+      );
+    }
+  });
+
+  it("makes every cycle exactly the requested length", () => {
+    for (const c of generateCycleSchedule(fortnightly)) {
+      expect(cycleLengthDays(c)).toBe(14);
+    }
+  });
+
+  it("starts on the requested date and numbers from the requested number", () => {
+    const planned = generateCycleSchedule(fortnightly);
+    expect(planned[0]).toEqual({
+      name: "Sprint 1",
+      startDate: "2026-08-10",
+      endDate: "2026-08-23",
+    });
+    expect(planned[1]!.name).toBe("Sprint 2");
+  });
+
+  it("never runs past the end date", () => {
+    for (const c of generateCycleSchedule(fortnightly)) {
+      expect(c.endDate <= fortnightly.endDate).toBe(true);
+    }
+  });
+
+  it("omits a trailing partial cycle rather than emitting a stunted one", () => {
+    // 2026-08-10 to 2026-12-31 is 144 days; ten fortnights fill 140 of them.
+    const planned = generateCycleSchedule(fortnightly);
+    expect(planned).toHaveLength(10);
+    expect(planned[9]!.endDate).toBe("2026-12-27");
+    expect(cycleScheduleRemainderDays(fortnightly)).toBe(4);
+  });
+
+  it("reports no remainder when the cadence divides the range evenly", () => {
+    expect(
+      cycleScheduleRemainderDays({ ...fortnightly, endDate: "2026-12-27" }),
+    ).toBe(0);
+  });
+
+  it("continues the sequence from a given start number", () => {
+    const planned = generateCycleSchedule({ ...fortnightly, startNumber: 6 });
+    expect(planned[0]!.name).toBe("Sprint 6");
+  });
+
+  it("replaces every occurrence of the token", () => {
+    const planned = generateCycleSchedule({
+      ...fortnightly,
+      nameTemplate: "S{n} (sprint {n})",
+    });
+    expect(planned[0]!.name).toBe("S1 (sprint 1)");
+  });
+
+  it("generates a single cycle when the range fits exactly one", () => {
+    const planned = generateCycleSchedule({
+      ...fortnightly,
+      endDate: "2026-08-23",
+    });
+    expect(planned).toHaveLength(1);
+  });
+
+  it("returns nothing when the input is unusable", () => {
+    expect(generateCycleSchedule({ ...fortnightly, lengthDays: 0 })).toEqual([]);
+  });
+});
+
+describe("validateCycleScheduleInput", () => {
+  it("accepts the worked example", () => {
+    expect(validateCycleScheduleInput(fortnightly)).toBeNull();
+  });
+
+  it("rejects a cadence that does not fit the range at all", () => {
+    expect(
+      validateCycleScheduleInput({ ...fortnightly, endDate: "2026-08-20" }),
+    ).toMatch(/end after the end date/);
+  });
+
+  it("rejects a template with no number token", () => {
+    expect(
+      validateCycleScheduleInput({ ...fortnightly, nameTemplate: "Sprint" }),
+    ).toMatch(/\{n\}/);
+  });
+
+  it("rejects a non-whole or zero cycle length", () => {
+    expect(validateCycleScheduleInput({ ...fortnightly, lengthDays: 0 })).toMatch(
+      /at least 1/,
+    );
+    expect(
+      validateCycleScheduleInput({ ...fortnightly, lengthDays: 2.5 }),
+    ).toMatch(/whole number/);
+  });
+
+  it("rejects a run that would exceed the cap, before generating it", () => {
+    // Daily cycles for five years: the guard exists so a slip like this is
+    // refused rather than quietly inserting thousands of rows.
+    expect(
+      validateCycleScheduleInput({
+        ...fortnightly,
+        lengthDays: 1,
+        endDate: "2031-12-31",
+      }),
+    ).toMatch(new RegExp(`more than ${MAX_GENERATED_CYCLES}`));
+  });
+
+  it("inherits the date validation used everywhere else", () => {
+    expect(
+      validateCycleScheduleInput({ ...fortnightly, endDate: "2026-01-01" }),
+    ).toMatch(/cannot end before it starts/);
+  });
+});
+
+describe("nextCycleNumber", () => {
+  it("continues past the highest existing match", () => {
+    expect(
+      nextCycleNumber(["Sprint 1", "Sprint 5", "Sprint 3"], "Sprint {n}"),
+    ).toBe(6);
+  });
+
+  it("starts at 1 when nothing matches", () => {
+    expect(nextCycleNumber(["Q3 planning", "Hardening"], "Sprint {n}")).toBe(1);
+  });
+
+  it("starts at 1 for an empty workspace", () => {
+    expect(nextCycleNumber([], "Sprint {n}")).toBe(1);
+  });
+
+  it("ignores names that only partly match the template", () => {
+    expect(
+      nextCycleNumber(["Sprint 9 (hardening)", "Sprint 2"], "Sprint {n}"),
+    ).toBe(3);
+  });
+
+  it("treats regex characters in the template as literals", () => {
+    // "Q3 (n)" must not be read as a regex group, and the escaped parens
+    // must still match the real names.
+    expect(nextCycleNumber(["C++ (7)", "C++ (2)"], "C++ ({n})")).toBe(8);
+  });
+
+  it("tolerates surrounding whitespace on stored names", () => {
+    expect(nextCycleNumber(["  Sprint 4  "], "Sprint {n}")).toBe(5);
   });
 });
