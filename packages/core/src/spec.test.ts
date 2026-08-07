@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   SpecParseError,
   extractSections,
+  featureSlug,
   frontmatterBlock,
   hasSpecId,
   parseSpec,
   previewSpec,
   rewriteSpecBody,
+  specFilePath,
 } from "./spec.js";
 
 const SAMPLE = `---
@@ -134,5 +136,37 @@ describe("rewriteSpecBody", () => {
     const reparsed = parseSpec(next);
     expect(reparsed.frontmatter.id).toBe("3f1a8c2e-0b7d-4e2a-9c11-2a6b8d4e1f00");
     expect(reparsed.frontmatter.title).toBe("Recovered");
+  });
+});
+
+describe("featureSlug", () => {
+  it("lowercases and hyphenates", () => {
+    expect(featureSlug("Attach a Spec")).toBe("attach-a-spec");
+  });
+
+  it("collapses runs of punctuation into a single hyphen", () => {
+    expect(featureSlug("Spec:  editing / in the app!")).toBe(
+      "spec-editing-in-the-app",
+    );
+  });
+
+  it("trims leading and trailing hyphens", () => {
+    expect(featureSlug("  --Hello--  ")).toBe("hello");
+  });
+
+  it("is empty when nothing sluggable survives", () => {
+    expect(featureSlug("!!! ???")).toBe("");
+  });
+});
+
+describe("specFilePath", () => {
+  it("builds the path the server will commit to", () => {
+    expect(specFilePath("Attach a spec")).toBe("specs/attach-a-spec/spec.md");
+  });
+
+  it("is null for a title with nothing sluggable in it", () => {
+    // The form uses this to withhold the path preview rather than show
+    // `specs//spec.md`, which is not a path the server would ever write.
+    expect(specFilePath("!!!")).toBeNull();
   });
 });

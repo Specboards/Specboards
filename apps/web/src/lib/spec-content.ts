@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import {
   canWriteProduct,
+  featureSlug,
   isLeafLevel,
   leafLevel,
   rewriteSpecBody,
@@ -16,7 +17,6 @@ import {
 } from "@specboards/db";
 
 import {
-  featureSlug,
   resolveRepoClient,
   resolveRepoDefaultProduct,
   syncRepository,
@@ -182,6 +182,15 @@ function newSpecFile(id: string, title: string, body: string | undefined): strin
  * Callers that want it parented under a particular card follow up with an
  * update_item on `parentSpecId` - this keeps the git write focused and lets the
  * store enforce the hierarchy rules.
+ *
+ * When attaching and the caller gives no `body`, the item's existing details
+ * become the spec's body. This is not a convenience: once a spec is attached
+ * the board reads the item's body from the file (`spec_index.content ?? details`
+ * in the store), so a description left behind stops being rendered and reads to
+ * its author as the app having eaten their writing. Seeding it here rather than
+ * in the caller is deliberate - the caller's copy of the item may be seconds
+ * stale, and the one case that matters most is an author who typed a
+ * description and attached a spec in the same breath.
  */
 export async function createSpec(
   db: Database,
@@ -254,6 +263,7 @@ export async function createSpec(
   // sync links the file to that row instead of creating a new one. Validated
   // through the RLS-scoped store, so an id from another tenant reads as unknown.
   let id: string;
+  let body = input.body;
   if (input.workItemId) {
     const target = await store.getFeature(input.workItemId, scope);
     if (!target) {
@@ -287,13 +297,17 @@ export async function createSpec(
       );
     }
     id = input.workItemId;
+    // Carry the card's description into the spec unless the caller supplied a
+    // body of its own. Read here, from the item we just fetched, so it is the
+    // current text rather than whatever the caller last saw.
+    if (body === undefined) body = target.content;
   } else {
     id = randomUUID();
   }
 
   const { commitSha } = await client.writeFile({
     path,
-    content: newSpecFile(id, title, input.body),
+    content: newSpecFile(id, title, body),
     message:
       input.message?.trim() ||
       (input.workItemId

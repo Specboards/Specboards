@@ -206,3 +206,30 @@ function firstHeading(markdown: string): string | null {
   }
   return null;
 }
+
+/**
+ * Slugify a spec title into a path segment (lowercase, hyphen-separated).
+ *
+ * Lives here rather than beside the sync that first needed it because the
+ * browser has to run it too: the create-a-spec form previews the file path it
+ * is about to commit, and a second, drifting copy of this rule would make that
+ * preview lie.
+ */
+export function featureSlug(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/**
+ * Repo-relative path a new spec with this title is committed to, or null when
+ * the title has nothing sluggable in it (e.g. only punctuation). Callers that
+ * are about to create a spec use this to show the user the file first; the
+ * server derives the same path independently, so this is a preview and never
+ * the authority.
+ */
+export function specFilePath(title: string): string | null {
+  const slug = featureSlug(title);
+  return slug ? `specs/${slug}/spec.md` : null;
+}

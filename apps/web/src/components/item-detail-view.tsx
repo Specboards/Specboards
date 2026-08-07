@@ -3,6 +3,7 @@
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 
+import { CreateSpecButton } from "@/components/create-spec-button";
 import { DetailSection } from "@/components/detail-section";
 import { FeatureComments } from "@/components/feature-comments";
 import { FeatureDetailsEditor } from "@/components/feature-details-editor";
@@ -37,10 +38,11 @@ export function ItemDetailView({
   /** "page" is the full-screen route; "flyout" is the in-context drawer. */
   variant: "page" | "flyout";
   /**
-   * Called after a spec body was committed. The full page re-renders from the
-   * refreshed cache on its own (`router.refresh()`), but the flyout holds its
-   * item in local state and has to re-read it, or it would keep showing the
-   * body from before the commit.
+   * Called after any write that goes through git: a spec body committed, a spec
+   * attached, a child spec created. The full page re-renders from the refreshed
+   * cache on its own (`router.refresh()`), but the flyout holds its item in
+   * local state and has to re-read it, or it would keep showing the item as it
+   * was before the commit.
    */
   onSpecSaved?: () => void;
 }) {
@@ -57,6 +59,8 @@ export function ItemDetailView({
     completedGateIds,
     canEdit,
     canEditSpec,
+    canAttachSpec,
+    canCreateChildSpec,
     currentUserId,
     availableFields,
     levelLabel,
@@ -153,6 +157,20 @@ export function ItemDetailView({
             <ReactMarkdown>{feature.content}</ReactMarkdown>
           </div>
         )}
+        {/* Below the body rather than beside the heading, so the expanded form
+            has the full column to open into. Only a leaf card tracked in the
+            app can take a spec; everywhere else the server would refuse. */}
+        {canAttachSpec ? (
+          <CreateSpecButton
+            target={{
+              kind: "attach",
+              workItemId: feature.specId,
+              itemTitle: feature.title,
+            }}
+            repos={data.repos}
+            onCreated={onSpecSaved}
+          />
+        ) : null}
       </div>
 
       {/* Why this work exists. Sits above the containment relationships below,
@@ -196,22 +214,41 @@ export function ItemDetailView({
 
           {childKey && childLabel ? (
             <div className="space-y-2">
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-xs font-medium text-muted-foreground">
                   {feature.children.length > 0
                     ? `${childLabel} items · ${feature.childDoneCount}/${feature.childCount} done`
                     : `No ${childLabel.toLowerCase()} items yet.`}
                 </p>
                 {canEdit ? (
-                  <GenerateChildButton
-                    parentSpecId={feature.specId}
-                    parentTitle={feature.title}
-                    childLevelKey={childKey}
-                    childLevelLabel={childLabel}
-                    productId={feature.productId}
-                    workflow={workflow}
-                    members={members}
-                  />
+                  <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+                    <GenerateChildButton
+                      parentSpecId={feature.specId}
+                      parentTitle={feature.title}
+                      childLevelKey={childKey}
+                      childLevelLabel={childLabel}
+                      productId={feature.productId}
+                      workflow={workflow}
+                      members={members}
+                    />
+                    {/* Two neighbouring ways to add a child, because they are
+                        two different things: a tracked card, or a card with a
+                        document in the repo behind it. */}
+                    {canCreateChildSpec ? (
+                      <CreateSpecButton
+                        target={{
+                          kind: "child",
+                          parentSpecId: feature.specId,
+                          parentTitle: feature.title,
+                        }}
+                        repos={data.repos}
+                        // The flyout holds its item in local state, so without
+                        // this it keeps reporting "no items yet" beside the
+                        // child that was just created.
+                        onCreated={onSpecSaved}
+                      />
+                    ) : null}
+                  </div>
                 ) : null}
               </div>
               {feature.children.map((c) => (

@@ -183,6 +183,56 @@ export async function updateSpecBody(
   return body.spec;
 }
 
+/** What a create returned: the spec, plus anything that partly went wrong. */
+export interface SpecCreateResult {
+  spec: SpecWriteResult;
+  /**
+   * Set when the spec was committed but nesting it under the requested parent
+   * failed. The spec exists either way, so this is a warning to show, not an
+   * error to retry: creating it again would only make a second file.
+   */
+  parentWarning?: string;
+}
+
+/**
+ * Create a new spec file, commit it, and sync it onto the board.
+ *
+ * With `workItemId` the spec attaches to an existing leaf item, which keeps
+ * that item's id, status, assignee, parent and history. With `parentSpecId` a
+ * new item is created for the spec and nested under that card. The two are
+ * mutually exclusive: attaching never moves the item it attaches to.
+ *
+ * The server's error messages are written for a human to read (including the
+ * "pick a different title" one raised by a slug collision), so they are
+ * surfaced as-is rather than replaced with a generic failure.
+ */
+export async function createSpec(input: {
+  title: string;
+  body?: string;
+  workItemId?: string;
+  parentSpecId?: string;
+  repoId?: string;
+  message?: string;
+}): Promise<SpecCreateResult> {
+  const res = await apiFetch("/api/v1/specs", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as {
+    spec?: SpecWriteResult;
+    parentWarning?: string;
+    error?: string;
+  } | null;
+  if (!res.ok || !body?.spec) {
+    throw new Error(
+      body?.error ?? `Creating the spec failed (${res.status}).`,
+    );
+  }
+  return { spec: body.spec, parentWarning: body.parentWarning };
+}
+
 /** Load a feature's full detail (metadata + spec content) for in-context edit. */
 export async function getFeature(specId: string): Promise<FeatureDetail> {
   const res = await apiFetch(`/api/v1/features/${encodeURIComponent(specId)}`);
