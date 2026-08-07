@@ -1,6 +1,7 @@
 "use client";
 
 import type { ItemDetailData } from "@/lib/item-detail";
+import type { ReleaseItemGroup } from "@/lib/release-items";
 import type {
   BoardKey,
   BoardPreferences,
@@ -859,6 +860,31 @@ export async function deleteRelease(id: string): Promise<void> {
     } | null;
     throw new Error(body?.error ?? `Delete release failed with ${res.status}`);
   }
+}
+
+/**
+ * The work scheduled into a release, grouped by hierarchy level (top level
+ * first). `count` is the number of items the caller may read, which can be
+ * fewer than the release's own `itemCount`.
+ */
+export async function getReleaseItems(
+  id: string,
+): Promise<{ groups: ReleaseItemGroup[]; count: number }> {
+  const res = await apiFetch(
+    `/api/v1/releases/${encodeURIComponent(id)}/items`,
+  );
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as {
+    groups?: ReleaseItemGroup[];
+    count?: number;
+    error?: string;
+  } | null;
+  if (!res.ok || !body?.groups) {
+    throw new Error(
+      body?.error ?? `Failed to load release items (${res.status}).`,
+    );
+  }
+  return { groups: body.groups, count: body.count ?? 0 };
 }
 
 

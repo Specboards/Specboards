@@ -352,6 +352,13 @@ export function RoadmapBoard({
         }
         properties={releaseProperties}
         members={members}
+        workflow={workflow}
+        // Opening an item from the release's contents swaps one panel for the
+        // other rather than stacking two sheets.
+        onOpenItem={(specId) => {
+          setDetailReleaseId(null);
+          setEditingSpecId(specId);
+        }}
         onClose={() => setDetailReleaseId(null)}
       />
       <FeatureEditSheet
