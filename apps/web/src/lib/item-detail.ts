@@ -64,6 +64,18 @@ export interface ItemDetailData {
   /** Which of `stageGates` are checked off for this item. */
   completedGateIds: string[];
   canEdit: boolean;
+  /**
+   * Whether this item's Markdown body may be edited *as a spec*, meaning the
+   * save commits to git rather than to the database. Needs product-write, a
+   * spec-backed item, a repo file to write to, and a database-backed
+   * deployment (the git write has neither a repo record nor a scope to
+   * authorize against in local file mode).
+   *
+   * Separate from `canEdit` because the two save paths are not interchangeable:
+   * a DB-native card's body autosaves to the database, while a spec body is a
+   * commit.
+   */
+  canEditSpec: boolean;
   /** The acting user's id (for author-only affordances like deleting a
    * comment); null in local file mode where there is no authenticated user. */
   currentUserId: string | null;
@@ -150,6 +162,11 @@ export async function getItemDetailData(
     .map((f) => ({ specId: f.specId, title: f.title }));
 
   const canEdit = canEditProducts(access, products, feature.productId);
+  // A spec-backed body is written by committing to the connected repo, so it
+  // needs more than product-write: a file to write to, and the cloud
+  // deployment that holds the repo record. `access` is null in file mode.
+  const canEditSpec =
+    canEdit && !feature.isDbNative && feature.path !== "" && access !== null;
   const availableFields =
     levels.find((l) => l.key === feature.level)?.fields ?? null;
 
@@ -173,6 +190,7 @@ export async function getItemDetailData(
     stageGates,
     completedGateIds,
     canEdit,
+    canEditSpec,
     currentUserId: access?.userId ?? null,
     availableFields,
     levelLabel,
