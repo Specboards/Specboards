@@ -88,6 +88,23 @@ export function FeatureEditSheet({
     };
   }, [specId]);
 
+  /**
+   * Re-read the item after its body was written to git. `router.refresh()`
+   * re-renders server components, but this drawer's content is fetched into
+   * local state, so without this the flyout would keep showing the pre-commit
+   * body while the page behind it moved on. Unlike the initial load this does
+   * not blank `data` first: the panel is being read, not opened.
+   */
+  const reload = useCallback(() => {
+    if (!specId) return;
+    getItemDetail(specId)
+      .then(setData)
+      .catch(() => {
+        // The write succeeded and was reported; a failed re-read is not worth
+        // replacing the panel with an error.
+      });
+  }, [specId]);
+
   // Drag-to-resize from the drawer's left edge; width persists across opens.
   const onResizeStart = useCallback((e: React.PointerEvent) => {
     e.preventDefault();
@@ -156,7 +173,11 @@ export function FeatureEditSheet({
           {error ? (
             <p className="text-sm text-destructive">{error}</p>
           ) : data ? (
-            <ItemDetailView data={data} variant="flyout" />
+            <ItemDetailView
+              data={data}
+              variant="flyout"
+              onSpecSaved={reload}
+            />
           ) : (
             <p className="text-sm text-muted-foreground">Loading…</p>
           )}

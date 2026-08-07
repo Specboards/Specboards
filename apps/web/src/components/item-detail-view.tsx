@@ -14,6 +14,7 @@ import { GenerateChildButton } from "@/components/generate-child-button";
 import { ItemGoals } from "@/components/item-goals";
 import { ItemProperties } from "@/components/item-properties";
 import { ItemTitle } from "@/components/item-title";
+import { SpecBodyEditor } from "@/components/spec-body-editor";
 import { StatusDot } from "@/components/status-dot";
 import { WorkItemDelete } from "@/components/work-item-controls";
 import { Badge } from "@/components/ui/badge";
@@ -30,10 +31,18 @@ import { useOrgProductPath } from "@/lib/use-org";
 export function ItemDetailView({
   data,
   variant,
+  onSpecSaved,
 }: {
   data: ItemDetailData;
   /** "page" is the full-screen route; "flyout" is the in-context drawer. */
   variant: "page" | "flyout";
+  /**
+   * Called after a spec body was committed. The full page re-renders from the
+   * refreshed cache on its own (`router.refresh()`), but the flyout holds its
+   * item in local state and has to re-read it, or it would keep showing the
+   * body from before the commit.
+   */
+  onSpecSaved?: () => void;
 }) {
   const {
     feature,
@@ -47,6 +56,7 @@ export function ItemDetailView({
     stageGates,
     completedGateIds,
     canEdit,
+    canEditSpec,
     currentUserId,
     availableFields,
     levelLabel,
@@ -59,8 +69,11 @@ export function ItemDetailView({
   } = data;
   const orgHref = useOrgProductPath();
 
-  // DB-native items' bodies live inline and are editable; spec-backed bodies
-  // come from git and render read-only here.
+  // Two editable bodies with two different destinations. A DB-native card's
+  // body is a database column, so it autosaves. A spec's body is a file in git,
+  // so it commits, and the editor for it says so rather than pretending the two
+  // are the same thing (`canEditSpec` also covers having a file to write to and
+  // a deployment that can reach the repo).
   const editableBody = feature.isDbNative && canEdit;
 
   return (
@@ -120,6 +133,14 @@ export function ItemDetailView({
             specId={feature.specId}
             initial={feature.content}
             minHeightClass="min-h-[15rem]"
+          />
+        ) : canEditSpec ? (
+          <SpecBodyEditor
+            specId={feature.specId}
+            path={feature.path}
+            initial={feature.content}
+            minHeightClass="min-h-[15rem]"
+            onSaved={onSpecSaved}
           />
         ) : feature.content.trim() === "" ? (
           <div className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">
