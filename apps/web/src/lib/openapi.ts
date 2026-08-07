@@ -158,6 +158,10 @@ export function buildOpenApiDocument(baseUrl: string): Record<string, unknown> {
         patch: { tags: ["releases"], summary: "Update a release.", requestBody: { required: true, content: { "application/json": { schema: { type: "object" } } } }, responses: { "200": ok("The updated release.") } },
         delete: { tags: ["releases"], summary: "Delete a release.", responses: { "204": { description: "Deleted." } } },
       },
+      "/api/v1/releases/{id}/items": {
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+        get: { tags: ["releases"], summary: "The work scheduled into a release, grouped by hierarchy level (top level first).", responses: { "200": ok("The release's items, grouped by level."), "404": { $ref: "#/components/responses/NotFound" } } },
+      },
       "/api/v1/cycles": {
         get: listOp("cycles", "cycles", "List cycles (active first, then upcoming, then most recently complete). Each carries a derived state."),
         post: { tags: ["cycles"], summary: "Create a cycle.", requestBody: { required: true, content: { "application/json": { schema: { type: "object" } } } }, responses: { "201": ok("The created cycle.") } },

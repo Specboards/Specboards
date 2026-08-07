@@ -1,16 +1,17 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
 
-import type { PropertyDef } from "@specboards/core";
+import type { PropertyDef, StatusWorkflow } from "@specboards/core";
 
 import {
   CustomFieldInput,
   collectCustomFields,
 } from "@/components/item-properties";
+import { StatusDot } from "@/components/status-dot";
 import { Badge } from "@/components/ui/badge";
 import { Box, BoxHeader } from "@/components/ui/box";
 import { Button } from "@/components/ui/button";
@@ -26,8 +27,11 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   AuthRequiredError,
   deleteRelease,
+  getReleaseItems,
   updateRelease,
 } from "@/lib/api-client";
+import { statusLabel } from "@/lib/feature-helpers";
+import type { ReleaseItemGroup } from "@/lib/release-items";
 import { RELEASE_STATUS_LABELS } from "@/lib/release-status";
 import {
   RELEASE_STATUSES,
@@ -73,6 +77,8 @@ export function ReleaseDetailSheet({
   productName,
   properties,
   members,
+  workflow,
+  onOpenItem,
   onClose,
 }: {
   /** The release to show, or null when the panel is closed. */
@@ -85,6 +91,10 @@ export function ReleaseDetailSheet({
   properties: PropertyDef[];
   /** Workspace members, for `user`-typed custom fields. */
   members: WorkspaceMember[];
+  /** Status workflow, so the item list shows the workspace's own status labels. */
+  workflow?: StatusWorkflow;
+  /** Open one of the release's items. When omitted the list is not clickable. */
+  onOpenItem?: (specId: string) => void;
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -332,6 +342,12 @@ export function ReleaseDetailSheet({
                 onCommit={commit}
               />
 
+              <ReleaseItems
+                releaseId={current.id}
+                workflow={workflow}
+                onOpenItem={onOpenItem}
+              />
+
               <p
                 className="h-4 text-2xs text-muted-foreground"
                 role="status"
@@ -385,6 +401,11 @@ export function ReleaseDetailSheet({
                 canEdit={false}
                 onCommit={() => {}}
               />
+              <ReleaseItems
+                releaseId={current.id}
+                workflow={workflow}
+                onOpenItem={onOpenItem}
+              />
             </div>
           )}
         </div>
@@ -433,6 +454,114 @@ export function ReleaseDetailSheet({
         ) : null}
       </SheetContent>
     </Sheet>
+  );
+}
+
+/**
+ * The work scheduled into this release, grouped by hierarchy level (Initiative,
+ * Epic, Feature, Work Item) with the top level first.
+ *
+ * The roadmap board only ever draws one level at a time, so this is the one
+ * place a release's full contents are readable. Loaded on open rather than
+ * passed down, because the board's own item list is filtered to the level the
+ * user is looking at and would under-report every release.
+ */
+function ReleaseItems({
+  releaseId,
+  workflow,
+  onOpenItem,
+}: {
+  releaseId: string;
+  workflow?: StatusWorkflow;
+  onOpenItem?: (specId: string) => void;
+}) {
+  const [groups, setGroups] = useState<ReleaseItemGroup[] | null>(null);
+  const [count, setCount] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setGroups(null);
+    setError(null);
+    getReleaseItems(releaseId)
+      .then((res) => {
+        if (cancelled) return;
+        setGroups(res.groups);
+        setCount(res.count);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        // An expired session is the sheet's problem to handle, not this
+        // section's: leave the panel intact and just say the list is unavailable.
+        setError(
+          err instanceof AuthRequiredError
+            ? "Sign in again to see this release's items."
+            : err instanceof Error
+              ? err.message
+              : "Could not load this release's items.",
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [releaseId]);
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-medium text-muted-foreground">Items</span>
+        {groups ? (
+          <Badge variant="counter">{count}</Badge>
+        ) : null}
+      </div>
+
+      {error ? (
+        <p className="text-sm text-muted-foreground">{error}</p>
+      ) : !groups ? (
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      ) : groups.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          Nothing is scheduled into this release yet.
+        </p>
+      ) : (
+        <div className="space-y-3">
+          {groups.map((group) => (
+            <div key={group.levelKey} className="space-y-1">
+              <div className="flex items-center gap-1.5">
+                <span className="text-2xs font-medium uppercase tracking-wide text-muted-foreground">
+                  {group.levelLabel}
+                </span>
+                <Badge variant="counter">{group.items.length}</Badge>
+              </div>
+              <ul className="space-y-0.5">
+                {group.items.map((item) => (
+                  <li key={item.specId} className="flex items-center gap-2">
+                    <StatusDot status={item.status} />
+                    {onOpenItem ? (
+                      <Button
+                        variant="link"
+                        size="inline"
+                        onClick={() => onOpenItem(item.specId)}
+                        className="min-w-0 flex-1 justify-start whitespace-normal text-left text-sm font-normal text-foreground"
+                      >
+                        {item.title}
+                      </Button>
+                    ) : (
+                      <span className="min-w-0 flex-1 text-sm">
+                        {item.title}
+                      </span>
+                    )}
+                    <span className="shrink-0 text-2xs text-muted-foreground">
+                      {statusLabel(item.status, workflow)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
