@@ -160,7 +160,7 @@ export function WorkItemCreate({
 
   return (
     <>
-      <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
+      <Button variant="outline" onClick={() => setOpen(true)}>
         New {levelLabel.toLowerCase()}
       </Button>
       <Sheet

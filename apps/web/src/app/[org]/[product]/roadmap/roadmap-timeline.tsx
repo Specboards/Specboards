@@ -31,6 +31,7 @@ import {
   MIN_TRACK_PX,
 } from "./timeline-geometry";
 import { TimelineScroller } from "./timeline-scroller";
+import { UndatedTray } from "./undated-tray";
 
 /** Human label for a scale, used by the zoom control and its notices. */
 const SCALE_LABELS: Record<AxisScale, string> = {
@@ -430,33 +431,16 @@ export function RoadmapTimeline({
         the workflow (or, for an item with children, how many of them are done).
       </p>
 
-      {/*
-        Items that cannot be placed on the axis are counted here rather than
-        dropped, so the timeline never implies coverage it does not have.
-      */}
-      {undated.length > 0 ? (
-        <section className="rounded-md border border-dashed p-3">
-          <h2 className="text-xs font-medium text-muted-foreground">
-            Undated ({undated.length})
-          </h2>
-          <p className="mt-0.5 text-2xs text-muted-foreground">
-            {undatedReason(sources, dateFieldLabels)}
-          </p>
-          <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
-            {undated.map((item) => (
-              <li key={item.specId} className="flex items-center gap-1.5">
-                <StatusDot status={item.status} />
-                <Link
-                  href={itemHref(item.level, item.specId)}
-                  className="truncate text-xs text-link hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  {item.title}
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
+      <UndatedTray
+        items={undated.map((item) => ({
+          specId: item.specId,
+          title: item.title,
+          status: item.status,
+          href: itemHref(item.level, item.specId),
+        }))}
+        description={undatedReason(sources, dateFieldLabels)}
+        stateKey={`timeline.${stateKey}`}
+      />
     </div>
   );
 }

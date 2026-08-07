@@ -2,7 +2,6 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ListChecks } from "lucide-react";
 import {
   DndContext,
   DragOverlay,
@@ -28,6 +27,7 @@ import {
   BulkActionBar,
   type BulkOptions,
 } from "@/app/[org]/[product]/backlog/bulk-action-bar";
+import { useBoardSelection } from "@/components/board-selection";
 import { BoardColumnNav } from "@/components/board-column-nav";
 import { ColumnQuickAdd } from "@/components/column-quick-add";
 import {
@@ -169,14 +169,13 @@ export function RoadmapBoard({
     columns.length,
   );
 
-  // Opt-in multi-select, mirroring the backlog board. Off on the mobile swipe
-  // layout (its floating bar and per-card checkboxes fight the carousel) and
-  // for viewers (no bulkOptions). `selecting` gates the checkboxes and bar so
-  // they vanish if the viewport crosses to mobile mid-selection.
+  // Opt-in multi-select, mirroring the backlog board. The mode lives in
+  // BoardSelectionProvider (which also drops it on the mobile swipe layout,
+  // whose carousel fights the floating bar and per-card checkboxes, and for
+  // viewers with no bulkOptions), so the toolbar can own the toggle; only the
+  // selected ids belong to this board.
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [selectMode, setSelectMode] = useState(false);
-  const canSelect = !!bulkOptions && !isMobile;
-  const selecting = selectMode && canSelect;
+  const { selectMode: selecting, exit: exitSelect } = useBoardSelection();
 
   const toggleSelect = useCallback((specId: string) => {
     setSelected((prev) => {
@@ -187,20 +186,12 @@ export function RoadmapBoard({
     });
   }, []);
   const clearSelection = useCallback(() => setSelected(new Set()), []);
-  const exitSelect = useCallback(() => {
-    setSelectMode(false);
-    setSelected(new Set());
-  }, []);
 
-  // Esc leaves multi-select entirely.
+  // Leaving multi-select drops whatever was selected, so re-entering never
+  // resurrects a stale selection.
   useEffect(() => {
-    if (!selecting) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") exitSelect();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [selecting, exitSelect]);
+    if (!selecting) setSelected(new Set());
+  }, [selecting]);
 
   const releaseOf = (f: FeatureRecord): string | null =>
     f.specId in placement ? placement[f.specId]! : f.releaseId;
@@ -295,20 +286,6 @@ export function RoadmapBoard({
 
   return (
     <>
-      {canSelect ? (
-        <div className="mb-2 flex justify-end">
-          <Button
-            type="button"
-            size="sm"
-            variant={selectMode ? "secondary" : "outline"}
-            onClick={() => (selectMode ? exitSelect() : setSelectMode(true))}
-            className="h-8 gap-1.5"
-          >
-            <ListChecks className="h-4 w-4" />
-            {selectMode ? "Done" : "Select"}
-          </Button>
-        </div>
-      ) : null}
       <BoardColumnNav
         label={(columns[activeColumn] ?? columns[0])?.name}
         index={activeColumn}
@@ -365,7 +342,9 @@ export function RoadmapBoard({
       </DndContext>
       <ReleaseDetailSheet
         release={detailRelease}
-        canEdit={detailRelease ? editableReleaseIds.includes(detailRelease.id) : false}
+        canEdit={
+          detailRelease ? editableReleaseIds.includes(detailRelease.id) : false
+        }
         productName={
           detailRelease?.productId
             ? (productNamesById[detailRelease.productId] ?? null)
@@ -447,7 +426,9 @@ function Column({
       ? `Shipped ${column.shippedDate}`
       : formatReleaseDates(column.startDate, column.targetDate);
   const statusLabelText =
-    column.status && column.status !== "planned" && !(shipped && column.shippedDate)
+    column.status &&
+    column.status !== "planned" &&
+    !(shipped && column.shippedDate)
       ? releaseStatusLabel(column.status)
       : null;
 

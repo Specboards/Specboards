@@ -22,7 +22,14 @@ const buttonVariants = cva(
         link: "text-link underline-offset-4 hover:underline",
       },
       size: {
+        // `default` is the shared control height: h-8, the same as Input and
+        // Select. Any control that sits in a toolbar row next to an input or a
+        // select must use it, or the row comes out ragged. Do not reach for
+        // `sm` to make a toolbar button "fit" and do not patch a height on with
+        // `className="h-8"` — both are how this drifted before.
         default: "h-8 px-3 py-1",
+        // Dense contexts only, where nothing lines up against a form control:
+        // inside a card, a table row, or an inline empty-state action.
         sm: "h-7 rounded-md px-2.5 text-xs",
         lg: "h-10 rounded-md px-6",
         icon: "h-8 w-8",

@@ -1,9 +1,9 @@
 "use client";
 
-import { ListChecks } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { useBoardSelection } from "@/components/board-selection";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -61,9 +61,10 @@ export function BacklogTable({
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // Multi-select is opt-in: the checkbox column appears only once turned on.
-  const [selectMode, setSelectMode] = useState(false);
+  // The mode lives in BoardSelectionProvider so the toolbar owns the toggle;
+  // only the selected ids belong to this table.
+  const { selectMode, exit: exitSelect } = useBoardSelection();
   const orgHref = useOrgProductPath();
-  const canSelect = canEdit && !!bulkOptions;
 
   // Hydrate persisted collapsed set after mount (avoids SSR/client mismatch).
   useEffect(() => {
@@ -103,10 +104,12 @@ export function BacklogTable({
     });
   }, []);
   const clearSelection = useCallback(() => setSelected(new Set()), []);
-  const exitSelect = useCallback(() => {
-    setSelectMode(false);
-    setSelected(new Set());
-  }, []);
+
+  // Leaving multi-select drops whatever was selected, so re-entering never
+  // resurrects a stale selection.
+  useEffect(() => {
+    if (!selectMode) setSelected(new Set());
+  }, [selectMode]);
 
   // Select-all toggles just the currently visible rows (collapsed epics' hidden
   // children are left alone, matching what the user can see).
@@ -114,7 +117,9 @@ export function BacklogTable({
     () => visible.map(({ feature }) => feature.specId),
     [visible],
   );
-  const selectedVisibleCount = visibleIds.filter((id) => selected.has(id)).length;
+  const selectedVisibleCount = visibleIds.filter((id) =>
+    selected.has(id),
+  ).length;
   const allVisibleSelected =
     visibleIds.length > 0 && selectedVisibleCount === visibleIds.length;
   const toggleSelectAll = useCallback(() => {
@@ -130,178 +135,163 @@ export function BacklogTable({
     });
   }, [visibleIds]);
 
-  // Esc leaves multi-select entirely.
-  useEffect(() => {
-    if (!selectMode) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") exitSelect();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [selectMode, exitSelect]);
-
   return (
     <>
-    {canSelect ? (
-      <div className="mb-2 flex justify-end">
-        <Button
-          type="button"
-          size="sm"
-          variant={selectMode ? "secondary" : "outline"}
-          onClick={() => (selectMode ? exitSelect() : setSelectMode(true))}
-          className="h-8 gap-1.5"
-        >
-          <ListChecks className="h-4 w-4" />
-          {selectMode ? "Done" : "Select"}
-        </Button>
-      </div>
-    ) : null}
-    <Table>
-      <TableHeader>
-        <TableRow>
-          {selectMode ? (
-            <TableHead className="w-8">
-              <input
-                type="checkbox"
-                aria-label="Select all visible items"
-                className="h-4 w-4 cursor-pointer align-middle accent-primary"
-                checked={allVisibleSelected}
-                ref={(el) => {
-                  if (el)
-                    el.indeterminate =
-                      selectedVisibleCount > 0 && !allVisibleSelected;
-                }}
-                onChange={toggleSelectAll}
-              />
-            </TableHead>
-          ) : null}
-          <TableHead>Feature</TableHead>
-          {productsById ? <TableHead className="w-32">Product</TableHead> : null}
-          <TableHead className="w-44">Status</TableHead>
-          <TableHead>Tags</TableHead>
-          <TableHead className="w-32">Release</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {visible.map(({ feature: f, depth }) => {
-          const isEpic = f.childCount > 0;
-          const isCollapsed = collapsed.has(f.specId);
-          return (
-            <TableRow key={f.specId} data-selected={selected.has(f.specId)}>
-              {selectMode ? (
-                <TableCell className="w-8">
-                  <input
-                    type="checkbox"
-                    aria-label={`Select ${f.title}`}
-                    className="h-4 w-4 cursor-pointer align-middle accent-primary"
-                    checked={selected.has(f.specId)}
-                    onChange={() => toggleSelect(f.specId)}
-                  />
-                </TableCell>
-              ) : null}
-              <TableCell>
-                <span
-                  className="flex items-center gap-2"
-                  style={depth > 0 ? { paddingLeft: depth * 16 } : undefined}
-                >
-                  {isEpic ? (
-                    <button
-                      type="button"
-                      onClick={() => toggle(f.specId)}
-                      aria-expanded={!isCollapsed}
-                      aria-label={isCollapsed ? "Expand epic" : "Collapse epic"}
-                      className="-ml-1 flex size-6 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground"
-                    >
-                      {isCollapsed ? "▸" : "▾"}
-                    </button>
-                  ) : depth > 0 ? (
-                    <span className="text-muted-foreground">↳</span>
-                  ) : null}
-                  <Link
-                    href={orgHref(`/backlog/${f.level}/${f.specId}`)}
-                    className="font-medium text-link hover:underline"
-                  >
-                    {f.title}
-                  </Link>
-                  {f.childCount > 0 && (
-                    <Badge
-                      variant="outline"
-                      size="sm"
-                      title={`${f.childDoneCount} of ${f.childCount} children done`}
-                    >
-                      epic {f.childDoneCount}/{f.childCount}
-                    </Badge>
-                  )}
-                  {f.blockedByCount > 0 && (
-                    <Badge
-                      variant="destructive"
-                      size="sm"
-                      title={`Blocked by ${f.blockedByCount} feature(s)`}
-                    >
-                      Blocked
-                    </Badge>
-                  )}
-                </span>
-                <div className="font-mono text-xs text-muted-foreground">
-                  {f.path}
-                </div>
-              </TableCell>
-              {productsById ? (
+      <Table>
+        <TableHeader>
+          <TableRow>
+            {selectMode ? (
+              <TableHead className="w-8">
+                <input
+                  type="checkbox"
+                  aria-label="Select all visible items"
+                  className="h-4 w-4 cursor-pointer align-middle accent-primary"
+                  checked={allVisibleSelected}
+                  ref={(el) => {
+                    if (el)
+                      el.indeterminate =
+                        selectedVisibleCount > 0 && !allVisibleSelected;
+                  }}
+                  onChange={toggleSelectAll}
+                />
+              </TableHead>
+            ) : null}
+            <TableHead>Feature</TableHead>
+            {productsById ? (
+              <TableHead className="w-32">Product</TableHead>
+            ) : null}
+            <TableHead className="w-44">Status</TableHead>
+            <TableHead>Tags</TableHead>
+            <TableHead className="w-32">Release</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {visible.map(({ feature: f, depth }) => {
+            const isEpic = f.childCount > 0;
+            const isCollapsed = collapsed.has(f.specId);
+            return (
+              <TableRow key={f.specId} data-selected={selected.has(f.specId)}>
+                {selectMode ? (
+                  <TableCell className="w-8">
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${f.title}`}
+                      className="h-4 w-4 cursor-pointer align-middle accent-primary"
+                      checked={selected.has(f.specId)}
+                      onChange={() => toggleSelect(f.specId)}
+                    />
+                  </TableCell>
+                ) : null}
                 <TableCell>
-                  {(() => {
-                    const p = f.productId ? productsById[f.productId] : undefined;
-                    return p ? (
-                      <Badge
-                        variant="secondary"
-                        size="sm"
-                        className={cn("border-transparent", productBadge(p).className)}
-                        style={productBadge(p).style}
+                  <span
+                    className="flex items-center gap-2"
+                    style={depth > 0 ? { paddingLeft: depth * 16 } : undefined}
+                  >
+                    {isEpic ? (
+                      <button
+                        type="button"
+                        onClick={() => toggle(f.specId)}
+                        aria-expanded={!isCollapsed}
+                        aria-label={
+                          isCollapsed ? "Expand epic" : "Collapse epic"
+                        }
+                        className="-ml-1 flex size-6 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground"
                       >
-                        {p.name}
+                        {isCollapsed ? "▸" : "▾"}
+                      </button>
+                    ) : depth > 0 ? (
+                      <span className="text-muted-foreground">↳</span>
+                    ) : null}
+                    <Link
+                      href={orgHref(`/backlog/${f.level}/${f.specId}`)}
+                      className="font-medium text-link hover:underline"
+                    >
+                      {f.title}
+                    </Link>
+                    {f.childCount > 0 && (
+                      <Badge
+                        variant="outline"
+                        size="sm"
+                        title={`${f.childDoneCount} of ${f.childCount} children done`}
+                      >
+                        epic {f.childDoneCount}/{f.childCount}
                       </Badge>
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    );
-                  })()}
+                    )}
+                    {f.blockedByCount > 0 && (
+                      <Badge
+                        variant="destructive"
+                        size="sm"
+                        title={`Blocked by ${f.blockedByCount} feature(s)`}
+                      >
+                        Blocked
+                      </Badge>
+                    )}
+                  </span>
+                  <div className="font-mono text-xs text-muted-foreground">
+                    {f.path}
+                  </div>
                 </TableCell>
-              ) : null}
-              <TableCell>
-                <div className="flex items-center gap-2">
-                  <StatusDot status={f.status} />
-                  <StatusSelect
-                    specId={f.specId}
-                    status={f.status}
-                    className="h-8 w-36"
-                    canEdit={canEdit}
-                    workflow={workflow}
-                  />
-                </div>
-              </TableCell>
-              <TableCell>
-                <div className="flex flex-wrap gap-1">
-                  {f.tags.map((tag) => (
-                    <Badge key={tag} variant="secondary">
-                      {tag}
-                    </Badge>
-                  ))}
-                </div>
-              </TableCell>
-              <TableCell className="text-sm text-muted-foreground">
-                {f.releaseId ? (releaseNames[f.releaseId] ?? "—") : "—"}
-              </TableCell>
-            </TableRow>
-          );
-        })}
-      </TableBody>
-    </Table>
-    {selectMode && bulkOptions ? (
-      <BulkActionBar
-        selectedIds={[...selected]}
-        options={bulkOptions}
-        onClear={clearSelection}
-        onExit={exitSelect}
-      />
-    ) : null}
+                {productsById ? (
+                  <TableCell>
+                    {(() => {
+                      const p = f.productId
+                        ? productsById[f.productId]
+                        : undefined;
+                      return p ? (
+                        <Badge
+                          variant="secondary"
+                          size="sm"
+                          className={cn(
+                            "border-transparent",
+                            productBadge(p).className,
+                          )}
+                          style={productBadge(p).style}
+                        >
+                          {p.name}
+                        </Badge>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      );
+                    })()}
+                  </TableCell>
+                ) : null}
+                <TableCell>
+                  <div className="flex items-center gap-2">
+                    <StatusDot status={f.status} />
+                    <StatusSelect
+                      specId={f.specId}
+                      status={f.status}
+                      className="h-8 w-36"
+                      canEdit={canEdit}
+                      workflow={workflow}
+                    />
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <div className="flex flex-wrap gap-1">
+                    {f.tags.map((tag) => (
+                      <Badge key={tag} variant="secondary">
+                        {tag}
+                      </Badge>
+                    ))}
+                  </div>
+                </TableCell>
+                <TableCell className="text-sm text-muted-foreground">
+                  {f.releaseId ? (releaseNames[f.releaseId] ?? "—") : "—"}
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+      {selectMode && bulkOptions ? (
+        <BulkActionBar
+          selectedIds={[...selected]}
+          options={bulkOptions}
+          onClear={clearSelection}
+          onExit={exitSelect}
+        />
+      ) : null}
     </>
   );
 }

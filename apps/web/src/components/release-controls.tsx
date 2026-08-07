@@ -61,7 +61,7 @@ export function ReleaseCreate({ productId }: { productId: string | null }) {
 
   return (
     <>
-      <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
+      <Button variant="outline" onClick={() => setOpen(true)}>
         New release
       </Button>
       <Sheet open={open} onOpenChange={setOpen}>

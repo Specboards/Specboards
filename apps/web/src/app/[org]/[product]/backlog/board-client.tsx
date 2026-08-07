@@ -22,19 +22,18 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS, getEventCoordinates } from "@dnd-kit/utilities";
-import { ListChecks } from "lucide-react";
 import { toast } from "sonner";
 
 import type { PropertyType, StatusWorkflow } from "@specboards/core";
 
 import { BoardColumnNav } from "@/components/board-column-nav";
+import { useBoardSelection } from "@/components/board-selection";
 import { ColumnQuickAdd } from "@/components/column-quick-add";
 import { FeatureCard, type ProductTag } from "@/components/feature-card";
 import { FeatureEditSheet } from "@/components/feature-edit-sheet";
 import { MoveMenu, type MoveOption } from "@/components/move-menu";
 import { StatusDot } from "@/components/status-dot";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { AuthRequiredError, patchFeature } from "@/lib/api-client";
 import { useAnnouncer } from "@/lib/use-announcer";
 import { useIsCoarsePointer, useIsMobile } from "@/lib/use-media-query";
@@ -125,9 +124,10 @@ export function BoardClient({
   const [editingSpecId, setEditingSpecId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // Multi-select is opt-in: checkboxes only appear once the user turns it on, so
-  // they never crowd a card's product tag or title in normal use.
-  const [selectMode, setSelectMode] = useState(false);
-  const canSelect = !!bulkOptions;
+  // they never crowd a card's product tag or title in normal use. The mode
+  // itself lives in BoardSelectionProvider so the toolbar can own the toggle;
+  // only the selected ids belong to this board.
+  const { selectMode, exit: exitSelect } = useBoardSelection();
 
   const toggleSelect = useCallback((specId: string) => {
     setSelected((prev) => {
@@ -138,20 +138,12 @@ export function BoardClient({
     });
   }, []);
   const clearSelection = useCallback(() => setSelected(new Set()), []);
-  const exitSelect = useCallback(() => {
-    setSelectMode(false);
-    setSelected(new Set());
-  }, []);
 
-  // Esc leaves multi-select entirely.
+  // Leaving multi-select (the toggle, Escape, or the bulk bar) drops whatever
+  // was selected, so re-entering never resurrects a stale selection.
   useEffect(() => {
-    if (!selectMode) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") exitSelect();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [selectMode, exitSelect]);
+    if (!selectMode) setSelected(new Set());
+  }, [selectMode]);
 
   // Re-seed from the server whenever the data set changes. Every mutation (a
   // field edit in the drawer, a newly created item, a drag we just persisted)
@@ -429,20 +421,6 @@ export function BoardClient({
 
   return (
     <>
-      {canSelect ? (
-        <div className="mb-2 flex justify-end">
-          <Button
-            type="button"
-            size="sm"
-            variant={selectMode ? "secondary" : "outline"}
-            onClick={() => (selectMode ? exitSelect() : setSelectMode(true))}
-            className="h-8 gap-1.5"
-          >
-            <ListChecks className="h-4 w-4" />
-            {selectMode ? "Done" : "Select"}
-          </Button>
-        </div>
-      ) : null}
       <BoardColumnNav
         label={
           columns[activeColumn]

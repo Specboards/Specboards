@@ -303,7 +303,7 @@ export function BacklogFilters({
       <div className="sm:hidden" data-pending={pending}>
         <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
           <SheetTrigger asChild>
-            <Button variant="outline" size="default" className="h-8 gap-2">
+            <Button variant="outline" className="gap-2">
               <SlidersHorizontal />
               Filters
               {activeCount > 0 ? (

@@ -67,7 +67,13 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
               <div className="flex min-w-0 flex-1 flex-col">
                 <MobileNav orgs={orgs} products={products} groups={groups} />
                 <main id="main" tabIndex={-1} className="min-w-0 flex-1 focus:outline-none">
-                  <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">{children}</div>
+                  {/* Capped to a comfortable measure for prose and forms, but
+                      a page can opt out with <WidePage> (see page-width.tsx)
+                      when it is a board, table, or timeline that should use
+                      the whole monitor. Below the cap nothing changes. */}
+                  <div className="mx-auto w-full max-w-6xl px-4 py-6 has-[[data-page-width=wide]]:max-w-none sm:px-6 sm:py-8">
+                    {children}
+                  </div>
                 </main>
               </div>
             </div>

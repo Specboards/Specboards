@@ -4,10 +4,15 @@ import { notFound } from "next/navigation";
 import { parentLevelKey, propertyAppliesToLevel } from "@specboards/core";
 
 import { BoardPrefsProvider } from "@/app/[org]/[product]/backlog/board-prefs";
+import {
+  BoardSelectToggle,
+  BoardSelectionProvider,
+} from "@/components/board-selection";
 import { CardFieldsMenu } from "@/components/card-fields-menu";
 import { EmptyState } from "@/components/empty-state";
 import { NoSpecsEmptyState } from "@/components/no-specs-empty-state";
 import { LevelSwitcher } from "@/components/level-switcher";
+import { widePage } from "@/components/page-width";
 import { ReleaseCreate } from "@/components/release-controls";
 import { WorkItemCreate } from "@/components/work-item-create";
 import { resolveActiveLevel } from "@/lib/active-level";
@@ -265,26 +270,25 @@ export default async function RoadmapPage({
       <ReleaseCreate productId={activeProduct?.id ?? null} />
     ) : null;
   // Every level is creatable, leaf included (ADR 0003).
-  const newItemButton =
-    canEdit ? (
-      <WorkItemCreate
-        levelKey={activeLevel.key}
-        levelLabel={activeLevel.label}
-        parentLabel={parentLabel}
-        parents={parents}
-        productId={activeProduct?.id ?? null}
-        products={products.map((p) => ({ id: p.id, name: p.name }))}
-        releases={activeReleases.map((r) => ({
-          id: r.id,
-          name: r.name,
-          productId: r.productId,
-        }))}
-        properties={properties}
-        workflow={workflow}
-        members={members}
-        templateBody={templateBody}
-      />
-    ) : null;
+  const newItemButton = canEdit ? (
+    <WorkItemCreate
+      levelKey={activeLevel.key}
+      levelLabel={activeLevel.label}
+      parentLabel={parentLabel}
+      parents={parents}
+      productId={activeProduct?.id ?? null}
+      products={products.map((p) => ({ id: p.id, name: p.name }))}
+      releases={activeReleases.map((r) => ({
+        id: r.id,
+        name: r.name,
+        productId: r.productId,
+      }))}
+      properties={properties}
+      workflow={workflow}
+      members={members}
+      templateBody={templateBody}
+    />
+  ) : null;
 
   // Per-column quick add: same single-product gate as the backlog board (a
   // release column can only create into an unambiguous product). Off in the
@@ -292,7 +296,7 @@ export default async function RoadmapPage({
   // to the workflow's first stage.
   const quickAddProductId =
     activeProduct?.id ??
-    (scopedProducts.length === 1 ? scopedProducts[0]?.id ?? null : null);
+    (scopedProducts.length === 1 ? (scopedProducts[0]?.id ?? null) : null);
   const quickAdd =
     canEdit && !showShipped && quickAddProductId
       ? {
@@ -334,7 +338,8 @@ export default async function RoadmapPage({
     end: parseDateSource(sp.end, dateFieldKeys),
   };
   const plottedByField =
-    dateSources.start.kind === "property" || dateSources.end.kind === "property";
+    dateSources.start.kind === "property" ||
+    dateSources.end.kind === "property";
   const axisScale = parseAxisScale(sp.zoom);
   // How the rows are grouped. Three readings of the same bars on the same axis:
   // release bands (what ships when), the hierarchy ladder (what sits under
@@ -437,11 +442,13 @@ export default async function RoadmapPage({
   // board nor the other two timelines need the link graph.
   const [scopedGoals, goalLinks] = showGoals
     ? await Promise.all([
-        store.listGoals(access ?? undefined).then((all) =>
-          activeProduct
-            ? goalsForProduct(all, activeProduct.id)
-            : all.filter((g) => g.productId === null || inScope(g.productId)),
-        ),
+        store
+          .listGoals(access ?? undefined)
+          .then((all) =>
+            activeProduct
+              ? goalsForProduct(all, activeProduct.id)
+              : all.filter((g) => g.productId === null || inScope(g.productId)),
+          ),
         store.listGoalLinks(access ?? undefined),
       ])
     : [[], []];
@@ -524,211 +531,232 @@ export default async function RoadmapPage({
       initialFeatured={featured}
       orderedKeys={catalog.map((f) => f.key)}
     >
-      <section className="space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-lg font-semibold tracking-tight">
-              {showShipped
-                ? "Shipped releases"
-                : showTimeline
-                  ? "Timeline"
-                  : "Roadmap"}
-            </h1>
-            <LevelSwitcher levels={levels} active={activeLevel.key} />
-            {showShipped || showTimeline ? (
-              <Link
-                href={roadmapViewHref(org, productSlug, sp.level, "board")}
-                className="text-xs text-link hover:underline"
-              >
-                ← Roadmap board
-              </Link>
-            ) : (
-              <>
+      <BoardSelectionProvider
+        canSelect={canEdit && !showTimeline && features.length > 0}
+        disableOnMobile
+      >
+        <section {...widePage} className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="text-lg font-semibold tracking-tight">
+                {showShipped
+                  ? "Shipped releases"
+                  : showTimeline
+                    ? "Timeline"
+                    : "Roadmap"}
+              </h1>
+              <LevelSwitcher levels={levels} active={activeLevel.key} />
+              {showShipped || showTimeline ? (
                 <Link
-                  href={roadmapViewHref(org, productSlug, sp.level, "timeline")}
+                  href={roadmapViewHref(org, productSlug, sp.level, "board")}
                   className="text-xs text-link hover:underline"
                 >
-                  Timeline →
+                  ← Roadmap board
                 </Link>
-                {shippedReleases.length > 0 ? (
+              ) : (
+                <>
                   <Link
-                    href={roadmapViewHref(org, productSlug, sp.level, "shipped")}
+                    href={roadmapViewHref(
+                      org,
+                      productSlug,
+                      sp.level,
+                      "timeline",
+                    )}
                     className="text-xs text-link hover:underline"
                   >
-                    Shipped releases ({shippedReleases.length}) →
+                    Timeline →
                   </Link>
-                ) : null}
-              </>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            {releaseCtaInEmptyState ? null : newReleaseButton}
-            {itemCtaInEmptyState ? null : newItemButton}
-            {features.length > 0 && canEdit && !showTimeline ? (
-              <CardFieldsMenu
-                catalog={catalog}
-                customFields={properties.map((f) => ({
-                  key: f.key,
-                  label: f.label,
-                }))}
-              />
-            ) : null}
-          </div>
-        </div>
-        {showTimeline ? (
-          <>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex flex-wrap items-center gap-3">
-                <DateSourcePicker
-                  fields={dateFields}
-                  start={dateSources.start}
-                  end={dateSources.end}
+                  {shippedReleases.length > 0 ? (
+                    <Link
+                      href={roadmapViewHref(
+                        org,
+                        productSlug,
+                        sp.level,
+                        "shipped",
+                      )}
+                      className="text-xs text-link hover:underline"
+                    >
+                      Shipped releases ({shippedReleases.length}) →
+                    </Link>
+                  ) : null}
+                </>
+              )}
+            </div>
+            {/* One action cluster, not several stacked right-aligned rows. Every
+              control here is the shared h-8 control height (see Button's
+              `default` size), so the row reads as a single toolbar. */}
+            <div className="flex flex-wrap items-center gap-2">
+              {releaseCtaInEmptyState ? null : newReleaseButton}
+              {itemCtaInEmptyState ? null : newItemButton}
+              {features.length > 0 && canEdit && !showTimeline ? (
+                <CardFieldsMenu
+                  catalog={catalog}
+                  customFields={properties.map((f) => ({
+                    key: f.key,
+                    label: f.label,
+                  }))}
                 />
-                <TimelineRowsToggle
-                  active={rows}
-                  // Every href clears the legacy `ladder` param, so switching
-                  // rows from an old link cannot leave the two disagreeing.
-                  hrefs={{
-                    releases: roadmapParamHref(org, productSlug, sp, {
-                      rows: null,
-                      ladder: null,
-                    }),
-                    ladder: roadmapParamHref(org, productSlug, sp, {
-                      rows: "ladder",
-                      ladder: null,
-                    }),
-                    goals: roadmapParamHref(org, productSlug, sp, {
-                      rows: "goals",
-                      ladder: null,
-                    }),
-                  }}
-                />
-                {/* Only offered when there is shipped history in scope to hide. */}
-                {shippedReleases.length > 0 ? (
-                  <TimelineShippedToggle
-                    hidden={hideShipped}
-                    count={shippedReleases.length}
-                    href={roadmapParamHref(org, productSlug, sp, {
-                      shipped: hideShipped ? null : "0",
-                    })}
+              ) : null}
+              <BoardSelectToggle />
+            </div>
+          </div>
+          {showTimeline ? (
+            <>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-3">
+                  <DateSourcePicker
+                    fields={dateFields}
+                    start={dateSources.start}
+                    end={dateSources.end}
                   />
+                  <TimelineRowsToggle
+                    active={rows}
+                    // Every href clears the legacy `ladder` param, so switching
+                    // rows from an old link cannot leave the two disagreeing.
+                    hrefs={{
+                      releases: roadmapParamHref(org, productSlug, sp, {
+                        rows: null,
+                        ladder: null,
+                      }),
+                      ladder: roadmapParamHref(org, productSlug, sp, {
+                        rows: "ladder",
+                        ladder: null,
+                      }),
+                      goals: roadmapParamHref(org, productSlug, sp, {
+                        rows: "goals",
+                        ladder: null,
+                      }),
+                    }}
+                  />
+                  {/* Only offered when there is shipped history in scope to hide. */}
+                  {shippedReleases.length > 0 ? (
+                    <TimelineShippedToggle
+                      hidden={hideShipped}
+                      count={shippedReleases.length}
+                      href={roadmapParamHref(org, productSlug, sp, {
+                        shipped: hideShipped ? null : "0",
+                      })}
+                    />
+                  ) : null}
+                </div>
+                {/* Zoom is offered whenever there is an axis to zoom. */}
+                {timeline || ladder || goalTimeline ? (
+                  <TimelineZoom active={axisScale} hrefs={zoomHrefs} />
                 ) : null}
               </div>
-              {/* Zoom is offered whenever there is an axis to zoom. */}
-              {timeline || ladder || goalTimeline ? (
-                <TimelineZoom active={axisScale} hrefs={zoomHrefs} />
-              ) : null}
-            </div>
-            {showGoals ? (
-              goalTimeline ? (
-                <RoadmapGoalLanes
-                  model={goalTimeline}
+              {showGoals ? (
+                goalTimeline ? (
+                  <RoadmapGoalLanes
+                    model={goalTimeline}
+                    org={org}
+                    productSlug={productSlug}
+                    productNamesById={
+                      productsById ? productNamesById : undefined
+                    }
+                    productKeysById={Object.fromEntries(
+                      products.map((p) => [p.id, p.key]),
+                    )}
+                    today={today}
+                    levelLabels={Object.fromEntries(
+                      levels.map((l) => [l.key, l.label]),
+                    )}
+                    // Lanes are goals, not levels, so the collapse state is per
+                    // scope only: the level switcher does not reshape this view.
+                    stateKey={productSlug}
+                  />
+                ) : (
+                  <GoalTimelineEmptyState hasGoals={scopedGoals.length > 0} />
+                )
+              ) : ladder ? (
+                <RoadmapLadder
+                  model={ladder}
                   org={org}
                   productSlug={productSlug}
                   productNamesById={productsById ? productNamesById : undefined}
-                  productKeysById={Object.fromEntries(
-                    products.map((p) => [p.id, p.key]),
-                  )}
                   today={today}
-                  levelLabels={Object.fromEntries(
-                    levels.map((l) => [l.key, l.label]),
+                  // Collapse state is per scope and level, so expanding the
+                  // initiative ladder does not reshape the epic one.
+                  stateKey={`${productSlug}:${activeLevel.key}`}
+                />
+              ) : timeline ? (
+                <RoadmapTimeline
+                  model={timeline}
+                  org={org}
+                  productSlug={productSlug}
+                  // Product attribution only where it carries information: the
+                  // same multi-product test the board's card tags use.
+                  productNamesById={productsById ? productNamesById : undefined}
+                  today={today}
+                  sources={dateSources}
+                  dateFieldLabels={Object.fromEntries(
+                    dateFields.map((f) => [f.key, f.label]),
                   )}
-                  // Lanes are goals, not levels, so the collapse state is per
-                  // scope only: the level switcher does not reshape this view.
-                  stateKey={productSlug}
+                  requestedScale={axisScale}
+                  // Collapse state is per scope and level, so folding up the
+                  // feature timeline does not reshape the epic one.
+                  stateKey={`${productSlug}:${activeLevel.key}`}
                 />
               ) : (
-                <GoalTimelineEmptyState hasGoals={scopedGoals.length > 0} />
-              )
-            ) : ladder ? (
-              <RoadmapLadder
-                model={ladder}
-                org={org}
-                productSlug={productSlug}
-                productNamesById={productsById ? productNamesById : undefined}
-                today={today}
-                // Collapse state is per scope and level, so expanding the
-                // initiative ladder does not reshape the epic one.
-                stateKey={`${productSlug}:${activeLevel.key}`}
-              />
-            ) : timeline ? (
-              <RoadmapTimeline
-                model={timeline}
-                org={org}
-                productSlug={productSlug}
-                // Product attribution only where it carries information: the
-                // same multi-product test the board's card tags use.
-                productNamesById={productsById ? productNamesById : undefined}
-                today={today}
-                sources={dateSources}
-                dateFieldLabels={Object.fromEntries(
-                  dateFields.map((f) => [f.key, f.label]),
-                )}
-                requestedScale={axisScale}
-                // Collapse state is per scope and level, so folding up the
-                // feature timeline does not reshape the epic one.
-                stateKey={`${productSlug}:${activeLevel.key}`}
-              />
-            ) : (
-              <TimelineEmptyState
-                action={plottedByField ? null : newReleaseButton}
-                plottedByField={plottedByField}
-                shippedHidden={hideShipped && shippedReleases.length > 0}
-              />
-            )}
-          </>
-        ) : features.length === 0 && scopedReleases.length === 0 ? (
-          // Nothing at all yet: no items at this level and no releases.
-          activeLevel.isLeaf ? (
-            <NoSpecsEmptyState
-              canConnect={canConnectRepos(access)}
-              createAction={newItemButton}
-            />
-          ) : (
-            <EmptyState
-              className="mt-8"
-              title="Nothing on the roadmap yet"
-              description={`Releases are the ship vehicles on this roadmap, and ${activeLevel.label.toLowerCase()} items are the work you schedule into them. Create a release to plan against, add an item, then drag it into the release column.`}
-              action={
-                newReleaseButton || newItemButton ? (
-                  <div className="flex items-center justify-center gap-2">
-                    {newReleaseButton}
-                    {newItemButton}
-                  </div>
-                ) : null
-              }
-            />
-          )
-        ) : features.length === 0 && !showShipped ? (
-          // Releases exist but nothing at this level is scheduled: keep the
-          // release columns visible and guide the next step above them.
-          <>
-            {activeLevel.isLeaf ? (
+                <TimelineEmptyState
+                  action={plottedByField ? null : newReleaseButton}
+                  plottedByField={plottedByField}
+                  shippedHidden={hideShipped && shippedReleases.length > 0}
+                />
+              )}
+            </>
+          ) : features.length === 0 && scopedReleases.length === 0 ? (
+            // Nothing at all yet: no items at this level and no releases.
+            activeLevel.isLeaf ? (
               <NoSpecsEmptyState
-                variant="inline"
-                className="py-4"
                 canConnect={canConnectRepos(access)}
                 createAction={newItemButton}
               />
             ) : (
               <EmptyState
-                variant="inline"
-                className="py-4"
-                title={`No ${activeLevel.label.toLowerCase()} items to schedule yet`}
-                description={
-                  canEdit
-                    ? "Create one, then drag it into a release column to plan it."
-                    : "Once items exist at this level they can be scheduled into the releases below."
+                className="mt-8"
+                title="Nothing on the roadmap yet"
+                description={`Releases are the ship vehicles on this roadmap, and ${activeLevel.label.toLowerCase()} items are the work you schedule into them. Create a release to plan against, add an item, then drag it into the release column.`}
+                action={
+                  newReleaseButton || newItemButton ? (
+                    <div className="flex items-center justify-center gap-2">
+                      {newReleaseButton}
+                      {newItemButton}
+                    </div>
+                  ) : null
                 }
-                action={newItemButton}
               />
-            )}
-            {board}
-          </>
-        ) : (
-          board
-        )}
-      </section>
+            )
+          ) : features.length === 0 && !showShipped ? (
+            // Releases exist but nothing at this level is scheduled: keep the
+            // release columns visible and guide the next step above them.
+            <>
+              {activeLevel.isLeaf ? (
+                <NoSpecsEmptyState
+                  variant="inline"
+                  className="py-4"
+                  canConnect={canConnectRepos(access)}
+                  createAction={newItemButton}
+                />
+              ) : (
+                <EmptyState
+                  variant="inline"
+                  className="py-4"
+                  title={`No ${activeLevel.label.toLowerCase()} items to schedule yet`}
+                  description={
+                    canEdit
+                      ? "Create one, then drag it into a release column to plan it."
+                      : "Once items exist at this level they can be scheduled into the releases below."
+                  }
+                  action={newItemButton}
+                />
+              )}
+              {board}
+            </>
+          ) : (
+            board
+          )}
+        </section>
+      </BoardSelectionProvider>
     </BoardPrefsProvider>
   );
 }
