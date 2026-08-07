@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -16,11 +16,12 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import {
+  arrayMove,
   SortableContext,
   useSortable,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
+import { CSS, getEventCoordinates } from "@dnd-kit/utilities";
 import { ListChecks } from "lucide-react";
 import { toast } from "sonner";
 
@@ -55,6 +56,19 @@ import { useBoardPrefs } from "./board-prefs";
 import { BulkActionBar, type BulkOptions } from "./bulk-action-bar";
 
 const COL_PREFIX = "col:";
+/** Edge drop zones: the "drop at top" / "drop at end" bars a column floats over
+ * its two edges while a card is in flight, so a tall column's ends stay
+ * reachable without drag-scrolling to them. */
+const TOP_PREFIX = "top:";
+const END_PREFIX = "end:";
+/** Every droppable id carries one of these; the rest is the column's status. */
+const ZONE_PREFIXES = [COL_PREFIX, TOP_PREFIX, END_PREFIX];
+
+/** True for a column-level droppable (a column body or one of its edge bars),
+ * as opposed to a card. */
+function isZoneId(id: string): boolean {
+  return ZONE_PREFIXES.some((p) => id.startsWith(p));
+}
 
 /**
  * Interactive Kanban board: drag cards between columns (changes status, if the
@@ -169,26 +183,58 @@ export function BoardClient({
     columns.length,
   );
 
-  // Column-aware collision: resolve what the pointer is actually over, then
-  // prefer a card (for precise within-column insertion) but fall back to the
-  // column droppable so a drop onto a short/empty column's open space still
-  // lands there. `closestCorners` (the dnd-kit board default) measured against
-  // the nearest card rect, so dragging from the bottom of a tall column toward a
-  // near-empty one kept resolving back to a source-column card and the drop
-  // no-oped (the card snapped home). The roadmap board avoids this the same way
-  // (it uses pointerWithin).
+  // Desktop columns stop growing at the bottom of the viewport and scroll
+  // inside instead, so the board never runs off the page. That is what makes a
+  // drop reachable: the column's own scroll area is the drag surface, its edge
+  // bars stay pinned in view, and dnd-kit auto-scrolls the column (not the
+  // window) when a card nears an edge. Measured rather than a guessed `vh`
+  // offset, so the toolbar and filter bar above can change height freely. Below
+  // md the board is a swipe carousel with drag off, so the page scrolls as
+  // before.
+  const boardRef = useRef<HTMLDivElement | null>(null);
+  const [boardMaxHeight, setBoardMaxHeight] = useState<number | null>(null);
+  useEffect(() => {
+    function measure() {
+      const el = boardRef.current;
+      if (!el) return;
+      const top = el.getBoundingClientRect().top + window.scrollY;
+      // The gap clears what sits below the board (the page container's bottom
+      // padding, mainly). Leaving the page even slightly scrollable would undo
+      // the point of the cap: dnd-kit auto-scrolls the window whenever a drag
+      // nears the viewport edge, which is exactly where the "drop at end" bar
+      // sits, and the page sliding out from under the pointer knocks it off the
+      // target.
+      setBoardMaxHeight(Math.max(360, window.innerHeight - top - 48));
+    }
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, []);
+
+  // Column-aware collision, in priority order: an edge bar (it floats over the
+  // cards beneath it, so the pointer is always inside both), then a card (for
+  // precise within-column insertion), then the column body so a drop onto open
+  // space still lands in that column. `closestCorners` (the dnd-kit board
+  // default) measured against the nearest card rect, so dragging from the bottom
+  // of a tall column toward a near-empty one kept resolving back to a
+  // source-column card and the drop no-oped (the card snapped home). The roadmap
+  // board avoids this the same way (it uses pointerWithin).
   const collisionDetection: CollisionDetection = useCallback((args) => {
     const pointerCollisions = pointerWithin(args);
     const collisions =
       pointerCollisions.length > 0 ? pointerCollisions : rectIntersection(args);
-    const cardCollisions = collisions.filter(
-      (c) => !String(c.id).startsWith(COL_PREFIX),
-    );
+    const edgeCollisions = collisions.filter((c) => {
+      const id = String(c.id);
+      return id.startsWith(TOP_PREFIX) || id.startsWith(END_PREFIX);
+    });
+    if (edgeCollisions.length > 0) return edgeCollisions;
+    const cardCollisions = collisions.filter((c) => !isZoneId(String(c.id)));
     return cardCollisions.length > 0 ? cardCollisions : collisions;
   }, []);
 
   function columnOf(id: string): string | undefined {
-    if (id.startsWith(COL_PREFIX)) return id.slice(COL_PREFIX.length);
+    const prefix = ZONE_PREFIXES.find((p) => id.startsWith(p));
+    if (prefix) return id.slice(prefix.length);
     return columns.find((c) => lists[c]?.includes(id));
   }
 
@@ -206,15 +252,28 @@ export function BoardClient({
     const to = columnOf(String(over.id));
     if (!from || !to || !current) return;
 
-    // Build the target column's new ordering (target list excludes the card,
-    // then re-inserts it at the drop position).
+    // Build the target column's new ordering.
     const overId = String(over.id);
-    const target = (lists[to] ?? []).filter((id) => id !== specId);
-    const overIndex = target.indexOf(overId);
-    const index = overId.startsWith(COL_PREFIX) || overIndex < 0
-      ? target.length
-      : overIndex;
-    target.splice(index, 0, specId);
+    let target: string[];
+    let index: number;
+    if (from === to && !isZoneId(overId)) {
+      // Within a column, commit exactly what the drag preview showed: the card
+      // takes the slot that opened up, which is *after* the card it was dragged
+      // past on the way down and before it on the way up. Inserting at the
+      // over-card's index unconditionally (what this used to do) contradicted
+      // the preview downward, so a card could never be dragged onto the last
+      // slot: it always landed one above.
+      const list = lists[from] ?? [];
+      const oldIndex = list.indexOf(specId);
+      const newIndex = list.indexOf(overId);
+      if (oldIndex < 0 || newIndex < 0) return;
+      target = arrayMove(list, oldIndex, newIndex);
+      index = newIndex;
+    } else {
+      target = (lists[to] ?? []).filter((id) => id !== specId);
+      index = dropIndex(overId, target, event);
+      target.splice(index, 0, specId);
+    }
 
     // No-op: dropped back into its original column at its original position.
     if (from === to && arraysEqual(lists[from] ?? [], target)) return;
@@ -400,10 +459,23 @@ export function BoardClient({
         collisionDetection={collisionDetection}
         onDragStart={onDragStart}
         onDragEnd={onDragEnd}
+        // A cancelled drag (Escape, the window resizing, the tab going
+        // background) never reaches onDragEnd, so without this the board would
+        // stay in its dragging state: overlay card stuck to the cursor, drop
+        // zones stuck open.
+        onDragCancel={() => setActiveId(null)}
       >
         <div
-          ref={scrollRef}
-          className="relative flex gap-4 overflow-x-auto pb-4 max-md:-mx-4 max-md:snap-x max-md:snap-mandatory max-md:px-4 max-md:scroll-px-4"
+          ref={(node) => {
+            scrollRef.current = node;
+            boardRef.current = node;
+          }}
+          style={
+            isMobile || !boardMaxHeight
+              ? undefined
+              : { maxHeight: boardMaxHeight }
+          }
+          className="relative flex items-stretch gap-4 overflow-x-auto pb-4 max-md:-mx-4 max-md:snap-x max-md:snap-mandatory max-md:px-4 max-md:scroll-px-4"
         >
           {columns.map((status) => (
             <Column
@@ -424,6 +496,7 @@ export function BoardClient({
               selected={selected}
               onToggleSelect={toggleSelect}
               dragDisabled={isMobile}
+              dragActive={activeId !== null}
               onMoveToStatus={moveToStatus}
               onMoveWithinColumn={moveWithinColumn}
               quickAdd={quickAdd}
@@ -483,6 +556,7 @@ function Column({
   selected,
   onToggleSelect,
   dragDisabled,
+  dragActive,
   onMoveToStatus,
   onMoveWithinColumn,
   quickAdd,
@@ -504,6 +578,9 @@ function Column({
   onToggleSelect: (specId: string) => void;
   /** Below md, drag is off and swiping scrolls between columns instead. */
   dragDisabled: boolean;
+  /** True while a card is in flight anywhere on the board: the cue to show this
+   * column's drop zones. */
+  dragActive: boolean;
   /** Non-drag "Move to <column>" (workflow-validated). */
   onMoveToStatus: (specId: string, toStatus: string) => void;
   /** Non-drag reorder within this column (-1 up, +1 down). */
@@ -513,6 +590,19 @@ function Column({
   quickAdd?: { levelKey: string; levelLabel: string; productId: string | null };
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `${COL_PREFIX}${status}` });
+  // The column's scroll area, kept alongside the droppable ref so a drag can ask
+  // whether this column is taller than it can show. Only an overflowing column
+  // gets the edge bars: where you can see the whole column, both ends are
+  // already on screen and its open space appends a card anyway.
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const [overflowing, setOverflowing] = useState(false);
+  useEffect(() => {
+    if (!dragActive) return;
+    const el = listRef.current;
+    if (el) setOverflowing(el.scrollHeight > el.clientHeight + 4);
+  }, [dragActive]);
+  const showEdges = dragActive && !dragDisabled && overflowing;
+
   // Destinations for a card's Move menu: this column (checked, current) plus the
   // transitions the workflow permits out of it.
   const moveDestinations: MoveOption[] = [
@@ -529,82 +619,124 @@ function Column({
     >
       <div className="flex items-center gap-2 px-2 py-1.5">
         <StatusDot status={status} />
-        <span className="text-sm font-medium">{statusLabel(status, workflow)}</span>
+        <span className="text-sm font-medium">
+          {statusLabel(status, workflow)}
+        </span>
         <Badge variant="counter" className="ml-auto">
           {cardIds.length}
         </Badge>
       </div>
       <SortableContext items={cardIds} strategy={verticalListSortingStrategy}>
-        <div
-          ref={setNodeRef}
-          className={`min-h-12 flex-1 space-y-2 rounded-md transition-colors ${isOver ? "bg-muted" : ""}`}
-        >
-          {cardIds.map((id, index) => {
-            const record = records[id];
-            if (!record) return null;
-            return (
-              <SortableCard key={id} id={id} disabled={dragDisabled}>
-                {/* In select mode the checkbox sits in a left gutter beside the
+        {/* The edge bars are siblings of the scroll area, not children of it,
+            and float over its two edges. dnd-kit rebases a droppable's rect by
+            how far its scroll container has scrolled since the drag began, which
+            is right for cards (they move with the content) and wrong for
+            anything pinned: inside the list, a bar's drop target slid away from
+            the bar the moment the column auto-scrolled. */}
+        <div className="relative flex min-h-0 flex-1 flex-col">
+          {/* The whole scroll area is the column's drop target, and each card
+              tiles it edge to edge (the 8px gap between cards is the card's own
+              padding, not a dead margin), so there is no sliver you can release
+              a card over and have nothing happen. */}
+          <div
+            ref={(node) => {
+              listRef.current = node;
+              setNodeRef(node);
+            }}
+            className={cn(
+              "min-h-12 flex-1 rounded-md transition-colors md:min-h-0 md:overflow-y-auto",
+              isOver && "bg-muted",
+            )}
+          >
+            {cardIds.map((id, index) => {
+              const record = records[id];
+              if (!record) return null;
+              return (
+                <SortableCard key={id} id={id} disabled={dragDisabled}>
+                  {/* In select mode the checkbox sits in a left gutter beside the
                     card (not over it), so it never overlaps the product tag or
                     title. stopPropagation keeps a checkbox click from starting a
                     drag or opening the card. */}
-                <div className="flex items-start gap-1.5">
-                  {selectMode ? (
-                    <input
-                      type="checkbox"
-                      aria-label={`Select ${record.title}`}
-                      className="mt-3 h-4 w-4 shrink-0 cursor-pointer accent-primary"
-                      checked={selected.has(id)}
-                      onPointerDown={(e) => e.stopPropagation()}
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={() => onToggleSelect(id)}
-                    />
-                  ) : null}
-                  <div
-                    className={cn(
-                      "group relative min-w-0 flex-1 rounded-md",
-                      selected.has(id) && "ring-2 ring-primary",
-                    )}
-                  >
-                    <FeatureCard
-                      feature={record}
-                      fields={cardFields}
-                      featured={featured}
-                      customFieldLabels={customFieldLabels}
-                      customFieldTypes={customFieldTypes}
-                      memberNames={memberNames}
-                      releaseNames={releaseNames}
-                      onOpen={() => onOpen(id)}
-                      product={
-                        record.productId ? productsById?.[record.productId] : undefined
-                      }
-                    />
-                    {/* The keyboard/pointer alternative to dragging (SC 2.1.1,
+                  <div className="flex items-start gap-1.5">
+                    {selectMode ? (
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${record.title}`}
+                        className="mt-3 h-4 w-4 shrink-0 cursor-pointer accent-primary"
+                        checked={selected.has(id)}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={() => onToggleSelect(id)}
+                      />
+                    ) : null}
+                    <div
+                      className={cn(
+                        "group relative min-w-0 flex-1 rounded-md",
+                        selected.has(id) && "ring-2 ring-primary",
+                      )}
+                    >
+                      <FeatureCard
+                        feature={record}
+                        fields={cardFields}
+                        featured={featured}
+                        customFieldLabels={customFieldLabels}
+                        customFieldTypes={customFieldTypes}
+                        memberNames={memberNames}
+                        releaseNames={releaseNames}
+                        onOpen={() => onOpen(id)}
+                        // Below md there is no drag to protect, so the whole card
+                        // stays a tap target. Where it can be dragged, only the
+                        // title opens it.
+                        clickToOpen={dragDisabled}
+                        product={
+                          record.productId
+                            ? productsById?.[record.productId]
+                            : undefined
+                        }
+                      />
+                      {/* The keyboard/pointer alternative to dragging (SC 2.1.1,
                         2.5.7). Revealed on hover/focus on desktop where drag is
                         primary; always visible below md where drag is off. */}
-                    {!selectMode ? (
-                      <div className="absolute right-1 top-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 max-md:opacity-100 has-[[data-state=open]]:opacity-100">
-                        <MoveMenu
-                          triggerLabel={`Move ${record.title}`}
-                          destinationsLabel="Move to column"
-                          destinations={moveDestinations}
-                          onSelect={(toStatus) => onMoveToStatus(id, toStatus)}
-                          reorder={{
-                            onUp: () => onMoveWithinColumn(id, -1),
-                            onDown: () => onMoveWithinColumn(id, 1),
-                            canUp: index > 0,
-                            canDown: index < cardIds.length - 1,
-                          }}
-                        />
-                      </div>
-                    ) : null}
+                      {!selectMode ? (
+                        <div className="absolute right-1 top-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 max-md:opacity-100 has-[[data-state=open]]:opacity-100">
+                          <MoveMenu
+                            triggerLabel={`Move ${record.title}`}
+                            destinationsLabel="Move to column"
+                            destinations={moveDestinations}
+                            onSelect={(toStatus) =>
+                              onMoveToStatus(id, toStatus)
+                            }
+                            reorder={{
+                              onUp: () => onMoveWithinColumn(id, -1),
+                              onDown: () => onMoveWithinColumn(id, 1),
+                              canUp: index > 0,
+                              canDown: index < cardIds.length - 1,
+                            }}
+                          />
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
-                </div>
-              </SortableCard>
-            );
-          })}
-          {cardIds.length === 0 ? (
-            <p className="px-2 pb-2 text-xs text-muted-foreground">Empty</p>
+                </SortableCard>
+              );
+            })}
+            {cardIds.length === 0 ? (
+              <p className="px-2 pb-2 text-xs text-muted-foreground">Empty</p>
+            ) : null}
+          </div>
+          {showEdges ? (
+            <>
+              <EdgeDropZone
+                id={`${TOP_PREFIX}${status}`}
+                edge="top"
+                label="Drop at top"
+              />
+              <EdgeDropZone
+                id={`${END_PREFIX}${status}`}
+                edge="bottom"
+                label="Drop at end"
+              />
+            </>
           ) : null}
         </div>
       </SortableContext>
@@ -622,6 +754,45 @@ function Column({
   );
 }
 
+/**
+ * A column's "drop at top" / "drop at end" bar, shown only while a card is in
+ * flight. It floats over its edge of the column's scroll area, so the two ends
+ * of a column that is taller than the screen stay one move away instead of a
+ * drag-scroll away. Positioned out of the flow so a starting drag doesn't
+ * displace the list, and the collision detection gives it priority over whatever
+ * is underneath.
+ */
+function EdgeDropZone({
+  id,
+  edge,
+  label,
+}: {
+  id: string;
+  edge: "top" | "bottom";
+  label: string;
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id });
+  return (
+    <div
+      ref={setNodeRef}
+      aria-hidden
+      className={cn(
+        // Inert to the pointer: dnd-kit resolves drops from rects, and this way
+        // the bar never swallows a hover or click of its own.
+        "pointer-events-none absolute inset-x-0 z-20 flex h-9 items-center justify-center rounded-md border border-dashed text-xs font-medium shadow-sm",
+        edge === "top" ? "top-0" : "bottom-0",
+        // Opaque: it floats over the card at that edge, and a translucent bar
+        // left that card's title showing through it.
+        isOver
+          ? "border-primary bg-primary/20 text-primary"
+          : "border-border bg-background text-muted-foreground",
+      )}
+    >
+      {label}
+    </div>
+  );
+}
+
 function SortableCard({
   id,
   disabled,
@@ -631,8 +802,14 @@ function SortableCard({
   disabled: boolean;
   children: React.ReactNode;
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({ id, disabled });
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id, disabled });
   return (
     <div
       ref={setNodeRef}
@@ -641,12 +818,43 @@ function SortableCard({
         transition,
         opacity: isDragging ? 0.4 : 1,
       }}
+      // The gap between cards is padding here rather than a margin, so a card's
+      // droppable rect reaches its neighbor's and a release between two cards
+      // still resolves to one of them. The body is the drag handle (the title
+      // link opts out of it), hence the grab cursor.
+      className={cn("pb-2", !disabled && "cursor-grab active:cursor-grabbing")}
       {...attributes}
       {...listeners}
     >
       {children}
     </div>
   );
+}
+
+/**
+ * Where a card dropped into a different column (or onto one of a column's edge
+ * bars) lands in that column's order: the top bar pins it first, the end bar and
+ * any open column space append it, and a drop on a card inserts on whichever
+ * side of that card the pointer is nearer. The half-and-half rule is what makes
+ * the last slot reachable without scrolling: aim at the bottom of the bottom
+ * card and the drop appends rather than pushing that card down.
+ */
+function dropIndex(
+  overId: string,
+  target: string[],
+  event: DragEndEvent,
+): number {
+  if (overId.startsWith(TOP_PREFIX)) return 0;
+  if (overId.startsWith(END_PREFIX) || overId.startsWith(COL_PREFIX)) {
+    return target.length;
+  }
+  const overIndex = target.indexOf(overId);
+  if (overIndex < 0) return target.length;
+  const rect = event.over?.rect;
+  const start = getEventCoordinates(event.activatorEvent);
+  if (!rect || !start) return overIndex;
+  const pointerY = start.y + event.delta.y;
+  return pointerY > rect.top + rect.height / 2 ? overIndex + 1 : overIndex;
 }
 
 function arraysEqual(a: string[], b: string[]): boolean {

@@ -1,6 +1,6 @@
 {
   "name": "specboards",
-  "version": "0.25.5",
+  "version": "0.26.0",
   "private": true,
   "description": "Lightweight, spec-based product management layer over git-native specs. Open-core self-host (AGPL-3.0) + hosted SaaS.",
   "license": "AGPL-3.0-only",
@@ -17,6 +17,8 @@
     "db:up": "docker compose -f infra/docker-compose.yml up -d db",
     "db:migrate": "pnpm --filter @specboards/db migrate",
     "db:seed": "pnpm --filter @specboards/db seed",
+    "deploy:test": "scripts/deploy.sh test",
+    "deploy:prod": "scripts/deploy.sh production",
     "format": "prettier --write \"**/*.{ts,tsx,md,json,yml,yaml}\"",
     "audit": "pnpm audit --prod --audit-level high --ignore-registry-errors"
   },
@@ -30,7 +32,8 @@
       "esbuild": "0.28.1",
       "postcss": ">=8.5.18",
       "sharp": ">=0.35.0",
-      "fast-uri": ">=3.1.4",
+      "fast-uri": ">=4.1.2",
+      "ip-address": ">=10.3.1",
       "shell-quote": ">=1.9.0",
       "hono": ">=4.12.27",
       "body-parser": ">=2.3.0"

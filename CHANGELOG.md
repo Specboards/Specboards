@@ -32,6 +32,74 @@ for how and when the version is bumped.
   `delete_key_result`. `read_item` now reports the goals an item ladders up to,
   so the "why does this exist" edge reads from both ends.
 
+## [0.26.0] - 2026-08-07
+
+Where goals surface once they exist, a board you can actually drop a card on,
+and scoring that explains itself.
+
+### Added
+
+- **Goal roll-up on the portfolio dashboard.** `/{org}/dashboard` now carries a
+  Goals section: each goal's status, product, period, and both progress figures,
+  still labelled and still never merged. Hidden entirely until a goal exists.
+- **Goal swimlanes on the roadmap timeline.** A third option on the timeline's
+  rows toggle (`?rows=goals`), beside "By release" and "Laddered": one lane per
+  goal, drawn over its measurement period, with the work laddering up to it
+  inside. The band fills with **outcome** progress and states delivery beside
+  it. Two things follow from what a goal is: a lane is not a partition (work
+  serving two goals is drawn in both), and the level switcher does not filter it
+  (a goal is served by an initiative and a single work item alike). Goals with
+  no period, and work that ladders up to nothing, are trayed rather than
+  dropped. New `listGoalLinks` store method reads the whole link graph in one
+  call.
+- **Nested goals render as a tree.** The Goals page lays goals out by
+  `parentGoalId` instead of listing them flat, so a company objective and the
+  product goals under it read as one ladder. A goal whose parent is out of scope
+  is promoted to the top level and says whose it is; editing it no longer
+  silently detaches it from that parent.
+
+### Changed
+
+- **RICE is scored in a flyout, one scale per input.** The four values used to
+  sit in the item's properties row as look-alike boxes whose units and scales
+  you had to already know, and which mean nothing apart from each other. They
+  now open from the RICE row: Reach on a magnitude ladder plus a free field,
+  Impact on the canonical five-step scale, Confidence on a slider with the
+  Low/Medium/High anchors, Effort on a person-month ladder, with the running
+  score and its formula underneath. The row reads as the score plus a compact
+  breakdown.
+
+### Fixed
+
+- **Board cards can be grabbed, and drops land where you aim.** The whole card
+  was a click target, so the zone that opened an item was far larger than the
+  title it looked like, and a drag that fell short of the threshold opened the
+  drawer instead. The card body is now the drag handle and only the title opens
+  the item (below md, where drag is off, the whole card stays a tap target).
+  Dropping is more forgiving in three ways: cards tile their column with no dead
+  gaps between them, a drop on a card's lower half inserts after it, and a
+  within-column drag commits what the preview showed rather than landing one
+  slot above it. Desktop columns stop at the bottom of the viewport and scroll
+  inside, and a column taller than it can show floats "Drop at top" / "Drop at
+  end" bars over its edges so both ends stay one move away instead of a
+  drag-scroll away. A cancelled drag (Escape, a resize, the tab going
+  background) no longer leaves the overlay card stuck to the cursor, and the
+  Roadmap column's drop target fills the column rather than stopping at its last
+  card.
+- **New items pick up their level's detail template on every path.** An item
+  created from a column quick add came out blank even where the level had a
+  template assigned: the quick add posts a title and nothing else, and the
+  template was only ever applied by the "New item" drawer. It is seeded on
+  create now, so the REST API and the MCP tools behave like the UI. Clearing the
+  drawer's editor still creates a blank body.
+- **`GIT_SHA` is passed on every deploy path.** /legal's "Source code" link
+  pins to the running commit (the AGPL section 13 offer), but the build arg that
+  bakes it in was only ever passed by hand, so three releases shipped pointing
+  at the repo root instead. The GitHub workflow now passes it for both test and
+  production, and local deploys go through `pnpm deploy:test` /
+  `pnpm deploy:prod` (`scripts/deploy.sh`), which supplies it and refuses to
+  ship production from a feature branch or a dirty tree.
+
 ## [0.25.5] - 2026-07-27
 
 Planning entities: two new first-class records, and a change to what a work item
