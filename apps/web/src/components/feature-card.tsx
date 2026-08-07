@@ -36,6 +36,11 @@ function isModifiedClick(e: React.MouseEvent): boolean {
  * this component just handles the title link. The card carries no status
  * control: the column it sits in already shows the stage, and dragging between
  * columns is how the stage changes.
+ *
+ * Where the card can be dragged, only the title opens it: the body is the grab
+ * handle (the Roadmap card works the same way). A whole-card click target made
+ * the "open" zone far bigger than the name it looked like, so a grab that
+ * started a few pixels short of the drag threshold opened the drawer instead.
  */
 export function FeatureCard({
   feature,
@@ -46,6 +51,7 @@ export function FeatureCard({
   memberNames,
   releaseNames,
   onOpen,
+  clickToOpen = false,
   product,
 }: {
   feature: FeatureRecord;
@@ -59,6 +65,11 @@ export function FeatureCard({
   /** Release name by id, for the release badge. */
   releaseNames: Record<string, string>;
   onOpen: () => void;
+  /** Make the whole card a click target for opening it. Only set where drag is
+   * off (below md), so a tap anywhere still opens the item; wherever the card
+   * can be dragged, the title is the open affordance and the body is the
+   * handle. */
+  clickToOpen?: boolean;
   /** The owning product, shown as a badge in the cross-product ("All
    * products") view; omitted when the board is scoped to one product. */
   product?: ProductTag;
@@ -75,8 +86,11 @@ export function FeatureCard({
 
   return (
     <Card
-      className="cursor-pointer transition-colors hover:border-foreground/25"
-      onClick={onOpen}
+      className={cn(
+        "transition-colors hover:border-foreground/25",
+        clickToOpen && "cursor-pointer",
+      )}
+      onClick={clickToOpen ? onOpen : undefined}
     >
       <CardHeader className="space-y-1 p-3">
         {product ? (
@@ -94,9 +108,12 @@ export function FeatureCard({
         ) : null}
         {featuredEl}
         <CardTitle className="text-[0.9375rem]">
+          {/* The card's open affordance. `stop` on pointerdown keeps the title
+              out of the drag handle, so a press here is unambiguously a click
+              and a press anywhere else on the card is unambiguously a grab. */}
           <Link
             href={orgHref(`/backlog/${feature.level}/${feature.specId}`)}
-            className="hover:underline"
+            className="cursor-pointer hover:underline"
             onPointerDown={stop}
             onClick={(e) => {
               e.stopPropagation();

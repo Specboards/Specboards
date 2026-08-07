@@ -91,6 +91,10 @@ export default async function GoalsPage({
       levels={levels.map((l) => ({ key: l.key, label: l.label }))}
       defaultProductId={activeProduct?.id ?? null}
       products={scopedProducts.map((p) => ({ id: p.id, name: p.name }))}
+      // Every readable goal, not just the ones in scope: a goal shown here can
+      // be parented to one that is not, and the view has to be able to name it.
+      // No leak, since listGoals is already filtered to what the caller can read.
+      goalTitles={Object.fromEntries(allGoals.map((g) => [g.id, g.title]))}
     />
   );
 }
