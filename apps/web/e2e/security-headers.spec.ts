@@ -25,6 +25,15 @@ test.describe("security headers", () => {
     expect(scriptSrc).not.toContain("'unsafe-inline'");
     expect(scriptSrc).toMatch(/'nonce-[^']+'/);
     expect(scriptSrc).toContain("'strict-dynamic'");
+    // `next dev` adds 'unsafe-eval' so React Refresh can run (without it the
+    // bootstrap dies and nothing hydrates). This is the guard that it never
+    // rides along into a build.
+    expect(scriptSrc).not.toContain("'unsafe-eval'");
+
+    // The dev HMR websocket is likewise development-only.
+    const connectSrc = directive("connect-src");
+    expect(connectSrc, "connect-src directive present").toBeTruthy();
+    expect(connectSrc).toBe("connect-src 'self'");
 
     // style-src (the element directive) must also be free of 'unsafe-inline':
     // an injected <style> block is refused. Inline style="..." attributes stay
