@@ -630,6 +630,9 @@ export class LocalFileStore implements FeatureStore {
         }),
         path: path.relative(this.root, file),
         content: parsed.content,
+        // Local file mode has no remote to race against, and no blob shas: the
+        // file on disk is the only copy there is.
+        blobSha: null,
         sections: parsed.sections,
         relations: [],
         blocksCount: 0,
@@ -668,6 +671,7 @@ export class LocalFileStore implements FeatureStore {
         }),
         path: "",
         content: item.details ?? "",
+        blobSha: null,
         sections: [],
         relations: [],
         blocksCount: 0,

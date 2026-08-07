@@ -43,7 +43,11 @@ import {
   parseGithubLinkInput,
   removeFeatureGithubLink,
 } from "@/lib/github-links-service";
-import { createSpec, updateSpecContent } from "@/lib/spec-content";
+import {
+  createSpec,
+  SpecConflictError,
+  updateSpecContent,
+} from "@/lib/spec-content";
 import { getStore, type GithubLink } from "@/lib/store";
 
 import { DOC_TOOLS } from "./doc-tools";
@@ -422,6 +426,10 @@ export const TOOLS: McpTool[] = [
           status: g.status,
         })),
         content: f.content,
+        // Hand back the sha `content` came from so an edit can be guarded
+        // against whatever happens between this read and that write. Null for a
+        // DB-native card, which has no file to race against.
+        blobSha: f.blobSha,
       };
     },
   },
@@ -636,6 +644,15 @@ export const TOOLS: McpTool[] = [
           type: "string",
           description: "Optional git commit message.",
         },
+        expectedBlobSha: {
+          type: "string",
+          description:
+            "The `blobSha` from the read_item you based this body on. The " +
+            "write is refused if the spec changed in git since, rather than " +
+            "overwriting whoever got there first. Pass it whenever you are " +
+            "editing an existing body; omit it only when you are replacing " +
+            "the spec wholesale and do not care what was there.",
+        },
       },
       required: ["specId", "content"],
       additionalProperties: false,
@@ -647,7 +664,34 @@ export const TOOLS: McpTool[] = [
       const content = requireString(args, "content");
       const message =
         typeof args.message === "string" ? args.message : undefined;
-      return updateSpecContent(db, scope, specId, content, { message });
+      const expectedBlobSha =
+        typeof args.expectedBlobSha === "string"
+          ? args.expectedBlobSha
+          : undefined;
+      try {
+        return await updateSpecContent(db, scope, specId, content, {
+          message,
+          expectedBlobSha,
+        });
+      } catch (err) {
+        if (!(err instanceof SpecConflictError)) throw err;
+        // Answer a conflict with everything needed to resolve it rather than an
+        // error the agent can only retry. Re-reading is not a substitute: in PR
+        // mode the version that won lives on a working branch, and read_item
+        // would hand back the default branch's copy and send the agent round
+        // the same loop with the same stale sha.
+        return {
+          conflict: true,
+          message: err.message,
+          path: err.path,
+          currentContent: err.currentContent,
+          currentBlobSha: err.currentBlobSha,
+          howToResolve:
+            "Merge your change into currentContent, then call this tool again " +
+            "with expectedBlobSha set to currentBlobSha. Do not resend your " +
+            "version unchanged: that discards whatever the other write said.",
+        };
+      }
     },
   },
   {

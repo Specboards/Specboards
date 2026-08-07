@@ -7,7 +7,11 @@ import {
   InvalidPatchError,
   parseSpecContentInput,
 } from "@/lib/features-service";
-import { SpecContentError, updateSpecContent } from "@/lib/spec-content";
+import {
+  SpecConflictError,
+  SpecContentError,
+  updateSpecContent,
+} from "@/lib/spec-content";
 
 export const dynamic = "force-dynamic";
 
@@ -72,7 +76,7 @@ export async function PUT(req: Request, { params }: Params) {
       authz.scope,
       specId,
       input.content,
-      { message: input.message },
+      { message: input.message, expectedBlobSha: input.expectedBlobSha },
     );
     // A direct write re-syncs the repo, so the item's cached body has already
     // changed by the time this returns; drop the pages that render it. A change
@@ -86,6 +90,24 @@ export async function PUT(req: Request, { params }: Params) {
     }
     return Response.json({ spec: result });
   } catch (err) {
+    // A conflict is 409 rather than 422 because it is not a bad request: the
+    // author did nothing wrong and the same body sent a moment earlier would
+    // have worked. The version that won comes back with it so the editor can
+    // show what happened instead of an apology, and its sha is what a
+    // deliberate overwrite sends next.
+    if (err instanceof SpecConflictError) {
+      return Response.json(
+        {
+          error: err.message,
+          conflict: {
+            path: err.path,
+            currentContent: err.currentContent,
+            currentBlobSha: err.currentBlobSha,
+          },
+        },
+        { status: 409 },
+      );
+    }
     // SpecContentError messages are already written for a human ("This spec has
     // no connected repository file to edit", "Your role does not permit editing
     // this spec"), so they go through to the UI unchanged.

@@ -7,8 +7,15 @@ import {
   leafLevel,
   resolveWriteMode,
   rewriteSpecBody,
+  specBody,
 } from "@specboards/core";
-import type { WritePullRequest } from "@specboards/git";
+import {
+  GitWriteConflictError,
+  type GitRepoClient,
+  type WriteFileInput,
+  type WriteFileResult,
+  type WritePullRequest,
+} from "@specboards/git";
 import {
   and,
   eq,
@@ -38,6 +45,31 @@ import { getStore, type WorkspaceScope } from "@/lib/store";
 
 /** Raised when a spec can't be written (no repo, no access, name clash, ...). */
 export class SpecContentError extends Error {}
+
+/**
+ * The spec moved in git between the author loading it and saving. Kept apart
+ * from {@link SpecContentError} so the UI can offer a resolution instead of a
+ * failure message: everything needed to resolve it is on the error, because a
+ * conflict view that has to go back for the losing version is a second round
+ * trip during the one moment the author is least patient.
+ *
+ * `currentContent` is the body with frontmatter stripped, matching what the
+ * editor holds, so the two versions can be put side by side without either
+ * side re-parsing.
+ */
+export class SpecConflictError extends Error {
+  constructor(
+    readonly path: string,
+    readonly currentContent: string,
+    readonly currentBlobSha: string,
+  ) {
+    super(
+      "Someone else changed this spec while you were writing. Your version " +
+        "has not been saved yet.",
+    );
+    this.name = "SpecConflictError";
+  }
+}
 
 /** The feature's git pointers, resolved on the owner connection. */
 interface SpecGitTarget {
@@ -104,10 +136,52 @@ async function authorizeSpecWrite(
   return { repo, path: row.path, title: feature.title };
 }
 
+/**
+ * Write a spec file, turning a lost guard into a {@link SpecConflictError} that
+ * carries the version which won.
+ *
+ * The losing write names the branch it was aimed at, and that is what gets read
+ * back: in PR mode the version that beat the author is on the working branch,
+ * and reporting the default branch's copy instead would show them a document
+ * they are not in conflict with. If that read fails the conflict is still
+ * reported, with an empty current version, because "you lost a race and here is
+ * nothing" is a worse answer than the plain error the caller would otherwise
+ * get, but silently completing the write would be worse than both.
+ */
+async function writeGuarded(
+  client: GitRepoClient,
+  input: WriteFileInput,
+): Promise<WriteFileResult> {
+  try {
+    return await client.writeFile(input);
+  } catch (err) {
+    if (!(err instanceof GitWriteConflictError)) throw err;
+    let current = { raw: "", blobSha: "" };
+    try {
+      current = await client.readFile(input.path, err.ref);
+    } catch {
+      // Reported below as an empty incoming version.
+    }
+    throw new SpecConflictError(
+      input.path,
+      specBody(current.raw),
+      current.blobSha,
+    );
+  }
+}
+
 export interface SpecWriteResult {
   specId: string;
   path: string;
   commitSha: string;
+  /**
+   * Blob sha of what was just written. An editor still holding the document
+   * guards its *next* save with this: without it a second save in one session
+   * would be checked against the sha the page loaded, which its own first save
+   * has already made stale, and every author would hit a conflict with
+   * themselves.
+   */
+  blobSha: string;
   /**
    * The pull request the change was proposed through, when the repo's write
    * mode is `pr`. Its presence means the change is *not* on the default branch
@@ -133,19 +207,32 @@ export interface SpecWriteResult {
  *   is recorded on the item and returned, so the proposal is traceable from the
  *   card and the author can be told where their change went.
  *
- * Note the gap PR mode leaves open until the concurrency guard lands: an author
- * who reloads the page reads the *default branch* text, not what they proposed,
- * so a second edit made from a fresh session would be written on top of a base
- * that is missing their own open proposal. Guarding the write with the blob sha
- * the editor loaded turns that into a conflict the author can resolve, which is
- * what the next feature in this release is for.
+ * `expectedBlobSha` is the concurrent-edit guard: the sha of the file the
+ * *editor loaded*, which is the only value that means anything here. Reading a
+ * fresh sha inside this function and passing that would satisfy GitHub and
+ * guard nothing, because the window the author is exposed to opened when the
+ * page rendered, not when the request arrived. Omitting it keeps the old
+ * last-write-wins behaviour, which is what the sync's own housekeeping commits
+ * want and what a caller with no loaded copy (an agent writing a body it
+ * composed) is left with.
+ *
+ * One sha covers both write modes without a special case, because a blob sha
+ * addresses content rather than a branch: in `direct` mode it is checked against
+ * the default branch, and in `pr` mode against the working branch, where a
+ * proposal the author has not seen shows up as a different sha and stops the
+ * write. That is what closes the gap PR mode would otherwise leave, where an
+ * author reloading the page reads the default branch and would silently write
+ * over their own open proposal.
+ *
+ * A failed guard raises {@link SpecConflictError} carrying the version that won,
+ * so the author is shown what happened rather than handed a failure.
  */
 export async function updateSpecContent(
   db: Database,
   scope: WorkspaceScope,
   specId: string,
   body: string,
-  opts: { message?: string } = {},
+  opts: { message?: string; expectedBlobSha?: string } = {},
 ): Promise<SpecWriteResult> {
   const { repo, path, title } = await authorizeSpecWrite(db, scope, specId);
   const client = await resolveRepoClient(db, repo);
@@ -153,16 +240,17 @@ export async function updateSpecContent(
   const content = rewriteSpecBody(existing.raw, body, { id: specId, title });
   const message = opts.message?.trim() || `docs(specboard): update ${path}`;
   const { mode } = resolveWriteMode(repo.config);
-  const { commitSha, pullRequest } = await client.writeFile({
+  const { commitSha, blobSha, pullRequest } = await writeGuarded(client, {
     path,
     content,
     message,
     mode,
+    ...(opts.expectedBlobSha ? { expectedBlobSha: opts.expectedBlobSha } : {}),
   });
 
   if (!pullRequest) {
     await syncRepository(db, repo);
-    return { specId, path, commitSha };
+    return { specId, path, commitSha, blobSha };
   }
 
   // The commit has already landed on the working branch, so a link that fails
@@ -176,7 +264,7 @@ export async function updateSpecContent(
       err instanceof Error ? err.message : err,
     );
   }
-  return { specId, path, commitSha, pullRequest };
+  return { specId, path, commitSha, blobSha, pullRequest };
 }
 
 /**
@@ -419,7 +507,14 @@ export async function createSpec(
   // would leave its item tracked in the app with the spec it is waiting for
   // invisible. Proposing a *new* spec for review means showing it as pending
   // until it merges, which this release does not build.
-  const { commitSha } = await client.writeFile({
+  //
+  // `expectedBlobSha: null` means "the file must not exist yet", which is the
+  // create the existence check above only *looks* like: between that read and
+  // this write someone else can commit the same path, and without the guard we
+  // would overwrite their brand-new spec while reporting a success. The check
+  // stays because it produces the far better message ("pick a different
+  // title"); the guard is what makes the answer true.
+  const { commitSha, blobSha } = await writeGuarded(client, {
     path,
     content: newSpecFile(id, title, body),
     message:
@@ -428,7 +523,8 @@ export async function createSpec(
         ? `docs(specboard): attach spec ${path}`
         : `docs(specboard): add spec ${path}`),
     mode: "direct",
+    expectedBlobSha: null,
   });
   await syncRepository(db, repo);
-  return { specId: id, path, commitSha };
+  return { specId: id, path, commitSha, blobSha };
 }

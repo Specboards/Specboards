@@ -99,12 +99,17 @@ export function fakeRepoClient(repo: Pick<RepoRecord, "owner" | "name">): GitRep
         .map(([path, raw]) => ({ path, raw, blobSha: blobShaOf(raw) }));
     },
 
-    async readFile(path: string): Promise<SpecFile> {
-      // The default branch, like the real client reading at its configured ref.
-      // A change waiting in a pull request is deliberately not visible here.
-      const raw = readFixture()[key]?.files[path];
+    async readFile(path: string, ref?: string): Promise<SpecFile> {
+      // Defaults to the default branch, like the real client reading at its
+      // configured ref: a change waiting in a pull request is deliberately not
+      // visible until asked for by branch.
+      const repo = readFixture()[key];
+      const files = ref ? repo?.branches[ref] : repo?.files;
+      const raw = files?.[path];
       if (raw === undefined) {
-        throw new Error(`E2E fake: ${key} has no file at ${path}`);
+        throw new Error(
+          `E2E fake: ${key}${ref ? `@${ref}` : ""} has no file at ${path}`,
+        );
       }
       return { path, raw, blobSha: blobShaOf(raw) };
     },
@@ -125,7 +130,7 @@ export function fakeRepoClient(repo: Pick<RepoRecord, "owner" | "name">): GitRep
           input.expectedBlobSha === null
             ? existing !== undefined
             : existing === undefined || blobShaOf(existing) !== input.expectedBlobSha;
-        if (conflict) throw new GitWriteConflictError(input.path);
+        if (conflict) throw new GitWriteConflictError(input.path, target ?? undefined);
       }
       files[input.path] = input.content;
 

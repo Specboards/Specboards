@@ -49,8 +49,15 @@ function db() {
 export async function truncateAll(): Promise<void> {
   // CASCADE clears sessions/accounts (FK to users) and every workspace-scoped
   // table (FK to workspaces). RESTART IDENTITY keeps runs reproducible.
+  //
+  // `rate_limits` has no FK to either, so it has to be named: sign-up is capped
+  // at ten an hour (lib/auth.ts) and global setup spends one every run, so
+  // without this the eleventh run in an hour fails at setup with a timeout that
+  // looks like a broken app rather than a spent budget. The limit is a real
+  // protection in production and is deliberately not weakened for tests; this
+  // just stops one run's spending from being charged to the next.
   await db().execute(
-    sql`TRUNCATE TABLE ${schema.users}, ${workspaces} RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE TABLE ${schema.users}, ${workspaces}, ${schema.rateLimits} RESTART IDENTITY CASCADE`,
   );
 }
 
@@ -73,6 +80,14 @@ export async function resetBoard(workspaceId: string): Promise<void> {
   await db()
     .delete(githubInstallations)
     .where(eq(githubInstallations.workspaceId, workspaceId));
+  // Scanning and importing a repo are quota'd per workspace (lib/rate-limit.ts:
+  // 20 scans per 5 minutes, 10 imports per half hour) because they cost real
+  // GitHub calls. A suite that seeds a repo per test spends that budget in
+  // minutes and then fails somewhere unrelated to what it was testing, so each
+  // test starts from a clean counter. The quotas themselves are left alone:
+  // they exist to protect the hosted app, and weakening them for tests would
+  // mean the thing under test is not the thing that ships.
+  await db().delete(schema.operationLimits);
 }
 
 /** Remove every release in the workspace (items are unscheduled by SET NULL). */

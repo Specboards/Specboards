@@ -143,6 +143,7 @@ export function ItemDetailView({
             specId={feature.specId}
             path={feature.path}
             initial={feature.content}
+            blobSha={feature.blobSha}
             writeMode={data.specWriteMode}
             minHeightClass="min-h-[15rem]"
             onSaved={onSpecSaved}
