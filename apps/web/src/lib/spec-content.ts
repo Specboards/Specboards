@@ -160,6 +160,43 @@ export async function deleteSpecFile(
   return { path, commitSha };
 }
 
+/**
+ * The Markdown a new spec starts from when nothing else has filled it: the
+ * template the caller picked, else the one the workspace assigned to its leaf
+ * level, else null for the stub.
+ *
+ * This is only ever consulted for an *empty* body, which is the whole safety
+ * property: a skeleton must never displace something a person wrote. It also
+ * means a picked template silently does nothing when there is real content to
+ * keep, so callers should not offer the choice where that is the case.
+ *
+ * Templates are read through the RLS-scoped store, so an id from another tenant
+ * reads as unknown rather than leaking that tenant's Markdown.
+ */
+async function resolveTemplateBody(
+  store: Awaited<ReturnType<typeof getStore>>,
+  scope: WorkspaceScope,
+  templateId: string | undefined,
+  levels: Awaited<ReturnType<Awaited<ReturnType<typeof getStore>>["listLevels"]>>,
+): Promise<string | null> {
+  const wanted =
+    templateId ?? leafLevel(levels).detailTemplateId ?? undefined;
+  if (!wanted) return null;
+  const templates = await store.listDetailTemplates(scope);
+  const found = templates.find((t) => t.id === wanted);
+  if (!found) {
+    // An explicit pick that cannot be resolved is the caller's error and worth
+    // saying so. A stale *level* default is not: an admin deleting a template
+    // should not start failing everyone's spec creation, so that falls through
+    // to the stub.
+    if (templateId) {
+      throw new SpecContentError("That template no longer exists.");
+    }
+    return null;
+  }
+  return found.body.trim() || null;
+}
+
 /** The spec file body committed for a brand-new spec (fresh id in frontmatter). */
 function newSpecFile(id: string, title: string, body: string | undefined): string {
   const trimmed = (body ?? "").trim();
@@ -191,6 +228,14 @@ function newSpecFile(id: string, title: string, body: string | undefined): strin
  * in the caller is deliberate - the caller's copy of the item may be seconds
  * stale, and the one case that matters most is an author who typed a
  * description and attached a spec in the same breath.
+ *
+ * Otherwise the body comes from a template: `templateId` when the caller picked
+ * one, else whichever detail template the workspace has assigned to its leaf
+ * level. A blank page is the wrong starting point for the non-technical authors
+ * this is for - the sections *are* the prompt - and reusing the templates
+ * admins already maintain in Settings beats a second, parallel set of them that
+ * says the same thing in a different place. See {@link resolveTemplateBody} for
+ * why a template can never displace real writing.
  */
 export async function createSpec(
   db: Database,
@@ -202,6 +247,8 @@ export async function createSpec(
     message?: string;
     /** An existing work item to attach the new spec to, by its specId. */
     workItemId?: string;
+    /** A detail template to start the spec from, by id. */
+    templateId?: string;
   },
 ): Promise<SpecWriteResult> {
   const title = input.title.trim();
@@ -264,6 +311,7 @@ export async function createSpec(
   // through the RLS-scoped store, so an id from another tenant reads as unknown.
   let id: string;
   let body = input.body;
+  const levels = await store.listLevels(scope);
   if (input.workItemId) {
     const target = await store.getFeature(input.workItemId, scope);
     if (!target) {
@@ -278,7 +326,6 @@ export async function createSpec(
     // Only the leaf level carries specs. Attaching to a grouping would let the
     // sync reconcile that row down to the leaf level on its next run, silently
     // demoting an initiative or epic and stranding its children.
-    const levels = await store.listLevels(scope);
     if (!isLeafLevel(target.level, levels)) {
       const leaf = leafLevel(levels);
       throw new SpecContentError(
@@ -303,6 +350,13 @@ export async function createSpec(
     if (body === undefined) body = target.content;
   } else {
     id = randomUUID();
+  }
+
+  // Only a blank spec falls back to a template. Order matters and is checked
+  // last on purpose: a caller's body, and an attached card's own description,
+  // are things a person wrote, and a skeleton must not paper over either.
+  if (!body?.trim()) {
+    body = (await resolveTemplateBody(store, scope, input.templateId, levels)) ?? body;
   }
 
   const { commitSha } = await client.writeFile({

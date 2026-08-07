@@ -4,6 +4,7 @@ import { InvalidPatchError, parseSpecCreateInput } from "./features-service";
 
 const ITEM = "11111111-2222-3333-4444-555555555555";
 const PARENT = "66666666-7777-8888-9999-aaaaaaaaaaaa";
+const TEMPLATE = "bbbbbbbb-cccc-dddd-eeee-ffffffffffff";
 
 describe("parseSpecCreateInput", () => {
   it("accepts a title on its own", () => {
@@ -89,12 +90,31 @@ describe("parseSpecCreateInput", () => {
     );
   });
 
+  it("keeps a template to start from", () => {
+    expect(parseSpecCreateInput({ title: "T", templateId: TEMPLATE })).toEqual({
+      title: "T",
+      templateId: TEMPLATE,
+    });
+  });
+
+  it("accepts a template alongside a body rather than rejecting it", () => {
+    // The server only consults a template for a spec that would otherwise be
+    // blank, so the combination is harmless and refusing it would make the
+    // caller special-case something that resolves itself.
+    expect(
+      parseSpecCreateInput({ title: "T", body: "written", templateId: TEMPLATE }),
+    ).toEqual({ title: "T", body: "written", templateId: TEMPLATE });
+  });
+
   it("rejects ids that are not UUIDs", () => {
     expect(() => parseSpecCreateInput({ title: "T", workItemId: "nope" })).toThrow(
       InvalidPatchError,
     );
     expect(() =>
       parseSpecCreateInput({ title: "T", parentSpecId: "nope" }),
+    ).toThrow(InvalidPatchError);
+    expect(() =>
+      parseSpecCreateInput({ title: "T", templateId: "nope" }),
     ).toThrow(InvalidPatchError);
   });
 

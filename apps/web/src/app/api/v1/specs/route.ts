@@ -79,6 +79,7 @@ export async function POST(req: Request) {
       body: input.body,
       repoId: input.repoId,
       workItemId: input.workItemId,
+      templateId: input.templateId,
       message: input.message,
     });
   } catch (err) {

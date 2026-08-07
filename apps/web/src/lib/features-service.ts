@@ -524,6 +524,8 @@ export interface SpecCreateInput {
   workItemId?: string;
   /** Card to nest the newly created item under. Not valid when attaching. */
   parentSpecId?: string;
+  /** Detail template to start the spec's body from. */
+  templateId?: string;
   repoId?: string;
   message?: string;
 }
@@ -531,6 +533,9 @@ export interface SpecCreateInput {
 /**
  * Parse an untrusted spec-create body:
  * `{ title, body?, workItemId?, parentSpecId?, repoId?, message? }`.
+ *
+ * `templateId` is only consulted for a spec that would otherwise be blank, so it
+ * is accepted rather than rejected alongside a body: see `resolveTemplateBody`.
  *
  * `workItemId` and `parentSpecId` are mutually exclusive, and the rejection is
  * the point rather than a technicality: attaching a spec to an item that
@@ -558,7 +563,7 @@ export function parseSpecCreateInput(body: unknown): SpecCreateInput {
     input.body = raw.body;
   }
 
-  for (const key of ["workItemId", "parentSpecId"] as const) {
+  for (const key of ["workItemId", "parentSpecId", "templateId"] as const) {
     if (raw[key] === null || raw[key] === undefined) continue;
     if (!isUuid(raw[key])) {
       throw new InvalidPatchError(`${key} must be a UUID.`);

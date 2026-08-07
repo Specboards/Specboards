@@ -116,7 +116,7 @@ export default async function CardsSettingsPage() {
       <CollapsibleSettingsGroup
         id="templates"
         title="Templates"
-        description="Reusable detail skeletons, assigned per level. New cards at that level start from the template."
+        description="Reusable Markdown skeletons, assigned per level. New cards at that level start from the template, and so do new specs."
         defaultCollapsed
       >
         <DetailTemplatesManager

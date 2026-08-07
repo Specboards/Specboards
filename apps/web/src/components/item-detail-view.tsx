@@ -242,6 +242,7 @@ export function ItemDetailView({
                           parentTitle: feature.title,
                         }}
                         repos={data.repos}
+                        templates={data.specTemplates}
                         // The flyout holds its item in local state, so without
                         // this it keeps reporting "no items yet" beside the
                         // child that was just created.
