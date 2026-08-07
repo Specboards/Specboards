@@ -12,6 +12,37 @@
   breadth or polish. Prefer a working narrow slice over a complete-but-untested
   layer. (From The Pragmatic Programmer.)
 
+## Working items in Specboard
+
+- **Keep the item's status matching the work actually happening to it.** We
+  dogfood Specboard to track our own work, so a board that lags reality is worse
+  than no board. When work on a Specboard item starts, move the item to the
+  stage that describes that work, and move it on as the work changes shape. Do
+  this as part of the work, not as a cleanup pass at the end, and do it without
+  being asked each time.
+- **The workflow is ordered and strict**, so stages must be walked in sequence:
+  `backlog` -> `defining` -> `ready` -> `in_progress` -> `in_review` -> `done`
+  (plus `archived`, reachable from anywhere and returning to `backlog`). To skip
+  ahead several stages, make one `update_item` call with `advance: true` rather
+  than one call per stage. Call `list_statuses` (or read an item's
+  `allowedTransitions`) if you need to confirm the keys before moving something.
+- **Which stage matches which work:**
+  - `defining` - breaking an item down, writing or revising its spec, drafting
+    acceptance criteria, sizing or estimating it, asking the clarifying
+    questions that shape the work.
+  - `ready` - definition is settled and the item is waiting to be picked up.
+  - `in_progress` - writing code, tests, or migrations for the item.
+  - `in_review` - a PR is open and awaiting review. Record the PR on the item
+    with `link_github` at the same time.
+  - `done` - the PR is merged and the work is deployed or otherwise complete.
+- **Do not run ahead of reality.** Only mark `done` once the change has actually
+  landed, and only mark `in_review` once a PR really exists. If work stalls or
+  is handed back, move the item backwards rather than leaving it parked at an
+  optimistic stage.
+- **When work does not map to an existing item, say so** rather than silently
+  inventing status changes. Offer to create the item (`create_item` works at any
+  level, including the leaf) so the work is tracked and rolls up.
+
 ## Deployment and infrastructure
 
 - **Hosting is Fly.io, data is Fly Postgres, auth is Better Auth.** There is no
