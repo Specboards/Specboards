@@ -9,11 +9,14 @@ import {
   createKeyResult,
   createRelease,
   createWorkItem,
+  deleteGoal,
+  deleteKeyResult,
   deleteWorkItem,
   getTransitionMode,
   listCycles,
   listGoalContributions,
   listGoals,
+  listItemGoals,
   listReleases,
   parseCreateFeatureInput,
   parseFeaturePatch,
@@ -41,62 +44,22 @@ import {
   removeFeatureGithubLink,
 } from "@/lib/github-links-service";
 import { createSpec, updateSpecContent } from "@/lib/spec-content";
-import { getStore, type GithubLink, type WorkspaceScope } from "@/lib/store";
-import { type MemberRole } from "@/lib/workspace";
+import { getStore, type GithubLink } from "@/lib/store";
+
+import { DOC_TOOLS } from "./doc-tools";
+import { requireDbScope, requireString, type McpTool } from "./types";
 
 /**
  * The MCP tools Specboards exposes to coding agents. Each tool is a thin adapter
  * over the same service layer the REST API uses (`features-service`, the
  * `store`), so authorization, the status workflow, stage gates, and webhook
  * emission all behave identically to the web app - no logic is duplicated here.
+ *
+ * The Plan-section doc areas (Strategy / Research / Architecture) live in
+ * `doc-tools.ts` and are appended to `TOOLS` below.
  */
 
-/** Per-call tenant context, resolved once per request from the API key. */
-export interface McpContext {
-  /** Tenant scope passed to the store; `undefined` in local file mode. */
-  scope: WorkspaceScope | undefined;
-  /** The caller's workspace role, or null in local file mode. */
-  role: MemberRole | null;
-  /** True when auth is disabled (self-host local file mode): everything allowed. */
-  isLocal: boolean;
-}
-
-export interface McpTool {
-  name: string;
-  description: string;
-  /** JSON Schema for the tool's arguments (advertised via tools/list). */
-  inputSchema: Record<string, unknown>;
-  /** Marks a mutating tool. Any member may attempt it; per-product write
-   * (owner, or an admin/contributor grant) is enforced by the store on run. */
-  write: boolean;
-  run: (args: Record<string, unknown>, ctx: McpContext) => Promise<unknown>;
-}
-
-function requireString(args: Record<string, unknown>, key: string): string {
-  const value = args[key];
-  if (typeof value !== "string" || value.trim() === "") {
-    throw new Error(`"${key}" is required and must be a non-empty string.`);
-  }
-  return value;
-}
-
-/**
- * Git-backed tools need a real workspace + database (they commit to GitHub).
- * Resolve both, or fail with a clear message in local file mode.
- */
-function requireDbScope(ctx: McpContext): {
-  db: NonNullable<ReturnType<typeof getDb>>;
-  scope: WorkspaceScope;
-} {
-  const db = getDb();
-  if (!db || !ctx.scope) {
-    throw new Error(
-      "Editing spec content needs a database-backed deployment with a " +
-        "connected GitHub repository; it is unavailable in local file mode.",
-    );
-  }
-  return { db, scope: ctx.scope };
-}
+export type { McpContext, McpTool } from "./types";
 
 /** Shared JSON Schema fragment for a spec id argument. */
 const specIdSchema = {
@@ -414,7 +377,8 @@ export const TOOLS: McpTool[] = [
     description:
       "Read one item in full: its metadata, Markdown content (spec body for " +
       "spec-backed items, or the card's details for DB-native items), typed " +
-      "relations, parent, and children. This is the 'review' view.",
+      "relations, parent, children, and the goals it ladders up to. This is " +
+      "the 'review' view.",
     inputSchema: {
       type: "object",
       properties: { specId: specIdSchema },
@@ -428,8 +392,12 @@ export const TOOLS: McpTool[] = [
       const f = await store.getFeature(specId, ctx.scope);
       if (!f) throw new Error(`No item with spec id ${specId}.`);
       // Advertise the moves update_item will accept from here, so agents step
-      // the workflow instead of guessing stage keys (see list_statuses).
-      const workflow = await resolveWorkflowFor(ctx.scope ?? null);
+      // the workflow instead of guessing stage keys (see list_statuses). The
+      // goals answer the other half of the review question: why this exists.
+      const [workflow, goals] = await Promise.all([
+        resolveWorkflowFor(ctx.scope ?? null),
+        listItemGoals(specId, ctx.scope),
+      ]);
       return {
         specId: f.specId,
         title: f.title,
@@ -448,6 +416,11 @@ export const TOOLS: McpTool[] = [
         parentTitle: f.parentTitle,
         children: f.children,
         relations: f.relations,
+        goals: goals.map((g) => ({
+          id: g.goalId,
+          title: g.title,
+          status: g.status,
+        })),
         content: f.content,
       };
     },
@@ -1157,6 +1130,61 @@ export const TOOLS: McpTool[] = [
     },
   },
   {
+    name: "read_goal",
+    description:
+      "Read one goal in full: its key results with their measurements, both " +
+      "progress figures, and - the part list_goals leaves out - the work " +
+      "items linked to it, each with its status and whether it counts as " +
+      "done. Use this before changing a goal, and to answer 'what are we " +
+      "actually doing about this objective?'. Pass the goal `id` from " +
+      "list_goals.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Goal id from list_goals." },
+      },
+      required: ["id"],
+      additionalProperties: false,
+    },
+    write: false,
+    run: async (args, ctx) => {
+      const id = requireString(args, "id");
+      const goals = await listGoals(ctx.scope);
+      const goal = goals.find((g) => g.id === id);
+      if (!goal) throw new Error(`No goal with id ${id}.`);
+      const contributions = await listGoalContributions(id, ctx.scope);
+      return {
+        id: goal.id,
+        title: goal.title,
+        description: goal.description,
+        productId: goal.productId,
+        parentGoalId: goal.parentGoalId,
+        periodStart: goal.periodStart,
+        periodEnd: goal.periodEnd,
+        status: goal.status,
+        progress: goal.progress,
+        deliveryProgress: goal.deliveryProgress,
+        keyResults: goal.keyResults.map((kr) => ({
+          id: kr.id,
+          title: kr.title,
+          metricKind: kr.metricKind,
+          startValue: kr.startValue,
+          currentValue: kr.currentValue,
+          targetValue: kr.targetValue,
+          progress: kr.progress,
+        })),
+        linkedItems: contributions.map((c) => ({
+          specId: c.specId,
+          title: c.title,
+          level: c.level,
+          status: c.status,
+          done: c.done,
+          productId: c.productId,
+        })),
+      };
+    },
+  },
+  {
     name: "create_goal",
     description:
       "Create a goal (objective). Provide a `title`; optionally " +
@@ -1233,6 +1261,44 @@ export const TOOLS: McpTool[] = [
     },
   },
   {
+    name: "delete_goal",
+    description:
+      "Delete a goal. Its key results and every link from work to it go with " +
+      "it; the work items themselves are untouched, they simply stop " +
+      "laddering up to anything. Goals nested underneath it are NOT deleted: " +
+      "they move to the top level, so re-parent them with " +
+      "update_goal(parentGoalId) if they belong under something else. This is " +
+      "irreversible and discards the goal's measurement history, so read_goal " +
+      "it first and prefer update_goal(status) - `achieved` or `missed` - for " +
+      "a goal whose period simply ended.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Goal id from list_goals." },
+      },
+      required: ["id"],
+      additionalProperties: false,
+    },
+    write: true,
+    run: async (args, ctx) => {
+      const id = requireString(args, "id");
+      // Read first so the response can name what was removed, and so an
+      // unknown id fails before anything is deleted.
+      const goals = await listGoals(ctx.scope);
+      const goal = goals.find((g) => g.id === id);
+      if (!goal) throw new Error(`No goal with id ${id}.`);
+      const contributions = await listGoalContributions(id, ctx.scope);
+      await deleteGoal(id, ctx.scope);
+      return {
+        id,
+        title: goal.title,
+        deleted: true,
+        keyResultsRemoved: goal.keyResults.length,
+        itemsUnlinked: contributions.length,
+      };
+    },
+  },
+  {
     name: "create_key_result",
     description:
       "Add a key result (a measurable outcome) to a goal. Provide `goalId`, " +
@@ -1300,6 +1366,43 @@ export const TOOLS: McpTool[] = [
         parseKeyResultPatch(rest),
         ctx.scope,
       );
+      return {
+        id: goal.id,
+        title: goal.title,
+        progress: goal.progress,
+        keyResults: goal.keyResults.map((kr) => ({
+          id: kr.id,
+          title: kr.title,
+          currentValue: kr.currentValue,
+          progress: kr.progress,
+        })),
+      };
+    },
+  },
+  {
+    name: "delete_key_result",
+    description:
+      "Remove a key result from its goal, for a measure that turned out to " +
+      "be the wrong one. The goal's `progress` is the mean of what remains, " +
+      "so deleting a lagging measure MOVES THE GOAL'S NUMBER - to stop " +
+      "tracking a metric without rewriting history, consider leaving it and " +
+      "letting the goal read honestly instead. Pass the key result `id` from " +
+      "list_goals or read_goal; returns the goal with its recomputed progress.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: {
+          type: "string",
+          description: "Key result id (from list_goals / read_goal).",
+        },
+      },
+      required: ["id"],
+      additionalProperties: false,
+    },
+    write: true,
+    run: async (args, ctx) => {
+      const id = requireString(args, "id");
+      const goal = await deleteKeyResult(id, ctx.scope);
       return {
         id: goal.id,
         title: goal.title,
@@ -1542,4 +1645,6 @@ export const TOOLS: McpTool[] = [
       return { specId, githubLinks: links.map(githubLinkOut) };
     },
   },
+  // Strategy / Research / Architecture: the narrative plan the work delivers.
+  ...DOC_TOOLS,
 ];
