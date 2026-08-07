@@ -33,16 +33,29 @@ const HOST_REDIRECTS: Record<string, string> = {
  * `style="..."` attributes React and Radix legitimately set (dynamic widths,
  * tree indentation): those are element-scoped CSSOM mutations, not a
  * script-injection or CSS-exfiltration vector.
+ *
+ * `next dev` is the one exception. React Refresh evaluates its runtime with
+ * `eval`, which this policy refuses, and the refusal is not a warning: the
+ * bootstrap chunk dies with it and *nothing* on the page hydrates, so every
+ * client component silently stops responding to clicks. Development therefore
+ * adds `'unsafe-eval'` (and the HMR websocket to `connect-src`). Both are keyed
+ * off `NODE_ENV`, which Next fixes to "production" in a built app, so neither
+ * can reach a deployment; `e2e/security-headers.spec.ts` runs against a
+ * production build and asserts the shipped policy has neither.
  */
+const DEV = process.env.NODE_ENV !== "production";
+
 function contentSecurityPolicy(nonce: string): string {
   return [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${
+      DEV ? " 'unsafe-eval'" : ""
+    }`,
     `style-src 'self' 'nonce-${nonce}'`,
     "style-src-attr 'unsafe-inline'",
     "img-src 'self' data: https://avatars.githubusercontent.com https://*.githubusercontent.com",
     "font-src 'self' data:",
-    "connect-src 'self'",
+    `connect-src 'self'${DEV ? " ws: wss:" : ""}`,
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "form-action 'self'",
