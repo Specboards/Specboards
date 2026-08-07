@@ -25,13 +25,7 @@ import type { LinkableRepo } from "@/lib/github-links-service";
  * - `child` creates a brand-new spec and item, nested under the given card.
  */
 export type SpecCreateTarget =
-  | {
-      kind: "attach";
-      workItemId: string;
-      itemTitle: string;
-      /** The card's current Markdown body, seeded into the new spec. */
-      details: string;
-    }
+  | { kind: "attach"; workItemId: string; itemTitle: string }
   | { kind: "child"; parentSpecId: string; parentTitle: string };
 
 /**
@@ -44,10 +38,13 @@ export type SpecCreateTarget =
  *
  * Two details worth knowing:
  *
- * - Attaching **carries the card's existing description into the spec**. Once a
- *   spec is attached, the board reads the item's body from the file rather than
- *   from the `details` column, so a card whose description stayed behind would
- *   look to its author like the app had eaten their writing.
+ * - Attaching carries the card's existing description into the spec, but the
+ *   **server** does that seeding, not this form. Once a spec is attached the
+ *   board reads the item's body from the file rather than from the `details`
+ *   column, so a description left behind stops being rendered. Sending the copy
+ *   this component was rendered with would miss the case that matters most: an
+ *   author who types a description and attaches a spec in the same breath, whose
+ *   text this component has not seen yet.
  * - The path preview is computed from the same slug rule the server uses
  *   (`specFilePath` in core, shared for exactly this reason), so the file named
  *   before the commit is the file that gets written.
@@ -73,7 +70,6 @@ export function CreateSpecButton({
 
   const path = specFilePath(title);
   const repo = repos.find((r) => r.id === repoId) ?? repos[0];
-  const seeding = attaching && target.details.trim() !== "";
 
   function expand() {
     setTitle(attaching ? target.itemTitle : "");
@@ -95,8 +91,10 @@ export function CreateSpecButton({
       const result = await createSpec({
         title,
         repoId: repoId || undefined,
+        // No `body` on attach: the server seeds it from the item's current
+        // description, which this component may not have seen yet.
         ...(target.kind === "attach"
-          ? { workItemId: target.workItemId, body: target.details }
+          ? { workItemId: target.workItemId }
           : { parentSpecId: target.parentSpecId }),
       });
       toast.success(
@@ -155,7 +153,7 @@ export function CreateSpecButton({
     >
       <p className="text-xs text-muted-foreground">
         {attaching
-          ? "Commits a spec file for this item to the repository. The item keeps its status, assignee, parent and history."
+          ? "Commits a spec file for this item to the repository. The item keeps its status, assignee, parent and history, and its description becomes the spec's body."
           : `Creates a spec and nests it under “${target.parentTitle}”.`}
       </p>
       <label className="block space-y-1.5">
@@ -192,18 +190,15 @@ export function CreateSpecButton({
       <p className="text-2xs text-muted-foreground" role="status" aria-live="polite">
         {path && repo ? (
           <>
-            Commits{" "}
+            Commits <span className="font-mono">{path}</span> to{" "}
             <span className="font-mono">
               {repo.owner}/{repo.name}
-            </span>{" "}
-            <span className="font-mono">{path}</span>.
+            </span>
+            .
           </>
         ) : (
           "Give the spec a title with at least one letter or number."
         )}
-        {seeding
-          ? " This item's current description is carried into the spec."
-          : ""}
       </p>
       {error ? <p className="text-xs text-destructive">{error}</p> : null}
       <div className="flex items-center gap-2">

@@ -38,10 +38,11 @@ export function ItemDetailView({
   /** "page" is the full-screen route; "flyout" is the in-context drawer. */
   variant: "page" | "flyout";
   /**
-   * Called after a spec body was committed. The full page re-renders from the
-   * refreshed cache on its own (`router.refresh()`), but the flyout holds its
-   * item in local state and has to re-read it, or it would keep showing the
-   * body from before the commit.
+   * Called after any write that goes through git: a spec body committed, a spec
+   * attached, a child spec created. The full page re-renders from the refreshed
+   * cache on its own (`router.refresh()`), but the flyout holds its item in
+   * local state and has to re-read it, or it would keep showing the item as it
+   * was before the commit.
    */
   onSpecSaved?: () => void;
 }) {
@@ -165,7 +166,6 @@ export function ItemDetailView({
               kind: "attach",
               workItemId: feature.specId,
               itemTitle: feature.title,
-              details: feature.content,
             }}
             repos={data.repos}
             onCreated={onSpecSaved}
@@ -242,6 +242,10 @@ export function ItemDetailView({
                           parentTitle: feature.title,
                         }}
                         repos={data.repos}
+                        // The flyout holds its item in local state, so without
+                        // this it keeps reporting "no items yet" beside the
+                        // child that was just created.
+                        onCreated={onSpecSaved}
                       />
                     ) : null}
                   </div>

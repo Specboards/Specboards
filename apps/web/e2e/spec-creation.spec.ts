@@ -82,6 +82,8 @@ test.describe("spec creation: bring a spec into existence from the app", () => {
     // is attached the board reads the body from the file, so a description left
     // behind in the database would read as the app having eaten their work.
     expect(raw).toContain("Refunds are capped at 30 days.");
+    // And the stub did not win: seeding replaced it rather than being appended.
+    expect(raw).not.toContain("Describe this spec.");
 
     // One item, not two, and it is now spec-backed.
     const after = await page.request.get(`/api/v1/features/${specId}`);
@@ -89,6 +91,46 @@ test.describe("spec creation: bring a spec into existence from the app", () => {
     const feature = (await after.json()).feature;
     expect(feature.isDbNative).toBe(false);
     expect(feature.path).toBe("specs/refund-window/spec.md");
+  });
+
+  test("carries a description typed in the same session into the spec", async ({
+    page,
+  }) => {
+    const ws = await getWorkspace();
+
+    // No description at create time: the author writes it on the page, then
+    // attaches straight away. The client's copy of the item is stale by then,
+    // which is exactly why the seeding is the server's job. An earlier version
+    // sent the body from the browser and silently shipped the stub instead,
+    // leaving the author's paragraph in a column nothing renders any more.
+    const created = await page.request.post("/api/v1/features", {
+      data: { title: "Dispute window", level: "work", details: "" },
+    });
+    expect(created.ok(), await created.text()).toBeTruthy();
+    const specId = (await created.json()).feature.specId as string;
+
+    await page.goto(`/${ws.slug}/all/backlog/work/${specId}`);
+
+    const editor = page.locator(".tiptap");
+    await editor.click();
+    await page.keyboard.type("Disputes must be answerable for 60 days.");
+    // The card's body autosaves; wait for it to land before attaching.
+    await expect(page.getByText("Saved", { exact: true })).toBeVisible();
+
+    await page.getByRole("button", { name: /Attach a spec/i }).click();
+    const form = page.locator("form").filter({ hasText: /Commits a spec file/ });
+    const [resp] = await Promise.all([
+      page.waitForResponse(
+        (r) => r.url().includes("/api/v1/specs") && r.request().method() === "POST",
+      ),
+      form.getByRole("button", { name: /^Attach spec$/i }).click(),
+    ]);
+    expect(resp.ok(), await resp.text()).toBeTruthy();
+
+    const raw = getRepoFiles(OWNER, REPO)["specs/dispute-window/spec.md"];
+    expect(raw).toBeDefined();
+    expect(raw).toContain("Disputes must be answerable for 60 days.");
+    expect(raw).not.toContain("Describe this spec.");
   });
 
   test("creates a new spec under a parent card and nests it there", async ({
