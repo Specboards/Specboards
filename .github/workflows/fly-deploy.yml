@@ -33,7 +33,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # master, 2026-04-08
-      - run: flyctl deploy -c fly.test.toml --remote-only
+      # GIT_SHA is baked into the client bundle at build time so /legal's
+      # "Source code" link resolves to the exact commit running (AGPL s13).
+      # It has to be passed on every deploy path or the link silently degrades
+      # to the repo root, which is why it is here and not left to a human.
+      - run: flyctl deploy -c fly.test.toml --remote-only --build-arg GIT_SHA="${GITHUB_SHA::7}"
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN_TEST }}
 
@@ -47,6 +51,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # master, 2026-04-08
-      - run: flyctl deploy --remote-only
+      - run: flyctl deploy --remote-only --build-arg GIT_SHA="${GITHUB_SHA::7}"
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN_PROD }}

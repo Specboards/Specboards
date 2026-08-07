@@ -30,6 +30,7 @@ import {
   type FeatureDetail,
   type FeaturePatch,
   type FeatureRecord,
+  type FeatureStore,
   type OutboxEmit,
   type WorkspaceScope,
   type WorkspaceLevel,
@@ -732,14 +733,21 @@ export function parseCreateFeatureInput(body: unknown): CreateFeatureInput {
     }
     input.tags = (raw.tags as string[]).map((t) => t.trim()).filter(Boolean);
   }
-  if ("details" in raw && raw.details !== null) {
-    if (typeof raw.details !== "string") {
-      throw new InvalidPatchError("details must be a string or null.");
+  // `details: null` is preserved rather than dropped: an explicit null means
+  // "create this one blank" and suppresses the level's detail template, while
+  // omitting the key entirely (the column quick add) opts into it.
+  if ("details" in raw) {
+    if (raw.details === null) {
+      input.details = null;
+    } else {
+      if (typeof raw.details !== "string") {
+        throw new InvalidPatchError("details must be a string or null.");
+      }
+      if (raw.details.length > 100_000) {
+        throw new InvalidPatchError("details is too long.");
+      }
+      input.details = raw.details;
     }
-    if (raw.details.length > 100_000) {
-      throw new InvalidPatchError("details is too long.");
-    }
-    input.details = raw.details;
   }
   return input;
 }
@@ -2168,17 +2176,47 @@ function parseNullableId(value: unknown, field: string): string | null {
   return value;
 }
 
-/** Create a DB-native work item (initiative/epic). Validation lives in the store. */
+/**
+ * Create a DB-native work item (initiative/epic). Validation lives in the store.
+ *
+ * A caller that says nothing about `details` gets the body the workspace
+ * configured for that level (its detail template). The "New item" drawer seeds
+ * the same template into its editor and then sends whatever the user left
+ * there, including an explicit null when they cleared it, so seeding here only
+ * fills the gap for the paths that never ask: the per-column quick add, the API,
+ * the MCP tools.
+ */
 export async function createWorkItem(
   input: CreateFeatureInput,
   scope?: WorkspaceScope,
 ): Promise<FeatureRecord> {
   const store = await getStore();
+  const seeded =
+    input.details === undefined
+      ? {
+          ...input,
+          details: await levelTemplateBody(store, input.level, scope),
+        }
+      : input;
   // The store records item.created in the create transaction (it builds the data
   // from the new row, since specId is generated there).
-  const created = await store.createFeature(input, scope, "item.created");
+  const created = await store.createFeature(seeded, scope, "item.created");
   notifyOutbox();
   return created;
+}
+
+/** The body of the detail template assigned to `levelKey`, or null if the level
+ * has no template (or the assigned one has since been deleted). */
+async function levelTemplateBody(
+  store: FeatureStore,
+  levelKey: string,
+  scope?: WorkspaceScope,
+): Promise<string | null> {
+  const levels = await store.listLevels(scope);
+  const templateId = levels.find((l) => l.key === levelKey)?.detailTemplateId;
+  if (!templateId) return null;
+  const templates = await store.listDetailTemplates(scope);
+  return templates.find((t) => t.id === templateId)?.body?.trim() || null;
 }
 
 /**

@@ -51,18 +51,25 @@
   clients, dependencies, or migration paths.
 - **Two Fly apps, two configs, in the repo root:**
   - `fly.toml` - production. Fly app `specboard`, served at
-    https://app.specboards.ai. Deploy from the repo root with `fly deploy`.
+    https://app.specboards.ai.
   - `fly.test.toml` - test/staging. Fly app `specboard-test`, served at
-    https://test.specboards.ai. Deploy with `fly deploy -c fly.test.toml`.
+    https://test.specboards.ai.
+- **Deploy with `pnpm deploy:test` / `pnpm deploy:prod`, never a bare
+  `fly deploy`.** Both wrap `scripts/deploy.sh`, which passes the running commit
+  as the `GIT_SHA` build arg. That arg is what pins /legal's "Source code" link
+  to the exact source running, satisfying the AGPL section 13 offer; a bare
+  `fly deploy` bakes in nothing and the link silently falls back to the repo
+  root. The script also refuses to ship production from a feature branch or a
+  dirty tree, so the sha it bakes in always names fetchable source.
 - **Always deploy to test first.** New code goes to `specboard-test` and is
   verified there before production. Never deploy production from a feature
-  branch: merge to `main` first, then `fly deploy`.
+  branch: merge to `main` first, then `pnpm deploy:prod`.
 - **Merging to `main` deploys test automatically.** `.github/workflows/fly-deploy.yml`
   runs on every push to `main`, so a merged PR is on `specboard-test` within
-  minutes without anyone running a command. Production is the manual step
-  (`fly deploy`, or the workflow's `workflow_dispatch` with environment
-  `production`). Plan for this: by the time you go to verify something on test,
-  it is usually already deployed.
+  minutes without anyone running a command (it passes `GIT_SHA` too). Production
+  is the manual step (`pnpm deploy:prod`, or the workflow's `workflow_dispatch`
+  with environment `production`). Plan for this: by the time you go to verify
+  something on test, it is usually already deployed.
 - **Databases are Fly Postgres apps:** `specboard-test-db` (test) and
   `specboard-prod-db` (production). The app reads its connection string from the
   `DATABASE_URL` secret.
