@@ -155,6 +155,18 @@ export function rewriteSpecBody(
 }
 
 /**
+ * The Markdown after the frontmatter, the shape the board caches and the editor
+ * holds. The counterpart to {@link rewriteSpecBody}, and non-throwing unlike
+ * {@link parseSpec}: it is used to describe a file the caller did not write and
+ * cannot vouch for (the version that won a write conflict), where refusing to
+ * read a spec whose frontmatter is malformed would withhold exactly the text
+ * someone needs to see.
+ */
+export function specBody(raw: string): string {
+  return parseMatter(raw).content.trim();
+}
+
+/**
  * Returns true if the raw file already carries a Specboards `id`. Used by the
  * git integration to decide whether it must inject one on first import.
  */

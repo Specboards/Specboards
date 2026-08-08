@@ -217,12 +217,12 @@ export class GitHubRepoClient implements GitRepoClient {
   }
 
   /** Read a single file's content + blob sha at `ref` via the contents API. */
-  async readFile(path: string): Promise<SpecFile> {
+  async readFile(path: string, ref = this.ref): Promise<SpecFile> {
     const { data } = await this.octokit.rest.repos.getContent({
       owner: this.owner,
       repo: this.repo,
       path,
-      ref: this.ref,
+      ref,
     });
     if (Array.isArray(data) || data.type !== "file") {
       throw new Error(`Expected a file at ${path}, got a ${Array.isArray(data) ? "directory" : data.type}`);
@@ -288,6 +288,11 @@ export class GitHubRepoClient implements GitRepoClient {
       state: null,
       url: `https://github.com/${this.owner}/${this.repo}/tree/${encodeURIComponent(name)}`,
     };
+  }
+
+  /** Read a blob by sha (see {@link GitRepoClient.readBlobBySha}). */
+  readBlobBySha(sha: string): Promise<string> {
+    return this.readBlob(sha);
   }
 
   private async readBlob(sha: string): Promise<string> {
@@ -357,7 +362,7 @@ export class GitHubRepoClient implements GitRepoClient {
       // 409: the provided sha is stale. 422: the file exists but no sha was
       // sent (a guarded create losing to a concurrent create).
       if (input.expectedBlobSha !== undefined && isWriteConflict(err)) {
-        throw new GitWriteConflictError(input.path);
+        throw new GitWriteConflictError(input.path, branch);
       }
       throw err;
     }

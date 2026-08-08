@@ -44,6 +44,31 @@ describe("parseSpecContentInput", () => {
     ).toThrow(InvalidPatchError);
   });
 
+  it("keeps the loaded blob sha, which is what arms the guard", () => {
+    expect(
+      parseSpecContentInput({ content: "body", expectedBlobSha: "abc123" }),
+    ).toEqual({ content: "body", expectedBlobSha: "abc123" });
+  });
+
+  it("treats an absent sha as an unguarded write rather than an error", () => {
+    // An agent composing a body has no loaded copy to guard against, and
+    // refusing its write would be refusing the API's oldest caller.
+    expect(
+      parseSpecContentInput({ content: "body", expectedBlobSha: null }),
+    ).toEqual({ content: "body" });
+  });
+
+  it("rejects a blank sha instead of quietly dropping the guard", () => {
+    // Dropping it would turn a write the caller believes is guarded into one
+    // that is not, which is the exact failure the guard exists to prevent.
+    expect(() =>
+      parseSpecContentInput({ content: "body", expectedBlobSha: "  " }),
+    ).toThrow(InvalidPatchError);
+    expect(() =>
+      parseSpecContentInput({ content: "body", expectedBlobSha: 7 }),
+    ).toThrow(InvalidPatchError);
+  });
+
   it("rejects a non-object body", () => {
     expect(() => parseSpecContentInput(null)).toThrow(InvalidPatchError);
     expect(() => parseSpecContentInput("body")).toThrow(InvalidPatchError);

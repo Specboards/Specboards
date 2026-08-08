@@ -8,6 +8,7 @@ import {
   parseSpec,
   previewSpec,
   rewriteSpecBody,
+  specBody,
   specFilePath,
 } from "./spec.js";
 
@@ -156,6 +157,39 @@ describe("featureSlug", () => {
 
   it("is empty when nothing sluggable survives", () => {
     expect(featureSlug("!!! ???")).toBe("");
+  });
+});
+
+describe("specBody", () => {
+  it("returns the body the editor holds, without the frontmatter", () => {
+    const body = specBody(SAMPLE);
+    expect(body.startsWith("# Example Feature")).toBe(true);
+    expect(body).not.toContain("kind: feature");
+  });
+
+  it("round-trips with rewriteSpecBody", () => {
+    const next = rewriteSpecBody(SAMPLE, "# Rewritten\n\nNew text.", {
+      id: "x",
+      title: "y",
+    });
+    expect(specBody(next)).toBe("# Rewritten\n\nNew text.");
+  });
+
+  it("reads a file whose frontmatter parseSpec would refuse", () => {
+    // This describes the version that won a write conflict, which nobody here
+    // wrote and nothing has validated. Withholding the text because its
+    // frontmatter is malformed would hide exactly what the author needs to see.
+    expect(specBody("---\nid: 7\n---\n\nStill readable.\n")).toBe(
+      "Still readable.",
+    );
+    expect(() => parseSpec("---\nid: 7\n---\n\nStill readable.\n")).toThrow(
+      SpecParseError,
+    );
+  });
+
+  it("treats a file with no frontmatter as all body", () => {
+    expect(specBody("# Orphan\n\ntext\n")).toBe("# Orphan\n\ntext");
+    expect(specBody("")).toBe("");
   });
 });
 

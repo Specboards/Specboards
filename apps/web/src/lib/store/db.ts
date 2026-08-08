@@ -690,6 +690,7 @@ export class DbStore implements FeatureStore {
         }),
         path: row.index?.path ?? "",
         content,
+        blobSha: row.index?.blobSha ?? null,
         sections: extractSections(content),
         relations,
         blocksCount: relations.filter((r) => r.direction === "blocks").length,

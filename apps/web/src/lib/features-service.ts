@@ -484,6 +484,12 @@ export interface BulkPatchRequest {
 export interface SpecContentInput {
   content: string;
   message?: string;
+  /**
+   * Blob sha of the file the editor loaded, guarding against overwriting a
+   * change made in git in the meantime. Absent means an unguarded write, which
+   * is what a caller with no loaded copy (an agent composing a body) has.
+   */
+  expectedBlobSha?: string;
 }
 
 /**
@@ -508,6 +514,21 @@ export function parseSpecContentInput(body: unknown): SpecContentInput {
       throw new InvalidPatchError("message must be a string.");
     }
     if (raw.message.trim()) input.message = raw.message;
+  }
+  if (
+    "expectedBlobSha" in raw &&
+    raw.expectedBlobSha !== null &&
+    raw.expectedBlobSha !== undefined
+  ) {
+    // A blank sha is rejected rather than quietly dropped. Dropping it would
+    // turn a write the caller believes is guarded into one that is not, and the
+    // point of the guard is that nobody has to wonder which they got.
+    if (typeof raw.expectedBlobSha !== "string" || !raw.expectedBlobSha.trim()) {
+      throw new InvalidPatchError(
+        "expectedBlobSha must be a non-empty string when given.",
+      );
+    }
+    input.expectedBlobSha = raw.expectedBlobSha;
   }
   return input;
 }

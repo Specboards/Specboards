@@ -199,6 +199,13 @@ export interface FeatureDetail extends FeatureRecord {
   assigneeName: string | null;
   /** Spec markdown with frontmatter stripped. */
   content: string;
+  /**
+   * Blob sha the cached `content` came from, or null for a DB-native card.
+   * Handed to the editor so a save can be guarded against a change made in git
+   * since the page rendered: the sha has to be the one the *author* was looking
+   * at, so re-reading it at write time would guard nothing.
+   */
+  blobSha: string | null;
   sections: SpecSection[];
   /** Typed relations to other features, from this feature's perspective. */
   relations: FeatureRelation[];

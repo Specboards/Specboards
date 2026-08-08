@@ -149,6 +149,17 @@ export interface SpecWriteResult {
   specId: string;
   path: string;
   commitSha: string;
+  /** Sha of what was written; guards the next save from the same editor. */
+  blobSha: string;
+  /** How many other people's changes this save merged with (usually 0). */
+  mergedWith?: number;
+  /**
+   * The body as written, present only when a merge changed it. An editor must
+   * adopt this: keeping the author's own text after a merge means holding a
+   * document that has lost somebody else's paragraph, and the next save would
+   * write that loss to git without tripping any guard.
+   */
+  mergedBody?: string;
   /**
    * Present when the repo takes spec changes as pull requests. The change is
    * then *proposed*, not live: the board still shows the previous text until
@@ -174,25 +185,67 @@ export interface SpecWriteResult {
 export async function updateSpecBody(
   specId: string,
   content: string,
-  message?: string,
+  opts: { message?: string; expectedBlobSha?: string | null } = {},
 ): Promise<SpecWriteResult> {
   const res = await apiFetch(
     `/api/v1/features/${encodeURIComponent(specId)}/content`,
     {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(message ? { content, message } : { content }),
+      body: JSON.stringify({
+        content,
+        ...(opts.message ? { message: opts.message } : {}),
+        ...(opts.expectedBlobSha
+          ? { expectedBlobSha: opts.expectedBlobSha }
+          : {}),
+      }),
     },
   );
   if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     spec?: SpecWriteResult;
+    conflict?: SpecConflict;
     error?: string;
   } | null;
+  // A conflict is thrown as its own type rather than folded into the generic
+  // failure: it is the one error the caller can do something about, and doing
+  // something about it needs the version that won, not just a message.
+  if (res.status === 409 && body?.conflict) {
+    throw new SpecConflictError(body.error ?? "", body.conflict);
+  }
   if (!res.ok || !body?.spec) {
     throw new Error(body?.error ?? `Saving the spec failed (${res.status}).`);
   }
   return body.spec;
+}
+
+/** The version of a spec that beat a guarded save, as the server reports it. */
+export interface SpecConflict {
+  path: string;
+  /** The body now in git, frontmatter stripped, ready to show or adopt. */
+  currentContent: string;
+  /** Send this back as `expectedBlobSha` to overwrite it deliberately. */
+  currentBlobSha: string;
+  /**
+   * Headings both sides rewrote. Empty when the overlap could not be pinned
+   * down. The empty string means the text above the first heading.
+   */
+  sections?: string[];
+}
+
+/** A save was refused because the spec moved in git since the editor loaded it. */
+export class SpecConflictError extends Error {
+  constructor(
+    message: string,
+    readonly conflict: SpecConflict,
+  ) {
+    super(
+      message ||
+        "Someone else changed this spec while you were writing. Your version " +
+          "has not been saved yet.",
+    );
+    this.name = "SpecConflictError";
+  }
 }
 
 /** What a create returned: the spec, plus anything that partly went wrong. */

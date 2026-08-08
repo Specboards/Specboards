@@ -15,8 +15,20 @@ export interface SpecFile {
 export interface GitRepoClient {
   /** List spec files matching the repo's configured globs. */
   listSpecFiles(globs: string[]): Promise<SpecFile[]>;
-  /** Read a single file's contents + sha at the current ref. */
-  readFile(path: string): Promise<SpecFile>;
+  /**
+   * Read a single file's contents + sha, at the client's ref by default.
+   * `ref` names a different branch, which is how a conflict on a working
+   * branch reports the version that actually beat the caller: the default
+   * branch's copy would be a different file entirely.
+   */
+  readFile(path: string, ref?: string): Promise<SpecFile>;
+  /**
+   * Read a blob's contents by sha, regardless of which branch still points at
+   * it. This is how a three-way merge gets its base: the version the author
+   * loaded may have been replaced on every branch by the time they save, so it
+   * is reachable only by the sha they were handed.
+   */
+  readBlobBySha(sha: string): Promise<string>;
   /** Write a file back, returning the new commit sha and the new blob sha. */
   writeFile(input: WriteFileInput): Promise<WriteFileResult>;
   /** Delete a file with a commit, returning the commit sha. */
@@ -75,7 +87,16 @@ export interface DeleteFileInput {
  * disappeared) on the remote since the caller loaded it.
  */
 export class GitWriteConflictError extends Error {
-  constructor(path: string) {
+  constructor(
+    readonly path: string,
+    /**
+     * The branch the write was aimed at, when it is known. Callers that want to
+     * show the author what beat them need this rather than the default branch:
+     * a PR-mode write lands on a working branch, and the losing version lives
+     * there, not on the base.
+     */
+    readonly ref?: string,
+  ) {
     super(`${path} changed on the remote since it was loaded.`);
     this.name = "GitWriteConflictError";
   }

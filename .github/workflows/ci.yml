@@ -4,8 +4,11 @@
 name: CI
 
 on:
+  # Every pull request, not only those aimed at main. A stacked branch (one PR
+  # built on another that has not merged yet) targets its parent, and with a
+  # main-only filter those PRs got no CI at all: the gate silently did not
+  # apply to exactly the changes most likely to need it.
   pull_request:
-    branches: [main]
   push:
     branches: [main]
 
