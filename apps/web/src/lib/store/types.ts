@@ -1161,6 +1161,49 @@ export interface WorkspaceScope {
 /** Kinds of thing that can change an item. */
 export type ActorType = "user" | "api_key" | "agent" | "sync" | "system";
 
+/** Window and filters for an activity report. */
+export interface ActivityQuery {
+  /** Inclusive ISO start of the reporting window. */
+  from: string;
+  /** Exclusive ISO end. */
+  to: string;
+  /** Limit to one product; omitted reports across everything readable. */
+  productId?: string | null;
+}
+
+/**
+ * Cross-item reporting over the change ledger.
+ *
+ * `since` is the oldest event the workspace holds, and every report has to show
+ * it. The ledger starts when it was deployed, so a window reaching back further
+ * looks like a period of no activity when it is really a period of no
+ * recording, and a reader who is not told that will see a fall in output that
+ * never happened.
+ */
+export interface ActivitySummary {
+  since: string | null;
+  total: number;
+  byActor: {
+    actorType: ActorType;
+    actorId: string | null;
+    actorLabel: string | null;
+    count: number;
+  }[];
+  /** Grouped by what was changed, so "what kind of work is this" is answerable. */
+  byField: { type: string; field: string | null; count: number }[];
+  byDay: { day: string; count: number }[];
+  /**
+   * Average time an item sat in a stage before moving on, in hours.
+   *
+   * Only spans between two recorded status changes count. An item's *current*
+   * stage is still running and has no end, and the stage it was in before the
+   * ledger existed has no recorded start, so both are excluded rather than
+   * guessed. `samples` is how many completed spans the average is drawn from,
+   * which is the number that says whether to trust it.
+   */
+  stageTime: { status: string; averageHours: number; samples: number }[];
+}
+
 /**
  * One recorded change to an item, as the change log reads it back.
  *
@@ -1655,6 +1698,11 @@ export interface FeatureStore {
     scope?: WorkspaceScope,
     limit?: number,
   ): Promise<ItemEvent[]>;
+  /** Cross-item activity report over the change ledger. */
+  itemActivitySummary(
+    query: ActivityQuery,
+    scope?: WorkspaceScope,
+  ): Promise<ActivitySummary>;
   /** The acting user's saved backlog views (personal, newest first). */
   listSavedViews(scope?: WorkspaceScope): Promise<SavedView[]>;
   /** Persist a new saved view for the acting user; returns it with its id. */

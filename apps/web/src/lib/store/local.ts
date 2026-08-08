@@ -135,6 +135,8 @@ import {
   type SavedViewPatch,
   type OutboxEmit,
   type TransitionMode,
+  type ActivityQuery,
+  type ActivitySummary,
   type ItemEvent,
   type WorkspaceScope,
 } from "./types";
@@ -1074,6 +1076,14 @@ export class LocalFileStore implements FeatureStore {
     _limit?: number,
   ): Promise<ItemEvent[]> {
     return [];
+  }
+
+  /** Nothing is recorded in file mode, so there is nothing to report on. */
+  async itemActivitySummary(
+    _query: ActivityQuery,
+    _scope?: WorkspaceScope,
+  ): Promise<ActivitySummary> {
+    return { since: null, total: 0, byActor: [], byField: [], byDay: [], stageTime: [] };
   }
 
   // Saved views persist to `.specboards/local-views.json`. There's a single

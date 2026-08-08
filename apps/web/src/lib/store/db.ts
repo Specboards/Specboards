@@ -193,6 +193,8 @@ import {
   type SavedViewInput,
   type SavedViewPatch,
   type ActorType,
+  type ActivityQuery,
+  type ActivitySummary,
   type ItemEvent,
   type WorkspaceScope,
 } from "./types";
@@ -1816,6 +1818,150 @@ export class DbStore implements FeatureStore {
         actorType: r.actorType as ActorType,
         createdAt: r.createdAt.toISOString(),
       }));
+    });
+  }
+
+  /**
+   * Cross-item activity report over the change ledger.
+   *
+   * Aggregated in Postgres rather than by reading rows into memory: this is the
+   * one caller whose result set grows without bound as a workspace is used, and
+   * a report that works for a month and dies at a year is not a report.
+   *
+   * Product visibility is applied by joining `features`, so a private product's
+   * changes never reach someone who cannot see the items. That also means an
+   * event whose item has since been deleted is not counted here, which is the
+   * right trade for a report: the row is kept for audit, but there is no item
+   * left to check anyone's access against.
+   */
+  async itemActivitySummary(
+    query: ActivityQuery,
+    scope?: WorkspaceScope,
+  ): Promise<ActivitySummary> {
+    const empty: ActivitySummary = {
+      since: null,
+      total: 0,
+      byActor: [],
+      byField: [],
+      byDay: [],
+      stageTime: [],
+    };
+    if (!scope) return empty;
+
+    return this.scoped(scope, async (tx) => {
+      const ws = scope.workspaceId;
+      const access = await this.accessIn(tx, scope);
+      const productById = await this.productVisibilityIn(tx, ws);
+      const readable = [...productById.values()]
+        .filter((p) => canReadProduct(access, p))
+        .map((p) => p.id);
+      const scoped = query.productId
+        ? readable.filter((id) => id === query.productId)
+        : readable;
+
+      // Each id is bound as a parameter rather than pasted into the string.
+      // They are database-issued uuids today, so interpolation would be safe
+      // and would still be a template waiting to be copied somewhere it is not.
+      // An empty list is handled separately: `in ()` is a syntax error.
+      const productFilter =
+        scoped.length > 0
+          ? sql`and (e.product_id is null or e.product_id in (${sql.join(
+              scoped.map((id) => sql`${id}::uuid`),
+              sql`, `,
+            )}))`
+          : sql`and e.product_id is null`;
+
+      const window = sql`
+        e.workspace_id = ${ws}
+        and e.created_at >= ${query.from}
+        and e.created_at < ${query.to}
+        ${productFilter}
+      `;
+
+      const [sinceRow] = (await tx.execute(sql`
+        select min(created_at) as since from item_events where workspace_id = ${ws}
+      `)) as unknown as { since: Date | string | null }[];
+
+      const byActor = (await tx.execute(sql`
+        select e.actor_type, e.actor_id, e.actor_label, count(*)::int as count
+        from item_events e
+        where ${window}
+        group by e.actor_type, e.actor_id, e.actor_label
+        order by count desc
+        limit 50
+      `)) as unknown as {
+        actor_type: string;
+        actor_id: string | null;
+        actor_label: string | null;
+        count: number;
+      }[];
+
+      const byField = (await tx.execute(sql`
+        select e.type, e.field, count(*)::int as count
+        from item_events e
+        where ${window}
+        group by e.type, e.field
+        order by count desc
+      `)) as unknown as { type: string; field: string | null; count: number }[];
+
+      const byDay = (await tx.execute(sql`
+        select to_char(date_trunc('day', e.created_at), 'YYYY-MM-DD') as day,
+               count(*)::int as count
+        from item_events e
+        where ${window}
+        group by day
+        order by day
+      `)) as unknown as { day: string; count: number }[];
+
+      // Time in a stage is the gap between two consecutive status changes on
+      // the same item, so the span belongs to the status being left. The first
+      // recorded change for an item has no predecessor and is skipped: we do
+      // not know when it entered that stage, and assuming the item's creation
+      // date would invent data for anything that existed before the ledger did.
+      const stageTime = (await tx.execute(sql`
+        with spans as (
+          select e.before #>> '{}' as status,
+                 e.created_at - lag(e.created_at) over (
+                   partition by e.feature_id order by e.created_at
+                 ) as elapsed
+          from item_events e
+          where ${window} and e.field = 'status'
+        )
+        select status,
+               round(avg(extract(epoch from elapsed)) / 3600.0, 2)::float8 as average_hours,
+               count(*)::int as samples
+        from spans
+        where elapsed is not null and status is not null
+        group by status
+        order by samples desc
+      `)) as unknown as {
+        status: string;
+        average_hours: number;
+        samples: number;
+      }[];
+
+      const since = sinceRow?.since ?? null;
+      return {
+        since: since ? new Date(since).toISOString() : null,
+        total: byField.reduce((sum, r) => sum + Number(r.count), 0),
+        byActor: byActor.map((r) => ({
+          actorType: r.actor_type as ActorType,
+          actorId: r.actor_id,
+          actorLabel: r.actor_label,
+          count: Number(r.count),
+        })),
+        byField: byField.map((r) => ({
+          type: r.type,
+          field: r.field,
+          count: Number(r.count),
+        })),
+        byDay: byDay.map((r) => ({ day: r.day, count: Number(r.count) })),
+        stageTime: stageTime.map((r) => ({
+          status: r.status,
+          averageHours: Number(r.average_hours),
+          samples: Number(r.samples),
+        })),
+      };
     });
   }
 
