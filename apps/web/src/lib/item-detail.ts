@@ -7,6 +7,7 @@ import {
   type DetailTemplate,
   type PropertyDef,
   type StatusWorkflow,
+  type WriteMode,
 } from "@specboards/core";
 
 import { ALL_PRODUCTS } from "@/lib/active-product";
@@ -15,6 +16,7 @@ import {
   listLinkableRepos,
   type LinkableRepo,
 } from "@/lib/github-links-service";
+import { resolveSpecWriteMode } from "@/lib/github-sync";
 import { resolveWorkflowFor } from "@/lib/repo-config";
 import { getStore } from "@/lib/store";
 import type {
@@ -80,6 +82,13 @@ export interface ItemDetailData {
    * commit.
    */
   canEditSpec: boolean;
+  /**
+   * How a spec edit reaches the repo: `direct` commits onto the default branch,
+   * `pr` proposes it for review. Null when the item has no spec repo. Resolved
+   * for the editor so an author is told what saving does before they save,
+   * rather than discovering it from the result.
+   */
+  specWriteMode: WriteMode | null;
   /**
    * Whether this item can have a spec *attached* to it: it is tracked in the
    * app only, sits at the leaf level (the sync would reconcile a grouping back
@@ -192,6 +201,13 @@ export async function getItemDetailData(
   // deployment that holds the repo record. `access` is null in file mode.
   const canEditSpec =
     canEdit && !feature.isDbNative && feature.path !== "" && access !== null;
+  // Only for an editable spec: nothing else on the page changes with the mode,
+  // and an ordinary read should not pay for a join it will not render.
+  const specWriteMode =
+    canEditSpec && db && access
+      ? ((await resolveSpecWriteMode(db, access.workspaceId, feature.specId))
+          ?.mode ?? null)
+      : null;
   const availableFields =
     levels.find((l) => l.key === feature.level)?.fields ?? null;
 
@@ -242,6 +258,7 @@ export async function getItemDetailData(
     completedGateIds,
     canEdit,
     canEditSpec,
+    specWriteMode,
     canAttachSpec,
     canCreateChildSpec,
     currentUserId: access?.userId ?? null,

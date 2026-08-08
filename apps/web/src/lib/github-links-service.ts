@@ -341,6 +341,42 @@ export async function addFeatureGithubLink(
   return updated?.githubLinks ?? [];
 }
 
+/**
+ * Record a pull request Specboards itself just opened (or just added a commit
+ * to) against the item whose spec it proposes a change to.
+ *
+ * Unlike {@link addFeatureGithubLink} this does not read the pull request back
+ * from GitHub: the write returned its number and url, we wrote its title, and
+ * it is open by construction. Skipping the round trip keeps a spec save at one
+ * GitHub conversation, and keeps this path working under the E2E fake, which
+ * stands in for the repo client but not for the App.
+ *
+ * Idempotent: the store upserts on (item, url), so a second edit joining the
+ * same pull request refreshes the link rather than stacking duplicates.
+ */
+export async function recordWritePullRequest(
+  specId: string,
+  repoId: string,
+  pull: { number: number; url: string },
+  title: string,
+  scope: WorkspaceScope,
+): Promise<void> {
+  const store = await getStore();
+  await store.addGithubLink(
+    specId,
+    {
+      repoId,
+      kind: "pull_request",
+      number: pull.number,
+      branch: null,
+      url: pull.url,
+      title,
+      state: "open",
+    },
+    scope,
+  );
+}
+
 /** Remove a GitHub link by id; returns the feature's refreshed links. */
 export async function removeFeatureGithubLink(
   specId: string,

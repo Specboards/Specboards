@@ -6,8 +6,10 @@ import {
   parentLevelKey,
   parseRepoConfigYaml,
   previewSpec,
+  resolveWriteMode,
   safeParseRepoConfig,
   type RepoConfig,
+  type ResolvedWriteMode,
 } from "@specboards/core";
 import {
   and,
@@ -167,6 +169,28 @@ export function decideReparent(
   // for a system row that predates key tracking so a future change is caught.
   if (!userOwned && row.syncedFeatureKey === null) return { kind: "baseline" };
   return { kind: "noop" };
+}
+
+/**
+ * The write mode in effect for the repo the spec `specId` lives in, or null
+ * when the item has no connected repo (a DB-native card, or a repo that was
+ * disconnected). Read before the editor is shown, so the author is told what
+ * saving will do *before* they do it rather than after.
+ */
+export async function resolveSpecWriteMode(
+  db: Database,
+  workspaceId: string,
+  specId: string,
+): Promise<ResolvedWriteMode | null> {
+  const [row] = await db
+    .select({ config: repositories.config })
+    .from(features)
+    .innerJoin(repositories, eq(repositories.id, features.repoId))
+    .where(
+      and(eq(features.specId, specId), eq(features.workspaceId, workspaceId)),
+    )
+    .limit(1);
+  return row ? resolveWriteMode(row.config) : null;
 }
 
 /** The spec globs configured for a repo, falling back to the default. */

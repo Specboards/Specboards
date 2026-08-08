@@ -31,6 +31,48 @@ export const repoConfigSchema = z.object({
 
 export type RepoConfig = z.infer<typeof repoConfigSchema>;
 
+/** How a spec edit made in the app reaches the repo's default branch. */
+export type WriteMode = RepoConfig["writeMode"];
+
+/** The write mode in effect for a repo, and which setting produced it. */
+export interface ResolvedWriteMode {
+  mode: WriteMode;
+  /**
+   * Where the value came from: an admin's per-repository setting, the repo's
+   * own `.specboards/config.yml`, or the default nobody chose. Surfaced in
+   * settings, because "why are my saves opening pull requests?" is otherwise
+   * a question the UI gives no way to answer.
+   */
+  source: "override" | "config" | "default";
+}
+
+/**
+ * Resolve the write mode for a connected repo from the admin's override and the
+ * repo's stored config, defaulting to `pr`.
+ *
+ * The stored config is read defensively rather than through the schema, the way
+ * {@link safeParseRepoConfig} would: a config written under a different schema
+ * version still carries a usable `writeMode`, and refusing to read it would
+ * silently drop a team back to committing straight onto their default branch,
+ * which is the outcome this setting exists to prevent.
+ */
+export function resolveWriteMode(
+  config: unknown,
+  override?: string | null,
+): ResolvedWriteMode {
+  if (isWriteMode(override)) return { mode: override, source: "override" };
+  const fromConfig =
+    typeof config === "object" && config !== null
+      ? (config as { writeMode?: unknown }).writeMode
+      : undefined;
+  if (isWriteMode(fromConfig)) return { mode: fromConfig, source: "config" };
+  return { mode: repoConfigSchema.shape.writeMode.parse(undefined), source: "default" };
+}
+
+function isWriteMode(value: unknown): value is WriteMode {
+  return value === "pr" || value === "direct";
+}
+
 export function parseRepoConfig(input: unknown): RepoConfig {
   return repoConfigSchema.parse(input);
 }

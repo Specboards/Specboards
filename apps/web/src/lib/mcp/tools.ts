@@ -618,7 +618,12 @@ export const TOOLS: McpTool[] = [
       "full new body as `content` - the same shape read_item returns, without " +
       "frontmatter; the spec's frontmatter and stable id are preserved " +
       "automatically. Only works on spec-backed items; use update_item for " +
-      "DB-native cards. This is how an agent edits an actual spec.",
+      "DB-native cards. This is how an agent edits an actual spec. Where the " +
+      "change lands depends on the repo's writeMode: with `pr` (the default) " +
+      "it is committed to a working branch and proposed as a pull request, " +
+      "returned as `pullRequest`, and the board keeps showing the old text " +
+      "until that is merged - do not report the spec as updated, report it as " +
+      "proposed. A second edit to the same spec joins the open pull request.",
     inputSchema: {
       type: "object",
       properties: {
