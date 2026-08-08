@@ -58,6 +58,12 @@ grant select, insert, update, delete    on feature_github_links to specboards_wo
 grant select                            on workspace_levels   to specboards_worker;
 grant select, insert, update, delete    on features           to specboards_worker;
 grant select, insert, update, delete    on spec_index         to specboards_worker;
+-- Sync records git-originated changes in the ledger. Insert and select only:
+-- the worker appends history and never revises it, matching the append-only
+-- trigger. Also granted in migration 0056, because this insert shares sync's
+-- transaction and a missing grant would abort ingestion rather than merely
+-- lose a row; see that migration for why it is in both places.
+grant select, insert                    on item_events        to specboards_worker;
 grant select, insert, update            on products           to specboards_worker;
 -- Sync resolves each repo's default product from its links (read-only).
 grant select                            on product_repositories to specboards_worker;
@@ -79,7 +85,7 @@ declare
     'outbox_events', 'webhook_endpoints', 'webhook_deliveries',
     'github_installations', 'repositories', 'feature_github_links',
     'workspace_levels', 'features', 'spec_index', 'products',
-    'product_repositories', 'workspaces'
+    'product_repositories', 'workspaces', 'item_events'
   ];
 begin
   foreach t in array worker_tables loop

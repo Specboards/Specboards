@@ -128,6 +128,21 @@ describe("describeChange", () => {
     ).toBe('changed the title from "Old" to "New"');
   });
 
+  it("describes a document change, which names no field at all", () => {
+    // These arrive from sync with `field: null`. Falling through to the
+    // field-driven wording produces "changed the " with nothing after it,
+    // which is what the first version of this did.
+    expect(
+      describeChange(event({ type: "spec.body_changed", field: null, before: null, after: null }), ctx),
+    ).toBe("rewrote the spec");
+    expect(
+      describeChange(
+        event({ type: "spec.moved", field: "path", before: "specs/a.md", after: "specs/b.md" }),
+        ctx,
+      ),
+    ).toBe("moved the spec from specs/a.md to specs/b.md");
+  });
+
   it("falls back to the field name for anything unmapped", () => {
     expect(describeChange(event({ field: "somethingNew", before: 1, after: 2 }), ctx)).toBe(
       "changed the somethingNew from 1 to 2",

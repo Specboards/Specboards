@@ -393,6 +393,13 @@
       "when": 1786334400000,
       "tag": "0055_item_events",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1786338000000,
+      "tag": "0056_item_events_worker_access",
+      "breakpoints": true
     }
   ]
 }
