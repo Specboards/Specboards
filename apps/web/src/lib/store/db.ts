@@ -68,6 +68,7 @@ import {
   ideas,
   inArray,
   isNull,
+  itemEvents,
   not,
   lt,
   members,
@@ -191,6 +192,8 @@ import {
   type SavedViewFilters,
   type SavedViewInput,
   type SavedViewPatch,
+  type ActorType,
+  type ItemEvent,
   type WorkspaceScope,
 } from "./types";
 
@@ -291,6 +294,89 @@ function canWriteProductId(
   return canWriteProduct(access, productId);
 }
 
+/** The item a ledger row is about, snapshotted as it was when it changed. */
+interface ItemEventSubject {
+  featureId: string;
+  specId: string;
+  title: string | null;
+  productId: string | null;
+}
+
+/** One field's change, as the ledger records it. */
+interface ItemFieldChange {
+  field: string;
+  before: unknown;
+  after: unknown;
+  /** Defaults to "item.field_changed". */
+  type?: string;
+}
+
+/**
+ * The item columns whose changes are worth remembering.
+ *
+ * `rank` is deliberately absent. It is board ordering, rewritten every time
+ * anyone drags a card, and recording it would bury the changes people actually
+ * mean by "who changed what" under thousands of rows that answer nobody's
+ * question. `updatedAt` and `parentSetBy` are bookkeeping the change itself
+ * implies, so they are not changes in their own right.
+ */
+const LEDGER_FIELDS = [
+  "title",
+  "status",
+  "tags",
+  "releaseId",
+  "cycleId",
+  "assigneeId",
+  "customFields",
+  "details",
+  "parentId",
+  "riceReach",
+  "riceImpact",
+  "riceConfidence",
+  "riceEffort",
+] as const;
+
+/**
+ * Compare a stored value with the one about to replace it.
+ *
+ * Tags and custom fields are arrays and objects, so identity is the wrong test
+ * and would log a change every time a form round-trips an unmodified list.
+ * Serializing is enough here because these are plain JSON values with stable
+ * key order from the same code path on both sides.
+ */
+function sameLedgerValue(before: unknown, after: unknown): boolean {
+  if (before === after) return true;
+  if (before === null || after === null || before === undefined || after === undefined) {
+    return (before ?? null) === (after ?? null);
+  }
+  if (typeof before === "object" || typeof after === "object") {
+    return JSON.stringify(before) === JSON.stringify(after);
+  }
+  return false;
+}
+
+/**
+ * Which of the tracked fields this write actually changes.
+ *
+ * Driven by what is in `set` (the columns the update will really write) rather
+ * than by the caller's patch, so a value the store normalized or ignored does
+ * not get recorded as a change that never happened.
+ */
+function ledgerChanges(
+  current: Record<string, unknown>,
+  set: Record<string, unknown>,
+): ItemFieldChange[] {
+  const changes: ItemFieldChange[] = [];
+  for (const field of LEDGER_FIELDS) {
+    if (!(field in set)) continue;
+    const before = current[field];
+    const after = set[field];
+    if (sameLedgerValue(before, after)) continue;
+    changes.push({ field, before: before ?? null, after: after ?? null });
+  }
+  return changes;
+}
+
 /** Postgres-backed store (self-host compose stack or hosted Postgres). */
 export class DbStore implements FeatureStore {
   private readonly db: Database;
@@ -340,6 +426,45 @@ export class DbStore implements FeatureStore {
       type: emit.type,
       data: emit.data,
     });
+  }
+
+  /**
+   * Append change-ledger rows, in the same transaction as the change itself so
+   * a change can never exist without its record.
+   *
+   * One row per field, not one per request: a patch that moves an item's status
+   * and reassigns it is two changes, and reverting or reporting on either one
+   * separately is the whole point. A request that changes nothing writes
+   * nothing, so re-saving a form does not pad the history.
+   */
+  private async writeItemEvents(
+    tx: Tx,
+    scope: WorkspaceScope,
+    subject: ItemEventSubject,
+    changes: ItemFieldChange[],
+  ): Promise<void> {
+    if (changes.length === 0) return;
+    // An unstated actor is a person in the browser. Every other caller is
+    // expected to say what it is; see WorkspaceScope.actor.
+    const actor = scope.actor ?? { type: "user", id: scope.userId, label: null };
+    await tx.insert(itemEvents).values(
+      changes.map((c) => ({
+        workspaceId: scope.workspaceId,
+        featureId: subject.featureId,
+        specId: subject.specId,
+        itemTitle: subject.title,
+        productId: subject.productId,
+        actorType: actor.type,
+        actorId: actor.id,
+        actorLabel: actor.label,
+        type: c.type ?? "item.field_changed",
+        field: c.field,
+        // jsonb, so `null` and "absent" are different things: null means the
+        // field was genuinely cleared, which revert has to be able to reproduce.
+        before: c.before ?? null,
+        after: c.after ?? null,
+      })),
+    );
   }
 
   async listFeatures(scope?: WorkspaceScope): Promise<FeatureRecord[]> {
@@ -1314,8 +1439,27 @@ export class DbStore implements FeatureStore {
     const { parentSpecId, ...rest } = patch;
     await this.scoped(scope, async (tx) => {
       const ws = scope!.workspaceId;
+      // Reads the fields the ledger tracks, not just the one authorization
+      // needs: a change's previous value is knowable only here, before the
+      // update overwrites it, and no later feature can reconstruct it.
       const current = await tx
-        .select({ productId: features.productId })
+        .select({
+          id: features.id,
+          productId: features.productId,
+          title: features.title,
+          status: features.status,
+          tags: features.tags,
+          releaseId: features.releaseId,
+          cycleId: features.cycleId,
+          assigneeId: features.assigneeId,
+          customFields: features.customFields,
+          details: features.details,
+          parentId: features.parentId,
+          riceReach: features.riceReach,
+          riceImpact: features.riceImpact,
+          riceConfidence: features.riceConfidence,
+          riceEffort: features.riceEffort,
+        })
         .from(features)
         .where(and(eq(features.specId, specId), eq(features.workspaceId, ws)))
         .limit(1);
@@ -1399,6 +1543,8 @@ export class DbStore implements FeatureStore {
           set.parentId = parent[0].id;
         }
       }
+      // Computed before the update, against the values it is about to replace.
+      const changes = ledgerChanges(current[0], set);
       await tx
         .update(features)
         .set(set)
@@ -1408,6 +1554,20 @@ export class DbStore implements FeatureStore {
             eq(features.workspaceId, scope!.workspaceId),
           ),
         );
+      // The title recorded on the row is the one the item had when it changed,
+      // including on the write that renames it, so the history reads as what
+      // the item was called at the time rather than what it is called now.
+      await this.writeItemEvents(
+        tx,
+        scope!,
+        {
+          featureId: current[0].id,
+          specId,
+          title: current[0].title,
+          productId: current[0].productId,
+        },
+        changes,
+      );
       if (emit) await this.writeOutbox(tx, scope!, emit);
     });
   }
@@ -1600,6 +1760,62 @@ export class DbStore implements FeatureStore {
             ...(link.headBranch ? { headBranch: link.headBranch } : {}),
           },
         });
+    });
+  }
+
+  /**
+   * One item's change history, newest first.
+   *
+   * Joins through `features` rather than trusting the caller's spec id against
+   * the snapshotted `spec_id` column: the ledger keeps history for deleted
+   * items, and matching on the snapshot alone would let a caller read the
+   * history of an item they can no longer see.
+   */
+  async listItemEvents(
+    specId: string,
+    scope?: WorkspaceScope,
+    limit = 100,
+  ): Promise<ItemEvent[]> {
+    if (!scope) return [];
+    return this.scoped(scope, async (tx) => {
+      const ws = scope.workspaceId;
+      const feature = await tx
+        .select({ id: features.id, productId: features.productId })
+        .from(features)
+        .where(and(eq(features.specId, specId), eq(features.workspaceId, ws)))
+        .limit(1);
+      if (!feature[0]) return [];
+      const access = await this.accessIn(tx, scope);
+      const productById = await this.productVisibilityIn(tx, ws);
+      if (!canReadProductId(access, productById, feature[0].productId)) return [];
+
+      const rows = await tx
+        .select({
+          id: itemEvents.id,
+          type: itemEvents.type,
+          field: itemEvents.field,
+          before: itemEvents.before,
+          after: itemEvents.after,
+          actorType: itemEvents.actorType,
+          actorId: itemEvents.actorId,
+          actorLabel: itemEvents.actorLabel,
+          createdAt: itemEvents.createdAt,
+        })
+        .from(itemEvents)
+        .where(
+          and(
+            eq(itemEvents.workspaceId, ws),
+            eq(itemEvents.featureId, feature[0].id),
+          ),
+        )
+        .orderBy(desc(itemEvents.createdAt))
+        .limit(limit);
+
+      return rows.map((r) => ({
+        ...r,
+        actorType: r.actorType as ActorType,
+        createdAt: r.createdAt.toISOString(),
+      }));
     });
   }
 

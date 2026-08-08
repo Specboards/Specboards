@@ -135,6 +135,7 @@ import {
   type SavedViewPatch,
   type OutboxEmit,
   type TransitionMode,
+  type ItemEvent,
   type WorkspaceScope,
 } from "./types";
 
@@ -1060,6 +1061,19 @@ export class LocalFileStore implements FeatureStore {
     _scope?: WorkspaceScope,
   ): Promise<void> {
     // Nothing to remove in file mode.
+  }
+
+  /**
+   * File mode keeps no change ledger. There is one implicit user and no
+   * database to append to, and the specs themselves are files in a git working
+   * tree, so their history is already the user's own `git log`.
+   */
+  async listItemEvents(
+    _specId: string,
+    _scope?: WorkspaceScope,
+    _limit?: number,
+  ): Promise<ItemEvent[]> {
+    return [];
   }
 
   // Saved views persist to `.specboards/local-views.json`. There's a single

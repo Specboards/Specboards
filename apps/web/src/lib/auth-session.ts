@@ -6,7 +6,7 @@ import { getAuth } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { QUOTAS, enforceQuota } from "@/lib/rate-limit";
 import type { Database } from "@specboards/db";
-import type { WorkspaceScope } from "@/lib/store/types";
+import type { ActorRef, WorkspaceScope } from "@/lib/store/types";
 import {
   resolveApiMembership,
   type ApiMembershipError,
@@ -85,6 +85,24 @@ interface RequestPrincipal {
   scopes: string[];
   /** True when the caller authenticated with an API key (vs a browser session). */
   viaKey: boolean;
+}
+
+/**
+ * Describe the caller for the change ledger.
+ *
+ * An API key is what an MCP agent authenticates with, so a key-authenticated
+ * write is attributable to the key's owner and was still not typed by them.
+ * Recording only the user id would make every agent edit look like a person
+ * sitting at a keyboard, and that cannot be corrected after the fact: it is a
+ * property of rows already written.
+ */
+function actorFor(principal: RequestPrincipal): ActorRef {
+  return {
+    type: principal.viaKey ? "api_key" : "user",
+    id: principal.user.id,
+    // Snapshotted at write time; the user may later be renamed or removed.
+    label: principal.user.name ?? principal.user.email ?? null,
+  };
 }
 
 /**
@@ -214,7 +232,11 @@ async function resolveScope(
 
   return {
     ok: true,
-    scope: { userId: principal.user.id, workspaceId: resolved.membership.workspaceId },
+    scope: {
+      userId: principal.user.id,
+      workspaceId: resolved.membership.workspaceId,
+      actor: actorFor(principal),
+    },
   };
 }
 
@@ -298,6 +320,10 @@ export async function authorizeOrgAdmin(req: Request): Promise<ScopeResult> {
   }
   return {
     ok: true,
-    scope: { userId: principal.user.id, workspaceId: resolved.membership.workspaceId },
+    scope: {
+      userId: principal.user.id,
+      workspaceId: resolved.membership.workspaceId,
+      actor: actorFor(principal),
+    },
   };
 }
