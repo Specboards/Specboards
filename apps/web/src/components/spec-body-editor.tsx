@@ -15,6 +15,23 @@ import {
 } from "@/lib/api-client";
 
 /**
+ * Headline for the conflict panel, naming what was actually fought over.
+ * "You both changed Acceptance Criteria" is something a product manager can act
+ * on; "a write conflict occurred" is something they forward to an engineer.
+ */
+function conflictHeading(sections: string[] | undefined): string {
+  const named = (sections ?? []).map((s) => s || "the opening");
+  if (named.length === 0) {
+    return "Someone else changed this spec while you were writing";
+  }
+  const where =
+    named.length === 1
+      ? named[0]
+      : `${named.slice(0, -1).join(", ")} and ${named[named.length - 1]}`;
+  return `You and someone else both changed ${where}`;
+}
+
+/**
  * Edit a spec-backed item's Markdown body. Saving commits the change to the
  * connected repo, since git is canonical for a spec and `spec_index` is a cache.
  *
@@ -90,6 +107,9 @@ export function SpecBodyEditor({
   // Second-click guard on "Use theirs", which is destructive and sits beside
   // the button that is not.
   const [discarding, setDiscarding] = useState(false);
+  // Other people's changes the last save absorbed, so the author can be told
+  // their document moved under them even though nothing was lost.
+  const [mergedWith, setMergedWith] = useState(0);
   // What this save is going to do. The server decides for real; this only sets
   // expectations, so an unknown mode falls back to the plainer commit wording.
   const proposes = writeMode === "pr";
@@ -132,6 +152,22 @@ export function SpecBodyEditor({
       setConflict(null);
       setCommitSha(result.commitSha);
       setProposed(result.pullRequest);
+      setMergedWith(result.mergedWith ?? 0);
+      // A merged save means the spec now holds an edit this author has not
+      // read. Show them the merged document, not their own copy of it: leaving
+      // their version on screen would mean the next save writes it back over
+      // the paragraph that was just merged in, and pass every guard doing it.
+      if (result.mergedWith && result.mergedBody !== undefined) {
+        draftRef.current = result.mergedBody;
+        savedRef.current = result.mergedBody;
+        setBase(result.mergedBody);
+        setEditorKey((k) => k + 1);
+        toast.info(
+          result.mergedWith === 1
+            ? "Merged with one other change made while you were writing"
+            : `Merged with ${result.mergedWith} other changes made while you were writing`,
+        );
+      }
       if (result.pullRequest) {
         toast.success(
           result.pullRequest.created
@@ -205,15 +241,20 @@ export function SpecBodyEditor({
       {conflict ? (
         <div className="space-y-3 rounded-md border border-warning/50 bg-warning/5 p-4">
           <div className="space-y-1">
+            {/* Naming the section is what makes this actionable. Reaching this
+                panel at all means the edits genuinely overlap: anything that
+                could be merged already was, server-side, without asking. */}
             <p className="text-sm font-medium">
-              Someone else changed this spec while you were writing
+              {conflictHeading(conflict.sections)}
             </p>
             {/* No shas, no branch names. The person this is for did not opt into
                 git vocabulary and does not need it to make this decision. */}
             <p className="text-xs text-muted-foreground">
-              Your version is still in the editor above and has not been saved.
-              Below is what {path} says now. Copy anything you need from it,
-              then keep yours, or start again from theirs.
+              Edits to other parts of the spec are merged in automatically, so
+              this is a part you both rewrote. Your version is still in the
+              editor above and has not been saved. Below is what {path} says now.
+              Copy anything you need from it, then keep yours, or start again
+              from theirs.
             </p>
           </div>
           <div className="max-h-64 overflow-auto rounded border bg-background p-3">
@@ -309,6 +350,16 @@ export function SpecBodyEditor({
           </a>
         ) : null}
       </div>
+      {/* Stays on screen after the toast goes. Someone who saved, looked away,
+          and looked back should still find out their spec picked up an edit
+          they have not read. */}
+      {mergedWith > 0 && !dirty ? (
+        <p className="text-2xs text-muted-foreground">
+          {mergedWith === 1
+            ? "Merged with one other change made while you were writing. The editor now shows the combined version."
+            : `Merged with ${mergedWith} other changes made while you were writing. The editor now shows the combined version.`}
+        </p>
+      ) : null}
       {error ? <p className="text-xs text-destructive">{error}</p> : null}
     </div>
   );

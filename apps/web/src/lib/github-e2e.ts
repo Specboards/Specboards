@@ -47,13 +47,19 @@ interface FakeRepo {
   /** Working branches, each a full snapshot taken when it was cut. */
   branches: Record<string, RepoFiles>;
   pulls: FakePull[];
+  /**
+   * Every blob ever written, keyed by sha, like a real object store. A merge
+   * asks for the version its author loaded, which by then may be on no branch
+   * at all, so contents cannot simply be looked up by path.
+   */
+  blobs?: RepoFiles;
 }
 
 type Fixture = Record<string, FakeRepo>;
 
 /** Fill in a repo the fixture knows nothing about yet. */
 function emptyRepo(): FakeRepo {
-  return { files: {}, branches: {}, pulls: [] };
+  return { files: {}, branches: {}, pulls: [], blobs: {} };
 }
 
 function readFixture(): Fixture {
@@ -114,6 +120,14 @@ export function fakeRepoClient(repo: Pick<RepoRecord, "owner" | "name">): GitRep
       return { path, raw, blobSha: blobShaOf(raw) };
     },
 
+    async readBlobBySha(sha: string): Promise<string> {
+      const raw = readFixture()[key]?.blobs?.[sha];
+      if (raw === undefined) {
+        throw new Error(`E2E fake: ${key} has no blob ${sha}`);
+      }
+      return raw;
+    },
+
     async writeFile(input: WriteFileInput): Promise<WriteFileResult> {
       const data = readFixture();
       const repo = (data[key] ??= emptyRepo());
@@ -133,6 +147,9 @@ export function fakeRepoClient(repo: Pick<RepoRecord, "owner" | "name">): GitRep
         if (conflict) throw new GitWriteConflictError(input.path, target ?? undefined);
       }
       files[input.path] = input.content;
+      // Keep every version, not just the reachable ones: a merge asks for the
+      // blob its author loaded, which this write may just have replaced.
+      (repo.blobs ??= {})[blobShaOf(input.content)] = input.content;
 
       const pullRequest = target
         ? openOrJoinPull(repo, target, input.message)

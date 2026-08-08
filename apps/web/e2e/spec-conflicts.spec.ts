@@ -44,24 +44,44 @@ function pricingSpec(body: string): string {
   ].join("\n");
 }
 
+/** A spec with the sections two different people would each own. */
+function sectionedSpec(problem: string, design: string): string {
+  return pricingSpec(
+    ["## Problem", "", problem, "", "## Design", "", design].join("\n"),
+  );
+}
+
 /** Seed a repo + import its one spec, then open that item's page. */
-async function setup(page: Page, repo: string, config?: Record<string, unknown>) {
+async function setup(
+  page: Page,
+  repo: string,
+  config?: Record<string, unknown>,
+  seed = pricingSpec("The original body."),
+) {
   const ws = await getWorkspace();
   await resetBoard(ws.id);
   resetFixture();
   await seedRepository({ workspaceId: ws.id, owner: OWNER, name: repo, config });
-  setRepoFiles(OWNER, repo, { [SPEC_PATH]: pricingSpec("The original body.") });
+  setRepoFiles(OWNER, repo, { [SPEC_PATH]: seed });
 
   await page.goto(`/${ws.slug}/settings/repositories`);
   await page.getByRole("button", { name: /Create 1 card/i }).click();
   await expect(page.getByText(/Imported\s+1\s+spec/i)).toBeVisible();
   await page.goto(`/${ws.slug}/all/backlog/work/${SPEC_ID}`);
-  await expect(page.locator(".tiptap")).toContainText("The original body.");
+  await expect(page.locator(".tiptap")).not.toBeEmpty();
 }
 
-/** Type at the end of the body and press the save button, whatever it says. */
-async function editAndSave(page: Page, text: string) {
-  await page.locator(".tiptap").click();
+/**
+ * Type `text` at the end of the paragraph containing `after` (or at the end of
+ * the document when it is omitted) and press save. Editing a *named* paragraph
+ * is what lets a test put two people in two different sections.
+ */
+async function editAndSave(page: Page, text: string, after?: string) {
+  if (after) {
+    await page.locator(".tiptap p", { hasText: after }).first().click();
+  } else {
+    await page.locator(".tiptap").click();
+  }
   await page.keyboard.press("End");
   await page.keyboard.type(text);
   const save = page.getByRole("button", {
@@ -77,6 +97,101 @@ async function editAndSave(page: Page, text: string) {
     save.click(),
   ]);
 }
+
+/**
+ * The conflict panel, found by the one sentence that does not change with the
+ * shape of the clash. Its heading deliberately names the section involved, so
+ * matching on that would make every test restate the copy.
+ */
+function conflictPanel(page: Page) {
+  return page.getByText(/Your version is still in the editor above/i);
+}
+
+/** The merged-save notice in the editor, not the toast that says the same. */
+function mergedNotice(page: Page) {
+  return page.getByText(/The editor now shows the combined version/i);
+}
+
+test.describe("spec editing: two people, two sections, one afternoon", () => {
+  // The case this is really for: a product manager owns Problem, a designer
+  // owns Design, they are both in the spec at once, and neither should be told
+  // their save was refused because the other one got there first.
+  const REPO = "duties-merge";
+  const BASE = sectionedSpec("Refunds take too long.", "TBD.");
+
+  test("merges edits to different sections instead of blocking the second", async ({
+    page,
+  }) => {
+    await setup(page, REPO, { version: 1, writeMode: "direct" }, BASE);
+
+    // The designer files their section while this page sits open, so the
+    // editor is now working from a version that no longer exists in git.
+    setRepoFiles(OWNER, REPO, {
+      [SPEC_PATH]: sectionedSpec(
+        "Refunds take too long.",
+        "One screen, no confirmation step.",
+      ),
+    });
+
+    // The product manager rewrites theirs and saves.
+    await editAndSave(page, " Eleven days, median.", "Refunds take too long.");
+
+    // Both survive. Nobody was asked to choose, and nobody redid an afternoon.
+    const raw = getRepoFiles(OWNER, REPO)[SPEC_PATH]!;
+    expect(raw).toContain("Eleven days, median.");
+    expect(raw).toContain("One screen, no confirmation step.");
+    await expect(conflictPanel(page)).toBeHidden();
+
+    // And they are told, because their spec now holds a paragraph they have
+    // not read, with the editor showing the combined version rather than the
+    // copy they typed.
+    await expect(mergedNotice(page)).toBeVisible();
+    await expect(page.locator(".tiptap")).toContainText(
+      "One screen, no confirmation step.",
+    );
+  });
+
+  test("a merged editor does not delete the merged-in change on its next save", async ({
+    page,
+  }) => {
+    // The sharp edge of merging server-side: if the editor kept showing the
+    // author's own text, their next save would pass the guard cleanly and
+    // quietly remove the paragraph that was just merged in.
+    await setup(page, REPO, { version: 1, writeMode: "direct" }, BASE);
+    setRepoFiles(OWNER, REPO, {
+      [SPEC_PATH]: sectionedSpec("Refunds take too long.", "One screen."),
+    });
+
+    await editAndSave(page, " Eleven days.", "Refunds take too long.");
+    await expect(mergedNotice(page)).toBeVisible();
+
+    await editAndSave(page, " And falling.", "Eleven days.");
+
+    const raw = getRepoFiles(OWNER, REPO)[SPEC_PATH]!;
+    expect(raw).toContain("And falling.");
+    expect(raw).toContain("One screen.");
+  });
+
+  test("only a genuine overlap reaches the author, and it names the section", async ({
+    page,
+  }) => {
+    await setup(page, REPO, { version: 1, writeMode: "direct" }, BASE);
+    setRepoFiles(OWNER, REPO, {
+      [SPEC_PATH]: sectionedSpec("Refunds are slow and customers churn.", "TBD."),
+    });
+
+    // Both rewrote Problem. There is no merge for that, and pretending there
+    // is would be worse than asking.
+    await editAndSave(page, " Eleven days, median.", "Refunds take too long.");
+
+    await expect(
+      page.getByText(/You and someone else both changed Problem/i),
+    ).toBeVisible();
+    // Nothing was written, and their draft is still theirs.
+    expect(getRepoFiles(OWNER, REPO)[SPEC_PATH]).not.toContain("Eleven days");
+    await expect(page.locator(".tiptap")).toContainText("Eleven days, median.");
+  });
+});
 
 test.describe("spec editing: a change made in git is never overwritten", () => {
   test("direct mode refuses the save and offers a way out", async ({ page }) => {
@@ -98,8 +213,10 @@ test.describe("spec editing: a change made in git is never overwritten", () => {
 
     // The author is shown what happened, in words that do not require knowing
     // what a blob sha is, with the incoming version to read.
+    // Named for where it happened. This spec has no headings, so the clash is
+    // in the text above the first one.
     await expect(
-      page.getByText(/Someone else changed this spec while you were writing/i),
+      page.getByText(/You and someone else both changed the opening/i),
     ).toBeVisible();
     await expect(
       page.getByText("Rewritten in the repo by someone else."),
@@ -117,9 +234,7 @@ test.describe("spec editing: a change made in git is never overwritten", () => {
     setRepoFiles(OWNER, REPO, { [SPEC_PATH]: pricingSpec("Repo version.") });
 
     await editAndSave(page, " Mine.");
-    await expect(
-      page.getByText(/Someone else changed this spec while you were writing/i),
-    ).toBeVisible();
+    await expect(conflictPanel(page)).toBeVisible();
 
     await Promise.all([
       page.waitForResponse(
@@ -135,9 +250,7 @@ test.describe("spec editing: a change made in git is never overwritten", () => {
     const raw = getRepoFiles(OWNER, REPO)[SPEC_PATH];
     expect(raw).toContain("Mine.");
     expect(raw).not.toContain("Repo version.");
-    await expect(
-      page.getByText(/Someone else changed this spec/i),
-    ).toBeHidden();
+    await expect(conflictPanel(page)).toBeHidden();
   });
 
   test("using theirs takes two clicks and replaces the draft", async ({ page }) => {
@@ -184,9 +297,7 @@ test.describe("spec editing: a change made in git is never overwritten", () => {
     const proposed = getRepoBranchFiles(OWNER, REPO, BRANCH)[SPEC_PATH];
     expect(proposed).toContain("First proposal.");
     expect(proposed).not.toContain("Second, unaware of the first.");
-    await expect(
-      page.getByText(/Someone else changed this spec while you were writing/i),
-    ).toBeVisible();
+    await expect(conflictPanel(page)).toBeVisible();
   });
 
   test("a second save in the same session is not a conflict with itself", async ({
@@ -204,9 +315,7 @@ test.describe("spec editing: a change made in git is never overwritten", () => {
     ).toBeVisible();
 
     await editAndSave(page, " Second.");
-    await expect(
-      page.getByText(/Someone else changed this spec/i),
-    ).toBeHidden();
+    await expect(conflictPanel(page)).toBeHidden();
     const raw = getRepoFiles(OWNER, REPO)[SPEC_PATH];
     expect(raw).toContain("First.");
     expect(raw).toContain("Second.");

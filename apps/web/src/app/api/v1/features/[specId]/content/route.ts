@@ -103,6 +103,7 @@ export async function PUT(req: Request, { params }: Params) {
             path: err.path,
             currentContent: err.currentContent,
             currentBlobSha: err.currentBlobSha,
+            sections: err.sections,
           },
         },
         { status: 409 },

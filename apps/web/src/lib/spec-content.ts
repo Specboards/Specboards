@@ -2,9 +2,11 @@ import { randomUUID } from "node:crypto";
 
 import {
   canWriteProduct,
+  conflictingSections,
   featureSlug,
   isLeafLevel,
   leafLevel,
+  merge3,
   resolveWriteMode,
   rewriteSpecBody,
   specBody,
@@ -62,13 +64,31 @@ export class SpecConflictError extends Error {
     readonly path: string,
     readonly currentContent: string,
     readonly currentBlobSha: string,
+    /**
+     * Headings both sides rewrote, when they can be worked out. Empty means the
+     * overlap could not be narrowed down, not that there is none. The empty
+     * string names the text above the first heading.
+     */
+    readonly sections: string[] = [],
   ) {
-    super(
-      "Someone else changed this spec while you were writing. Your version " +
-        "has not been saved yet.",
-    );
+    super(conflictMessage(sections));
     this.name = "SpecConflictError";
   }
+}
+
+/** Say what actually clashed, in the words the people involved would use. */
+function conflictMessage(sections: string[]): string {
+  const named = sections.map((s) => s || "the opening");
+  const where =
+    named.length === 0
+      ? "this spec"
+      : named.length === 1
+        ? `${named[0]}`
+        : `${named.slice(0, -1).join(", ")} and ${named[named.length - 1]}`;
+  return (
+    `Someone else changed ${where} while you were writing, so this could not ` +
+    "be merged automatically. Your version has not been saved yet."
+  );
 }
 
 /** The feature's git pointers, resolved on the owner connection. */
@@ -170,6 +190,114 @@ async function writeGuarded(
   }
 }
 
+/**
+ * How many times a save may re-merge and retry before giving up and asking the
+ * author. Each round trip costs GitHub calls, and a spec being rewritten fast
+ * enough to lose three races in a row is a document two people should be
+ * talking about rather than one the server should keep patching.
+ */
+const MAX_MERGE_ATTEMPTS = 3;
+
+/**
+ * Write a spec body, merging around anyone who got there first.
+ *
+ * This is the difference between concurrency control that protects work and
+ * concurrency control that blocks it. A product manager rewriting the problem
+ * statement and a designer filling in the interaction notes are not in
+ * conflict, and telling the second one their save was refused, with a wall of
+ * the other's text and a choice between overwriting a colleague or redoing
+ * their own afternoon, is a worse outcome than the lost write it prevents.
+ *
+ * So a rejected write is retried against what is actually there: fetch the base
+ * the author loaded (by sha, since by now it may be on no branch at all), merge
+ * their body with the current one, and write the result. The retry is itself
+ * guarded, against the version just read, so a third writer arriving mid-merge
+ * is not clobbered either; it simply merges again.
+ *
+ * Only a genuine overlap, where both sides rewrote the same lines, reaches the
+ * author, and it arrives naming the sections they disagree about. Frontmatter
+ * never takes part: it is machine-managed and is taken from whichever file is
+ * current, so it cannot be the thing two people conflict over.
+ */
+async function writeMerged(
+  client: GitRepoClient,
+  input: WriteFileInput & { expectedBlobSha?: string },
+  spec: { id: string; title: string; body: string },
+): Promise<WriteFileResult & { mergedWith: number; mergedBody?: string }> {
+  let expectedBlobSha = input.expectedBlobSha;
+  let content = input.content;
+  let body = spec.body;
+  let mergedWith = 0;
+
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const result = await client.writeFile({ ...input, content, expectedBlobSha });
+      return {
+        ...result,
+        mergedWith,
+        ...(mergedWith > 0 ? { mergedBody: body } : {}),
+      };
+    } catch (err) {
+      if (!(err instanceof GitWriteConflictError)) throw err;
+      // Unguarded writes cannot reach here, and without the base there is
+      // nothing to merge against: fall back to reporting the conflict.
+      if (!expectedBlobSha || attempt + 1 >= MAX_MERGE_ATTEMPTS) {
+        throw await describeConflict(client, input.path, err.ref, null, body);
+      }
+
+      const theirs = await client.readFile(input.path, err.ref);
+      let base: string;
+      try {
+        base = specBody(await client.readBlobBySha(expectedBlobSha));
+      } catch {
+        // The base is unreachable (a repo that garbage-collected it, or a sha
+        // from somewhere else). Merging without it would be guessing.
+        throw await describeConflict(client, input.path, err.ref, null, body);
+      }
+
+      const theirBody = specBody(theirs.raw);
+      const merged = merge3(base, body, theirBody);
+      if (!merged.clean) {
+        throw await describeConflict(client, input.path, err.ref, base, body);
+      }
+
+      body = merged.merged;
+      // Frontmatter comes from the file that is actually there, so the merge
+      // never has to reconcile machine-managed keys.
+      content = rewriteSpecBody(theirs.raw, body, { id: spec.id, title: spec.title });
+      expectedBlobSha = theirs.blobSha;
+      mergedWith++;
+    }
+  }
+}
+
+/**
+ * Build the conflict handed back to the author. With a `base` the sections both
+ * sides rewrote can be named, which is the whole difference between "someone
+ * changed this spec" and "you and Sam both rewrote Acceptance Criteria".
+ */
+async function describeConflict(
+  client: GitRepoClient,
+  path: string,
+  ref: string | undefined,
+  base: string | null,
+  mine: string,
+): Promise<SpecConflictError> {
+  let current = { raw: "", blobSha: "" };
+  try {
+    current = await client.readFile(path, ref);
+  } catch {
+    // Reported as an empty incoming version rather than swallowed.
+  }
+  const theirBody = specBody(current.raw);
+  return new SpecConflictError(
+    path,
+    theirBody,
+    current.blobSha,
+    base === null ? [] : conflictingSections(base, mine, theirBody),
+  );
+}
+
 export interface SpecWriteResult {
   specId: string;
   path: string;
@@ -189,6 +317,20 @@ export interface SpecWriteResult {
    * thing to tell whoever made the edit.
    */
   pullRequest?: WritePullRequest;
+  /**
+   * How many other people's changes this save merged with on its way in. Zero
+   * for the ordinary case. Worth telling the author about when it is not: their
+   * spec now contains an edit they have not read.
+   */
+  mergedWith?: number;
+  /**
+   * The body as written, returned only when it is not what the caller sent,
+   * i.e. after a merge. An editor that keeps showing the author's own text
+   * after a merged save is holding a document that is missing somebody else's
+   * paragraph, and its next save would delete that paragraph while passing the
+   * guard cleanly. So the merged text goes back and the editor adopts it.
+   */
+  mergedBody?: string;
 }
 
 /**
@@ -224,8 +366,13 @@ export interface SpecWriteResult {
  * author reloading the page reads the default branch and would silently write
  * over their own open proposal.
  *
- * A failed guard raises {@link SpecConflictError} carrying the version that won,
- * so the author is shown what happened rather than handed a failure.
+ * A failed guard does not go straight to the author. The write is merged with
+ * whatever landed first and retried, so two people editing different parts of a
+ * spec, which is what a product manager and a designer working the same
+ * afternoon actually do, both keep their work and neither is asked to redo it.
+ * Only a real overlap raises {@link SpecConflictError}, naming the sections both
+ * sides rewrote, with `mergedWith` reporting how many other changes a save
+ * absorbed on the way through.
  */
 export async function updateSpecContent(
   db: Database,
@@ -240,17 +387,21 @@ export async function updateSpecContent(
   const content = rewriteSpecBody(existing.raw, body, { id: specId, title });
   const message = opts.message?.trim() || `docs(specboard): update ${path}`;
   const { mode } = resolveWriteMode(repo.config);
-  const { commitSha, blobSha, pullRequest } = await writeGuarded(client, {
-    path,
-    content,
-    message,
-    mode,
-    ...(opts.expectedBlobSha ? { expectedBlobSha: opts.expectedBlobSha } : {}),
-  });
+  const { commitSha, blobSha, pullRequest, mergedWith, mergedBody } = await writeMerged(
+    client,
+    {
+      path,
+      content,
+      message,
+      mode,
+      ...(opts.expectedBlobSha ? { expectedBlobSha: opts.expectedBlobSha } : {}),
+    },
+    { id: specId, title, body },
+  );
 
   if (!pullRequest) {
     await syncRepository(db, repo);
-    return { specId, path, commitSha, blobSha };
+    return { specId, path, commitSha, blobSha, mergedWith, mergedBody };
   }
 
   // The commit has already landed on the working branch, so a link that fails
@@ -264,7 +415,7 @@ export async function updateSpecContent(
       err instanceof Error ? err.message : err,
     );
   }
-  return { specId, path, commitSha, blobSha, pullRequest };
+  return { specId, path, commitSha, blobSha, pullRequest, mergedWith, mergedBody };
 }
 
 /**

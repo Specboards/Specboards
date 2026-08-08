@@ -290,6 +290,11 @@ export class GitHubRepoClient implements GitRepoClient {
     };
   }
 
+  /** Read a blob by sha (see {@link GitRepoClient.readBlobBySha}). */
+  readBlobBySha(sha: string): Promise<string> {
+    return this.readBlob(sha);
+  }
+
   private async readBlob(sha: string): Promise<string> {
     const { data } = await this.octokit.rest.git.getBlob({
       owner: this.owner,

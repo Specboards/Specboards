@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
@@ -20,6 +21,8 @@ interface FakeRepo {
   files: RepoFiles;
   branches: Record<string, RepoFiles>;
   pulls: FakePull[];
+  /** Every version ever written, by sha; the merge base is fetched from here. */
+  blobs?: RepoFiles;
 }
 
 type Fixture = Record<string, FakeRepo>;
@@ -48,11 +51,34 @@ export function resetFixture(): void {
   write({});
 }
 
-/** Set the files (path -> raw content) on one repo's default branch. */
+/**
+ * Set the files (path -> raw content) on one repo's default branch.
+ *
+ * Called twice in a test this stands in for someone else committing while a
+ * page sits open, so it replaces the branch contents but *keeps* everything a
+ * real repo would keep: open branches, their pull requests, and every blob ever
+ * written. Forgetting old blobs in particular would make a three-way merge
+ * unable to fetch the version the author loaded, and the test would then be
+ * asserting against a repo that has no equivalent in reality.
+ */
 export function setRepoFiles(owner: string, name: string, files: RepoFiles): void {
   const data = read();
-  data[`${owner}/${name}`] = { files, branches: {}, pulls: [] };
+  const key = `${owner}/${name}`;
+  const existing = data[key];
+  const blobs: RepoFiles = { ...existing?.blobs };
+  for (const raw of Object.values(files)) blobs[blobShaOf(raw)] = raw;
+  data[key] = {
+    files,
+    branches: existing?.branches ?? {},
+    pulls: existing?.pulls ?? [],
+    blobs,
+  };
   write(data);
+}
+
+/** Same content-addressing the app's fake uses, so shas agree across the seam. */
+function blobShaOf(content: string): string {
+  return createHash("sha1").update(content).digest("hex");
 }
 
 /** Read back a repo's default-branch files (e.g. to assert what was committed). */

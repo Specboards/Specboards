@@ -22,6 +22,13 @@ export interface GitRepoClient {
    * branch's copy would be a different file entirely.
    */
   readFile(path: string, ref?: string): Promise<SpecFile>;
+  /**
+   * Read a blob's contents by sha, regardless of which branch still points at
+   * it. This is how a three-way merge gets its base: the version the author
+   * loaded may have been replaced on every branch by the time they save, so it
+   * is reachable only by the sha they were handed.
+   */
+  readBlobBySha(sha: string): Promise<string>;
   /** Write a file back, returning the new commit sha and the new blob sha. */
   writeFile(input: WriteFileInput): Promise<WriteFileResult>;
   /** Delete a file with a commit, returning the commit sha. */

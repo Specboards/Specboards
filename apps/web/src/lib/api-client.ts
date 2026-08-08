@@ -151,6 +151,15 @@ export interface SpecWriteResult {
   commitSha: string;
   /** Sha of what was written; guards the next save from the same editor. */
   blobSha: string;
+  /** How many other people's changes this save merged with (usually 0). */
+  mergedWith?: number;
+  /**
+   * The body as written, present only when a merge changed it. An editor must
+   * adopt this: keeping the author's own text after a merge means holding a
+   * document that has lost somebody else's paragraph, and the next save would
+   * write that loss to git without tripping any guard.
+   */
+  mergedBody?: string;
   /**
    * Present when the repo takes spec changes as pull requests. The change is
    * then *proposed*, not live: the board still shows the previous text until
@@ -217,6 +226,11 @@ export interface SpecConflict {
   currentContent: string;
   /** Send this back as `expectedBlobSha` to overwrite it deliberately. */
   currentBlobSha: string;
+  /**
+   * Headings both sides rewrote. Empty when the overlap could not be pinned
+   * down. The empty string means the text above the first heading.
+   */
+  sections?: string[];
 }
 
 /** A save was refused because the spec moved in git since the editor loaded it. */
