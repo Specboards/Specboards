@@ -334,6 +334,9 @@ export async function addFeatureGithubLink(
     url: meta.url,
     title: meta.title,
     state: meta.state,
+    // A hand-linked pull request is not a pending change to this spec, however
+    // much it looks like one in the table.
+    headBranch: null,
   };
 
   await store.addGithubLink(specId, resolved, scope);
@@ -353,11 +356,15 @@ export async function addFeatureGithubLink(
  *
  * Idempotent: the store upserts on (item, url), so a second edit joining the
  * same pull request refreshes the link rather than stacking duplicates.
+ *
+ * Records the head branch, which is what marks the link as a change waiting for
+ * review rather than a pull request someone attached to the card. Nothing else
+ * writes that column, so the distinction cannot be forged by hand-linking.
  */
 export async function recordWritePullRequest(
   specId: string,
   repoId: string,
-  pull: { number: number; url: string },
+  pull: { number: number; url: string; branch: string },
   title: string,
   scope: WorkspaceScope,
 ): Promise<void> {
@@ -368,10 +375,13 @@ export async function recordWritePullRequest(
       repoId,
       kind: "pull_request",
       number: pull.number,
+      // `branch` stays null: it means "this link *is* a branch", and this one
+      // is a pull request. The working branch goes in headBranch.
       branch: null,
       url: pull.url,
       title,
       state: "open",
+      headBranch: pull.branch,
     },
     scope,
   );

@@ -1,0 +1,27 @@
+-- The head branch of a pull request Specboards opened for a spec edit.
+--
+-- After a save in PR mode the author's change sits on a working branch while
+-- the board keeps showing the merged text. To tell them "your change is waiting
+-- for review" on a page they come back to later, that pending state has to
+-- survive a reload, and until now it did not exist anywhere: it lived only in
+-- the editor's React state and vanished with the tab.
+--
+-- The links table already holds the pull request, but a link Specboards opened
+-- for a spec edit and a link someone pasted onto a card by hand are stored in
+-- exactly the same shape. Claiming "your change is waiting for review" for the
+-- second kind would report an edit that does not exist, so the two have to be
+-- told apart. This column is what tells them apart: it is set only by the spec
+-- write path, so a non-NULL value means "Specboards opened this to propose a
+-- change to this spec".
+--
+-- It stores the branch rather than a boolean flag because the branch is the
+-- thing later work needs (reading the pending version back to show what it
+-- says, and spotting that another author already has a change in flight), and
+-- because it cannot be recomputed: `createWriteBranch` falls back to
+-- sha-suffixed names on collision, so the branch is not a pure function of the
+-- spec path.
+--
+-- NULL for every existing link, which is correct: none of them were opened by
+-- the spec write path, and nothing about how they render changes.
+
+ALTER TABLE "feature_github_links" ADD COLUMN "head_branch" text;

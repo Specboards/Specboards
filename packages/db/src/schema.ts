@@ -1428,6 +1428,13 @@ export const featureGithubLinks = pgTable(
     title: text("title"),
     /** Cached state: open / closed / merged; null for a branch. */
     state: text("state"),
+    /**
+     * Head branch of a pull request Specboards opened to propose a change to
+     * this item's spec. Set only by the spec write path, so a non-null value is
+     * what distinguishes "your change is waiting for review" from a pull request
+     * someone linked to the card by hand.
+     */
+    headBranch: text("head_branch"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

@@ -626,6 +626,7 @@ export class DbStore implements FeatureStore {
           url: featureGithubLinks.url,
           title: featureGithubLinks.title,
           state: featureGithubLinks.state,
+          headBranch: featureGithubLinks.headBranch,
         })
         .from(featureGithubLinks)
         .where(
@@ -660,6 +661,7 @@ export class DbStore implements FeatureStore {
         url: l.url,
         title: l.title,
         state: l.state,
+        headBranch: l.headBranch,
         sourceSpecId: sourceById.get(l.featureId)?.specId ?? row.specId,
         sourceTitle: sourceById.get(l.featureId)?.title ?? row.title,
         inherited: l.featureId !== row.id,
@@ -1583,11 +1585,20 @@ export class DbStore implements FeatureStore {
           url: link.url,
           title: link.title,
           state: link.state,
+          headBranch: link.headBranch ?? null,
         })
         // Re-linking the same url refreshes the cached title/state.
         .onConflictDoUpdate({
           target: [featureGithubLinks.featureId, featureGithubLinks.url],
-          set: { title: link.title, state: link.state },
+          set: {
+            title: link.title,
+            state: link.state,
+            // Only ever set, never cleared. Someone hand-linking the url of a
+            // pull request the write path opened would otherwise demote a
+            // pending change to an ordinary link, and the author would be told
+            // their change is no longer waiting for review when it still is.
+            ...(link.headBranch ? { headBranch: link.headBranch } : {}),
+          },
         });
     });
   }
