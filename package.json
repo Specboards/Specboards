@@ -20,7 +20,7 @@
     "deploy:test": "scripts/deploy.sh test",
     "deploy:prod": "scripts/deploy.sh production",
     "format": "prettier --write \"**/*.{ts,tsx,md,json,yml,yaml}\"",
-    "audit": "pnpm audit --prod --audit-level high --ignore-registry-errors"
+    "audit": "pnpm audit --prod --audit-level moderate --ignore-registry-errors"
   },
   "devDependencies": {
     "prettier": "^3.9.6",
