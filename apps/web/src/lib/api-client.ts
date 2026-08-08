@@ -7,6 +7,7 @@ import type {
   BoardPreferences,
   CommentInput,
   CommentRecord,
+  ItemEvent,
   NotificationList,
   CreatableRelationDirection,
   CreateFeatureInput,
@@ -392,6 +393,22 @@ export async function listComments(specId: string): Promise<CommentRecord[]> {
     throw new Error(body?.error ?? `Failed to load comments (${res.status}).`);
   }
   return body.comments;
+}
+
+/** An item's change history, newest first. */
+export async function listItemEvents(specId: string): Promise<ItemEvent[]> {
+  const res = await apiFetch(
+    `/api/v1/features/${encodeURIComponent(specId)}/events`,
+  );
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as {
+    events?: ItemEvent[];
+    error?: string;
+  } | null;
+  if (!res.ok || !body?.events) {
+    throw new Error(body?.error ?? `Failed to load history (${res.status}).`);
+  }
+  return body.events;
 }
 
 /** Post a comment to a feature; returns the created record. */

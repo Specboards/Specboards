@@ -15,6 +15,7 @@ import { GenerateChildButton } from "@/components/generate-child-button";
 import { ItemGoals } from "@/components/item-goals";
 import { ItemProperties } from "@/components/item-properties";
 import { ItemTitle } from "@/components/item-title";
+import { ItemHistory } from "@/components/item-history";
 import { SpecBodyEditor } from "@/components/spec-body-editor";
 import { SpecPendingChange } from "@/components/spec-pending-change";
 import { StatusDot } from "@/components/status-dot";
@@ -289,6 +290,21 @@ export function ItemDetailView({
           links={feature.githubLinks}
           canEdit={canEdit}
           repos={data.repos}
+        />
+      </DetailSection>
+
+      {/* Collapsed by default: most people opening an item are not asking what
+          happened to it, and the panel fetches only when it is opened. */}
+      <DetailSection id="history" title="History" defaultCollapsed>
+        <ItemHistory
+          specId={feature.specId}
+          isSpecBacked={!feature.isDbNative}
+          context={{
+            workflow,
+            members: members.map((m) => ({ userId: m.userId, name: m.name })),
+            releases: releases.map((r) => ({ id: r.id, name: r.name })),
+            cycles: cycles.map((c) => ({ id: c.id, name: c.name })),
+          }}
         />
       </DetailSection>
 
