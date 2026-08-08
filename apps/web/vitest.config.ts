@@ -12,8 +12,13 @@ export default defineConfig({
   resolve: {
     alias: { "@": resolve(__dirname, "src") },
   },
+  // Matches the app's own JSX transform, so a `.tsx` test does not have to
+  // import React to render a component that never does.
+  esbuild: { jsx: "automatic" },
   test: {
-    include: ["src/**/*.test.ts"],
+    // `.tsx` too, so a server component whose correctness is in what it renders
+    // (rather than in a helper it calls) can be asserted with react-dom/server.
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
     exclude: ["src/**/*.int.test.ts", "node_modules/**"],
     environment: "node",
   },

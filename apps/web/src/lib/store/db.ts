@@ -1855,9 +1855,15 @@ export class DbStore implements FeatureStore {
       const readable = [...productById.values()]
         .filter((p) => canReadProduct(access, p))
         .map((p) => p.id);
-      const scoped = query.productId
-        ? readable.filter((id) => id === query.productId)
-        : readable;
+      // Intersected with what the caller can read, never substituted for it:
+      // asking for a product you cannot see must narrow the report, not widen
+      // it.
+      // An empty list is a request for nothing, not a request for everything:
+      // a product group with no products must report zero rather than inherit
+      // the workspace's numbers.
+      const requested = query.productIds;
+      const scoped =
+        requested != null ? readable.filter((id) => requested.includes(id)) : readable;
 
       // Each id is bound as a parameter rather than pasted into the string.
       // They are database-issued uuids today, so interpolation would be safe

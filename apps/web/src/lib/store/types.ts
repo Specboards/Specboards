@@ -1167,8 +1167,14 @@ export interface ActivityQuery {
   from: string;
   /** Exclusive ISO end. */
   to: string;
-  /** Limit to one product; omitted reports across everything readable. */
-  productId?: string | null;
+  /**
+   * Limit to these products. Omitted or null reports across everything
+   * readable; an empty list reports nothing, which is what an empty product
+   * group must get. A list rather than a single id because a group's report
+   * covers its whole subtree, and reporting the workspace total under a group's
+   * name would overstate that group's output.
+   */
+  productIds?: string[] | null;
 }
 
 /**
