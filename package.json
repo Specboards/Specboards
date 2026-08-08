@@ -36,7 +36,8 @@
       "ip-address": ">=10.3.1",
       "shell-quote": ">=1.9.0",
       "hono": ">=4.12.27",
-      "body-parser": ">=2.3.0"
+      "body-parser": ">=2.3.0",
+      "nanoid": ">=3.3.17"
     },
     "patchedDependencies": {
       "sonner@2.0.7": "patches/sonner@2.0.7.patch"
