@@ -1804,6 +1804,64 @@ export const webhookDeliveries = pgTable(
  * stream. `productId`/`actorId` are historical snapshots (no FK), so deleting a
  * product or user never rewrites past events.
  */
+/**
+ * The item change ledger: who changed what, when, and what it was before.
+ *
+ * Distinct from {@link outboxEvents}, which is a delivery queue: that one has
+ * mutable processing state and is prunable once delivered, while this is
+ * immutable and must outlive any delivery schedule. Rows are appended in the
+ * same transaction as the change that produced them (the pattern `writeOutbox`
+ * established), so a change can never exist without its record.
+ *
+ * Append-only, enforced by a database trigger. A revert is a new forward event,
+ * never an edit of the row it undoes.
+ *
+ * Item identity is snapshotted and carries no foreign key on purpose: an audit
+ * trail that erases itself when the item is deleted cannot answer "who deleted
+ * this, and what was it". Spec **content** is deliberately absent; git is
+ * canonical for that, and spec events point at `commitSha` instead.
+ */
+export const itemEvents = pgTable(
+  "item_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    /** Snapshot; no FK, so history survives the item's deletion. */
+    featureId: uuid("feature_id"),
+    /** The item's stable public id, snapshotted. */
+    specId: uuid("spec_id"),
+    /** The item's title when the change happened. */
+    itemTitle: text("item_title"),
+    /** Product scope at the time of the change; null = no product. */
+    productId: uuid("product_id"),
+    /** user | api_key | agent | sync | system (checked in the database). */
+    actorType: text("actor_type").notNull(),
+    /** The user the action ran as, including an API key's owner. */
+    actorId: uuid("actor_id"),
+    /** Display name at the time, so a renamed or deleted user stays readable. */
+    actorLabel: text("actor_label"),
+    type: text("type").notNull(),
+    /** The column that changed, for a field change. */
+    field: text("field"),
+    before: jsonb("before"),
+    after: jsonb("after"),
+    /** Event-specific detail that is not a field change. */
+    data: jsonb("data"),
+    /** For spec-content events: the commit the change landed in. */
+    commitSha: text("commit_sha"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("item_events_item_idx").on(t.workspaceId, t.featureId, t.createdAt),
+    index("item_events_ws_created_idx").on(t.workspaceId, t.createdAt),
+    index("item_events_actor_idx").on(t.workspaceId, t.actorId, t.createdAt),
+  ],
+);
+
 export const outboxEvents = pgTable(
   "outbox_events",
   {

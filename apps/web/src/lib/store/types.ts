@@ -1145,6 +1145,56 @@ export class LevelError extends Error {}
 export interface WorkspaceScope {
   userId: string;
   workspaceId: string;
+  /**
+   * How this change is reaching us. Omitted means a person in the browser,
+   * which is the safe default only because it is also the common one: every
+   * caller that is *not* a person is expected to say so.
+   *
+   * This is separate from `userId` because both matter. An MCP agent
+   * authenticates with an API key that belongs to a person, so the change is
+   * attributable to them and was still not typed by them. Reporting that cannot
+   * tell those apart cannot answer "what did the team change this month".
+   */
+  actor?: ActorRef;
+}
+
+/** Kinds of thing that can change an item. */
+export type ActorType = "user" | "api_key" | "agent" | "sync" | "system";
+
+/**
+ * One recorded change to an item, as the change log reads it back.
+ *
+ * `before`/`after` are the stored values, not rendered text: turning a status
+ * key or an assignee id into something a person can read needs the workspace's
+ * workflow and member list, which belong to the reader rather than the record.
+ * Keeping the raw values is also what makes revert possible.
+ */
+export interface ItemEvent {
+  id: string;
+  type: string;
+  field: string | null;
+  before: unknown;
+  after: unknown;
+  actorType: ActorType;
+  actorId: string | null;
+  /** Display name captured when the change was made. */
+  actorLabel: string | null;
+  /** ISO 8601; serializable across the server/client boundary. */
+  createdAt: string;
+}
+
+/**
+ * Who made a change, as the ledger records it.
+ *
+ * `label` is snapshotted at write time rather than joined on read: users get
+ * renamed and deleted, and a history that turns into a column of nulls when
+ * somebody leaves the company is not a history.
+ */
+export interface ActorRef {
+  type: ActorType;
+  /** The user the action ran as, including an API key's owner. */
+  id: string | null;
+  label: string | null;
 }
 
 /**
@@ -1595,6 +1645,16 @@ export interface FeatureStore {
     linkId: string,
     scope?: WorkspaceScope,
   ): Promise<void>;
+  /**
+   * One item's change history, newest first. Covers the fields Specboards
+   * stores; a spec-backed item's document history lives in git and is read
+   * from there, not from here.
+   */
+  listItemEvents(
+    specId: string,
+    scope?: WorkspaceScope,
+    limit?: number,
+  ): Promise<ItemEvent[]>;
   /** The acting user's saved backlog views (personal, newest first). */
   listSavedViews(scope?: WorkspaceScope): Promise<SavedView[]>;
   /** Persist a new saved view for the acting user; returns it with its id. */
