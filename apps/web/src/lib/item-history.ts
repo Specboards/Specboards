@@ -140,6 +140,16 @@ function describeTags(before: unknown, after: unknown): string {
  * history entry makes the entries around it unfindable.
  */
 export function describeChange(event: ItemEvent, ctx: HistoryContext): string {
+  // Events that describe the document rather than one of its fields. These
+  // carry no `field`, so the field-driven wording below would produce
+  // "changed the " with nothing after it.
+  if (event.type === "spec.body_changed") return "rewrote the spec";
+  if (event.type === "spec.moved") {
+    const from = typeof event.before === "string" ? event.before : null;
+    const to = typeof event.after === "string" ? event.after : null;
+    return from && to ? `moved the spec from ${from} to ${to}` : "moved the spec";
+  }
+
   const field = event.field ?? "";
   const label = FIELD_LABELS[field] ?? field;
 

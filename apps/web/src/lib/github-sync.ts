@@ -16,6 +16,7 @@ import {
   eq,
   features,
   isNull,
+  itemEvents,
   or,
   productRepositories,
   repositories,
@@ -435,6 +436,87 @@ export async function resolveRepositories(
  * connection. Either way this is cross-workspace ingestion, not a per-user
  * tenant request.
  */
+/** What a reconcile is about to overwrite on one item, and what with. */
+interface SyncChangeInput {
+  featureId: string;
+  specId: string;
+  productId: string | null;
+  previousTitle: string | null;
+  nextTitle: string;
+  previousPath: string | null;
+  nextPath: string;
+  previousBlobSha: string | null;
+  nextBlobSha: string;
+}
+
+/**
+ * Append ledger rows for what a git reconcile changed on an existing item.
+ *
+ * Actor is `sync` with no label. The change genuinely came from git, and
+ * attributing it to whoever happened to trigger the reconcile (a push webhook,
+ * or a person pressing "Sync now") would name someone who did not make it.
+ * Naming the git commit author would be better still, but `syncRepository` has
+ * no commit context and per-file authorship needs commit history per path, so
+ * these read as "A change in git" until that exists. That is honest; a wrong
+ * name would not be.
+ *
+ * The body change records the blob sha rather than the text. Git is canonical
+ * for spec content, and copying past bodies here would create a second source
+ * of truth for the one thing the product insists git owns.
+ *
+ * A first-time attach (an item that had no index row) is not a change: there is
+ * no previous value, and reporting the initial import as an edit would put a
+ * fictional event at the start of every spec's history.
+ */
+async function recordSyncChanges(
+  tx: Parameters<Parameters<Database["transaction"]>[0]>[0],
+  repo: RepoRecord,
+  input: SyncChangeInput,
+): Promise<void> {
+  const rows: (typeof itemEvents.$inferInsert)[] = [];
+  const base = {
+    workspaceId: repo.workspaceId,
+    featureId: input.featureId,
+    specId: input.specId,
+    itemTitle: input.previousTitle,
+    productId: input.productId,
+    actorType: "sync" as const,
+    actorId: null,
+    actorLabel: null,
+  };
+
+  if (input.previousTitle !== null && input.previousTitle !== input.nextTitle) {
+    rows.push({
+      ...base,
+      type: "item.field_changed",
+      field: "title",
+      before: input.previousTitle,
+      after: input.nextTitle,
+    });
+  }
+  if (input.previousPath !== null && input.previousPath !== input.nextPath) {
+    rows.push({
+      ...base,
+      type: "spec.moved",
+      field: "path",
+      before: input.previousPath,
+      after: input.nextPath,
+    });
+  }
+  if (input.previousBlobSha !== null && input.previousBlobSha !== input.nextBlobSha) {
+    rows.push({
+      ...base,
+      type: "spec.body_changed",
+      field: null,
+      // The blobs, not the bodies: enough to reach either version in git,
+      // without keeping a rival copy of the text.
+      data: { previousBlobSha: input.previousBlobSha, blobSha: input.nextBlobSha },
+    });
+  }
+
+  if (rows.length > 0) await tx.insert(itemEvents).values(rows);
+}
+
 export async function syncRepository(db: Database, repo: RepoRecord): Promise<SyncSummary> {
   const client = await resolveRepoClient(db, repo);
 
@@ -510,14 +592,22 @@ export async function syncRepository(db: Database, repo: RepoRecord): Promise<Sy
       // belonging to a *different* connected repo are excluded, so two repos
       // holding a copied spec file keep their own rows instead of one stealing
       // the other's.
+      // `title`, and the index's `path` / `blobSha`, are read for the change
+      // ledger: they are the values git is about to replace, and after the
+      // update nothing can recover what they were.
       const [existingRow] = await tx
         .select({
           id: features.id,
           parentId: features.parentId,
           parentSetBy: features.parentSetBy,
           syncedFeatureKey: features.syncedFeatureKey,
+          title: features.title,
+          productId: features.productId,
+          indexedPath: specIndex.path,
+          indexedBlobSha: specIndex.blobSha,
         })
         .from(features)
+        .leftJoin(specIndex, eq(specIndex.featureId, features.id))
         .where(
           and(
             eq(features.workspaceId, repo.workspaceId),
@@ -548,6 +638,19 @@ export async function syncRepository(db: Database, repo: RepoRecord): Promise<Sy
             updatedAt: new Date(),
           })
           .where(eq(features.id, existingRow.id));
+        // Record what git changed, while the previous values are still known.
+        // Same transaction as the reconcile, so the two cannot disagree.
+        await recordSyncChanges(tx, repo, {
+          featureId: existingRow.id,
+          specId,
+          productId: existingRow.productId,
+          previousTitle: existingRow.title,
+          nextTitle: item.spec.frontmatter.title,
+          previousPath: existingRow.indexedPath,
+          nextPath: item.path,
+          previousBlobSha: existingRow.indexedBlobSha,
+          nextBlobSha: item.blobSha,
+        });
         row = existingRow;
         summary.attached += 1;
       } else {
