@@ -130,6 +130,10 @@ export default async function IntegrationsSettingsPage({
       defaultBranch: repositories.defaultBranch,
       githubInstallationId: repositories.githubInstallationId,
       isSpecRepo: repositories.isSpecRepo,
+      // For the write-mode row: what the repo's own config says, and whether
+      // an admin has overridden it here.
+      config: repositories.config,
+      writeModeOverride: repositories.writeModeOverride,
     })
     .from(repositories)
     .where(eq(repositories.workspaceId, access.workspaceId));
@@ -176,7 +180,17 @@ export default async function IntegrationsSettingsPage({
       }
       repositories={
         <RepositoriesManager
-          repos={repoRows}
+          repos={repoRows.map((r) => ({
+            ...r,
+            // `config` is jsonb, so it arrives as unknown. Only the write mode
+            // is read here, and it is read defensively: a config written under
+            // a different schema version still names one.
+            config: (r.config as { writeMode?: string } | null) ?? null,
+            writeModeOverride:
+              r.writeModeOverride === "pr" || r.writeModeOverride === "direct"
+                ? r.writeModeOverride
+                : null,
+          }))}
           canConnect={isAdmin}
           configured={configured}
           selfHosted={isSingleTenant()}

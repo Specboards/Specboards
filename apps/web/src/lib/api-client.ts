@@ -1627,8 +1627,10 @@ export interface ConnectedRepository {
   owner: string;
   name: string;
   defaultBranch: string;
-  config: { version: number; specGlobs?: string[] } | null;
+  config: { version: number; specGlobs?: string[]; writeMode?: string } | null;
   githubInstallationId: string;
+  /** Admin override of the repo config's writeMode; null means "use the config". */
+  writeModeOverride?: "pr" | "direct" | null;
 }
 
 /** Fetch one connected repo in the caller's workspace; throws if not found. */
@@ -1646,12 +1648,19 @@ export async function getRepository(id: string): Promise<ConnectedRepository> {
 }
 
 /**
- * Update a connected repo's default branch and/or spec-import globs. Admin-only
- * on the server; returns the updated record.
+ * Update a connected repo's default branch, spec-import globs, and/or write
+ * mode override. Admin-only on the server; returns the updated record.
+ *
+ * `writeModeOverride: null` is meaningful rather than absent: it clears the
+ * override and hands the decision back to the repo's `.specboards/config.yml`.
  */
 export async function updateRepository(
   id: string,
-  patch: { defaultBranch?: string; specGlobs?: string[] },
+  patch: {
+    defaultBranch?: string;
+    specGlobs?: string[];
+    writeModeOverride?: "pr" | "direct" | null;
+  },
 ): Promise<ConnectedRepository> {
   const res = await apiFetch(`/api/v1/repositories/${encodeURIComponent(id)}`, {
     method: "PATCH",

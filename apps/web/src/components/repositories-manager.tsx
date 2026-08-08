@@ -13,6 +13,7 @@ import {
   listInstallationRepositories,
   scanWorkspaceSpecs,
   setRepositoryProducts,
+  updateRepository,
   type CreatedSpecRepo,
   type ImportResult,
   type InstallationConnectState,
@@ -33,6 +34,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useOrgProductPath } from "@/lib/use-org";
 
@@ -44,6 +46,10 @@ export interface ConnectedRepo {
   githubInstallationId: string;
   /** The workspace's dedicated spec repository (one-click created). */
   isSpecRepo?: boolean;
+  /** Parsed `.specboards/config.yml`, for the write mode it declares. */
+  config?: { writeMode?: string } | null;
+  /** Admin override of that write mode; null means the config decides. */
+  writeModeOverride?: "pr" | "direct" | null;
 }
 
 export type SetupNotice = { kind: "ok" | "error"; message: string } | null;
@@ -1043,6 +1049,7 @@ function RepoRow({
             Unassigned: new specs land in the workspace&apos;s default product.
           </p>
         )}
+        <RepoWriteMode repo={repo} canManage={canManage} />
         {editingProducts && canManage ? (
           <RepoProductsEditor
             repoId={repo.id}
@@ -1057,6 +1064,91 @@ function RepoRow({
         ) : null}
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * How spec edits made in the app reach this repo, and who decided.
+ *
+ * The setting's real home is the repo's own `.specboards/config.yml`, where it
+ * is versioned with the code. This is the escape hatch for the case that home
+ * is unreachable: an admin connecting a repository they cannot commit to would
+ * otherwise have to open a pull request in order to change how pull requests
+ * are made.
+ *
+ * Where the value came from is shown, not just the value. "Why are my saves
+ * going straight to main?" is a question the UI should be able to answer
+ * without anyone opening a YAML file.
+ */
+function RepoWriteMode({
+  repo,
+  canManage,
+}: {
+  repo: ConnectedRepo;
+  canManage: boolean;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [override, setOverride] = useState(repo.writeModeOverride ?? null);
+  const [error, setError] = useState<string | null>(null);
+
+  const fromConfig =
+    repo.config?.writeMode === "pr" || repo.config?.writeMode === "direct"
+      ? repo.config.writeMode
+      : null;
+  const effective = override ?? fromConfig ?? "pr";
+  const source = override
+    ? "set here"
+    : fromConfig
+      ? "from .specboards/config.yml"
+      : "the default";
+
+  function choose(next: "pr" | "direct" | "") {
+    const value = next === "" ? null : next;
+    setError(null);
+    setOverride(value);
+    startTransition(async () => {
+      try {
+        await updateRepository(repo.id, { writeModeOverride: value });
+        router.refresh();
+      } catch (err) {
+        // Put the control back where it was: leaving it showing a choice the
+        // server rejected would misreport what this repo actually does.
+        setOverride(repo.writeModeOverride ?? null);
+        setError(err instanceof Error ? err.message : "Could not save.");
+      }
+    });
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+      <span>
+        Spec edits{" "}
+        {effective === "pr"
+          ? "open a pull request for review"
+          : "commit straight to the default branch"}{" "}
+        ({source}).
+      </span>
+      {canManage ? (
+        <>
+          <label className="sr-only" htmlFor={`write-mode-${repo.id}`}>
+            Write mode for {repo.owner}/{repo.name}
+          </label>
+          <Select
+            id={`write-mode-${repo.id}`}
+            className="h-7 w-auto text-xs"
+            value={override ?? ""}
+            disabled={pending}
+            onChange={(e) => choose(e.target.value as "pr" | "direct" | "")}
+          >
+            <option value="">Use the repo&apos;s config</option>
+            <option value="pr">Always ask for review</option>
+            <option value="direct">Always commit directly</option>
+          </Select>
+        </>
+      ) : null}
+      {error ? <span className="text-destructive">{error}</span> : null}
+    </div>
   );
 }
 
