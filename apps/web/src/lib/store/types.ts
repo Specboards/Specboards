@@ -138,6 +138,12 @@ export interface GithubLink {
   title: string | null;
   /** Cached state: open / closed / merged; null for a branch. */
   state: string | null;
+  /**
+   * Head branch of a pull request Specboards opened to propose a change to this
+   * item's spec, or null for every other link. Non-null is the marker for "this
+   * is a pending change to the spec", which a hand-linked pull request is not.
+   */
+  headBranch: string | null;
   /** The item the link is stored on (the spec it implements). */
   sourceSpecId: string;
   sourceTitle: string;
@@ -176,6 +182,8 @@ export interface ResolvedGithubLink {
   url: string;
   title: string | null;
   state: string | null;
+  /** Set only by the spec write path; see {@link GithubLink.headBranch}. */
+  headBranch?: string | null;
 }
 
 export interface FeatureRelation {

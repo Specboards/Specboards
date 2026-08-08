@@ -16,6 +16,7 @@ import { ItemGoals } from "@/components/item-goals";
 import { ItemProperties } from "@/components/item-properties";
 import { ItemTitle } from "@/components/item-title";
 import { SpecBodyEditor } from "@/components/spec-body-editor";
+import { SpecPendingChange } from "@/components/spec-pending-change";
 import { StatusDot } from "@/components/status-dot";
 import { WorkItemDelete } from "@/components/work-item-controls";
 import { Badge } from "@/components/ui/badge";
@@ -132,6 +133,10 @@ export function ItemDetailView({
       {/* Description / body */}
       <div className="space-y-2">
         <h2 className="text-sm font-medium text-muted-foreground">Description</h2>
+        {/* Above the body on purpose: it explains why the text underneath is
+            not the change someone just made, so reading it afterwards is too
+            late to stop them concluding the editor lost their work. */}
+        <SpecPendingChange links={feature.githubLinks} />
         {editableBody ? (
           <FeatureDetailsEditor
             specId={feature.specId}

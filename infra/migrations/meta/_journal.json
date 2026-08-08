@@ -379,6 +379,13 @@
       "when": 1786244400000,
       "tag": "0053_repo_write_mode_override",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1786330800000,
+      "tag": "0054_github_link_head_branch",
+      "breakpoints": true
     }
   ]
 }

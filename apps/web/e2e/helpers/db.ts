@@ -229,3 +229,27 @@ export async function seedRepository(input: {
   if (!row) throw new Error("Failed to seed repository row.");
   return row.id;
 }
+
+/**
+ * Move a stored GitHub link to a new cached state, keyed by its url.
+ *
+ * This is the same single-column write the `pull_request` webhook makes when a
+ * review is merged or closed (see `updateLinksFromEntityEvent`), which is how
+ * this happens in production. Doing it here keeps a test about what the item
+ * detail shows from also having to mint a signed webhook delivery.
+ *
+ * Returns the number of rows changed so a caller can tell "the state moved"
+ * apart from "the link was never recorded", which otherwise look identical
+ * from the page.
+ */
+export async function setGithubLinkState(
+  url: string,
+  state: "open" | "closed" | "merged",
+): Promise<number> {
+  const updated = await db()
+    .update(schema.featureGithubLinks)
+    .set({ state })
+    .where(eq(schema.featureGithubLinks.url, url))
+    .returning({ id: schema.featureGithubLinks.id });
+  return updated.length;
+}
