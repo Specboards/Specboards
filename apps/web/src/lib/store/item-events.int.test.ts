@@ -265,6 +265,34 @@ describe.skipIf(!OWNER_URL)("item change ledger", () => {
       expect(inProgress!.averageHours).toBeGreaterThanOrEqual(0);
     });
 
+    it("narrows to the products asked for, and reports nothing for none", async () => {
+      const item = await newItem("Report: product scope");
+      await store.updateFeature(item.specId, { status: "in_progress" }, asOwner);
+
+      const mine = await store.itemActivitySummary(
+        { ...WIDE, productIds: [product.alpha] },
+        asOwner,
+      );
+      expect(mine.total).toBeGreaterThan(0);
+
+      // An empty list is a request for nothing. It has to stay distinguishable
+      // from "omitted", or a product group with no products in it would render
+      // the whole workspace's output under its own name.
+      const none = await store.itemActivitySummary(
+        { ...WIDE, productIds: [] },
+        asOwner,
+      );
+      expect(none.total).toBe(0);
+
+      // Asking for a product you cannot read narrows the report; it must never
+      // widen it back out to everything readable.
+      const stranger = await store.itemActivitySummary(
+        { ...WIDE, productIds: [randomUUID()] },
+        asOwner,
+      );
+      expect(stranger.total).toBe(0);
+    });
+
     it("reports nothing to a workspace it does not belong to", async () => {
       const item = await newItem("Report: tenancy");
       await store.updateFeature(item.specId, { status: "in_progress" }, asOwner);

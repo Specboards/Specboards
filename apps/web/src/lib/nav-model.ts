@@ -1,4 +1,5 @@
 import {
+  Activity,
   Compass,
   DraftingCompass,
   Gauge,
@@ -68,6 +69,16 @@ export const GROUPS: NavGroup[] = [
     items: [
       { href: "/roadmap", label: "Roadmap", icon: Map, productScoped: true },
       { label: "Adoption", icon: TrendingUp, soon: true },
+    ],
+  },
+  {
+    // Looking back at work that already happened, rather than planning or
+    // running it. Its own group because the question ("what changed, and who
+    // changed it") is asked by different people, at different times, than the
+    // boards above.
+    label: "Measure",
+    items: [
+      { href: "/activity", label: "Activity", icon: Activity, productScoped: true },
     ],
   },
   {

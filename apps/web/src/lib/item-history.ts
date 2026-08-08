@@ -1,5 +1,5 @@
 import { statusLabel } from "@/lib/feature-helpers";
-import type { ItemEvent } from "@/lib/store/types";
+import type { ActorType, ItemEvent } from "@/lib/store/types";
 import type { StatusWorkflow } from "@specboards/core";
 
 /**
@@ -37,7 +37,8 @@ export interface HistoryEntry {
   automated: boolean;
 }
 
-const FIELD_LABELS: Record<string, string> = {
+/** What each stored field is called in prose. Shared with activity reporting. */
+export const FIELD_LABELS: Record<string, string> = {
   title: "title",
   status: "status",
   tags: "tags",
@@ -60,7 +61,10 @@ const FIELD_LABELS: Record<string, string> = {
  * it was not them typing. "Release bot" alone would hide who is accountable;
  * the owner's name alone would claim they did something they did not.
  */
-export function describeActor(event: ItemEvent): { actor: string; automated: boolean } {
+export function describeActor(event: {
+  actorType: ActorType;
+  actorLabel: string | null;
+}): { actor: string; automated: boolean } {
   const named = event.actorLabel?.trim();
   switch (event.actorType) {
     case "user":
