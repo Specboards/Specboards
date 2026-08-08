@@ -386,7 +386,7 @@ export async function updateSpecContent(
   const existing = await client.readFile(path);
   const content = rewriteSpecBody(existing.raw, body, { id: specId, title });
   const message = opts.message?.trim() || `docs(specboard): update ${path}`;
-  const { mode } = resolveWriteMode(repo.config);
+  const { mode } = resolveWriteMode(repo.config, repo.writeModeOverride);
   const { commitSha, blobSha, pullRequest, mergedWith, mergedBody } = await writeMerged(
     client,
     {

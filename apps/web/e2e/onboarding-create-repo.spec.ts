@@ -29,7 +29,9 @@ test.describe("onboarding: one-click dedicated spec repo", () => {
     await expect(
       page.getByText(/didn.?t find any specs in your connected repositories/i),
     ).toBeVisible();
-    await expect(page.getByText("acme/specs")).toBeVisible();
+    // `exact` matters: the repo row's write-mode control carries a screen
+    // reader label naming the same repo, so a loose match hits both.
+    await expect(page.getByText("acme/specs", { exact: true })).toBeVisible();
   });
 
   test("keeps the manual instructions for personal-account installations", async ({ page }) => {

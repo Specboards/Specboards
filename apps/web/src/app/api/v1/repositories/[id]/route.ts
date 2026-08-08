@@ -38,12 +38,15 @@ export async function GET(req: Request, { params }: Params) {
 interface RepositoryPatch {
   defaultBranch?: string;
   specGlobs?: string[];
+  /** `null` clears the override and hands the decision back to the repo config. */
+  writeModeOverride?: string | null;
 }
 
 /**
- * Validate an untrusted repository patch: an optional `defaultBranch` and/or
- * `specGlobs` (which becomes the repo's spec-import config). Returns an error
- * string when the body is malformed or empty.
+ * Validate an untrusted repository patch: an optional `defaultBranch`,
+ * `specGlobs` (which becomes the repo's spec-import config), and/or
+ * `writeModeOverride`. Returns an error string when the body is malformed or
+ * empty.
  */
 function parseRepositoryPatch(body: unknown): RepositoryPatch | string {
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
@@ -74,16 +77,36 @@ function parseRepositoryPatch(body: unknown): RepositoryPatch | string {
       .filter(Boolean);
   }
 
-  if (patch.defaultBranch === undefined && patch.specGlobs === undefined) {
-    return "Provide at least one of defaultBranch or specGlobs to update.";
+  if (raw.writeModeOverride !== undefined) {
+    // null is a real value here, not an omission: it is how an admin gives the
+    // decision back to the repo's own config after having taken it away.
+    if (raw.writeModeOverride === null) {
+      patch.writeModeOverride = null;
+    } else if (
+      raw.writeModeOverride !== "pr" &&
+      raw.writeModeOverride !== "direct"
+    ) {
+      return 'writeModeOverride must be "pr", "direct", or null.';
+    } else {
+      patch.writeModeOverride = raw.writeModeOverride;
+    }
+  }
+
+  if (
+    patch.defaultBranch === undefined &&
+    patch.specGlobs === undefined &&
+    patch.writeModeOverride === undefined
+  ) {
+    return "Provide at least one of defaultBranch, specGlobs or writeModeOverride to update.";
   }
   return patch;
 }
 
 /**
- * PATCH /api/v1/repositories/:id — update a connected repo's default branch
- * and/or spec-import globs. Admin-only, mirroring connect/disconnect (it
- * reshapes what gets imported from someone's source tree).
+ * PATCH /api/v1/repositories/:id — update a connected repo's default branch,
+ * spec-import globs, and/or write mode override. Admin-only, mirroring
+ * connect/disconnect (it reshapes what gets imported from someone's source
+ * tree, and decides whether in-app edits are reviewed before they land).
  */
 export async function PATCH(req: Request, { params }: Params) {
   const authz = await authorizeOrgAdmin(req);
@@ -109,6 +132,9 @@ export async function PATCH(req: Request, { params }: Params) {
     set.defaultBranch = parsed.defaultBranch;
   if (parsed.specGlobs !== undefined) {
     set.config = { version: 1, specGlobs: parsed.specGlobs };
+  }
+  if (parsed.writeModeOverride !== undefined) {
+    set.writeModeOverride = parsed.writeModeOverride;
   }
 
   const { id } = await params;

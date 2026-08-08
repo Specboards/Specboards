@@ -485,6 +485,14 @@ export const repositories = pgTable(
     isSpecRepo: boolean("is_spec_repo").notNull().default(false),
     /** Parsed `.specboards/config.yml`, refreshed on sync. */
     config: jsonb("config"),
+    /**
+     * Admin-set write mode that wins over the repo config's `writeMode`, or
+     * null for "whatever the repo says". Exists because a Specboard admin may
+     * have no commit access to a connected repo's `.specboards/config.yml`,
+     * and needing a pull request to change how pull requests are made is a bad
+     * first day. Constrained to 'pr' | 'direct' in the migration.
+     */
+    writeModeOverride: text("write_mode_override"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

@@ -183,14 +183,17 @@ export async function resolveSpecWriteMode(
   specId: string,
 ): Promise<ResolvedWriteMode | null> {
   const [row] = await db
-    .select({ config: repositories.config })
+    .select({
+      config: repositories.config,
+      override: repositories.writeModeOverride,
+    })
     .from(features)
     .innerJoin(repositories, eq(repositories.id, features.repoId))
     .where(
       and(eq(features.specId, specId), eq(features.workspaceId, workspaceId)),
     )
     .limit(1);
-  return row ? resolveWriteMode(row.config) : null;
+  return row ? resolveWriteMode(row.config, row.override) : null;
 }
 
 /** The spec globs configured for a repo, falling back to the default. */
