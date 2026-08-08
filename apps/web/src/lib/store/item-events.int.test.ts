@@ -195,4 +195,84 @@ describe.skipIf(!OWNER_URL)("item change ledger", () => {
     const stranger = { userId: randomUUID(), workspaceId: randomUUID() };
     expect(await store.listItemEvents(item.specId, stranger)).toEqual([]);
   });
+  describe("activity reporting", () => {
+    const WIDE = { from: "2000-01-01T00:00:00.000Z", to: "2999-01-01T00:00:00.000Z" };
+
+    it("says when history begins, so a quiet window is not read as quiet work", async () => {
+      const item = await newItem("Report: since");
+      await store.updateFeature(item.specId, { status: "in_progress" }, asOwner);
+
+      const summary = await store.itemActivitySummary(WIDE, asOwner);
+      // The ledger starts when it was deployed. A report that omits this makes
+      // a period of no *recording* look like a period of no *work*.
+      expect(summary.since).not.toBeNull();
+      expect(new Date(summary.since!).getTime()).toBeLessThanOrEqual(Date.now());
+    });
+
+    it("counts nothing outside the window it was asked about", async () => {
+      const item = await newItem("Report: window");
+      await store.updateFeature(item.specId, { status: "in_progress" }, asOwner);
+
+      const past = await store.itemActivitySummary(
+        { from: "2000-01-01T00:00:00.000Z", to: "2000-02-01T00:00:00.000Z" },
+        asOwner,
+      );
+      expect(past.total).toBe(0);
+      expect(past.byActor).toEqual([]);
+      // `since` still reports, because it is a property of the ledger rather
+      // than of the window, and it is what explains an empty window.
+      expect(past.since).not.toBeNull();
+    });
+
+    it("separates people from automations", async () => {
+      const item = await newItem("Report: actors");
+      await store.updateFeature(item.specId, { status: "in_progress" }, asOwner);
+      await store.updateFeature(item.specId, { assigneeId: user.mate }, asAgent);
+
+      const summary = await store.itemActivitySummary(WIDE, asOwner);
+      const kinds = summary.byActor.map((a) => a.actorType);
+      // The question the actor model exists to answer. If these collapsed into
+      // one bucket, "what did the team change" would silently include the bots.
+      expect(kinds).toContain("user");
+      expect(kinds).toContain("api_key");
+    });
+
+    it("groups by what changed", async () => {
+      const item = await newItem("Report: fields");
+      await store.updateFeature(item.specId, { status: "in_progress" }, asOwner);
+      await store.updateFeature(item.specId, { title: "Report: renamed" }, asOwner);
+
+      const summary = await store.itemActivitySummary(WIDE, asOwner);
+      const fields = summary.byField.map((f) => f.field);
+      expect(fields).toContain("status");
+      expect(fields).toContain("title");
+    });
+
+    it("measures a stage only when both ends of it were recorded", async () => {
+      const item = await newItem("Report: stage time");
+      // One status change: we know when it left this stage, but not when it
+      // entered, so there is no completed span to average yet.
+      await store.updateFeature(item.specId, { status: "in_progress" }, asOwner);
+      const first = await store.itemActivitySummary(WIDE, asOwner);
+      expect(first.stageTime.find((s) => s.status === "backlog")).toBeUndefined();
+
+      // A second change closes the span for the stage in between.
+      await store.updateFeature(item.specId, { status: "in_review" }, asOwner);
+      const second = await store.itemActivitySummary(WIDE, asOwner);
+      const inProgress = second.stageTime.find((s) => s.status === "in_progress");
+      expect(inProgress?.samples).toBeGreaterThanOrEqual(1);
+      // Never negative, and measured in hours from a span of seconds.
+      expect(inProgress!.averageHours).toBeGreaterThanOrEqual(0);
+    });
+
+    it("reports nothing to a workspace it does not belong to", async () => {
+      const item = await newItem("Report: tenancy");
+      await store.updateFeature(item.specId, { status: "in_progress" }, asOwner);
+
+      const stranger = { userId: randomUUID(), workspaceId: randomUUID() };
+      const summary = await store.itemActivitySummary(WIDE, stranger);
+      expect(summary.total).toBe(0);
+      expect(summary.since).toBeNull();
+    });
+  });
 });
