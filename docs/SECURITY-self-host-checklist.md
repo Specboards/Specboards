@@ -132,6 +132,14 @@ a live backstop behind the app-code workspace filters.
       production advisories; run it against your build if you fork or vendor.
 - [ ] Run behind the reverse proxy / WAF you would use for any internet-facing
       service, and keep the host OS patched.
+- [ ] **Set `SPECBOARDS_TRUST_PROXY=1` only if your proxy overwrites
+      `x-forwarded-for`** (rather than appending to whatever the client sent).
+      Rate limiting keys on the client IP; if that header is client-controlled,
+      a caller gets a fresh bucket per request by varying it, and the limit
+      reads as per-IP while providing none. Left unset, the app ignores the
+      header and falls back to a single shared bucket for unidentifiable
+      clients: blunter, but not forgeable. On Fly this does not arise, because
+      `Fly-Client-IP` is set at the edge and takes precedence.
 
 ## 8. License notices (AGPL)
 

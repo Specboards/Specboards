@@ -12,6 +12,7 @@ import {
   signUpCodeMatches,
   signUpCodeRequired,
 } from "@/lib/access-gate";
+import { trustsForwardedFor } from "@/lib/client-ip";
 import { getDb } from "@/lib/db";
 import { isE2E } from "@/lib/e2e";
 import { renderActionEmail, sendEmail } from "@/lib/email";
@@ -311,7 +312,19 @@ function createAuth(url: string) {
       // without this the rate limiter can't key on IP and collapses to ONE
       // shared bucket per path for all visitors (observed on prod). Fly
       // overwrites Fly-Client-IP at its edge, so it is trustworthy here.
-      ipAddress: { ipAddressHeaders: ["fly-client-ip", "x-forwarded-for"] },
+      //
+      // `x-forwarded-for` is only added when a proxy is declared to normalise
+      // it (SPECBOARDS_TRUST_PROXY), matching the trust model in
+      // `lib/client-ip.ts`. Nothing overwrites that header on a deployment
+      // without such a proxy, so listing it unconditionally let a caller mint a
+      // fresh limiter bucket per request by varying one header - the limit
+      // looked per-IP and was not. On Fly the first entry answers anyway, so
+      // this changes nothing there.
+      ipAddress: {
+        ipAddressHeaders: trustsForwardedFor()
+          ? ["fly-client-ip", "x-forwarded-for"]
+          : ["fly-client-ip"],
+      },
     },
   });
 }

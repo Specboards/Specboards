@@ -107,4 +107,16 @@ export const QUOTAS = {
    * and Better Auth already limits the auth routes).
    */
   apiRequest: { op: "api-request", limit: 600, windowSec: 60 },
+  /**
+   * The public "Request access" intake, which is unauthenticated, CORS-open to
+   * the marketing site, and sends TWO emails per accepted request (review inbox
+   * + requester confirmation).
+   *
+   * Two quotas, because they stop different things. Per client (see
+   * `lib/client-ip.ts`) caps one source hammering the form; per email address
+   * caps a botnet with many IPs mailbombing one person, which the per-client
+   * limit cannot see. Both are generous for a form a human fills in once.
+   */
+  accessRequest: { op: "access-request", limit: 5, windowSec: 3600 },
+  accessRequestEmail: { op: "access-request-email", limit: 3, windowSec: 86_400 },
 } as const satisfies Record<string, Quota>;
