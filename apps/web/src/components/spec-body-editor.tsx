@@ -13,6 +13,7 @@ import {
   type SpecConflict,
   type SpecWriteResult,
 } from "@/lib/api-client";
+import { saveButtonLabel, saveStatusLine } from "@/lib/spec-save-copy";
 
 /**
  * Headline for the conflict panel, naming what was actually fought over.
@@ -38,11 +39,16 @@ function conflictHeading(sections: string[] | undefined): string {
  * Deliberately **not** the autosave that {@link FeatureDetailsEditor} gives a
  * DB-native card. A card's body is a database column and a save costs nothing;
  * a spec's is a commit, and debounced autosave would turn one editing session
- * into a dozen of them in the repo history. So the save here is an explicit act,
- * announced as a commit and reporting the sha it produced. The two paths are
- * also kept visibly distinct on purpose: from v0.26.2 this one can open a pull
- * request, and an author who was never told their edit goes through git will not
- * understand what happened to it.
+ * into a dozen of them in the repo history. So the save here is an explicit act.
+ *
+ * What that act is *called* is not. The author this flow exists for did not opt
+ * into git and cannot act on a sha or a branch name, so the copy says what
+ * happened to their document: it is live, or it is waiting for review. The
+ * mechanism stays reachable for anyone who wants it (the commit is in the status
+ * line's tooltip, the review is a link) without being the primary reading. What
+ * still has to be obvious is the *consequence*, because in review mode the board
+ * keeps showing the old text and an author who was not told that reads it as a
+ * lost edit.
  *
  * The editor only ever sees the body. Frontmatter (and with it the stable `id`
  * that ties the file to its board row through renames) is reattached server-side
@@ -113,6 +119,14 @@ export function SpecBodyEditor({
   // What this save is going to do. The server decides for real; this only sets
   // expectations, so an unknown mode falls back to the plainer commit wording.
   const proposes = writeMode === "pr";
+  const copyState = {
+    proposes,
+    saving,
+    dirty,
+    proposed: Boolean(proposed),
+    saved: commitSha !== null,
+    path,
+  };
 
   // With an explicit save, a closed tab loses the edit. Drafts are a later
   // feature; until then the browser's own guard is what stands between an
@@ -180,7 +194,7 @@ export function SpecBodyEditor({
         // what they proposed; leave it there.
         return;
       }
-      toast.success(`Committed ${result.commitSha.slice(0, 7)}`);
+      toast.success("Saved. Your change is live.");
       // updateSpecContent re-syncs the repo before returning, so the cache is
       // already current: re-render from it, so what the author reads back is
       // what landed in git rather than their own optimistic copy.
@@ -309,30 +323,18 @@ export function SpecBodyEditor({
       ) : null}
       <div className="flex flex-wrap items-center gap-3">
         <Button size="sm" onClick={() => save()} disabled={!dirty || saving}>
-          {saving
-            ? proposes
-              ? "Sending…"
-              : "Committing…"
-            : proposes
-              ? "Send for review"
-              : "Commit changes"}
+          {saveButtonLabel(copyState)}
         </Button>
-        <p className="text-2xs text-muted-foreground" role="status" aria-live="polite">
-          {saving
-            ? proposes
-              ? `Proposing a change to ${path}…`
-              : `Committing to ${path}…`
-            : dirty
-              ? proposes
-                ? `Unsaved changes. Sending asks for a review of ${path}.`
-                : `Unsaved changes. Committing writes ${path} to the repo.`
-              : proposed
-                ? `Waiting for review. ${path} keeps its current text on the board until this is approved.`
-                : commitSha
-                  ? `Committed ${commitSha.slice(0, 7)} to ${path}.`
-                  : proposes
-                    ? `Changes to ${path} go for review before they reach the board.`
-                    : `Saved changes are committed to ${path}.`}
+        <p
+          className="text-2xs text-muted-foreground"
+          role="status"
+          aria-live="polite"
+          // The commit is still reachable for anyone who wants it, without
+          // being the primary reading. Someone debugging can hover; the author
+          // this flow is for never has to learn what a sha is.
+          title={commitSha ? `Commit ${commitSha.slice(0, 7)}` : undefined}
+        >
+          {saveStatusLine(copyState)}
         </p>
         {/* The link is the whole point of saying a change is under review: an
             author who cannot reach the review has been told to wait with no way
