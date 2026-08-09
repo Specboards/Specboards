@@ -10,6 +10,7 @@ import { and, eq, featureGithubLinks, githubInstallations, type Database } from 
 
 import { readTextBodyWithin } from "@/lib/api/body";
 import { getWorkerDb } from "@/lib/db";
+import { claimDelivery, pruneDeliveries } from "@/lib/github-delivery-dedup";
 import { getWebhookSecret } from "@/lib/github-app";
 import { notifyReviewOutcome } from "@/lib/review-outcome-notify";
 import { logSecurityEvent } from "@/lib/security-log";
@@ -98,7 +99,26 @@ export async function POST(req: Request) {
   }
 
   const event = req.headers.get("x-github-event");
+  // Ping carries no state to duplicate, and GitHub sends it on setup before
+  // anything is configured; let it through without consuming a delivery id.
   if (event === "ping") return Response.json({ ok: true });
+
+  // Claim the delivery before acting on it. A valid signature says GitHub sent
+  // this, not that GitHub sent it for the first time: without this, a captured
+  // delivery (or a click in GitHub's redelivery UI) re-runs the sync path, and
+  // for pull_request events re-notifies the author of a merge they were already
+  // told about. 2xx on a duplicate so GitHub marks it handled rather than
+  // retrying into the same wall.
+  const claim = await claimDelivery(db, req.headers.get("x-github-delivery"));
+  if (!claim.ok) {
+    return Response.json(
+      claim.reason === "duplicate"
+        ? { ok: true, duplicate: true }
+        : { error: "Missing x-github-delivery header." },
+      { status: claim.reason === "duplicate" ? 200 : 400 },
+    );
+  }
+  void pruneDeliveries(db);
   if (
     event !== "push" &&
     event !== "pull_request" &&

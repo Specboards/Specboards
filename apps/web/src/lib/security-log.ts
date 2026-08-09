@@ -12,6 +12,13 @@ export type SecurityEvent =
   | "request-oversized"
   | "batch-oversized"
   | "webhook-signature-invalid"
+  // A correctly-signed GitHub delivery whose id we had already processed:
+  // either a replay, or one of GitHub's own retries. Expected occasionally;
+  // a burst of them is someone re-sending captured deliveries.
+  | "webhook-delivery-replayed"
+  // A GitHub delivery with no usable `x-github-delivery` header. Every genuine
+  // delivery carries one, so this is either a forgery or a broken sender.
+  | "webhook-delivery-id-missing"
   // A GitHub account-connect callback whose state did not match the cookie.
   // Worth a line because this flow ends in storing a repo-write credential.
   | "github-user-connect-state-mismatch";
