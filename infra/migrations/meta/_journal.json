@@ -421,6 +421,13 @@
       "when": 1786348800000,
       "tag": "0059_github_user_tokens",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1786352400000,
+      "tag": "0060_spec_write_audit",
+      "breakpoints": true
     }
   ]
 }

@@ -1516,6 +1516,57 @@ export const githubUserTokens = pgTable(
 );
 
 /**
+ * Every attempt to write a spec, recorded in the product rather than only in
+ * git.
+ *
+ * Git has no record of a commit that never happened, which is exactly the case
+ * someone is investigating when they ask why a change they remember making is
+ * not there. So refusals and failures are recorded as deliberately as successes,
+ * with `detail` carrying the reason in the words the author was shown.
+ *
+ * `attribution` records whether the change was committed as the author, credited
+ * through a co-author trailer, or attributed to nobody. Without it, a history
+ * full of app-authored commits cannot be told apart from one where attribution
+ * silently stopped working.
+ *
+ * No FK on `actorId`: an audit row must outlive the account it names.
+ */
+export const specWriteAudit = pgTable(
+  "spec_write_audit",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    actorId: uuid("actor_id"),
+    /** Display name snapshotted at write time, like the change ledger's. */
+    actorLabel: text("actor_label"),
+    specId: uuid("spec_id"),
+    repoId: uuid("repo_id"),
+    path: text("path").notNull(),
+    /** create | update | remove */
+    action: text("action").notNull(),
+    /** pr | direct; null when the write never got as far as choosing. */
+    mode: text("mode"),
+    /** committed | proposed | refused | failed */
+    outcome: text("outcome").notNull(),
+    /** author | co_author | none */
+    attribution: text("attribution").notNull(),
+    commitSha: text("commit_sha"),
+    pullRequestNumber: integer("pull_request_number"),
+    /** Why, for a refusal or failure; the message the author was shown. */
+    detail: text("detail"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("spec_write_audit_ws_created_idx").on(t.workspaceId, t.createdAt),
+    index("spec_write_audit_spec_idx").on(t.specId),
+  ],
+);
+
+/**
  * Auth tables (Better Auth). Postgres mints UUID ids (Better Auth runs with
  * `generateId: false`) so they line up with the existing uuid user references
  * (`members.user_id`, `comments.author_id`, `features.assignee_id`).

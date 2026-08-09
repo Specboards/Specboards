@@ -32,6 +32,7 @@ import {
   specCommitMessage,
 } from "@/lib/commit-attribution";
 import { recordWritePullRequest } from "@/lib/github-links-service";
+import { recordSpecWrite } from "@/lib/spec-write-audit";
 import {
   resolveRepoClient,
   resolveRepoDefaultProduct,
@@ -386,7 +387,26 @@ export async function updateSpecContent(
   body: string,
   opts: { message?: string; expectedBlobSha?: string } = {},
 ): Promise<SpecWriteResult> {
-  const { repo, path, title } = await authorizeSpecWrite(db, scope, specId);
+  // A refusal is recorded too. Git has no record of a commit that never
+  // happened, and that is exactly the case someone is investigating when they
+  // ask why a change they remember making is not there.
+  let target: SpecGitTarget;
+  try {
+    target = await authorizeSpecWrite(db, scope, specId);
+  } catch (err) {
+    await recordSpecWrite(db, {
+      workspaceId: scope.workspaceId,
+      actorId: scope.userId,
+      specId,
+      path: specId,
+      action: "update",
+      outcome: "refused",
+      attribution: "none",
+      detail: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
+  }
+  const { repo, path, title } = target;
   // Commits as the author when they have connected an account and can push,
   // which makes the trailer unnecessary: naming someone as co-author on a
   // commit they already authored reads as two people having written it.
@@ -414,10 +434,29 @@ export async function updateSpecContent(
     { id: specId, title, body },
   );
 
+  const audit = {
+    workspaceId: scope.workspaceId,
+    actorId: scope.userId,
+    specId,
+    repoId: repo.id,
+    path,
+    action: "update" as const,
+    mode,
+    attribution: (asAuthor ? "author" : "co_author") as "author" | "co_author",
+    commitSha,
+  };
+
   if (!pullRequest) {
+    await recordSpecWrite(db, { ...audit, outcome: "committed" });
     await syncRepository(db, repo);
     return { specId, path, commitSha, blobSha, mergedWith, mergedBody };
   }
+
+  await recordSpecWrite(db, {
+    ...audit,
+    outcome: "proposed",
+    pullRequestNumber: pullRequest.number,
+  });
 
   // The commit has already landed on the working branch, so a link that fails
   // to record is a traceability problem, not a failed save. Say so in the log
