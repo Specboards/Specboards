@@ -4482,9 +4482,20 @@ export class DbStore implements FeatureStore {
         .from(workspaces)
         .where(eq(workspaces.id, scope!.workspaceId))
         .limit(1);
+
+      // No row is not a configuration state, it is a broken scope: the caller
+      // was authorized against a workspace this query cannot see. Reading that
+      // as "strict" is what made a failed save look like a deliberate setting,
+      // so it fails loudly instead.
+      if (row.length === 0) {
+        throw new Error(
+          `Workspace ${scope!.workspaceId} not found while reading its transition mode.`,
+        );
+      }
+
       // An unrecognized value (hand-edited row) reads as the safer pipeline
       // rather than silently opening every transition.
-      return isTransitionMode(row[0]?.mode) ? row[0]!.mode : "strict";
+      return isTransitionMode(row[0]!.mode) ? row[0]!.mode : "strict";
     });
   }
 
@@ -4493,10 +4504,21 @@ export class DbStore implements FeatureStore {
     scope?: WorkspaceScope,
   ): Promise<TransitionMode> {
     return this.scoped(scope, async (tx) => {
-      await tx
+      // `returning()` so a zero-row UPDATE cannot be reported as a save. This
+      // method used to return `mode` unconditionally, which meant a write that
+      // matched nothing still produced a 200 and a success toast, and the
+      // setting only appeared to revert on the next full page load.
+      const updated = await tx
         .update(workspaces)
         .set({ transitionMode: mode })
-        .where(eq(workspaces.id, scope!.workspaceId));
+        .where(eq(workspaces.id, scope!.workspaceId))
+        .returning({ mode: workspaces.transitionMode });
+
+      if (updated.length === 0) {
+        throw new Error(
+          `Workspace ${scope!.workspaceId} not found while setting its transition mode.`,
+        );
+      }
       return mode;
     });
   }

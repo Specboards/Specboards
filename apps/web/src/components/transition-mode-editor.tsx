@@ -52,6 +52,18 @@ export function TransitionModeEditor({
   const [saving, startSave] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
+  // `useState(initial)` seeds once and then ignores the prop, so the radio kept
+  // showing whatever was last clicked even after `router.refresh()` brought back
+  // a server value that disagreed. A save that did not persist therefore looked
+  // like it had, until the next full page load. Re-syncing during render (the
+  // documented pattern for deriving state from props) means the control always
+  // shows what the server actually stored.
+  const [serverMode, setServerMode] = useState<TransitionMode>(initial);
+  if (initial !== serverMode) {
+    setServerMode(initial);
+    setMode(initial);
+  }
+
   function choose(next: TransitionMode) {
     if (next === mode || !canEdit) return;
     const previous = mode;
