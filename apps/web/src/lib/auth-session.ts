@@ -111,7 +111,7 @@ function actorFor(principal: RequestPrincipal): ActorRef {
  * session cookie. Returns `null` when neither identifies a user. Assumes auth
  * is enabled (DB present); callers handle local file mode separately.
  */
-async function resolveRequestUser(req: Request): Promise<RequestPrincipal | null> {
+async function resolveRequestPrincipal(req: Request): Promise<RequestPrincipal | null> {
   const auth = getAuth();
   const db = getDb();
   if (!auth || !db) return null;
@@ -185,15 +185,33 @@ export async function getServerSessionUser(): Promise<SessionUser | null> {
 }
 
 /**
- * The authenticated user for a request, or `null` when there is no session.
- * Returns `null` in local file mode (auth disabled) too — callers that need a
- * user there should treat it as "auth disabled".
+ * The user behind a **browser session** for this request, or `null` when there
+ * is no session cookie. Returns `null` in local file mode (auth disabled) too —
+ * callers that need a user there should treat it as "auth disabled".
+ *
+ * Deliberately blind to API keys. This replaced a `getSessionUser` that shared
+ * {@link resolveRequestPrincipal} with the REST authorization helpers and so checked
+ * `x-api-key` / `Authorization: Bearer sb_…` *before* the cookie, despite every
+ * caller being an interactive browser flow. Those callers do not run the
+ * scope/quota enforcement the `/api/v1` helpers do, so a restricted key could
+ * disconnect its owner's GitHub account or repoint their MCP workspace binding.
+ *
+ * If a route legitimately needs to accept both, it should use one of the
+ * authorize helpers below, which enforce key scopes; not this.
+ *
+ * Better Auth's `getSession` reads the session cookie only. The `bearer` plugin
+ * (which would let it accept a session token in the Authorization header) is
+ * not enabled — see `lib/auth.ts`, which registers `mcp` and nothing else.
  */
-export async function getSessionUser(req: Request): Promise<SessionUser | null> {
+export async function getBrowserSessionUser(
+  req: Request,
+): Promise<SessionUser | null> {
   const auth = getAuth();
   if (!auth) return null;
-  const resolved = await resolveRequestUser(req);
-  return resolved?.user ?? null;
+  const session = await auth.api.getSession({ headers: req.headers });
+  if (!session) return null;
+  const { id, email, name } = session.user;
+  return { id, email, name };
 }
 
 /**
@@ -217,7 +235,7 @@ async function resolveScope(
   const db = getDb();
   if (!auth || !db) return { ok: true, scope: null };
 
-  const principal = await resolveRequestUser(req);
+  const principal = await resolveRequestPrincipal(req);
   if (!principal) {
     return {
       ok: false,
@@ -259,7 +277,7 @@ export async function resolveReadAccess(req: Request): Promise<ReadAccessResult>
   const db = getDb();
   if (!auth || !db) return { ok: true, access: null };
 
-  const principal = await resolveRequestUser(req);
+  const principal = await resolveRequestPrincipal(req);
   if (!principal) {
     return {
       ok: false,
@@ -298,7 +316,7 @@ export async function authorizeOrgAdmin(req: Request): Promise<ScopeResult> {
   const db = getDb();
   if (!auth || !db) return { ok: true, scope: null };
 
-  const principal = await resolveRequestUser(req);
+  const principal = await resolveRequestPrincipal(req);
   if (!principal) {
     return {
       ok: false,

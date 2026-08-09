@@ -2,6 +2,7 @@ import { readJsonBody } from "@/lib/api/body";
 import { createApiKey, listApiKeys } from "@/lib/api-keys";
 import { InvalidScopeError, parseApiScopes } from "@/lib/api-scopes";
 import { getAuth } from "@/lib/auth";
+import { getBrowserSessionUser } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -13,24 +14,26 @@ const EXPIRES_MAX_DAYS = 3650;
  * Personal API keys are managed with a browser session only (never with another
  * API key): a leaked key must not be able to mint fresh, separately-revocable
  * keys. Resolves the signed-in user from the session cookie, or 401 / 501.
+ *
+ * `getBrowserSessionUser` is what makes "cookie only" true rather than
+ * intended; this route used to resolve the session itself, because the shared
+ * helper of the day also accepted API keys.
  */
 async function sessionUserId(req: Request): Promise<{ id: string } | Response> {
-  const auth = getAuth();
-  const db = getDb();
-  if (!auth || !db) {
+  if (!getAuth() || !getDb()) {
     return Response.json(
       { error: "API keys require the database-backed deployment." },
       { status: 501 },
     );
   }
-  const session = await auth.api.getSession({ headers: req.headers });
-  if (!session) {
+  const user = await getBrowserSessionUser(req);
+  if (!user) {
     return Response.json(
       { error: "Authentication required." },
       { status: 401 },
     );
   }
-  return { id: session.user.id };
+  return { id: user.id };
 }
 
 /** GET /api/v1/api-keys — the signed-in user's keys (no secret material). */

@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 
-import { getSessionUser } from "@/lib/auth-session";
+import { getBrowserSessionUser } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
 import { getGithubOauthCredentials } from "@/lib/github-app";
 import {
@@ -31,7 +31,7 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(req: Request) {
   const db = getDb();
-  const user = await getSessionUser(req);
+  const user = await getBrowserSessionUser(req);
   if (!db || !user) {
     const from = encodeURIComponent("/api/v1/github/user/connect");
     return Response.redirect(new URL(`/sign-in?from=${from}`, appOriginFromRequest(req)), 302);

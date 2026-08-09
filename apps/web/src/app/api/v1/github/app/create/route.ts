@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 
-import { getSessionUser } from "@/lib/auth-session";
+import { getBrowserSessionUser } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
 import {
   APP_SETUP_COOKIE,
@@ -34,7 +34,7 @@ function htmlRedirect(path: string): Response {
  */
 export async function GET(req: Request) {
   const db = getDb();
-  const user = await getSessionUser(req);
+  const user = await getBrowserSessionUser(req);
   if (!db || !user) {
     const from = encodeURIComponent(`/api/v1/github/app/create${new URL(req.url).search}`);
     return htmlRedirect(`/sign-in?from=${from}`);

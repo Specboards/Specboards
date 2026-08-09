@@ -1,5 +1,5 @@
 import { readJsonBody } from "@/lib/api/body";
-import { getSessionUser } from "@/lib/auth-session";
+import { getBrowserSessionUser } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
 import { recordMcpWorkspaceBinding } from "@/lib/mcp/workspace-binding";
 import { getMembershipFor } from "@/lib/workspace";
@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(req: Request) {
   const db = getDb();
-  const user = await getSessionUser(req);
+  const user = await getBrowserSessionUser(req);
   if (!db || !user) {
     return Response.json(
       { error: "Authentication required." },

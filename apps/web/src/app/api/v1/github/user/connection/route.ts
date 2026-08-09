@@ -1,4 +1,4 @@
-import { getSessionUser } from "@/lib/auth-session";
+import { getBrowserSessionUser } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
 import { deleteGithubUserToken } from "@/lib/github-user-token";
 import { resolveApiMembership } from "@/lib/workspace";
@@ -18,7 +18,7 @@ export const dynamic = "force-dynamic";
  */
 export async function DELETE(req: Request) {
   const db = getDb();
-  const user = await getSessionUser(req);
+  const user = await getBrowserSessionUser(req);
   if (!db || !user) {
     return Response.json({ error: "Not signed in." }, { status: 401 });
   }

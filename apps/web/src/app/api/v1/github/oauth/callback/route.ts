@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { and, eq, githubInstallations, ne, sql } from "@specboards/db";
 import { exchangeGithubUserCode, verifyInstallationOwnership } from "@specboards/git";
 
-import { getSessionUser } from "@/lib/auth-session";
+import { getBrowserSessionUser } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
 import { getGithubOauthCredentials } from "@/lib/github-app";
 import {
@@ -39,7 +39,7 @@ export async function GET(req: Request) {
   const state = url.searchParams.get("state");
 
   const db = getDb();
-  const user = await getSessionUser(req);
+  const user = await getBrowserSessionUser(req);
   if (!db || !user) {
     const from = encodeURIComponent(`/api/v1/github/oauth/callback${url.search}`);
     return redirectTo(`/sign-in?from=${from}`);
