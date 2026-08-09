@@ -17,9 +17,11 @@ import { logSecurityEvent } from "@/lib/security-log";
  *   const body = parsed.body; // unknown, validate as before
  *
  * Oversized rejects are logged via `logSecurityEvent` so abuse is greppable.
- * The MCP (`/api/mcp`) and GitHub webhook routes keep their own bespoke caps:
- * they read the raw text for JSON-RPC batching / HMAC verification and cannot
- * use a JSON-returning helper.
+ *
+ * The MCP (`/api/mcp`) and GitHub webhook routes need the RAW text (JSON-RPC
+ * batching, and HMAC over the exact received bytes), so they cannot use a
+ * JSON-returning helper. They use {@link readTextBodyWithin} below, which is
+ * the same policy without the parse step.
  */
 
 /**
@@ -33,8 +35,75 @@ export type JsonBodyResult =
   | { ok: true; body: unknown }
   | { ok: false; response: Response };
 
-function tooLarge(endpoint: string, bytes: number, limit: number): JsonBodyResult {
-  logSecurityEvent("request-oversized", { endpoint, bytes });
+/**
+ * Read the raw body as text, refusing as soon as it exceeds `limit` BYTES.
+ *
+ * Two things this fixes over the `await req.text()` + check that the MCP and
+ * webhook routes each grew their own copy of:
+ *
+ * 1. **It stops reading.** Checking after `req.text()` means the whole body is
+ *    already in memory; the cap then bounds the response, not the allocation.
+ *    A `Content-Length` fast path covers the ordinary case, but a chunked
+ *    request need not send one. Here the limit is enforced against a running
+ *    total as chunks arrive, and the stream is cancelled on the chunk that
+ *    crosses it, so at most `limit` + one chunk is ever held.
+ * 2. **It counts bytes.** `raw.length` is UTF-16 code units: a multi-byte body
+ *    passes a byte-named limit at up to ~3x its stated size (4x for astral
+ *    characters). Decoding is incremental, and the total is measured on the
+ *    encoded chunks, which is what the limit is denominated in.
+ *
+ * Returns the decoded text, or `null` when the limit was exceeded (the caller
+ * shapes its own 413: JSON-RPC error vs plain JSON). Logs `request-oversized`
+ * either way, so oversized attempts stay greppable in the Fly logs.
+ *
+ * Note there is no outer bound to fall back on: `fly.toml` configures no
+ * request-size cap and Fly's proxy does not impose one, so this check is the
+ * only thing between a request body and a 512 MB machine (`[[vm]]` size). That
+ * is the argument for enforcing it as the bytes arrive rather than after.
+ */
+export async function readTextBodyWithin(
+  req: Request,
+  limit: number,
+  endpoint: string,
+): Promise<string | null> {
+  // Fast path: trust a present Content-Length (Next/undici enforce it) and
+  // reject before reading a byte. The streaming check below is the backstop
+  // for a request that omits or lies about it.
+  const declared = Number(req.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > limit) {
+    logSecurityEvent("request-oversized", { endpoint, bytes: declared });
+    return null;
+  }
+
+  if (!req.body) return "";
+
+  const reader = req.body.getReader();
+  // `stream: true` so a multi-byte character split across a chunk boundary is
+  // held until its remaining bytes arrive rather than becoming U+FFFD.
+  const decoder = new TextDecoder("utf-8");
+  let bytes = 0;
+  let text = "";
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > limit) {
+        logSecurityEvent("request-oversized", { endpoint, bytes });
+        // Tell the sender to stop rather than draining the rest politely.
+        await reader.cancel().catch(() => {});
+        return null;
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return text + decoder.decode();
+}
+
+/** The 413 for an oversized JSON body. Logging is the reader's job. */
+function tooLarge(limit: number): JsonBodyResult {
   return {
     ok: false,
     response: Response.json(
@@ -51,20 +120,11 @@ export async function readJsonBody(
   const limit = opts.limit ?? DEFAULT_MAX_BODY_BYTES;
   const endpoint = opts.endpoint ?? new URL(req.url).pathname;
 
-  // Fast path: trust a present Content-Length (Next/undici enforce it) and
-  // reject before reading a byte.
-  const declared = Number(req.headers.get("content-length"));
-  if (Number.isFinite(declared) && declared > limit) {
-    return tooLarge(endpoint, declared, limit);
-  }
-
-  const raw = await req.text();
-  // Byte length, not `raw.length`: a multibyte char is one UTF-16 code unit but
-  // several bytes, so string length would under-count against a byte limit.
-  const bytes = Buffer.byteLength(raw);
-  if (bytes > limit) {
-    return tooLarge(endpoint, bytes, limit);
-  }
+  // Shares the streaming reader with the MCP and webhook routes, so the cap
+  // bounds what is allocated rather than what is returned. It logs the
+  // oversized event itself.
+  const raw = await readTextBodyWithin(req, limit, endpoint);
+  if (raw === null) return tooLarge(limit);
 
   try {
     return { ok: true, body: JSON.parse(raw) };
