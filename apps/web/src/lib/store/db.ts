@@ -1748,6 +1748,7 @@ export class DbStore implements FeatureStore {
           title: link.title,
           state: link.state,
           headBranch: link.headBranch ?? null,
+          authorId: link.authorId ?? null,
         })
         // Re-linking the same url refreshes the cached title/state.
         .onConflictDoUpdate({
@@ -1760,6 +1761,9 @@ export class DbStore implements FeatureStore {
             // pending change to an ordinary link, and the author would be told
             // their change is no longer waiting for review when it still is.
             ...(link.headBranch ? { headBranch: link.headBranch } : {}),
+            // Same rule for the author: a second edit joining an open proposal
+            // must not reassign whose change it is to whoever touched it last.
+            ...(link.authorId ? { authorId: link.authorId } : {}),
           },
         });
     });

@@ -184,6 +184,12 @@ export interface ResolvedGithubLink {
   state: string | null;
   /** Set only by the spec write path; see {@link GithubLink.headBranch}. */
   headBranch?: string | null;
+  /**
+   * Who proposed the change, so they can be told what became of it. Set only by
+   * the spec write path. Where several people edit into one open proposal this
+   * stays the person who opened it rather than whoever wrote last.
+   */
+  authorId?: string | null;
 }
 
 export interface FeatureRelation {
@@ -869,7 +875,10 @@ export class CommentError extends Error {}
 /** A notification as the inbox renders it, actor + target resolved. */
 export interface NotificationRecord {
   id: string;
-  /** Kind of notification; currently only "mention". */
+  /**
+   * Kind of notification: "mention", or the outcome of a spec change the
+   * recipient proposed ("spec_change_merged" / "spec_change_closed").
+   */
   type: string;
   actorId: string | null;
   actorName: string | null;
@@ -879,7 +888,8 @@ export interface NotificationRecord {
   featureLevel: string;
   productSlug: string;
   featureTitle: string;
-  commentId: string;
+  /** The source comment, or null for a notification with no comment behind it. */
+  commentId: string | null;
   snippet: string;
   /** True once the recipient has read it. */
   read: boolean;

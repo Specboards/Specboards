@@ -1251,16 +1251,23 @@ export const notifications = pgTable(
     recipientId: uuid("recipient_id").notNull(),
     /** Who triggered it (comment author); snapshot, no FK. */
     actorId: uuid("actor_id"),
-    /** Kind of notification; only "mention" today, room for more. */
+    /**
+     * Kind of notification: "mention", or the outcome of a spec change the
+     * recipient proposed ("spec_change_merged" / "spec_change_closed").
+     */
     type: text("type").notNull().default("mention"),
     /** The item the comment lives on, for deep-linking the inbox row. */
     featureId: uuid("feature_id")
       .notNull()
       .references(() => features.id, { onDelete: "cascade" }),
-    /** The source comment; deleting it clears the notification. */
-    commentId: uuid("comment_id")
-      .notNull()
-      .references(() => comments.id, { onDelete: "cascade" }),
+    /**
+     * The source comment; deleting it clears the notification. Null for a
+     * notification that did not come from a comment, such as the outcome of a
+     * review, rather than pointing at a placeholder nobody wrote.
+     */
+    commentId: uuid("comment_id").references(() => comments.id, {
+      onDelete: "cascade",
+    }),
     /** Short rendered preview of the comment for the inbox list. */
     snippet: text("snippet").notNull(),
     /** Null = unread; set when the recipient reads it. */
@@ -1441,6 +1448,12 @@ export const featureGithubLinks = pgTable(
      * webhook has stopped working. NULL means never confirmed.
      */
     stateCheckedAt: timestamp("state_checked_at", { withTimezone: true }),
+    /**
+     * Who proposed this change, for telling them what became of it. Snapshot
+     * with no FK, like `notifications.actor_id`: a departed author's proposal
+     * still has to render. Null for a link nobody opened through the app.
+     */
+    authorId: uuid("author_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

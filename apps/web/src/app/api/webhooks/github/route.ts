@@ -10,6 +10,7 @@ import { and, eq, featureGithubLinks, githubInstallations, type Database } from 
 
 import { getWorkerDb } from "@/lib/db";
 import { getWebhookSecret } from "@/lib/github-app";
+import { notifyReviewOutcome } from "@/lib/review-outcome-notify";
 import { logSecurityEvent } from "@/lib/security-log";
 
 /** GitHub webhook payloads are well under this; reject larger before reading. */
@@ -142,7 +143,11 @@ export async function POST(req: Request) {
     if (!entity) return Response.json({ ignored: `malformed ${event}` }, { status: 202 });
     try {
       const updated = await updateLinksFromEntityEvent(db, entity);
-      return Response.json({ ok: true, updated });
+      // After the state lands, tell whoever proposed the change what happened
+      // to it. Ordered this way on purpose: the notification reads the stored
+      // state back, and it must never be the reason the state update is lost.
+      const notified = await notifyReviewOutcome(db, entity);
+      return Response.json({ ok: true, updated, notified });
     } catch (err) {
       console.error(`[webhooks/github] ${event} update failed:`, err);
       return Response.json({ error: "Link update failed." }, { status: 500 });
