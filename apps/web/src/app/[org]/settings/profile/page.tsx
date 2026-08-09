@@ -2,7 +2,9 @@ import { eq, users } from "@specboards/db";
 
 import { getServerSessionUser } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
+import { getGithubConnection } from "@/lib/github-user-token";
 import { requireWorkspaceAccess } from "@/lib/workspace-access";
+import { GithubAccountCard } from "@/components/github-account-card";
 import { AppearanceCard, EmailCard, ProfileCard } from "@/components/settings-form";
 
 export const dynamic = "force-dynamic";
@@ -28,11 +30,14 @@ export default async function ProfileSettingsPage() {
     );
   }
 
-  const [profile] = await db
-    .select({ image: users.image, timezone: users.timezone })
-    .from(users)
-    .where(eq(users.id, user.id))
-    .limit(1);
+  const [[profile], connection] = await Promise.all([
+    db
+      .select({ image: users.image, timezone: users.timezone })
+      .from(users)
+      .where(eq(users.id, user.id))
+      .limit(1),
+    getGithubConnection(db, access.workspaceId, user.id),
+  ]);
 
   return (
     <div className="space-y-6">
@@ -42,6 +47,7 @@ export default async function ProfileSettingsPage() {
         timezone={profile?.timezone ?? null}
       />
       <AppearanceCard />
+      <GithubAccountCard connection={connection} orgSlug={access.orgSlug} />
       <EmailCard email={user.email} />
     </div>
   );
