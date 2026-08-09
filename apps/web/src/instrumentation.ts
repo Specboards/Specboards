@@ -9,7 +9,9 @@
  * 2. Tenant-isolation guard: verify the tenant-data connection is one RLS
  *    actually constrains, and refuse to start a multi-tenant deployment
  *    otherwise (fail closed at deploy time; see lib/rls-guard.ts).
- * 3. Start the in-process webhook outbox drainer. No-op in local file mode,
+ * 3. Webhook egress policy: refuse a hosted deployment that has the SSRF
+ *    escape hatch set (see lib/webhooks/ssrf.ts).
+ * 4. Start the in-process webhook outbox drainer. No-op in local file mode,
  *    where `startDrainer` finds no database.
  */
 export async function register(): Promise<void> {
@@ -23,6 +25,9 @@ export async function register(): Promise<void> {
 
     const { assertCanonicalOrigin } = await import("@/lib/origin-guard");
     assertCanonicalOrigin();
+
+    const { assertWebhookEgressPolicy } = await import("@/lib/webhooks/ssrf");
+    assertWebhookEgressPolicy();
 
     const { startDrainer } = await import("@/lib/webhooks/drainer");
     startDrainer();

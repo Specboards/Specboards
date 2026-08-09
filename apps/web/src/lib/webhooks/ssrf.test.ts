@@ -6,11 +6,18 @@ vi.mock("node:dns/promises", () => ({
   lookup: (...args: unknown[]) => lookupMock(...args),
 }));
 
-import { isBlockedIp, resolveValidatedTarget } from "./ssrf";
+import {
+  allowPrivateWebhookTargets,
+  assertWebhookEgressPolicy,
+  isBlockedIp,
+  resolveValidatedTarget,
+} from "./ssrf";
 
 afterEach(() => {
   lookupMock.mockReset();
   delete process.env.SPECBOARDS_WEBHOOK_ALLOW_PRIVATE;
+  delete process.env.SPECBOARDS_MULTI_TENANT;
+  vi.restoreAllMocks();
 });
 
 describe("isBlockedIp", () => {
@@ -133,5 +140,71 @@ describe("resolveValidatedTarget", () => {
     const r = await resolveValidatedTarget("http://localhost:9000/hook");
     expect(r.ok).toBe(true);
     expect(r.ok && r.addresses).toEqual([]);
+  });
+
+  it("ignores allow-private in multi-tenant mode, whatever the env says", async () => {
+    // The finding: one env var disabled HTTPS, DNS checks, private-range
+    // checks and connection pinning, with nothing stopping it being set on the
+    // hosted deployment where tenants supply the URLs.
+    process.env.SPECBOARDS_WEBHOOK_ALLOW_PRIVATE = "1";
+    process.env.SPECBOARDS_MULTI_TENANT = "true";
+
+    // Plain HTTP is refused again...
+    const http = await resolveValidatedTarget("http://localhost:9000/hook");
+    expect(http.ok).toBe(false);
+
+    // ...and so is a loopback literal over HTTPS.
+    const loopback = await resolveValidatedTarget("https://127.0.0.1/hook");
+    expect(loopback.ok).toBe(false);
+
+    // ...and a hostname resolving somewhere private, with the connection
+    // pinned to what was actually validated.
+    lookupMock.mockResolvedValue([{ address: "169.254.169.254", family: 4 }]);
+    const metadata = await resolveValidatedTarget("https://metadata.example/hook");
+    expect(metadata.ok).toBe(false);
+  });
+});
+
+describe("allowPrivateWebhookTargets", () => {
+  it("is off unless explicitly requested", () => {
+    expect(allowPrivateWebhookTargets()).toBe(false);
+  });
+
+  it("honors the flag on a single-tenant self-host", () => {
+    process.env.SPECBOARDS_WEBHOOK_ALLOW_PRIVATE = "1";
+    expect(allowPrivateWebhookTargets()).toBe(true);
+  });
+
+  it("refuses the flag in multi-tenant mode", () => {
+    process.env.SPECBOARDS_WEBHOOK_ALLOW_PRIVATE = "1";
+    process.env.SPECBOARDS_MULTI_TENANT = "true";
+    expect(allowPrivateWebhookTargets()).toBe(false);
+  });
+
+  it("only accepts the exact value, not any truthy string", () => {
+    for (const value of ["true", "yes", "0", ""]) {
+      process.env.SPECBOARDS_WEBHOOK_ALLOW_PRIVATE = value;
+      expect(allowPrivateWebhookTargets(), value).toBe(false);
+    }
+  });
+});
+
+describe("assertWebhookEgressPolicy boot guard", () => {
+  it("passes when the flag is unset (both Fly apps, verified 2026-08-09)", () => {
+    process.env.SPECBOARDS_MULTI_TENANT = "true";
+    expect(() => assertWebhookEgressPolicy()).not.toThrow();
+  });
+
+  it("refuses to start a multi-tenant deployment with the flag set", () => {
+    process.env.SPECBOARDS_WEBHOOK_ALLOW_PRIVATE = "1";
+    process.env.SPECBOARDS_MULTI_TENANT = "true";
+    expect(() => assertWebhookEgressPolicy()).toThrow(/Refusing to start/);
+  });
+
+  it("warns but boots on a single-tenant self-host", () => {
+    process.env.SPECBOARDS_WEBHOOK_ALLOW_PRIVATE = "1";
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(() => assertWebhookEgressPolicy()).not.toThrow();
+    expect(warn.mock.calls[0]?.[0]).toMatch(/NOT checked/);
   });
 });

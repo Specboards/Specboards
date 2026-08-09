@@ -88,6 +88,12 @@ a live backstop behind the app-code workspace filters.
       `169.254.169.254` metadata IP, CGNAT, ...) rejected, with the connection
       pinned to the pre-validated address to defeat DNS rebinding. No
       configuration is required to get this.
+- [ ] **Leave `SPECBOARDS_WEBHOOK_ALLOW_PRIVATE` unset** unless you genuinely
+      need webhooks delivered to private addresses on a trusted network. It
+      turns the guard off wholesale: HTTPS, DNS checks, private-range checks
+      and connection pinning. A single-tenant deployment that sets it logs a
+      startup warning; a multi-tenant one ignores the flag and refuses to boot
+      with it set, because there the URLs come from tenants.
 - [ ] For defense in depth, add a **network-layer egress policy** so a future
       code path that bypasses the guard is still contained. This is
       platform-specific (it must carve out your own DB/data-plane traffic);
