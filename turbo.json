@@ -1,6 +1,10 @@
 {
   "$schema": "https://turbo.build/schema.json",
   "ui": "tui",
+  // The shared lint config lives at the root, outside any package, so a change
+  // to it has to invalidate every package's cached `lint` result. Without this
+  // a rule change would report a stale pass.
+  "globalDependencies": ["eslint.config.mjs"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

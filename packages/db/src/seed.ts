@@ -10,8 +10,6 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { eq } from "drizzle-orm";
-
 import {
   DEFAULT_LEVELS,
   DEFAULT_PRODUCT_KEY,
