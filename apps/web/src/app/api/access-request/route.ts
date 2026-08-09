@@ -1,5 +1,8 @@
 import { readJsonBody } from "@/lib/api/body";
+import { rateLimitKey } from "@/lib/client-ip";
+import { getDb } from "@/lib/db";
 import { renderInfoEmail, sendEmail } from "@/lib/email";
+import { QUOTAS, enforceQuota } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -56,28 +59,52 @@ export function OPTIONS(req: Request) {
 }
 
 /**
- * Best-effort per-IP throttle. In-memory, so it's advisory on a multi-instance
- * deploy, but it blunts casual abuse of an unauthenticated, email-sending
- * endpoint. Postmark and the required fields are the real backstops.
+ * Throttle this unauthenticated, email-sending endpoint.
+ *
+ * The counters live in Postgres (`operation_limits`, via `consumeQuota`), so
+ * the limit holds across machines and restarts. It used to be a module-level
+ * `Map`, which its own comment called "advisory on a multi-instance deploy":
+ * Fly keeps at least two machines warm, so the effective limit was
+ * `5 x machines`, and every deploy reset it. The mechanism to do this properly
+ * already existed - `QUOTAS` simply had no entry for this endpoint.
+ *
+ * Two quotas: per client, and per email address. See `QUOTAS.accessRequest` for
+ * why both.
+ *
+ * Local file mode has no Postgres, and `enforceQuota` no-ops without a
+ * database. Rather than leave a self-host trial with no limit at all, fall back
+ * to the old in-process counter there: single-process by definition, so a Map
+ * is exactly as good as a table.
  */
-const RATE_WINDOW_MS = 60 * 60 * 1000;
-const RATE_MAX = 5;
-const hits = new Map<string, number[]>();
+const FALLBACK_WINDOW_MS = 60 * 60 * 1000;
+const FALLBACK_MAX = 5;
+const fallbackHits = new Map<string, number[]>();
 
-function rateLimited(ip: string): boolean {
+function fallbackRateLimited(key: string): boolean {
   const now = Date.now();
-  const recent = (hits.get(ip) ?? []).filter((t) => now - t < RATE_WINDOW_MS);
+  const recent = (fallbackHits.get(key) ?? []).filter(
+    (t) => now - t < FALLBACK_WINDOW_MS,
+  );
   recent.push(now);
-  hits.set(ip, recent);
-  return recent.length > RATE_MAX;
+  fallbackHits.set(key, recent);
+  return recent.length > FALLBACK_MAX;
 }
 
-function clientIp(req: Request): string {
-  return (
-    req.headers.get("fly-client-ip") ??
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-    "unknown"
-  );
+/**
+ * Returns a ready-to-return 429 body when the caller is over either quota, else
+ * `null`. `email` is counted separately so many IPs cannot mailbomb one
+ * address.
+ */
+async function overQuota(req: Request, email: string): Promise<boolean> {
+  const db = getDb();
+  const key = rateLimitKey(req, "access-request");
+
+  if (!db) return fallbackRateLimited(key);
+
+  const perClient = await enforceQuota(db, QUOTAS.accessRequest, key);
+  if (perClient) return true;
+  const perEmail = await enforceQuota(db, QUOTAS.accessRequestEmail, email);
+  return perEmail !== null;
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -130,7 +157,9 @@ export async function POST(req: Request) {
       400,
     );
 
-  if (rateLimited(clientIp(req))) {
+  // Checked after validation so a malformed submission does not spend the
+  // caller's quota, and before sending so the quota is what bounds the emails.
+  if (await overQuota(req, email)) {
     return json(
       {
         error:

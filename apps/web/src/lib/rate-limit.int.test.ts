@@ -51,6 +51,24 @@ describe.skipIf(!DB_URL)("consumeQuota", () => {
     expect(b.ok).toBe(true);
   });
 
+  it("holds across separate connections, which is the point", async () => {
+    // The access-request endpoint used a module-level Map, "advisory on a
+    // multi-instance deploy" by its own comment. Fly keeps at least two
+    // machines warm, so the effective limit was 5 x machines and every deploy
+    // reset it. Two independent connections stand in for two machines: the
+    // count must be shared, not per-process.
+    const { createDb } = await import("@specboards/db");
+    const machineA = createDb(DB_URL!);
+    const machineB = createDb(DB_URL!);
+    const shared = `test-quota-${randomUUID().slice(0, 8)}`;
+
+    expect((await consumeQuota(machineA, shared, 2, 60)).ok).toBe(true);
+    expect((await consumeQuota(machineB, shared, 2, 60)).ok).toBe(true);
+    // Third request, whichever machine it lands on, is over the limit of 2.
+    expect((await consumeQuota(machineA, shared, 2, 60)).ok).toBe(false);
+    expect((await consumeQuota(machineB, shared, 2, 60)).ok).toBe(false);
+  });
+
   it("counts each key independently", async () => {
     const k1 = `test-quota-a-${randomUUID().slice(0, 8)}`;
     const k2 = `test-quota-b-${randomUUID().slice(0, 8)}`;
