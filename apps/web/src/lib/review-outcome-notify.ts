@@ -98,11 +98,23 @@ export async function notifyReviewOutcome(
     const targets = resolved.filter((l) => l.authorId !== null);
     if (targets.length === 0) return 0;
 
-    const reason =
-      evt.state === "closed" ? await reviewReason(db, evt) : null;
+    // Resolved per workspace, not once for the event. The same pull request
+    // can be linked from several tenants, and each has its own installation;
+    // reading the reviews with whichever installation happened to come back
+    // first would spend one tenant's credentials to serve another's
+    // notification, and would break outright when that tenant uninstalls.
+    const reasonByWorkspace = new Map<string, string | null>();
+    const reasonFor = async (workspaceId: string): Promise<string | null> => {
+      if (evt.state !== "closed") return null;
+      if (!reasonByWorkspace.has(workspaceId)) {
+        reasonByWorkspace.set(workspaceId, await reviewReason(db, evt, workspaceId));
+      }
+      return reasonByWorkspace.get(workspaceId) ?? null;
+    };
 
     let raised = 0;
     for (const link of targets) {
+      const reason = await reasonFor(link.workspaceId);
       await db.insert(notifications).values({
         workspaceId: link.workspaceId,
         recipientId: link.authorId!,
@@ -132,6 +144,7 @@ export async function notifyReviewOutcome(
 async function reviewReason(
   db: Database,
   evt: GithubEntityEvent,
+  workspaceId: string,
 ): Promise<string | null> {
   try {
     const app = await getGithubApp(db);
@@ -145,7 +158,14 @@ async function reviewReason(
       })
       .from(repositories)
       .where(
-        and(eq(repositories.owner, evt.owner), eq(repositories.name, evt.name)),
+        and(
+          // Scoped to the tenant whose notification this is: two workspaces can
+          // connect the same repo, and each must read it with its own
+          // installation rather than borrowing the other's.
+          eq(repositories.workspaceId, workspaceId),
+          eq(repositories.owner, evt.owner),
+          eq(repositories.name, evt.name),
+        ),
       )
       .limit(1);
     if (!repo) return null;
