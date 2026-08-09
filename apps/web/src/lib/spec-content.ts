@@ -35,6 +35,7 @@ import { recordWritePullRequest } from "@/lib/github-links-service";
 import {
   resolveRepoClient,
   resolveRepoDefaultProduct,
+  resolveSpecWriteClient,
   syncRepository,
   type RepoRecord,
 } from "@/lib/github-sync";
@@ -386,7 +387,10 @@ export async function updateSpecContent(
   opts: { message?: string; expectedBlobSha?: string } = {},
 ): Promise<SpecWriteResult> {
   const { repo, path, title } = await authorizeSpecWrite(db, scope, specId);
-  const client = await resolveRepoClient(db, repo);
+  // Commits as the author when they have connected an account and can push,
+  // which makes the trailer unnecessary: naming someone as co-author on a
+  // commit they already authored reads as two people having written it.
+  const { client, asAuthor } = await resolveSpecWriteClient(db, repo, scope);
   const existing = await client.readFile(path);
   const content = rewriteSpecBody(existing.raw, body, { id: specId, title });
   const message =
@@ -395,7 +399,7 @@ export async function updateSpecContent(
       action: "update",
       title,
       path,
-      author: await resolveCommitAuthor(db, scope.userId),
+      author: asAuthor ? null : await resolveCommitAuthor(db, scope.userId),
     });
   const { mode } = resolveWriteMode(repo.config, repo.writeModeOverride);
   const { commitSha, blobSha, pullRequest, mergedWith, mergedBody } = await writeMerged(
@@ -455,7 +459,7 @@ export async function deleteSpecFile(
   opts: { message?: string } = {},
 ): Promise<{ path: string; commitSha: string }> {
   const { repo, path, title } = await authorizeSpecWrite(db, scope, specId);
-  const client = await resolveRepoClient(db, repo);
+  const { client, asAuthor } = await resolveSpecWriteClient(db, repo, scope);
   const { commitSha } = await client.deleteFile({
     path,
     message:
@@ -464,7 +468,7 @@ export async function deleteSpecFile(
         action: "remove",
         title,
         path,
-        author: await resolveCommitAuthor(db, scope.userId),
+        author: asAuthor ? null : await resolveCommitAuthor(db, scope.userId),
       }),
   });
   return { path, commitSha };
@@ -601,7 +605,7 @@ export async function createSpec(
     );
   }
 
-  const client = await resolveRepoClient(db, repo);
+  const { client, asAuthor } = await resolveSpecWriteClient(db, repo, scope);
   const path = `specs/${slug}/spec.md`;
   let exists = false;
   try {
@@ -692,7 +696,7 @@ export async function createSpec(
         action: "create",
         title,
         path,
-        author: await resolveCommitAuthor(db, scope.userId),
+        author: asAuthor ? null : await resolveCommitAuthor(db, scope.userId),
       }),
     mode: "direct",
     expectedBlobSha: null,

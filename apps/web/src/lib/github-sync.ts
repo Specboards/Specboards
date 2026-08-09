@@ -26,6 +26,7 @@ import {
 } from "@specboards/db";
 import {
   createGitHubRepoClient,
+  createGitHubUserRepoClient,
   reconcileSpecs,
   type GitRepoClient,
 } from "@specboards/git";
@@ -33,6 +34,7 @@ import {
 import { isE2E } from "@/lib/e2e";
 import { getGithubApp } from "@/lib/github-app";
 import { fakeRepoClient } from "@/lib/github-e2e";
+import { resolveUserWriteToken } from "@/lib/github-user-token";
 import { ensureDefaultProduct } from "@/lib/workspace";
 
 export type RepoRecord = typeof repositories.$inferSelect;
@@ -83,6 +85,50 @@ export async function resolveRepoClient(
     name: repo.name,
     ref: repo.defaultBranch,
   });
+}
+
+/**
+ * The client a *spec write* should go through, and whether it will be the
+ * author's own.
+ *
+ * Prefers the acting user's GitHub token when they have connected an account
+ * and can actually push, so the commit is genuinely theirs: their name, their
+ * avatar, their permissions. Falls back to the installation client in every
+ * other case, which stays the common path and is not a degraded one, because
+ * the trailer names the author either way.
+ *
+ * The fallback is silent on purpose. An author who never connected an account
+ * has not failed at anything, and interrupting a save to tell them about a
+ * setting they did not know existed would be worse than the anonymous commit
+ * it is trying to prevent.
+ */
+export async function resolveSpecWriteClient(
+  db: Database,
+  repo: RepoRecord,
+  // Structural rather than the store's WorkspaceScope: this module is below the
+  // store in the import graph and does not need to be pulled up to it for two
+  // fields.
+  scope: { workspaceId: string; userId?: string | null },
+): Promise<{ client: GitRepoClient; asAuthor: boolean }> {
+  // The E2E fake stands in for the repo client but not for GitHub's OAuth, so
+  // there is no user token to resolve and the app path is the only one.
+  if (!isE2E()) {
+    const token = await resolveUserWriteToken(db, scope.workspaceId, scope.userId, {
+      owner: repo.owner,
+      name: repo.name,
+    });
+    if (token) {
+      return {
+        client: createGitHubUserRepoClient(token, {
+          owner: repo.owner,
+          name: repo.name,
+          ref: repo.defaultBranch,
+        }),
+        asAuthor: true,
+      };
+    }
+  }
+  return { client: await resolveRepoClient(db, repo), asAuthor: false };
 }
 
 /** Path of the per-repo config file, relative to the repo root. */

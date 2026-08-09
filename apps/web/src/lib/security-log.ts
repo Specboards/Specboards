@@ -11,7 +11,10 @@ export type SecurityEvent =
   | "rate-limit-exceeded"
   | "request-oversized"
   | "batch-oversized"
-  | "webhook-signature-invalid";
+  | "webhook-signature-invalid"
+  // A GitHub account-connect callback whose state did not match the cookie.
+  // Worth a line because this flow ends in storing a repo-write credential.
+  | "github-user-connect-state-mismatch";
 
 export function logSecurityEvent(
   event: SecurityEvent,

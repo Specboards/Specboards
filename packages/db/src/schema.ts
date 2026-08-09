@@ -1470,6 +1470,52 @@ export const featureGithubLinks = pgTable(
 );
 
 /**
+ * Per-user GitHub tokens, so a spec commit can genuinely be the author's
+ * rather than the App's with their name in a trailer.
+ *
+ * These are GitHub App **user-to-server** tokens, not broad `repo`-scoped OAuth
+ * app tokens: one can only reach repositories where the App is installed, and
+ * only with the intersection of the App's permissions and the user's own. So a
+ * connection grants Specboards nothing it did not already have; it narrows a
+ * given write to what that person could do by hand.
+ *
+ * Both tokens are stored encrypted (see `lib/crypto`), because these are the
+ * first credentials here that can write to a customer's repository and a
+ * database disclosure alone must not yield a usable one.
+ */
+export const githubUserTokens = pgTable(
+  "github_user_tokens",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** Whose account it is, so the UI can say so without an API call. */
+    githubLogin: text("github_login").notNull(),
+    /** AES-256-GCM blob, never the raw token. */
+    accessToken: text("access_token").notNull(),
+    /** AES-256-GCM blob. Null when the App does not expire user tokens. */
+    refreshToken: text("refresh_token"),
+    accessTokenExpiresAt: timestamp("access_token_expires_at", {
+      withTimezone: true,
+    }),
+    refreshTokenExpiresAt: timestamp("refresh_token_expires_at", {
+      withTimezone: true,
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [unique("github_user_tokens_ws_user_uq").on(t.workspaceId, t.userId)],
+);
+
+/**
  * Auth tables (Better Auth). Postgres mints UUID ids (Better Auth runs with
  * `generateId: false`) so they line up with the existing uuid user references
  * (`members.user_id`, `comments.author_id`, `features.assignee_id`).

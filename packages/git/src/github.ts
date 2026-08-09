@@ -1,4 +1,6 @@
-import { App, type Octokit } from "octokit";
+// Octokit is a value here, not just a type: the user-token client constructs
+// one directly rather than getting it from the App's installation cache.
+import { App, Octokit } from "octokit";
 
 import { compileGlobs } from "./webhook.js";
 import {
@@ -160,6 +162,22 @@ export async function createGitHubRepoClient(
 ): Promise<GitHubRepoClient> {
   const octokit = await app.getInstallationOctokit(Number(config.installationId));
   return new GitHubRepoClient(octokit, config);
+}
+
+/**
+ * A {@link GitHubRepoClient} authenticated as a *person* rather than as the App
+ * installation, so the commits it makes are genuinely theirs: their name, their
+ * avatar, and their repository permissions rather than the App's.
+ *
+ * The token is a GitHub App user-to-server token, so this is not a wider reach
+ * than the installation client but a narrower one: it can only touch repos
+ * where the App is installed, and only where the user's own access allows it.
+ */
+export function createGitHubUserRepoClient(
+  token: string,
+  config: Pick<GitHubRepoConfig, "owner" | "name" | "ref">,
+): GitHubRepoClient {
+  return new GitHubRepoClient(new Octokit({ auth: token }), config);
 }
 
 /**
