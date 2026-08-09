@@ -1,7 +1,11 @@
 import { headers } from "next/headers";
 
 import { extractApiKey, verifyApiKey } from "@/lib/api-keys";
-import { keyScopesSatisfy, requiredScopeFor } from "@/lib/api-scopes";
+import {
+  isScopeExemptPath,
+  keyScopesSatisfy,
+  requiredScopeFor,
+} from "@/lib/api-scopes";
 import { getAuth } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { QUOTAS, enforceQuota } from "@/lib/rate-limit";
@@ -132,14 +136,32 @@ async function resolveRequestUser(req: Request): Promise<RequestPrincipal | null
 
 /**
  * Enforce a scoped API key against what the request needs. Returns a 403
- * response when a scoped key lacks the required `<resource>:<action>` scope,
- * else `null`. Session auth and legacy full-access keys (empty `scopes`) always
- * pass, as do paths with no scope mapping (e.g. session-only routes).
+ * response when the key may not make this request, else `null`. Session auth and
+ * legacy full-access keys (empty `scopes`) always pass.
+ *
+ * Paths with no derivable scope are **denied**, not allowed. Deriving the scope
+ * from the URL only covers `/api/v1/<resource>`; treating "no mapping" as "no
+ * scope required" meant every other surface accepted a restricted key at full
+ * power, which is how a `features:read` key reached the MCP write tools. The
+ * surfaces that legitimately have no path-derived scope are named in
+ * {@link isScopeExemptPath} and gate themselves (`/api/mcp` scopes per tool).
  */
 function enforceKeyScope(req: Request, scopes: string[]): Response | null {
   if (scopes.length === 0) return null;
-  const required = requiredScopeFor(req.method, new URL(req.url).pathname);
-  if (!required || keyScopesSatisfy(scopes, required)) return null;
+  const pathname = new URL(req.url).pathname;
+  if (isScopeExemptPath(pathname)) return null;
+  const required = requiredScopeFor(req.method, pathname);
+  if (!required) {
+    return Response.json(
+      {
+        error:
+          "API keys cannot be used on this endpoint. Sign in from the browser, " +
+          "or use an endpoint under /api/v1 that a key scope can cover.",
+      },
+      { status: 403 },
+    );
+  }
+  if (keyScopesSatisfy(scopes, required)) return null;
   return Response.json(
     {
       error: `This API key lacks the "${required.resource}:${required.action}" scope.`,
@@ -249,15 +271,34 @@ export function resolveReadScope(req: Request): Promise<ScopeResult> {
  * Read access for an API request, including the caller's role (which
  * `resolveReadScope` drops). Used where the response depends on edit rights,
  * e.g. the item-detail context the flyout renders. `null` access is file mode.
+ *
+ * `credential` describes *how* the caller authenticated. The path-derived scope
+ * check has already run, but a surface whose URL does not name its resource
+ * (`/api/mcp`) has to do its own check, and it can only do that if it knows the
+ * key's grants. `scopes: []` means unrestricted: either a browser session or a
+ * legacy full-access key.
  */
+export interface CredentialInfo {
+  /** True when the caller authenticated with an API key (vs a browser session). */
+  viaKey: boolean;
+  /** The key's granted scopes; `[]` is unrestricted. */
+  scopes: string[];
+}
+
 export type ReadAccessResult =
-  | { ok: true; access: (WorkspaceScope & { role: MemberRole }) | null }
+  | {
+      ok: true;
+      access: (WorkspaceScope & { role: MemberRole }) | null;
+      credential: CredentialInfo;
+    }
   | { ok: false; response: Response };
 
 export async function resolveReadAccess(req: Request): Promise<ReadAccessResult> {
   const auth = getAuth();
   const db = getDb();
-  if (!auth || !db) return { ok: true, access: null };
+  if (!auth || !db) {
+    return { ok: true, access: null, credential: { viaKey: false, scopes: [] } };
+  }
 
   const principal = await resolveRequestUser(req);
   if (!principal) {
@@ -277,6 +318,7 @@ export async function resolveReadAccess(req: Request): Promise<ReadAccessResult>
       workspaceId: resolved.membership.workspaceId,
       role: resolved.membership.role,
     },
+    credential: { viaKey: principal.viaKey, scopes: principal.scopes },
   };
 }
 

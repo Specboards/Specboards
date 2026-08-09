@@ -73,7 +73,10 @@ export function buildOpenApiDocument(baseUrl: string): Record<string, unknown> {
         "(`x-api-key: sb_…` or `Authorization: Bearer sb_…`). Keys may be " +
         "scoped: a key carries `<resource>:read` / `<resource>:write` grants " +
         "(or none, meaning full access). Multi-org callers name the org with " +
-        "the `x-org-slug` header.",
+        "the `x-org-slug` header. The same scopes govern the MCP endpoint " +
+        "(`/api/mcp`), where each tool requires the scope its REST equivalent " +
+        "does: a `features:read` key can call `list_items` but not " +
+        "`create_item`. Endpoints outside `/api/v1` reject API keys.",
     },
     servers: [{ url: baseUrl }],
     security: [{ ApiKeyAuth: [] }],

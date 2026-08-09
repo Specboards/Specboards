@@ -1,3 +1,4 @@
+import { type RequiredScope, type ScopeResource } from "@/lib/api-scopes";
 import { getDb } from "@/lib/db";
 import { type WorkspaceScope } from "@/lib/store";
 import { type MemberRole } from "@/lib/workspace";
@@ -16,6 +17,13 @@ export interface McpContext {
   role: MemberRole | null;
   /** True when auth is disabled (self-host local file mode): everything allowed. */
   isLocal: boolean;
+  /**
+   * Scopes granted to the API key behind this call. `[]` means unrestricted: a
+   * browser session, an OAuth token, a legacy full-access key, or local mode.
+   * The RPC layer checks these against each tool's own {@link McpTool.scope};
+   * tools never read this themselves.
+   */
+  scopes: string[];
 }
 
 export interface McpTool {
@@ -26,6 +34,15 @@ export interface McpTool {
   /** Marks a mutating tool. Any member may attempt it; per-product write
    * (owner, or an admin/contributor grant) is enforced by the store on run. */
   write: boolean;
+  /**
+   * The API-key scope this tool requires, the same `<resource>:<action>`
+   * vocabulary the REST routes derive from their URL. Required, not optional:
+   * `/api/mcp` is a single URL, so nothing else can supply it, and a tool added
+   * without one would otherwise be reachable by any key. `resource` must be a
+   * known {@link ScopeResource}, and `action` must be `write` whenever `write`
+   * is true (asserted in `tools.test.ts`).
+   */
+  scope: RequiredScope & { resource: ScopeResource };
   run: (args: Record<string, unknown>, ctx: McpContext) => Promise<unknown>;
 }
 

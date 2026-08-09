@@ -115,6 +115,9 @@ const ctx: McpContext = {
   scope: { userId: "user-1", workspaceId: "ws-1" },
   role: "member",
   isLocal: false,
+  // Unrestricted: these tests exercise the tools, not the scope gate (which
+  // lives in rpc.ts and is covered by rpc.test.ts).
+  scopes: [],
 };
 
 function page(over: Partial<DocPageRecord> & { id: string }): DocPageRecord {
