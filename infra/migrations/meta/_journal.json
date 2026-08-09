@@ -442,6 +442,13 @@
       "when": 1786359600000,
       "tag": "0062_workspaces_admin_update_policy",
       "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1786363200000,
+      "tag": "0063_worker_product_repositories_grant",
+      "breakpoints": true
     }
   ]
 }
