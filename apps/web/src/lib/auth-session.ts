@@ -8,6 +8,7 @@ import {
 } from "@/lib/api-scopes";
 import { getAuth } from "@/lib/auth";
 import { getDb } from "@/lib/db";
+import { isLocalFileMode } from "@/lib/local-mode";
 import { QUOTAS, enforceQuota } from "@/lib/rate-limit";
 import type { Database } from "@specboards/db";
 import type { ActorRef, WorkspaceScope } from "@/lib/store/types";
@@ -188,6 +189,25 @@ async function enforceKeyPolicies(
 }
 
 /**
+ * "Auth is disabled, allow this" — but only when local file mode was actually
+ * asked for. Every authorize helper below has a `!auth || !db` branch that
+ * skips authorization entirely, which is correct for a developer running off
+ * the working tree and catastrophic for anything else: a deployment that lost
+ * its `DATABASE_URL` would authorize every request, including spec deletion.
+ *
+ * `isLocalFileMode()` requires the explicit `SPECBOARDS_LOCAL_MODE` opt-in, so
+ * a *missing* database is a misconfiguration and gets a 503 rather than a free
+ * pass. The boot guard normally stops such a process from starting at all
+ * (see `lib/local-mode.ts`); this is the second layer, in case it did.
+ */
+function noDatabaseResponse(): Response {
+  return Response.json(
+    { error: "This deployment is not configured: no database is available." },
+    { status: 503 },
+  );
+}
+
+/**
  * Outcome of resolving the tenant scope for an API request. `scope` is `null`
  * in local file mode (auth disabled) — callers pass it straight to the store,
  * which ignores it. On denial, `response` is the ready-to-return error.
@@ -255,7 +275,10 @@ async function resolveScope(
 ): Promise<ScopeResult> {
   const auth = getAuth();
   const db = getDb();
-  if (!auth || !db) return { ok: true, scope: null };
+  if (!auth || !db) {
+    if (!isLocalFileMode()) return { ok: false, response: noDatabaseResponse() };
+    return { ok: true, scope: null };
+  }
 
   const principal = await resolveRequestPrincipal(req);
   if (!principal) {
@@ -315,6 +338,7 @@ export async function resolveReadAccess(req: Request): Promise<ReadAccessResult>
   const auth = getAuth();
   const db = getDb();
   if (!auth || !db) {
+    if (!isLocalFileMode()) return { ok: false, response: noDatabaseResponse() };
     return { ok: true, access: null, credential: { viaKey: false, scopes: [] } };
   }
 
@@ -356,7 +380,10 @@ export function authorizeWrite(req: Request): Promise<ScopeResult> {
 export async function authorizeOrgAdmin(req: Request): Promise<ScopeResult> {
   const auth = getAuth();
   const db = getDb();
-  if (!auth || !db) return { ok: true, scope: null };
+  if (!auth || !db) {
+    if (!isLocalFileMode()) return { ok: false, response: noDatabaseResponse() };
+    return { ok: true, scope: null };
+  }
 
   const principal = await resolveRequestPrincipal(req);
   if (!principal) {
