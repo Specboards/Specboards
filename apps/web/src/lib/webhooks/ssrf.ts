@@ -3,6 +3,8 @@ import { isIP } from "node:net";
 
 import ipaddr from "ipaddr.js";
 
+import { isMultiTenant } from "@/lib/tenancy";
+
 /**
  * SSRF guard for user-supplied webhook URLs. On a hosted multi-tenant app the
  * endpoint URL is attacker-controllable, so a naive `fetch` is a server-side
@@ -18,6 +20,56 @@ import ipaddr from "ipaddr.js";
  */
 
 export type UrlCheck = { ok: true } | { ok: false; reason: string };
+
+/**
+ * Whether the private-target escape hatch applies to this deployment.
+ *
+ * `SPECBOARDS_WEBHOOK_ALLOW_PRIVATE=1` turns the whole guard off: HTTPS, DNS
+ * resolution, the private-range checks and connection pinning. That is
+ * legitimate for self-host and the e2e suite, where webhook targets live on the
+ * same private network. It is never legitimate on a hosted deployment, where
+ * the endpoint URL is supplied per tenant and the app sits inside a network
+ * with metadata endpoints and internal services in reach.
+ *
+ * So the flag is ignored outright in multi-tenant mode, rather than merely
+ * discouraged. {@link assertWebhookEgressPolicy} refuses the boot as well, but
+ * this is the check that matters at request time: a boot guard cannot help
+ * against an env var set on a process already running.
+ */
+export function allowPrivateWebhookTargets(): boolean {
+  if (isMultiTenant()) return false;
+  return process.env.SPECBOARDS_WEBHOOK_ALLOW_PRIVATE === "1";
+}
+
+/**
+ * Boot guard, called from `instrumentation.ts` beside the RLS, origin and
+ * local-mode guards. Fails the release when a hosted deployment is configured
+ * with the escape hatch set, so the misconfiguration surfaces at deploy time
+ * instead of being silently ignored per request.
+ *
+ * Verified on 2026-08-09: the flag is set on neither `specboard` nor
+ * `specboard-test` (both of which run `SPECBOARDS_MULTI_TENANT=true`), so this
+ * guard closes a latent hole rather than an open one.
+ */
+export function assertWebhookEgressPolicy(): void {
+  const requested = process.env.SPECBOARDS_WEBHOOK_ALLOW_PRIVATE === "1";
+  if (!requested) return;
+
+  if (isMultiTenant()) {
+    throw new Error(
+      "[security] Refusing to start: SPECBOARDS_WEBHOOK_ALLOW_PRIVATE is set on " +
+        "a multi-tenant deployment. That flag disables the webhook SSRF guard " +
+        "entirely (HTTPS, DNS, private-range checks and connection pinning), " +
+        "and tenants supply their own webhook URLs. Unset it.",
+    );
+  }
+  // Supported single-tenant/self-host, but never something to discover later.
+  console.warn(
+    "[security] SPECBOARDS_WEBHOOK_ALLOW_PRIVATE is set: webhook targets are " +
+      "NOT checked for private/loopback addresses and connections are not " +
+      "pinned. Intended for self-host on a trusted network only.",
+  );
+}
 
 /** A resolved, validated address to pin a connection to. */
 export interface PinnedAddress {
@@ -77,10 +129,12 @@ function isBlockedIpv4Range(addr: ipaddr.IPv4): boolean {
  * so the caller can pin the connection to exactly what was checked.
  *
  * In `SPECBOARDS_WEBHOOK_ALLOW_PRIVATE` mode (self-host / e2e) all checks are
- * skipped and no addresses are returned, so the sender connects normally.
+ * skipped and no addresses are returned, so the sender connects normally. That
+ * mode is unavailable to a multi-tenant deployment whatever the env says: see
+ * {@link allowPrivateWebhookTargets}.
  */
 export async function resolveValidatedTarget(raw: string): Promise<TargetResolution> {
-  const allowPrivate = process.env.SPECBOARDS_WEBHOOK_ALLOW_PRIVATE === "1";
+  const allowPrivate = allowPrivateWebhookTargets();
 
   let url: URL;
   try {

@@ -36,7 +36,11 @@ export default defineConfig({
       APP_URL: BASE_URL,
       SPECBOARDS_E2E_GITHUB_FIXTURE: process.env.SPECBOARDS_E2E_GITHUB_FIXTURE!,
       // Let the webhook e2e deliver to a loopback receiver (SSRF guard blocks
-      // private targets by default).
+      // private targets by default). This only works because the suite runs
+      // SINGLE-tenant: a multi-tenant deployment ignores the flag and refuses
+      // to boot with it set, since tenants there supply the webhook URLs (see
+      // lib/webhooks/ssrf.ts). Do not add SPECBOARDS_MULTI_TENANT here without
+      // giving the webhook spec another way to reach its receiver.
       SPECBOARDS_WEBHOOK_ALLOW_PRIVATE: "1",
     },
   },
