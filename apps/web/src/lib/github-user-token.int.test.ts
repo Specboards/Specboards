@@ -33,7 +33,20 @@ const OWNER_URL = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
 const wsId = randomUUID();
 const otherWsId = randomUUID();
 const userId = randomUUID();
+const colleagueId = randomUUID();
 const suffix = randomUUID().slice(0, 8);
+
+/** The non-owner role the RLS suites provision; provisioned here too so this
+ * file does not depend on running after them. */
+const APP_ROLE = "rls_int_app";
+const APP_PASSWORD = "rls-int-only-not-a-real-secret";
+
+function appUrl(): string {
+  const url = new URL(OWNER_URL!);
+  url.username = APP_ROLE;
+  url.password = APP_PASSWORD;
+  return url.toString();
+}
 
 const RAW = "ghu_averysecrettokenvalue000000000000000";
 
@@ -59,11 +72,23 @@ describe.skipIf(!OWNER_URL)("github user token storage", () => {
       (${wsId}, 'Tokens', ${"tokens-int-" + suffix}),
       (${otherWsId}, 'Tokens Two', ${"tokens2-int-" + suffix})`;
     await owner`insert into users (id, name, email, email_verified) values
-      (${userId}, 'Jane Doe', ${`jane-${suffix}@example.com`}, true)`;
+      (${userId}, 'Jane Doe', ${`jane-${suffix}@example.com`}, true),
+      (${colleagueId}, 'Sam Colleague', ${`sam-${suffix}@example.com`}, true)`;
+    await owner.unsafe(`
+      do $$ begin
+        if not exists (select 1 from pg_roles where rolname = '${APP_ROLE}') then
+          create role ${APP_ROLE} login password '${APP_PASSWORD}';
+        end if;
+      end $$;
+      grant usage on schema public to ${APP_ROLE};
+      grant select, insert, update, delete on all tables in schema public to ${APP_ROLE};
+      grant usage, select on all sequences in schema public to ${APP_ROLE};
+      grant execute on all functions in schema public to ${APP_ROLE};
+    `);
   });
 
   afterAll(async () => {
-    await owner`delete from users where id = ${userId}`;
+    await owner`delete from users where id in (${userId}, ${colleagueId})`;
     await owner`delete from workspaces where id in (${wsId}, ${otherWsId})`;
     await owner.end({ timeout: 5 });
   });
@@ -109,6 +134,37 @@ describe.skipIf(!OWNER_URL)("github user token storage", () => {
     const rows = await owner`select id from github_user_tokens
       where workspace_id = ${wsId} and user_id = ${userId}`;
     expect(rows).toHaveLength(0);
+  });
+
+  it("hides one member's token row from another member of the same workspace", async () => {
+    // The policy gates on the owning user, not just workspace membership, and
+    // this is why. `infra/rls-role.sql` grants specboards_app DML on future
+    // tables, so this table is reachable through the RLS connection as soon as
+    // it exists; a membership-only policy would hand a colleague someone else's
+    // credential row the first time any query touched it.
+    await storeGithubUserToken(db, wsId, userId, "janedoe", token());
+    await owner`insert into members (workspace_id, user_id, role) values
+      (${wsId}, ${userId}, 'owner'), (${wsId}, ${colleagueId}, 'member')
+      on conflict do nothing`;
+
+    const app = postgres(appUrl(), { prepare: false, max: 1 });
+    // In a transaction because `set_config(..., true)` is transaction-local,
+    // which is how the app sets the acting user in the first place.
+    const readAs = (actor: string) =>
+      app.begin(async (sql) => {
+        await sql`select set_config('app.user_id', ${actor}, true)`;
+        return sql`select user_id from github_user_tokens where workspace_id = ${wsId}`;
+      });
+
+    try {
+      expect(await readAs(colleagueId)).toHaveLength(0);
+      // The owner of the row still reaches it, so the policy is not simply
+      // closed to everyone, which would pass the assertion above for a bad
+      // reason.
+      expect(await readAs(userId)).toHaveLength(1);
+    } finally {
+      await app.end({ timeout: 5 });
+    }
   });
 
   it("drops a connection when the workspace goes", async () => {

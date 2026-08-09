@@ -49,13 +49,29 @@ CREATE TABLE IF NOT EXISTS "github_user_tokens" (
   CONSTRAINT "github_user_tokens_ws_user_uq" UNIQUE ("workspace_id", "user_id")
 );
 
--- Same posture as saved_views: the policy gates on workspace membership, and
--- the per-user narrowing is enforced in the query layer. Nothing reads these
--- rows except the write path acting as the user they belong to.
+-- Scoped to the owning user, NOT merely to workspace membership.
+--
+-- Everything else in this schema gates on membership and leaves per-user
+-- narrowing to the query layer (see saved_views), which is right for a saved
+-- view and wrong for a credential. `infra/rls-role.sql` grants specboards_app
+-- DML on future tables via ALTER DEFAULT PRIVILEGES, so this table is reachable
+-- through the RLS-enforced connection the moment it exists; a membership-only
+-- policy would let any colleague read or delete another person's token row the
+-- first time any query touched this table. Nothing does today, and relying on
+-- that is exactly the kind of assumption that stops being true quietly.
+--
+-- The write path uses the owner connection and so bypasses this entirely; the
+-- policy is the backstop for every path that does not.
 ALTER TABLE "github_user_tokens" ENABLE ROW LEVEL SECURITY;
-CREATE POLICY github_user_tokens_member_all ON "github_user_tokens"
-  FOR ALL USING (specboards_is_member(workspace_id))
-  WITH CHECK (specboards_is_member(workspace_id));
+CREATE POLICY github_user_tokens_own_all ON "github_user_tokens"
+  FOR ALL USING (
+    specboards_is_member(workspace_id)
+    AND user_id = nullif(current_setting('app.user_id', true), '')::uuid
+  )
+  WITH CHECK (
+    specboards_is_member(workspace_id)
+    AND user_id = nullif(current_setting('app.user_id', true), '')::uuid
+  );
 
 -- Deliberately NOT granted to specboards_worker. Sync and the webhook act for
 -- the whole workspace with no acting user, so there is no person whose token
