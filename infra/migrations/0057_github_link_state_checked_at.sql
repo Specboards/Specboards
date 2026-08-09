@@ -1,0 +1,26 @@
+-- When we last confirmed a link's state against GitHub.
+--
+-- The webhook already refreshes state and title when a pull request opens,
+-- merges or closes, and that is the fast path. What it cannot do is notice its
+-- own absence. A delivery that fails past GitHub's retries, a deploy that was
+-- restarting when the event fired, or an App installation created before
+-- `pull_request` was a subscribed event, all leave a link frozen at `open` with
+-- nothing in the system that will ever correct it.
+--
+-- That failure is quiet and it is not symmetrical. A link stuck at `open` tells
+-- an author their change is still waiting for review when it merged days ago,
+-- which is precisely the "your change silently evaporated" experience the
+-- authoring work exists to remove. Being wrong in that direction is worse than
+-- an occasional extra API call.
+--
+-- So the view path reconciles anything that has gone too long without
+-- confirmation. This column is what makes that bounded rather than a request to
+-- GitHub on every page load: the webhook stamps it on every update, so on a
+-- healthy installation the reconcile never fires at all, and it only starts
+-- costing anything once the webhook has already stopped working.
+--
+-- NULL for every existing row, which reads as "never confirmed" and is true:
+-- these rows were last written by the webhook or at link creation, and we did
+-- not record when.
+
+ALTER TABLE "feature_github_links" ADD COLUMN "state_checked_at" timestamptz;

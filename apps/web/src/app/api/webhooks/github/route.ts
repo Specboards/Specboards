@@ -33,7 +33,10 @@ async function updateLinksFromEntityEvent(
   for (const repo of repos) {
     const updated = await db
       .update(featureGithubLinks)
-      .set({ state: evt.state, title: evt.title })
+      // Stamping the check time here is what keeps the view-path reconcile
+      // idle: a working webhook confirms the state continuously, so nothing
+      // ever looks stale enough to be worth an API call.
+      .set({ state: evt.state, title: evt.title, stateCheckedAt: new Date() })
       .where(
         and(
           eq(featureGithubLinks.repoId, repo.id),

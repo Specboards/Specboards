@@ -1435,6 +1435,12 @@ export const featureGithubLinks = pgTable(
      * someone linked to the card by hand.
      */
     headBranch: text("head_branch"),
+    /**
+     * When this link's state was last confirmed against GitHub. Stamped by the
+     * webhook on every update, so the view-path reconcile only fires once the
+     * webhook has stopped working. NULL means never confirmed.
+     */
+    stateCheckedAt: timestamp("state_checked_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
