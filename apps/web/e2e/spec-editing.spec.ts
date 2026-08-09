@@ -74,7 +74,7 @@ test.describe("spec editing: edit a spec body in the app", () => {
     // The body is editable, and says where saving sends it. This is the part
     // that distinguishes a spec from a DB-native card: the destination is a
     // commit, and the UI has to admit that rather than autosaving silently.
-    const commit = page.getByRole("button", { name: /Commit changes/i });
+    const commit = page.getByRole("button", { name: /Save changes/i });
     await expect(commit).toBeVisible();
     await expect(commit).toBeDisabled(); // nothing edited yet
 
@@ -99,7 +99,7 @@ test.describe("spec editing: edit a spec body in the app", () => {
     // Scoped to the editor's status line: the toast says the same thing, and an
     // unscoped match resolves to both.
     await expect(
-      page.getByRole("status").filter({ hasText: /Committed [0-9a-f]{7} to / }),
+      page.getByRole("status").filter({ hasText: /Saved\. .+ is live\./ }),
     ).toBeVisible();
 
     // What actually landed in git.

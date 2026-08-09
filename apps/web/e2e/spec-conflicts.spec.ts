@@ -85,7 +85,7 @@ async function editAndSave(page: Page, text: string, after?: string) {
   await page.keyboard.press("End");
   await page.keyboard.type(text);
   const save = page.getByRole("button", {
-    name: /Send for review|Commit changes/i,
+    name: /Send for review|Save changes/i,
   });
   await expect(save).toBeEnabled();
   await Promise.all([
@@ -311,7 +311,7 @@ test.describe("spec editing: a change made in git is never overwritten", () => {
 
     await editAndSave(page, " First.");
     await expect(
-      page.getByRole("status").filter({ hasText: /Committed [0-9a-f]{7} to / }),
+      page.getByRole("status").filter({ hasText: /Saved\. .+ is live\./ }),
     ).toBeVisible();
 
     await editAndSave(page, " Second.");

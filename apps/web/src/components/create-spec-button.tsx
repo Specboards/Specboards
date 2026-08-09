@@ -168,7 +168,7 @@ export function CreateSpecButton({
     >
       <p className="text-xs text-muted-foreground">
         {attaching
-          ? "Commits a spec file for this item to the repository. The item keeps its status, assignee, parent and history, and its description becomes the spec's body."
+          ? "Gives this item a spec document. The item keeps its status, assignee, parent and history, and its description becomes the spec's body."
           : `Creates a spec and nests it under “${target.parentTitle}”.`}
       </p>
       <label className="block space-y-1.5">
