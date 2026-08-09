@@ -396,6 +396,29 @@ export const operationLimits = pgTable("operation_limits", {
 });
 
 /**
+ * GitHub webhook deliveries already processed, keyed by the `x-github-delivery`
+ * id. The insert IS the dedup check: a primary-key conflict means this delivery
+ * has been seen, so two concurrent copies cannot both proceed.
+ *
+ * Not to be confused with `webhookDeliveries`, which records our OUTBOUND
+ * deliveries to customer endpoints. Same word, opposite direction.
+ *
+ * Deployment-wide operational data with no tenant dimension, so no RLS (same
+ * shape as `githubApp`). Rows are pruned past a retention window well beyond
+ * GitHub's retry schedule; see `lib/github-delivery-dedup.ts`.
+ */
+export const githubWebhookDeliveries = pgTable(
+  "github_webhook_deliveries",
+  {
+    deliveryId: text("delivery_id").primaryKey(),
+    receivedAt: timestamp("received_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("github_webhook_deliveries_received_at_idx").on(t.receivedAt)],
+);
+
+/**
  * A pending GitHub App install flow, created when an owner clicks "Connect
  * GitHub" and consumed by the OAuth identity callback that completes the bind.
  * This is the server-side source of truth tying the CSRF nonce, the Specboards

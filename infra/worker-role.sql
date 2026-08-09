@@ -52,6 +52,11 @@ grant select, insert, update            on webhook_deliveries to specboards_work
 
 -- Incoming GitHub webhook sink (github-sync reconcile).
 grant select                            on github_app         to specboards_worker; -- no RLS (deployment singleton)
+-- Delivery-id dedup, so a replayed (or GitHub-retried) delivery is processed
+-- once. The INSERT is the check, so without this grant every delivery fails
+-- rather than merely losing a row; also granted in migration 0061. DELETE is
+-- for pruning past the retention window. No RLS (deployment singleton).
+grant select, insert, delete            on github_webhook_deliveries to specboards_worker;
 grant select, delete                    on github_installations to specboards_worker;
 grant select, update                    on repositories       to specboards_worker;
 grant select, insert, update, delete    on feature_github_links to specboards_worker;
