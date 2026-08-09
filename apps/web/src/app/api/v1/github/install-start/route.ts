@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 
-import { getSessionUser } from "@/lib/auth-session";
+import { getBrowserSessionUser } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
 import { getGithubAppSlug, getGithubOauthCredentials } from "@/lib/github-app";
 import {
@@ -29,7 +29,7 @@ function redirectTo(path: string): Response {
  */
 export async function GET(req: Request) {
   const db = getDb();
-  const user = await getSessionUser(req);
+  const user = await getBrowserSessionUser(req);
   if (!db || !user) {
     return redirectTo(`/sign-in?from=${encodeURIComponent("/")}`);
   }

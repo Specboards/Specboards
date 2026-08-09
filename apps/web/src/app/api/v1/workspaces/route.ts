@@ -1,5 +1,5 @@
 import { readJsonBody } from "@/lib/api/body";
-import { getSessionUser } from "@/lib/auth-session";
+import { getBrowserSessionUser } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
 import { seedSampleData } from "@/lib/sample-data";
 import {
@@ -20,7 +20,7 @@ const NAME_MAX = 80;
  */
 export async function POST(req: Request) {
   const db = getDb();
-  const user = await getSessionUser(req);
+  const user = await getBrowserSessionUser(req);
   if (!db || !user) {
     return Response.json(
       { error: "Authentication required." },

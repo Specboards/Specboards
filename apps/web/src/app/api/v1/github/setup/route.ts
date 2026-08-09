@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 
 import { getInstallationAccount } from "@specboards/git";
 
-import { getSessionUser } from "@/lib/auth-session";
+import { getBrowserSessionUser } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
 import { getGithubApp, getGithubOauthCredentials } from "@/lib/github-app";
 import {
@@ -47,7 +47,7 @@ export async function GET(req: Request) {
   const state = url.searchParams.get("state");
 
   const db = getDb();
-  const user = await getSessionUser(req);
+  const user = await getBrowserSessionUser(req);
   // Not signed in (or auth disabled): send them to sign in, then back here.
   if (!db || !user) {
     const from = encodeURIComponent(`/api/v1/github/setup${url.search}`);

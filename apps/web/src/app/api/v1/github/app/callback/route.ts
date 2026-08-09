@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 
-import { getSessionUser } from "@/lib/auth-session";
+import { getBrowserSessionUser } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
 import { saveCredentials } from "@/lib/github-app";
 import { APP_SETUP_COOKIE } from "@/lib/github-install";
@@ -36,7 +36,7 @@ export async function GET(req: Request) {
   const state = url.searchParams.get("state");
 
   const db = getDb();
-  const user = await getSessionUser(req);
+  const user = await getBrowserSessionUser(req);
   if (!db || !user) {
     const from = encodeURIComponent(`/api/v1/github/app/callback${url.search}`);
     return redirectTo(`/sign-in?from=${from}`);
