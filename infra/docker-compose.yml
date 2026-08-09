@@ -35,6 +35,13 @@ services:
       dockerfile: infra/web.Dockerfile
     environment:
       DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/specboard
+      # Keys session signing, the install-cookie HMAC, and AES-256-GCM
+      # encryption of the GitHub App private key and webhook secret at rest
+      # (apps/web/src/lib/crypto.ts). No default on purpose: `:?` makes compose
+      # refuse to start without it, which is a clearer failure than the app
+      # coming up and erroring the first time someone signs in or connects
+      # GitHub. Minimum 32 characters, enforced in crypto.ts.
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET in infra/.env (openssl rand -hex 32)}
       # Public origin used for OAuth callbacks, webhook URLs, and discovery
       # metadata. The localhost default suits a local trial; when serving
       # beyond this machine, set APP_URL in infra/.env to the real HTTPS

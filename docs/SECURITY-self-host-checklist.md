@@ -52,6 +52,17 @@ roughly by how much damage getting them wrong causes.
       the password into the data volume on initialization, so changing it later
       means `ALTER USER` in psql, not just editing `infra/.env`. Generate one
       with `openssl rand -hex 24`.
+- [ ] **Set `BETTER_AUTH_SECRET` (32+ characters, `openssl rand -hex 32`).**
+      One secret keys three things: Better Auth session signing, the GitHub
+      install-cookie HMAC, and AES-256-GCM encryption of secrets at rest (the
+      GitHub App private key and webhook secret). Compose refuses to start
+      without it, and the app refuses a value under 32 characters rather than
+      deriving a weak key.
+- [ ] Understand what rotating it costs **before** you rotate it: everyone is
+      signed out, and any GitHub App credentials encrypted under the old key
+      become undecryptable, so the GitHub integration must be set up again.
+      Unlike the database role passwords above, this is a migration rather than
+      a config edit.
 - [ ] Keep secrets in `infra/.env` (gitignored) or your platform's secret store,
       never in the compose file or committed config.
 - [ ] **Rotate on a schedule and on staff offboarding:** `POSTGRES_PASSWORD` and
