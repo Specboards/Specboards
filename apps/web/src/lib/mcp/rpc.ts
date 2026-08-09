@@ -1,10 +1,11 @@
+import { keyScopesSatisfy } from "@/lib/api-scopes";
 import { getAuth } from "@/lib/auth";
 import { orgSlugFromRequest, resolveReadAccess } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
 import { resolveApiMembership } from "@/lib/workspace";
 
 import { TOOLS } from "./tools";
-import { type McpContext } from "./types";
+import { type McpContext, type McpTool } from "./types";
 import { boundWorkspaceSlug } from "./workspace-binding";
 
 /**
@@ -106,7 +107,10 @@ export async function resolveMcpAuth(req: Request): Promise<McpAuth> {
   if (access.ok) {
     if (!access.access) {
       // Local file mode (auth disabled): everything allowed with no scope.
-      return { ok: true, ctx: { scope: undefined, role: null, isLocal: true } };
+      return {
+        ok: true,
+        ctx: { scope: undefined, role: null, isLocal: true, scopes: [] },
+      };
     }
     return {
       ok: true,
@@ -117,6 +121,9 @@ export async function resolveMcpAuth(req: Request): Promise<McpAuth> {
         },
         role: access.access.role,
         isLocal: false,
+        // Carried through so each tool call can be checked against the key's
+        // grants; `/api/mcp` has no path-derived scope to check instead.
+        scopes: access.credential.scopes,
       },
     };
   }
@@ -153,6 +160,8 @@ export async function resolveMcpAuth(req: Request): Promise<McpAuth> {
         scope: { userId: oauth.userId, workspaceId: resolved.membership.workspaceId },
         role: resolved.membership.role,
         isLocal: false,
+        // OAuth consent grants the client the user's access, not a scope subset.
+        scopes: [],
       },
     };
   }
@@ -193,6 +202,23 @@ async function resolveOAuthUser(
  */
 function canWriteCtx(ctx: McpContext): boolean {
   return ctx.isLocal || ctx.role !== null;
+}
+
+/**
+ * Whether the credential behind this call may use `tool`.
+ *
+ * The REST routes get this from their URL; `/api/mcp` is one URL for ~40 tools,
+ * so the check has to happen here or not at all. It used to not happen at all,
+ * which let a key scoped `features:read` call every write tool at its owner's
+ * full authority.
+ *
+ * An empty `ctx.scopes` is unrestricted by the same rule the REST side uses:
+ * browser sessions, OAuth tokens and legacy pre-scopes keys are not
+ * scope-limited.
+ */
+export function toolAllowedByScope(tool: McpTool, ctx: McpContext): boolean {
+  if (ctx.scopes.length === 0) return true;
+  return keyScopesSatisfy(ctx.scopes, tool.scope);
 }
 
 type JsonRpcId = string | number | null;
@@ -308,6 +334,17 @@ async function handleToolCall(
   if (!auth.ok) {
     return ok(id, toolError(auth.message));
   }
+  if (!toolAllowedByScope(tool, auth.ctx)) {
+    const { resource, action } = tool.scope;
+    logMcpCall({ tool: tool.name, denied: "scope", required: `${resource}:${action}` });
+    return ok(
+      id,
+      toolError(
+        `This API key lacks the "${resource}:${action}" scope, which ` +
+          `"${tool.name}" requires.`,
+      ),
+    );
+  }
   if (tool.write && !canWriteCtx(auth.ctx)) {
     return ok(
       id,
@@ -386,12 +423,18 @@ export async function handleMcpMessage(
     case "ping":
       return ok(id, {});
     case "tools/list":
+      // Advertise only what this credential may actually call, so an agent is
+      // not offered a tool it will be refused on. Convenience, not the gate:
+      // tools/call re-checks, because a client may call a name it was never
+      // offered.
       return ok(id, {
-        tools: TOOLS.map((t) => ({
-          name: t.name,
-          description: t.description,
-          inputSchema: t.inputSchema,
-        })),
+        tools: TOOLS.filter((t) => !auth.ok || toolAllowedByScope(t, auth.ctx)).map(
+          (t) => ({
+            name: t.name,
+            description: t.description,
+            inputSchema: t.inputSchema,
+          }),
+        ),
       });
     case "tools/call":
       if (isNotification) return null;

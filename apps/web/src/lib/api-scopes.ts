@@ -10,6 +10,12 @@
  * the request method + path (the resource is the first path segment under
  * `/api/v1/`), and the shared authorization helpers in `auth-session.ts` check
  * it. `write` on a resource implies `read` on that resource.
+ *
+ * Deriving the scope from the URL only works for surfaces whose URL names the
+ * resource. `/api/mcp` does not: it is one endpoint carrying a JSON-RPC tool
+ * name, so every MCP tool declares its own scope (`McpTool.scope`) and the RPC
+ * layer checks it per call. Anything else off the map is denied outright for
+ * key-authenticated callers - see {@link isScopeExemptPath}.
  */
 
 export type ScopeAction = "read" | "write";
@@ -22,9 +28,18 @@ export interface RequiredScope {
 /** One valid scope token: `*`, or `<resource>:<read|write>`. */
 const SCOPE_RE = /^([a-z][a-z0-9-]*):(read|write)$/;
 
-/** A human-readable list of the resources scopes can target (for docs/UI). */
+/**
+ * A human-readable list of the resources scopes can target (for docs/UI).
+ *
+ * Every `/api/v1/<segment>` a key can reach must appear here, or a key can
+ * never be granted access to it (`requiredScopeFor` still derives the scope, and
+ * no grant satisfies it). `api-scopes.test.ts` walks the route directory and
+ * fails when a new resource route lands without an entry.
+ */
 export const SCOPE_RESOURCES = [
   "features",
+  "specs",
+  "comments",
   "products",
   "repositories",
   "releases",
@@ -33,6 +48,8 @@ export const SCOPE_RESOURCES = [
   "key-results",
   "views",
   "ideas",
+  "idea-settings",
+  "idea-statuses",
   "webhooks",
   "docs",
   "doc-spaces",
@@ -48,6 +65,9 @@ export const SCOPE_RESOURCES = [
   "workspace",
   "me",
 ] as const;
+
+/** One of the resources a scope may target. */
+export type ScopeResource = (typeof SCOPE_RESOURCES)[number];
 
 /**
  * Validate an untrusted scopes list (from key creation). Each entry must be
@@ -101,6 +121,30 @@ export function requiredScopeFor(
   const action: ScopeAction =
     method === "GET" || method === "HEAD" ? "read" : "write";
   return { resource, action };
+}
+
+/**
+ * Paths a scoped API key may reach even though no `<resource>:<action>` scope
+ * is derivable from the URL. Everything else off the map is denied, so a new
+ * endpoint cannot silently inherit full key access the way `/api/mcp` did.
+ *
+ * - `/api/mcp` carries the resource in the JSON-RPC tool name rather than the
+ *   URL, so it is scoped per tool (`McpTool.scope`) by `lib/mcp/rpc.ts`. Listed
+ *   here so the path-level check defers to that one, not so it goes unchecked.
+ * - `/api/v1/openapi.json` is the published API description: it names no tenant
+ *   data, and its route is unauthenticated, so it never reaches this check
+ *   today. Listed so it stays reachable if it ever gains auth, and so the
+ *   resource-vocabulary test does not demand a scope for a document that
+ *   describes the scopes.
+ *
+ * Session (cookie) auth never reaches this: it is not scope-limited at all.
+ */
+const SCOPE_EXEMPT_PATHS = ["/api/mcp", "/api/v1/openapi.json"] as const;
+
+export function isScopeExemptPath(pathname: string): boolean {
+  return SCOPE_EXEMPT_PATHS.some(
+    (p) => pathname === p || pathname.startsWith(`${p}/`),
+  );
 }
 
 /**

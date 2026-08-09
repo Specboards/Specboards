@@ -229,6 +229,7 @@ export const DOC_TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: false,
+    scope: { resource: "docs", action: "read" },
     run: async (args, ctx) => {
       const target = await resolveTarget(ctx, args);
       const base = {
@@ -279,6 +280,7 @@ export const DOC_TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: false,
+    scope: { resource: "docs", action: "read" },
     run: async (args, ctx) => {
       const target = await resolveTarget(ctx, args);
       const docId = requireString(args, "docId");
@@ -363,6 +365,7 @@ export const DOC_TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: true,
+    scope: { resource: "docs", action: "write" },
     run: async (args, ctx) => {
       const target = await resolveTarget(ctx, args);
       const title = requireString(args, "title");
@@ -473,6 +476,7 @@ export const DOC_TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: true,
+    scope: { resource: "docs", action: "write" },
     run: async (args, ctx) => {
       const target = await resolveTarget(ctx, args);
       const docId = requireString(args, "docId");
@@ -592,6 +596,7 @@ export const DOC_TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: true,
+    scope: { resource: "docs", action: "write" },
     run: async (args, ctx) => {
       const target = await resolveTarget(ctx, args);
       const docId = requireString(args, "docId");

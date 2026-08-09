@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 
+import { SCOPE_RESOURCES } from "@/lib/api-scopes";
+
 import { TOOLS } from "./tools";
 
 /**
  * Registry invariants for the MCP surface. Nothing here calls a tool; it
- * guards the contract every client sees through tools/list, and the one
- * property that has security consequences: `write` is what the RPC layer
- * checks before letting a caller mutate, so a mutating tool that forgets the
- * flag is a hole, not a typo.
+ * guards the contract every client sees through tools/list, and the two
+ * properties that have security consequences: `write` is what the RPC layer
+ * checks before letting a caller mutate, and `scope` is what it checks against
+ * a restricted API key. A mutating tool that forgets either is a hole, not a
+ * typo.
  */
 
 /** Verbs that mutate. Everything else must be a read. */
@@ -19,6 +22,24 @@ describe("the tool registry", () => {
     expect(new Set(names).size).toBe(names.length);
   });
 
+  it("declares a known scope resource for every tool", () => {
+    // `/api/mcp` is one URL, so a tool's scope cannot be derived from the path
+    // the way the REST routes' are. If this list and SCOPE_RESOURCES drift
+    // apart, keys can be granted a scope no tool honours, or vice versa.
+    for (const t of TOOLS) {
+      expect(SCOPE_RESOURCES, t.name).toContain(t.scope.resource);
+    }
+  });
+
+  it("requires a write scope for exactly the write tools", () => {
+    for (const t of TOOLS) {
+      expect({ name: t.name, action: t.scope.action }).toEqual({
+        name: t.name,
+        action: t.write ? "write" : "read",
+      });
+    }
+  });
+
   it("marks every mutating tool as a write, and no others", () => {
     for (const t of TOOLS) {
       expect({ name: t.name, write: t.write }).toEqual({
@@ -26,6 +47,62 @@ describe("the tool registry", () => {
         write: MUTATING.test(t.name),
       });
     }
+  });
+
+  it("maps every tool to the scope its REST equivalent derives from its URL", () => {
+    // Spelled out rather than computed: this table is the authorization model
+    // for key-authenticated agents, so a change to it should be a visible diff
+    // someone signs off on. It mirrors what `requiredScopeFor` would return for
+    // the equivalent REST route, so one key behaves the same over both
+    // surfaces - hence `create_spec` is `specs:write` (POST /api/v1/specs) while
+    // `update_spec_content` is `features:write`
+    // (PUT /api/v1/features/<id>/content).
+    const expected: Record<string, string> = {
+      whoami: "me:read",
+      list_statuses: "statuses:read",
+      list_products: "products:read",
+      list_product_groups: "product-groups:read",
+      group_summary: "product-groups:read",
+      list_items: "features:read",
+      read_item: "features:read",
+      get_relations: "features:read",
+      list_github_links: "features:read",
+      update_item: "features:write",
+      delete_item: "features:write",
+      create_item: "features:write",
+      update_spec_content: "features:write",
+      link_github: "features:write",
+      unlink_github: "features:write",
+      create_spec: "specs:write",
+      list_releases: "releases:read",
+      create_release: "releases:write",
+      update_release: "releases:write",
+      update_release_notes: "releases:write",
+      list_cycles: "cycles:read",
+      create_cycle: "cycles:write",
+      update_cycle: "cycles:write",
+      rollover_cycle: "cycles:write",
+      list_goals: "goals:read",
+      read_goal: "goals:read",
+      create_goal: "goals:write",
+      update_goal: "goals:write",
+      delete_goal: "goals:write",
+      link_goal: "goals:write",
+      create_key_result: "key-results:write",
+      update_key_result: "key-results:write",
+      delete_key_result: "key-results:write",
+      list_docs: "docs:read",
+      read_doc: "docs:read",
+      create_doc: "docs:write",
+      update_doc: "docs:write",
+      delete_doc: "docs:write",
+    };
+    const actual = Object.fromEntries(
+      TOOLS.map((t) => [t.name, `${t.scope.resource}:${t.scope.action}`]),
+    );
+    // Equality both ways: a new tool with no entry here fails just as loudly as
+    // a changed mapping, so the table cannot quietly fall behind the registry.
+    expect(actual).toEqual(expected);
   });
 
   it("advertises a closed object schema for every tool", () => {

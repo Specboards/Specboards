@@ -97,6 +97,7 @@ export const TOOLS: McpTool[] = [
       "which level keys are valid for create_item.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     write: false,
+    scope: { resource: "me", action: "read" },
     run: async (_args, ctx) => {
       const store = await getStore();
       const [levels, products] = await Promise.all([
@@ -170,6 +171,7 @@ export const TOOLS: McpTool[] = [
       "have to guess a stage key.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     write: false,
+    scope: { resource: "statuses", action: "read" },
     run: async (_args, ctx) => {
       const [workflow, transitionMode] = await Promise.all([
         resolveWorkflowFor(ctx.scope ?? null),
@@ -199,6 +201,7 @@ export const TOOLS: McpTool[] = [
       "product group the product belongs to (null when ungrouped).",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     write: false,
+    scope: { resource: "products", action: "read" },
     run: async (_args, ctx) => {
       const store = await getStore();
       const [products, groups] = await Promise.all([
@@ -227,6 +230,7 @@ export const TOOLS: McpTool[] = [
       "(`group`) or group_summary.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     write: false,
+    scope: { resource: "product-groups", action: "read" },
     run: async (_args, ctx) => {
       const store = await getStore();
       const [groups, products] = await Promise.all([
@@ -262,6 +266,7 @@ export const TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: false,
+    scope: { resource: "product-groups", action: "read" },
     run: async (args, ctx) => {
       const store = await getStore();
       const [groups, products, releases] = await Promise.all([
@@ -319,6 +324,7 @@ export const TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: false,
+    scope: { resource: "features", action: "read" },
     run: async (args, ctx) => {
       const store = await getStore();
       const [features, products] = await Promise.all([
@@ -390,6 +396,7 @@ export const TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: false,
+    scope: { resource: "features", action: "read" },
     run: async (args, ctx) => {
       const specId = requireString(args, "specId");
       const store = await getStore();
@@ -445,6 +452,7 @@ export const TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: false,
+    scope: { resource: "features", action: "read" },
     run: async (args, ctx) => {
       const specId = requireString(args, "specId");
       const store = await getStore();
@@ -504,6 +512,7 @@ export const TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: true,
+    scope: { resource: "features", action: "write" },
     run: async (args, ctx) => {
       const specId = requireString(args, "specId");
       // parseFeaturePatch reads only known keys; specId/advance are ignored by it.
@@ -546,6 +555,7 @@ export const TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: true,
+    scope: { resource: "features", action: "write" },
     run: async (args, ctx) => {
       const specId = requireString(args, "specId");
       const store = await getStore();
@@ -596,6 +606,7 @@ export const TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: true,
+    scope: { resource: "features", action: "write" },
     run: async (args, ctx) => {
       const store = await getStore();
       const raw: Record<string, unknown> = { ...args };
@@ -658,6 +669,7 @@ export const TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: true,
+    scope: { resource: "features", action: "write" },
     run: async (args, ctx) => {
       const { db, scope } = requireDbScope(ctx);
       const specId = requireString(args, "specId");
@@ -733,6 +745,7 @@ export const TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: true,
+    scope: { resource: "specs", action: "write" },
     run: async (args, ctx) => {
       const { db, scope } = requireDbScope(ctx);
       const title = requireString(args, "title");
@@ -759,6 +772,7 @@ export const TOOLS: McpTool[] = [
       "releases come first (ascending target date), undated last.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     write: false,
+    scope: { resource: "releases", action: "read" },
     run: async (_args, ctx) => {
       const releases = await listReleases(ctx.scope);
       return releases.map((r) => ({
@@ -849,6 +863,7 @@ export const TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: true,
+    scope: { resource: "releases", action: "write" },
     run: async (args, ctx) => {
       // Per-product authorization is enforced in the store via
       // canWriteProductId: admin/contributor for a product release, owner for a
@@ -948,6 +963,7 @@ export const TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: true,
+    scope: { resource: "releases", action: "write" },
     run: async (args, ctx) => {
       // Per-product authorization is enforced in the store via
       // canWriteProductId against the release's product (owner for portfolio).
@@ -991,6 +1007,7 @@ export const TOOLS: McpTool[] = [
       "`cycleId` to schedule an item into it.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     write: false,
+    scope: { resource: "cycles", action: "read" },
     run: async (_args, ctx) => {
       const cycles = await listCycles(ctx.scope);
       return cycles.map((c) => ({
@@ -1048,6 +1065,7 @@ export const TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: true,
+    scope: { resource: "cycles", action: "write" },
     run: async (args, ctx) => {
       const cycle = await createCycle(parseCycleInput(args), ctx.scope);
       return {
@@ -1087,6 +1105,7 @@ export const TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: true,
+    scope: { resource: "cycles", action: "write" },
     run: async (args, ctx) => {
       const id = requireString(args, "id");
       const { id: _omit, ...rest } = args;
@@ -1130,6 +1149,7 @@ export const TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: true,
+    scope: { resource: "cycles", action: "write" },
     run: async (args, ctx) => {
       const fromCycleId = requireString(args, "fromCycleId");
       const toCycleId = requireString(args, "toCycleId");
@@ -1152,6 +1172,7 @@ export const TOOLS: McpTool[] = [
       "`status` is the owner's confidence call, not arithmetic.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     write: false,
+    scope: { resource: "goals", action: "read" },
     run: async (_args, ctx) => {
       const goals = await listGoals(ctx.scope);
       return goals.map((g) => ({
@@ -1196,6 +1217,7 @@ export const TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: false,
+    scope: { resource: "goals", action: "read" },
     run: async (args, ctx) => {
       const id = requireString(args, "id");
       const goals = await listGoals(ctx.scope);
@@ -1267,6 +1289,7 @@ export const TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: true,
+    scope: { resource: "goals", action: "write" },
     run: async (args, ctx) => {
       const goal = await createGoal(parseGoalInput(args), ctx.scope);
       return { id: goal.id, title: goal.title, status: goal.status };
@@ -1297,6 +1320,7 @@ export const TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: true,
+    scope: { resource: "goals", action: "write" },
     run: async (args, ctx) => {
       const id = requireString(args, "id");
       const { id: _omit, ...rest } = args;
@@ -1329,6 +1353,7 @@ export const TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: true,
+    scope: { resource: "goals", action: "write" },
     run: async (args, ctx) => {
       const id = requireString(args, "id");
       // Read first so the response can name what was removed, and so an
@@ -1375,6 +1400,7 @@ export const TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: true,
+    scope: { resource: "key-results", action: "write" },
     run: async (args, ctx) => {
       const goalId = requireString(args, "goalId");
       const { goalId: _omit, ...rest } = args;
@@ -1407,6 +1433,7 @@ export const TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: true,
+    scope: { resource: "key-results", action: "write" },
     run: async (args, ctx) => {
       const id = requireString(args, "id");
       const { id: _omit, ...rest } = args;
@@ -1449,6 +1476,7 @@ export const TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: true,
+    scope: { resource: "key-results", action: "write" },
     run: async (args, ctx) => {
       const id = requireString(args, "id");
       const goal = await deleteKeyResult(id, ctx.scope);
@@ -1489,6 +1517,7 @@ export const TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: true,
+    scope: { resource: "goals", action: "write" },
     run: async (args, ctx) => {
       const goalId = requireString(args, "goalId");
       const specId = requireString(args, "specId");
@@ -1550,6 +1579,7 @@ export const TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: true,
+    scope: { resource: "releases", action: "write" },
     run: async (args, ctx) => {
       // Reuses updateRelease so authorization (canWriteProductId: admin/
       // contributor for a product release, owner for portfolio) matches
@@ -1588,6 +1618,7 @@ export const TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: false,
+    scope: { resource: "features", action: "read" },
     run: async (args, ctx) => {
       const specId = requireString(args, "specId");
       const store = await getStore();
@@ -1644,6 +1675,7 @@ export const TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: true,
+    scope: { resource: "features", action: "write" },
     run: async (args, ctx) => {
       const specId = requireString(args, "specId");
       // Reuse the app's validation and GitHub resolution end to end; the store
@@ -1687,6 +1719,7 @@ export const TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: true,
+    scope: { resource: "features", action: "write" },
     run: async (args, ctx) => {
       const specId = requireString(args, "specId");
       const linkId = requireString(args, "linkId");
