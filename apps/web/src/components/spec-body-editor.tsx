@@ -14,6 +14,15 @@ import {
   type SpecWriteResult,
 } from "@/lib/api-client";
 import { saveButtonLabel, saveStatusLine } from "@/lib/spec-save-copy";
+import {
+  clearDraft,
+  draftAge,
+  hasMovedSince,
+  isDraftWorthOffering,
+  readDraft,
+  writeDraft,
+  type SpecDraft,
+} from "@/lib/spec-draft";
 
 /**
  * Headline for the conflict panel, naming what was actually fought over.
@@ -110,6 +119,10 @@ export function SpecBodyEditor({
   // means remounting it with a new starting point rather than setting a value.
   const [base, setBase] = useState(initial);
   const [editorKey, setEditorKey] = useState(0);
+  // A draft found on mount, held until the author decides. Never applied
+  // silently: restoring on top of what is on screen without asking is the same
+  // class of mistake as discarding it without asking.
+  const [draft, setDraft] = useState<SpecDraft | null>(null);
   // Second-click guard on "Use theirs", which is destructive and sits beside
   // the button that is not.
   const [discarding, setDiscarding] = useState(false);
@@ -128,9 +141,8 @@ export function SpecBodyEditor({
     path,
   };
 
-  // With an explicit save, a closed tab loses the edit. Drafts are a later
-  // feature; until then the browser's own guard is what stands between an
-  // author and silently losing their work.
+  // The browser's own guard still runs: a draft is recovery, not a reason to
+  // let someone close a tab on unsaved work without a word.
   useEffect(() => {
     if (!dirty) return;
     const warn = (e: BeforeUnloadEvent) => e.preventDefault();
@@ -138,10 +150,30 @@ export function SpecBodyEditor({
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
 
+  // Offer back anything left over from a previous visit, once, on mount.
+  useEffect(() => {
+    const stored = readDraft(specId);
+    if (isDraftWorthOffering(stored, initial)) setDraft(stored);
+    // Keyed by the spec: a different item is a different draft.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [specId]);
+
   function onChange(markdown: string) {
     draftRef.current = markdown;
     setDirty(markdown !== savedRef.current);
     if (error) setError(null);
+    // Written on every change rather than debounced: this is a local write of a
+    // string the browser already holds, and the moment worth protecting is the
+    // one keystroke before someone closes the tab.
+    if (markdown !== savedRef.current) {
+      writeDraft(specId, {
+        body: markdown,
+        savedAt: new Date().toISOString(),
+        baseSha: shaRef.current,
+      });
+    } else {
+      clearDraft(specId);
+    }
   }
 
   /**
@@ -163,6 +195,9 @@ export function SpecBodyEditor({
       savedRef.current = value;
       shaRef.current = result.blobSha;
       setDirty(false);
+      // The text is in git now, so the local copy has nothing left to protect.
+      clearDraft(specId);
+      setDraft(null);
       setConflict(null);
       setCommitSha(result.commitSha);
       setProposed(result.pullRequest);
@@ -242,8 +277,48 @@ export function SpecBodyEditor({
     setConflict(null);
   }
 
+  /** Put the draft back in the editor as the working copy. */
+  function restoreDraft(stored: SpecDraft) {
+    draftRef.current = stored.body;
+    setBase(stored.body);
+    setEditorKey((k) => k + 1);
+    setDirty(stored.body !== savedRef.current);
+    setDraft(null);
+  }
+
   return (
     <div className="space-y-2">
+      {draft ? (
+        <div className="space-y-2 rounded-md border border-warning/50 bg-warning/5 p-3">
+          <p className="text-sm font-medium">
+            You have unsaved writing on this spec from {draftAge(draft.savedAt, new Date())}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {/* Which version is which is the whole question here, so it is
+                answered before either button. */}
+            The editor is showing the version that is live. Your unsaved writing
+            was never published; it stayed in this browser.
+            {hasMovedSince(draft, shaRef.current)
+              ? " The spec has also changed since you wrote it, so restoring will not include that change."
+              : ""}
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" onClick={() => restoreDraft(draft)}>
+              Restore my writing
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                clearDraft(specId);
+                setDraft(null);
+              }}
+            >
+              Discard it
+            </Button>
+          </div>
+        </div>
+      ) : null}
       <MarkdownEditor
         key={editorKey}
         name="specBody"
