@@ -10,6 +10,7 @@ import {
   markAllNotificationsRead,
   markNotificationRead,
 } from "@/lib/api-client";
+import { notificationHeadline as headline } from "@/lib/notification-copy";
 import { useOrgSlug } from "@/lib/use-org";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -165,10 +166,12 @@ export function NotificationBell({ collapsed = false }: { collapsed?: boolean })
                           />
                         ) : null}
                         <span className="truncate text-sm">
-                          <span className="font-medium">
-                            {n.actorName ?? "Someone"}
-                          </span>{" "}
-                          mentioned you
+                          {headline(n).actor ? (
+                            <span className="font-medium">
+                              {headline(n).actor}{" "}
+                            </span>
+                          ) : null}
+                          {headline(n).text}
                         </span>
                         <span className="ml-auto shrink-0 text-2xs text-muted-foreground">
                           {timeAgo(n.createdAt)}

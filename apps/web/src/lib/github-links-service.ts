@@ -382,6 +382,10 @@ export async function recordWritePullRequest(
       title,
       state: "open",
       headBranch: pull.branch,
+      // Who to tell when this is merged or closed. Without it the outcome has
+      // no addressee, and a non-technical author never finds out: they do not
+      // watch the repo and will not see GitHub's own notification.
+      authorId: scope.userId,
     },
     scope,
   );

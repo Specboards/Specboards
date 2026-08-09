@@ -266,6 +266,32 @@ export class GitHubRepoClient implements GitRepoClient {
     };
   }
 
+  /**
+   * The most recent review comment left on a pull request, or null.
+   *
+   * A closed pull request carries no reason of its own: GitHub has a close
+   * reason for issues but not for these, so the only place a "why" exists is
+   * what a reviewer wrote. Telling an author their change was turned down
+   * without saying why is barely better than not telling them, so it is worth
+   * one extra call on an event that is rare.
+   *
+   * Reviews with no body (a bare approval, or a change request whose text sits
+   * on individual lines) are skipped rather than surfaced as an empty quote.
+   */
+  async getLatestReviewBody(number: number): Promise<string | null> {
+    const { data } = await this.octokit.rest.pulls.listReviews({
+      owner: this.owner,
+      repo: this.repo,
+      pull_number: number,
+      per_page: 100,
+    });
+    for (let i = data.length - 1; i >= 0; i--) {
+      const body = data[i]?.body?.trim();
+      if (body) return body;
+    }
+    return null;
+  }
+
   /** Fetch an issue's metadata. (Note: PRs are issues; pass real issues here.) */
   async getIssue(number: number): Promise<GithubArtifactMeta> {
     const { data } = await this.octokit.rest.issues.get({
