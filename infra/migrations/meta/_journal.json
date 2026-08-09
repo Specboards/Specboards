@@ -435,6 +435,13 @@
       "when": 1786356000000,
       "tag": "0061_github_webhook_delivery_dedup",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1786359600000,
+      "tag": "0062_workspaces_admin_update_policy",
+      "breakpoints": true
     }
   ]
 }
