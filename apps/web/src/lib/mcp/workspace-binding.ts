@@ -4,6 +4,7 @@ import {
   isNull,
   mcpWorkspaceBindings,
   members,
+  oauthApplications,
   workspaces,
   type Database,
 } from "@specboards/db";
@@ -56,6 +57,27 @@ export async function boundWorkspaceSlug(
     )
     .limit(1);
   return rows[0]?.slug ?? null;
+}
+
+/**
+ * The display name an MCP client registered under ("Claude Code", "claude.ai"),
+ * or null when the client omitted `client_name` at registration (it is optional
+ * in RFC 7591) or the row has since gone.
+ *
+ * Used to attribute changes in the ledger, so it is read on the write path and
+ * kept to one indexed lookup on `client_id`. A null here is not an error: it
+ * degrades to "An MCP agent", which still tells a reader nobody typed the change.
+ */
+export async function oauthClientName(
+  db: Database,
+  clientId: string,
+): Promise<string | null> {
+  const rows = await db
+    .select({ name: oauthApplications.name })
+    .from(oauthApplications)
+    .where(eq(oauthApplications.clientId, clientId))
+    .limit(1);
+  return rows[0]?.name?.trim() || null;
 }
 
 /** A workspace the user can act in, for the consent-screen picker. */

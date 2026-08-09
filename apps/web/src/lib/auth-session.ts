@@ -359,6 +359,11 @@ export async function resolveReadAccess(req: Request): Promise<ReadAccessResult>
       userId: principal.user.id,
       workspaceId: resolved.membership.workspaceId,
       role: resolved.membership.role,
+      // Carried, not dropped: a surface that hands this straight to the store as
+      // a write scope (`/api/mcp`) would otherwise fall back to "a person in the
+      // browser, name unknown", and every agent edit would land in the ledger as
+      // an unattributed "Someone".
+      actor: actorFor(principal),
     },
     credential: { viaKey: principal.viaKey, scopes: principal.scopes },
   };

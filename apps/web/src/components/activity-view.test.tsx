@@ -9,8 +9,8 @@ import type { ActivitySummary } from "@/lib/store/types";
  * could mislead are asserted against the markup rather than against the
  * helpers underneath it:
  *
- * - a window reaching back before the ledger must say so, in words, above the
- *   chart, or its blank days read as a fall in the team's output
+ * - a window reaching back before the ledger must flag itself on the total it
+ *   qualifies, or its blank days read as a fall in the team's output
  * - a stage average must never appear without the number of spans behind it
  *
  * Rendered with react-dom/server: these are server components with no state or
@@ -50,24 +50,26 @@ function render(over: Partial<ActivitySummary> = {}) {
 }
 
 describe("where history begins", () => {
-  it("says so when the window reaches back before the ledger", () => {
+  /**
+   * The words themselves are asserted against `coverageNote` in
+   * activity-report.test.ts: they now live in a tooltip, and Radix mounts a
+   * tooltip's content only once it is opened, so static markup can only show
+   * that the caveat is reachable and how loudly it is flagged.
+   */
+  it("flags a window reaching back before the ledger, on the total it qualifies", () => {
     const html = render({ since: "2026-08-05T10:00:00.000Z" });
-    expect(html).toContain("Recording began on");
-    // The sentence that stops a reader concluding the team slowed down.
-    expect(html).toContain("not");
-    expect(html).toContain("because nothing was being recorded then");
-    expect(html).toContain("The first 4 days of this window");
+    expect(html).toContain('aria-label="What this window covers"');
+    // Warning tone, so a partly-covered reading looks qualified at a glance
+    // rather than only to a reader who thinks to hover.
+    expect(html).toContain("lucide-triangle-alert");
+    expect(html).not.toContain("lucide-info");
   });
 
   it("does not cry gap when the window is covered in full", () => {
     const html = render({ since: "2026-07-01T00:00:00.000Z" });
-    expect(html).toContain("this window is covered in full");
-    expect(html).not.toContain("Recording began on");
-  });
-
-  it("says the whole window predates the ledger when it does", () => {
-    const html = render({ since: "2026-08-20T00:00:00.000Z" });
-    expect(html).toContain("This whole window predates the change ledger");
+    expect(html).toContain('aria-label="What this window covers"');
+    expect(html).toContain("lucide-info");
+    expect(html).not.toContain("lucide-triangle-alert");
   });
 
   it("explains an empty ledger rather than showing zeroes", () => {
@@ -77,7 +79,7 @@ describe("where history begins", () => {
     expect(html).not.toContain("changes recorded in this window");
   });
 
-  it("marks the unrecorded days in the chart, not only in the notice", () => {
+  it("marks the unrecorded days in the chart, not only in the tooltip", () => {
     const html = render({ since: "2026-08-05T10:00:00.000Z" });
     expect(html).toContain("Not recorded");
     expect(html).toContain("2026: not recorded");

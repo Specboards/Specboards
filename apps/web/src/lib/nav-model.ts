@@ -38,9 +38,15 @@ export interface NavGroup {
 
 export const GROUPS: NavGroup[] = [
   {
-    // Sits above Plan and outside any product: the portfolio view leadership
-    // starts from, before drilling into a single product's plan.
-    items: [{ href: "/dashboard", label: "Dashboard", icon: Gauge }],
+    // Sits above Plan: where you look to see how the work is actually going,
+    // before drilling into a single product's plan. Dashboard is the state of
+    // play right now and Activity is how it got there, so they answer the same
+    // question at two different time scales and belong side by side.
+    label: "Run",
+    items: [
+      { href: "/dashboard", label: "Dashboard", icon: Gauge },
+      { href: "/activity", label: "Activity", icon: Activity, productScoped: true },
+    ],
   },
   {
     label: "Plan",
@@ -69,16 +75,6 @@ export const GROUPS: NavGroup[] = [
     items: [
       { href: "/roadmap", label: "Roadmap", icon: Map, productScoped: true },
       { label: "Adoption", icon: TrendingUp, soon: true },
-    ],
-  },
-  {
-    // Looking back at work that already happened, rather than planning or
-    // running it. Its own group because the question ("what changed, and who
-    // changed it") is asked by different people, at different times, than the
-    // boards above.
-    label: "Measure",
-    items: [
-      { href: "/activity", label: "Activity", icon: Activity, productScoped: true },
     ],
   },
   {

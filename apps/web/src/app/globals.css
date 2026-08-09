@@ -1,6 +1,16 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
+/* `dark:` follows the `.dark` class, not the OS setting.
+ *
+ * Tailwind v4's stock `dark:` variant compiles to `@media
+ * (prefers-color-scheme: dark)`, but next-themes toggles a `.dark` class on
+ * <html> and every theme token below is keyed off that class. Left on the
+ * default the two disagree whenever the user's explicit choice differs from
+ * their OS: a light-mode reader on a dark-mode machine got `dark:prose-invert`
+ * applied over light tokens, i.e. near-white release notes on a white panel. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /* GitHub-native (Primer) re-skin over the shadcn/ui token architecture. Values
  * come from Primer Primitives; variable names stay on the stock shadcn names so
  * vendored components drop in unchanged. Light mode is Primer's slightly

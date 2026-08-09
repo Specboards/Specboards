@@ -101,6 +101,51 @@ export function unrecordedDays(days: ActivityDay[]): number {
   return days.filter((d) => !d.recorded).length;
 }
 
+/** A date for reading. UTC throughout, matching how the ledger buckets days. */
+export function formatDay(value: string): string {
+  return new Date(value).toLocaleDateString(undefined, {
+    dateStyle: "medium",
+    timeZone: "UTC",
+  });
+}
+
+/**
+ * What the window's totals do and do not cover, in words.
+ *
+ * The sentences live here rather than in the view because they are the part
+ * that has to be right: a window reaching back past the ledger's first day
+ * contains blank days that say nothing about the team, and a reader who is not
+ * told that reads a fall in output that never happened. `complete` is what the
+ * view keys its emphasis off, so a qualified reading looks qualified before
+ * anyone goes looking for the reason.
+ */
+export function coverageNote(
+  since: string,
+  missing: number,
+  windowDays: number,
+): { complete: boolean; headline: string; caveat: string } {
+  const began = `Recording began on ${formatDay(since)}`;
+  if (missing === 0) {
+    return {
+      complete: true,
+      headline: `${began}, so this window is covered in full.`,
+      caveat: "",
+    };
+  }
+  const extent =
+    missing === windowDays
+      ? "This whole window predates the change ledger."
+      : `The first ${missing} ${missing === 1 ? "day" : "days"} of this window predate it.`;
+  return {
+    complete: false,
+    headline: `${began}. ${extent}`,
+    caveat:
+      "Those days show no activity because nothing was being recorded then, " +
+      "not because nothing happened. Compare them with later days and the drop " +
+      "is in the record, not in the work.",
+  };
+}
+
 /**
  * A duration for reading, not for arithmetic.
  *

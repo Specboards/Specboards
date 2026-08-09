@@ -6,7 +6,7 @@ import { resolveApiMembership } from "@/lib/workspace";
 
 import { TOOLS } from "./tools";
 import { type McpContext, type McpTool } from "./types";
-import { boundWorkspaceSlug } from "./workspace-binding";
+import { boundWorkspaceSlug, oauthClientName } from "./workspace-binding";
 
 /**
  * A minimal, stateless MCP server over the Streamable HTTP transport, spoken as
@@ -118,6 +118,10 @@ export async function resolveMcpAuth(req: Request): Promise<McpAuth> {
         scope: {
           userId: access.access.userId,
           workspaceId: access.access.workspaceId,
+          // An `sb_` key resolves to `api_key` and a session cookie to `user`,
+          // which is right either way: the key path is an automation acting for
+          // its owner, the cookie path is that person's own browser session.
+          actor: access.access.actor,
         },
         role: access.access.role,
         isLocal: false,
@@ -157,7 +161,19 @@ export async function resolveMcpAuth(req: Request): Promise<McpAuth> {
     return {
       ok: true,
       ctx: {
-        scope: { userId: oauth.userId, workspaceId: resolved.membership.workspaceId },
+        scope: {
+          userId: oauth.userId,
+          workspaceId: resolved.membership.workspaceId,
+          // An OAuth connection is always a tool, never a person at a keyboard,
+          // and it told us its name at registration. Recording that is the
+          // difference between "Claude Code (agent)" and "Someone" in the
+          // ledger; the user it acted for is still on the row as the actor id.
+          actor: {
+            type: "agent",
+            id: oauth.userId,
+            label: db ? await oauthClientName(db, oauth.clientId) : null,
+          },
+        },
         role: resolved.membership.role,
         isLocal: false,
         // OAuth consent grants the client the user's access, not a scope subset.

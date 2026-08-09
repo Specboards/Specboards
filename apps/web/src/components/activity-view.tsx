@@ -4,13 +4,16 @@ import {
   RANGES,
   THIN_SAMPLE,
   changeKindLabel,
+  coverageNote,
   dailySeries,
+  formatDay,
   formatDuration,
   share,
   stageLabel,
   unrecordedDays,
   type ActivityDay,
 } from "@/lib/activity-report";
+import { InfoTip } from "@/components/ui/tooltip";
 import { describeActor } from "@/lib/item-history";
 import type { ActivitySummary } from "@/lib/store/types";
 import type { StatusWorkflow } from "@specboards/core";
@@ -24,14 +27,6 @@ import type { StatusWorkflow } from "@specboards/core";
  * does: draw days before the ledger existed as days of zero output, and print a
  * stage average without the number of spans behind it.
  */
-
-/** A date for reading. UTC throughout, matching how the ledger buckets days. */
-function formatDay(value: string): string {
-  return new Date(value).toLocaleDateString(undefined, {
-    dateStyle: "medium",
-    timeZone: "UTC",
-  });
-}
 
 export function ActivityView({
   summary,
@@ -67,21 +62,22 @@ export function ActivityView({
         </p>
       </div>
 
-      <RecordingNotice
-        since={summary.since}
-        missing={missing}
-        windowDays={days.length}
-      />
-
-      {summary.since === null ? null : (
+      {summary.since === null ? (
+        <NothingRecordedYet />
+      ) : (
         <>
           <div className="space-y-3 rounded-md border p-3">
             <div className="flex items-baseline gap-2">
               <span className="text-2xl font-semibold tabular-nums">
                 {summary.total}
               </span>
-              <span className="text-sm text-muted-foreground">
+              <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
                 {summary.total === 1 ? "change" : "changes"} recorded in this window
+                <RecordingCoverage
+                  since={summary.since}
+                  missing={missing}
+                  windowDays={days.length}
+                />
               </span>
             </div>
             <DailyChart days={days} />
@@ -141,60 +137,57 @@ function RangePicker({ basePath, rangeKey }: { basePath: string; rangeKey: strin
 }
 
 /**
- * Where the history begins, stated before any number is read.
+ * The empty state, before the ledger holds anything at all. Stays a block
+ * rather than a tooltip: it is the only thing on the page, so there is no
+ * number for it to qualify and nothing else for the reader to look at.
+ */
+function NothingRecordedYet() {
+  return (
+    <div className="rounded-md border border-dashed p-4 text-sm">
+      <p className="font-medium">No changes recorded yet</p>
+      <p className="mt-1 text-muted-foreground">
+        Specboards began keeping a change ledger when this workspace was
+        upgraded. Changes made from now on appear here; anything before that was
+        not recorded.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Where the history begins, attached to the count it qualifies.
  *
  * The ledger started when it was deployed, so a window reaching back past that
  * point contains days that are blank for a reason that has nothing to do with
  * the team. Left unsaid, that reads as a fall in output, and the reader draws a
- * conclusion about people from an artefact of the schema.
+ * conclusion about people from an artefact of the schema. It sits on the total
+ * rather than above the page because that is the number it changes the meaning
+ * of, and a banner over every report is read once and then never again.
+ *
+ * A partly-covered window gets the warning tone, so the caveat is visible
+ * before anyone hovers; a fully covered one is ordinary reassurance and stays
+ * quiet.
  */
-function RecordingNotice({
+function RecordingCoverage({
   since,
   missing,
   windowDays,
 }: {
-  since: string | null;
+  since: string;
   missing: number;
   windowDays: number;
 }) {
-  if (since === null) {
-    return (
-      <div className="rounded-md border border-dashed p-4 text-sm">
-        <p className="font-medium">No changes recorded yet</p>
-        <p className="mt-1 text-muted-foreground">
-          Specboards began keeping a change ledger when this workspace was
-          upgraded. Changes made from now on appear here; anything before that
-          was not recorded.
-        </p>
-      </div>
-    );
-  }
-  if (missing === 0) {
-    return (
-      <p className="text-xs text-muted-foreground">
-        Recording since {formatDay(since)}, so this window is covered in full.
-      </p>
-    );
-  }
+  const note = coverageNote(since, missing, windowDays);
   return (
-    <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm">
-      <p>
-        Recording began on <span className="font-medium">{formatDay(since)}</span>.{" "}
-        {missing === windowDays ? (
-          <>This whole window predates the change ledger.</>
-        ) : (
-          <>
-            The first {missing} {missing === 1 ? "day" : "days"} of this window
-            predate it.
-          </>
-        )}
-      </p>
-      <p className="mt-1 text-muted-foreground">
-        Those days show no activity because nothing was being recorded then, not
-        because nothing happened. Compare them with later days and the drop is in
-        the record, not in the work.
-      </p>
-    </div>
+    <InfoTip
+      label="What this window covers"
+      tone={note.complete ? "muted" : "warning"}
+    >
+      <p className="font-medium">{note.headline}</p>
+      {note.caveat ? (
+        <p className="mt-1.5 text-muted-foreground">{note.caveat}</p>
+      ) : null}
+    </InfoTip>
   );
 }
 

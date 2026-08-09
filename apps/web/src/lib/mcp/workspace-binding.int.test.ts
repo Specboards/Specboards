@@ -8,6 +8,7 @@ import { createDb, type Database } from "@specboards/db";
 import {
   boundWorkspaceSlug,
   consentWorkspaceOptions,
+  oauthClientName,
   recordMcpWorkspaceBinding,
 } from "./workspace-binding";
 
@@ -28,6 +29,8 @@ const ws = { a: randomUUID(), b: randomUUID() };
 const slug = { a: `mcpbind-a-${suffix}`, b: `mcpbind-b-${suffix}` };
 const userId = randomUUID();
 const clientId = `mcpbind-client-${suffix}`;
+/** A client that supplied `client_name` at registration, unlike `clientId`. */
+const namedClientId = `mcpbind-named-${suffix}`;
 
 describe.skipIf(!OWNER_URL)("MCP workspace binding", () => {
   let owner: postgres.Sql;
@@ -48,12 +51,14 @@ describe.skipIf(!OWNER_URL)("MCP workspace binding", () => {
       (${ws.b}, ${userId}, 'owner')`;
     await owner`insert into oauth_applications (client_id, redirect_urls, type) values
       (${clientId}, 'http://localhost/callback', 'public')`;
+    await owner`insert into oauth_applications (client_id, name, redirect_urls, type) values
+      (${namedClientId}, 'Claude Code', 'http://localhost/callback', 'public')`;
   });
 
   afterAll(async () => {
     // Bindings cascade from the user/client delete, but be explicit.
     await owner`delete from mcp_workspace_bindings where user_id = ${userId}`;
-    await owner`delete from oauth_applications where client_id = ${clientId}`;
+    await owner`delete from oauth_applications where client_id in (${clientId}, ${namedClientId})`;
     await owner`delete from members where user_id = ${userId}`;
     await owner`delete from workspaces where id in (${ws.a}, ${ws.b})`;
     await owner`delete from users where id = ${userId}`;
@@ -73,6 +78,17 @@ describe.skipIf(!OWNER_URL)("MCP workspace binding", () => {
   it("records the chosen workspace and reads it back as a slug", async () => {
     await recordMcpWorkspaceBinding(db, { userId, clientId, workspaceId: ws.a });
     expect(await boundWorkspaceSlug(db, userId, clientId)).toBe(slug.a);
+  });
+
+  it("reads back the client's registered name, for attributing its changes", async () => {
+    expect(await oauthClientName(db, namedClientId)).toBe("Claude Code");
+  });
+
+  it("has no name for a client that registered without one", async () => {
+    // `client_name` is optional in RFC 7591, and an unknown client id is the
+    // same story. Both degrade to "An MCP agent" rather than to a person.
+    expect(await oauthClientName(db, clientId)).toBeNull();
+    expect(await oauthClientName(db, `absent-${suffix}`)).toBeNull();
   });
 
   it("upserts on (user, client) so re-picking overwrites, not duplicates", async () => {

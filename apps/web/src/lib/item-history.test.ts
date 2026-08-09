@@ -61,10 +61,22 @@ describe("describeActor", () => {
     });
   });
 
+  it("names the MCP client behind an agent's change", () => {
+    // The label on an agent row is the tool, not a person, so it does not get
+    // the api_key phrasing that credits an owner for the change.
+    expect(
+      describeActor(event({ actorType: "agent", actorLabel: "Claude Code" })),
+    ).toEqual({ actor: "Claude Code (agent)", automated: true });
+  });
+
   it("still renders when the actor was never labelled", () => {
     expect(describeActor(event({ actorLabel: null })).actor).toBe("Someone");
     expect(describeActor(event({ actorType: "sync", actorLabel: null })).actor).toBe(
       "A change in git",
+    );
+    // A client that skipped `client_name` at registration is still not a person.
+    expect(describeActor(event({ actorType: "agent", actorLabel: null })).actor).toBe(
+      "An MCP agent",
     );
   });
 });

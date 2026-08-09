@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   activityWindow,
   changeKindLabel,
+  coverageNote,
   dailySeries,
   formatDuration,
   resolveRange,
@@ -128,5 +129,42 @@ describe("share", () => {
   it("is zero rather than NaN when there is nothing to divide", () => {
     expect(share(0, 0)).toBe(0);
     expect(share(3, 12)).toBe(25);
+  });
+});
+
+describe("coverageNote", () => {
+  const since = "2026-08-05T10:00:00.000Z";
+
+  it("says how much of the window predates the ledger", () => {
+    const note = coverageNote(since, 4, 8);
+    expect(note.complete).toBe(false);
+    expect(note.headline).toContain("Recording began on");
+    expect(note.headline).toContain("The first 4 days of this window predate it");
+  });
+
+  it("says so when the whole window predates the ledger", () => {
+    expect(coverageNote(since, 8, 8).headline).toContain(
+      "This whole window predates the change ledger",
+    );
+  });
+
+  it("agrees with itself on a single missing day", () => {
+    expect(coverageNote(since, 1, 8).headline).toContain("The first 1 day of this window");
+  });
+
+  it("carries the sentence that stops a reader blaming the team", () => {
+    // Without this the blank days read as a fall in output rather than as a
+    // period before anything was being recorded.
+    const note = coverageNote(since, 4, 8);
+    expect(note.caveat).toContain("because nothing was being recorded then");
+    expect(note.caveat).toContain("not in the work");
+  });
+
+  it("reassures rather than warns when the window is covered in full", () => {
+    const note = coverageNote(since, 0, 8);
+    expect(note.complete).toBe(true);
+    expect(note.headline).toContain("this window is covered in full");
+    // Nothing to explain away, so no caveat to make the reader hunt for.
+    expect(note.caveat).toBe("");
   });
 });

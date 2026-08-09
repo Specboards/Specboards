@@ -70,8 +70,12 @@ export function describeActor(event: {
     case "user":
       return { actor: named || "Someone", automated: false };
     case "api_key":
-    case "agent":
       return { actor: named ? `${named} (automation)` : "An automation", automated: true };
+    // An MCP client names itself when it registers, so `named` here is the tool
+    // ("Claude Code"), not a person. The user it acted for is still on the row
+    // as `actorId`; what the label has to carry is that nobody typed this.
+    case "agent":
+      return { actor: named ? `${named} (agent)` : "An MCP agent", automated: true };
     case "sync":
       return { actor: named ? `${named} (via git)` : "A change in git", automated: true };
     default:
