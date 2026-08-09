@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { eq, users, type Database } from "@specboards/db";
 
 /**
@@ -26,12 +28,51 @@ import { eq, users, type Database } from "@specboards/db";
 export interface CommitAuthor {
   name: string;
   /**
-   * Used for the trailer. GitHub links a co-author to an account by matching
-   * this against the addresses on it, so a Specboards email that happens to be
-   * their GitHub email links the commit to their profile; one that does not
-   * still records the name in `git log`, which is the part that matters.
+   * A minted, non-routable address, never the user's real one.
+   *
+   * The trailer format requires `Name <email>`: an address is structurally
+   * mandatory, so the choice is which one, not whether. Using the real one
+   * would publish a person's email into a repository that is often public and
+   * always outside our control, and a commit cannot be unpublished. That is a
+   * disclosure the author never agreed to in exchange for a line in a log.
+   *
+   * What it costs is profile linking, and less than it appears: GitHub only
+   * ever linked a co-author whose Specboards address happened to also be on
+   * their GitHub account. Those are precisely the people who will connect an
+   * account and get genuine authorship from their own token, at which point
+   * there is no trailer at all. The name is what makes `git log` answer the
+   * question, and the name is unaffected.
+   *
+   * GitHub solves the same problem the same way with
+   * `users.noreply.github.com`.
    */
   email: string;
+}
+
+/**
+ * Domain for minted attribution addresses. Must never accept mail: nothing
+ * should be deliverable here, and a stray MX record would turn a privacy
+ * measure into a mailbox.
+ */
+const NOREPLY_DOMAIN = "users.noreply.specboards.ai";
+
+/**
+ * A stable, non-routable address for an author.
+ *
+ * The name is already in the trailer, so the readable slug discloses nothing
+ * further; the digest is what keeps two people called Jane Doe apart and keeps
+ * one person's commits grouped as theirs over time. Derived from the user id
+ * rather than being the id, so an internal identifier is not published either.
+ */
+export function attributionAddress(userId: string, name: string): string {
+  const slug =
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 32) || "author";
+  const tag = createHash("sha256").update(userId).digest("hex").slice(0, 8);
+  return `${slug}-${tag}@${NOREPLY_DOMAIN}`;
 }
 
 /** What the write is doing, which decides the verb in the subject. */
@@ -62,7 +103,7 @@ function oneLine(value: string): string {
  * Edited in Specboards.
  * specs/refunds/spec.md
  *
- * Co-authored-by: Jane Doe <jane@acme.com>
+ * Co-authored-by: Jane Doe <jane-doe-8f3a2b1c@users.noreply.specboards.ai>
  * ```
  *
  * The path moves into the body because the title is the useful identifier for
@@ -95,7 +136,11 @@ export function specCommitMessage(input: {
 }
 
 /**
- * Resolve the acting user's name and email for attribution, or null.
+ * Resolve who to credit, or null.
+ *
+ * Reads the display name only. The user's email is deliberately never loaded:
+ * the address in the trailer is minted, so there is no point at which a real
+ * one is in hand and could be written out by mistake.
  *
  * Null rather than a placeholder: a commit credited to "Unknown
  * <unknown@example.com>" is worse than one that simply carries no co-author,
@@ -108,12 +153,15 @@ export async function resolveCommitAuthor(
   if (!userId) return null;
   try {
     const [row] = await db
-      .select({ name: users.name, email: users.email })
+      .select({ name: users.name })
       .from(users)
       .where(eq(users.id, userId))
       .limit(1);
-    if (!row?.email) return null;
-    return { name: row.name?.trim() || row.email, email: row.email };
+    if (!row) return null;
+    // A blank display name must not fall back to the email: that is the one
+    // value this whole change exists to keep out of the repo.
+    const name = row.name?.trim() || "Specboards user";
+    return { name, email: attributionAddress(userId, name) };
   } catch (err) {
     // Attribution is not worth failing a save over: the author would lose their
     // writing to protect a line in a commit message.
