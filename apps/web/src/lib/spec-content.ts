@@ -27,6 +27,10 @@ import {
   type Database,
 } from "@specboards/db";
 
+import {
+  resolveCommitAuthor,
+  specCommitMessage,
+} from "@/lib/commit-attribution";
 import { recordWritePullRequest } from "@/lib/github-links-service";
 import {
   resolveRepoClient,
@@ -385,7 +389,14 @@ export async function updateSpecContent(
   const client = await resolveRepoClient(db, repo);
   const existing = await client.readFile(path);
   const content = rewriteSpecBody(existing.raw, body, { id: specId, title });
-  const message = opts.message?.trim() || `docs(specboard): update ${path}`;
+  const message =
+    opts.message?.trim() ||
+    specCommitMessage({
+      action: "update",
+      title,
+      path,
+      author: await resolveCommitAuthor(db, scope.userId),
+    });
   const { mode } = resolveWriteMode(repo.config, repo.writeModeOverride);
   const { commitSha, blobSha, pullRequest, mergedWith, mergedBody } = await writeMerged(
     client,
@@ -443,11 +454,18 @@ export async function deleteSpecFile(
   specId: string,
   opts: { message?: string } = {},
 ): Promise<{ path: string; commitSha: string }> {
-  const { repo, path } = await authorizeSpecWrite(db, scope, specId);
+  const { repo, path, title } = await authorizeSpecWrite(db, scope, specId);
   const client = await resolveRepoClient(db, repo);
   const { commitSha } = await client.deleteFile({
     path,
-    message: opts.message?.trim() || `docs(specboard): remove spec ${path}`,
+    message:
+      opts.message?.trim() ||
+      specCommitMessage({
+        action: "remove",
+        title,
+        path,
+        author: await resolveCommitAuthor(db, scope.userId),
+      }),
   });
   return { path, commitSha };
 }
@@ -670,9 +688,12 @@ export async function createSpec(
     content: newSpecFile(id, title, body),
     message:
       input.message?.trim() ||
-      (input.workItemId
-        ? `docs(specboard): attach spec ${path}`
-        : `docs(specboard): add spec ${path}`),
+      specCommitMessage({
+        action: "create",
+        title,
+        path,
+        author: await resolveCommitAuthor(db, scope.userId),
+      }),
     mode: "direct",
     expectedBlobSha: null,
   });
