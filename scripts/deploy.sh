@@ -62,5 +62,33 @@ if [ -n "$dirty" ] || [ -n "$untracked" ]; then
   echo "from the tree. The commit /legal points at will not match exactly." >&2
 fi
 
+# The build context is uploaded to Fly's REMOTE builder, so anything that
+# escapes .dockerignore leaves the machine. Agent worktrees under .claude/ did
+# exactly that until they were excluded, and the only reason anyone noticed was
+# a security review. Warn about the next one here instead.
+#
+# Counts files rather than bytes, and prunes the same directory names
+# .dockerignore does. Two reasons for a count: `du --exclude` is GNU-only and
+# macOS silently ignores it (measuring the whole 8.7 GB tree, which is how this
+# check was first written), and per-directory sizing without pruning flags
+# `apps/` as 521 MB because node_modules lives inside it - a warning that fires
+# on every deploy is one nobody reads.
+#
+# The real context is ~740 files. With .claude/worktrees included it was ~4000,
+# so the threshold catches that class of mistake with room to spare.
+context_files="$(
+  find . -type d \( \
+      -name node_modules -o -name .next -o -name dist -o -name .turbo \
+      -o -name .git -o -name .claude -o -name out -o -name test-results \
+      -o -name playwright-report \
+    \) -prune -o -type f -print 2>/dev/null | wc -l | tr -d ' '
+)"
+echo "Build context: ~${context_files} files"
+if [ "${context_files:-0}" -gt 2000 ]; then
+  echo "Warning: that is far more than the ~740 files this context should hold." >&2
+  echo "Something large is escaping .dockerignore and will be uploaded to Fly's" >&2
+  echo "remote builder. Check for a new top-level or agent/tool state directory." >&2
+fi
+
 echo "Deploying $config at $sha (branch $branch)…"
 exec fly deploy -c "$config" --build-arg GIT_SHA="$sha" "$@"
