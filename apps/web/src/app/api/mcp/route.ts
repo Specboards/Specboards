@@ -1,3 +1,4 @@
+import { readTextBodyWithin } from "@/lib/api/body";
 import { handleMcpMessage, resolveMcpAuth, rpcError } from "@/lib/mcp/rpc";
 import { logSecurityEvent } from "@/lib/security-log";
 
@@ -50,17 +51,12 @@ function unauthorized(req: Request): Response {
 }
 
 export async function POST(req: Request) {
-  // Bound the body before reading it into memory. Trust the header when present
-  // (Next/undici enforce it); the read below is the backstop for a lying one.
-  const declared = Number(req.headers.get("content-length"));
-  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) {
-    logSecurityEvent("request-oversized", { endpoint: "mcp", bytes: declared });
-    return Response.json(rpcError(null, -32600, "Request too large"), { status: 413 });
-  }
-
-  const raw = await req.text();
-  if (raw.length > MAX_BODY_BYTES) {
-    logSecurityEvent("request-oversized", { endpoint: "mcp", bytes: raw.length });
+  // Bound the body as it arrives, in bytes. This used to buffer the whole body
+  // with `req.text()` and then compare `raw.length` (UTF-16 code units), so a
+  // chunked request was fully allocated before being refused and a multi-byte
+  // one could carry ~3x the stated limit.
+  const raw = await readTextBodyWithin(req, MAX_BODY_BYTES, "mcp");
+  if (raw === null) {
     return Response.json(rpcError(null, -32600, "Request too large"), { status: 413 });
   }
 

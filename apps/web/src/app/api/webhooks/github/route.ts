@@ -8,6 +8,7 @@ import {
 } from "@specboards/git";
 import { and, eq, featureGithubLinks, githubInstallations, type Database } from "@specboards/db";
 
+import { readTextBodyWithin } from "@/lib/api/body";
 import { getWorkerDb } from "@/lib/db";
 import { getWebhookSecret } from "@/lib/github-app";
 import { notifyReviewOutcome } from "@/lib/review-outcome-notify";
@@ -72,19 +73,16 @@ export async function POST(req: Request) {
     );
   }
 
-  // Bound the body before reading it in (defends against a memory-exhaustion
-  // delivery ahead of the HMAC check).
-  const declared = Number(req.headers.get("content-length"));
-  if (Number.isFinite(declared) && declared > MAX_WEBHOOK_BYTES) {
-    logSecurityEvent("request-oversized", { endpoint: "github-webhook", bytes: declared });
-    return Response.json({ error: "Payload too large." }, { status: 413 });
-  }
-
-  // Raw body is required: re-serializing parsed JSON would change the bytes the
-  // HMAC was computed over.
-  const raw = await req.text();
-  if (raw.length > MAX_WEBHOOK_BYTES) {
-    logSecurityEvent("request-oversized", { endpoint: "github-webhook", bytes: raw.length });
+  // Bound the body as it arrives, in bytes. This check sits ahead of the HMAC
+  // (it has to: the signature is computed over the body we have not read yet),
+  // so it is reachable by anyone who can reach the endpoint. It used to buffer
+  // the whole delivery with `req.text()` before deciding, which made the cap
+  // bound the response rather than the allocation.
+  //
+  // Raw text, not parsed JSON: re-serializing would change the bytes the HMAC
+  // was computed over.
+  const raw = await readTextBodyWithin(req, MAX_WEBHOOK_BYTES, "github-webhook");
+  if (raw === null) {
     return Response.json({ error: "Payload too large." }, { status: 413 });
   }
   const signature = req.headers.get("x-hub-signature-256") ?? "";
