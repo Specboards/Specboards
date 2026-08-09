@@ -17,6 +17,7 @@ import {
   type LinkableRepo,
 } from "@/lib/github-links-service";
 import { resolveSpecWriteMode } from "@/lib/github-sync";
+import { reconcilePendingChangeState } from "@/lib/pr-state-refresh";
 import { resolveWorkflowFor } from "@/lib/repo-config";
 import { getStore } from "@/lib/store";
 import type {
@@ -140,6 +141,11 @@ export async function getItemDetailData(
   access: ItemDetailAccess,
 ): Promise<ItemDetailData | null> {
   const store = await getStore();
+  // Before reading, give any pending spec change a chance to correct itself.
+  // Normally a no-op (the webhook keeps state fresh); it earns its place only
+  // when a delivery was missed, where the alternative is telling the author
+  // their change is still in review long after it merged.
+  if (access) await reconcilePendingChangeState(specId, access.workspaceId);
   const feature = await store.getFeature(specId, access ?? undefined);
   if (!feature) return null;
 
