@@ -1,5 +1,19 @@
 # Project instructions for Claude
 
+## Reporting back
+
+- **Separate what you did from what you need.** End every piece of work with a
+  clear split between the two, and never leave the reader guessing which one a
+  sentence is. Findings that you went on to fix yourself are *done*, not open
+  questions; say so plainly and move on. Anything that genuinely needs a human
+  decision, an approval, or a credential goes in its own clearly-labelled
+  section at the end, phrased as the question being asked and what changes
+  depending on the answer. If there is nothing outstanding, say that explicitly
+  rather than trailing off, so silence is never mistaken for a pending ask.
+- **Say what you deliberately did not do**, and why: scope you left out, a
+  finding you decided was not worth acting on, a check you could not run. An
+  omission the reader has to notice for themselves reads as an oversight.
+
 ## Building philosophy
 
 - **Tracer bullets.** When building a feature, first build the smallest possible
