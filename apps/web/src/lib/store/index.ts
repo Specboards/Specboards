@@ -2,6 +2,7 @@ import { DbStore } from "./db";
 import { findRepoRoot, LocalFileStore } from "./local";
 import type { FeatureStore } from "./types";
 
+import { isLocalFileMode } from "@/lib/local-mode";
 import { isMultiTenant } from "@/lib/tenancy";
 
 export type * from "./types";
@@ -12,7 +13,11 @@ let store: FeatureStore | undefined;
 
 /**
  * Resolve the feature store once per process: Postgres when `DATABASE_URL`
- * is set, otherwise the zero-setup local file store.
+ * is set, otherwise the zero-setup local file store — which now has to be
+ * asked for with `SPECBOARDS_LOCAL_MODE`, because it is unauthenticated (see
+ * `lib/local-mode.ts`). A missing connection string alone is a
+ * misconfiguration and throws here rather than quietly serving the working
+ * tree to anyone who asks.
  *
  * Tenant data uses `DATABASE_URL_APP`, the non-owner `specboards_app` role
  * that RLS enforces against. In multi-tenant (hosted) mode that connection is
@@ -37,6 +42,15 @@ export async function getStore(): Promise<FeatureStore> {
       }
       store = new DbStore(appUrl ?? process.env.DATABASE_URL);
     } else {
+      if (!isLocalFileMode()) {
+        // Not cached: every request fails until the env is fixed. The boot
+        // guard normally catches this first (see lib/local-mode.ts).
+        throw new Error(
+          "DATABASE_URL is not set and SPECBOARDS_LOCAL_MODE was not requested: " +
+            "refusing to serve the unauthenticated local file store, which has " +
+            "no sign-in and no membership check.",
+        );
+      }
       store = new LocalFileStore(await findRepoRoot());
     }
   }

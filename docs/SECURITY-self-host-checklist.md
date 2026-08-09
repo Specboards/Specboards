@@ -35,6 +35,16 @@ roughly by how much damage getting them wrong causes.
       entirely if you do not need host-side `psql` / migrations.
 - [ ] If the DB runs on a separate host, put it on a private network / VPC and
       restrict inbound to the app hosts only.
+- [ ] **Always set `DATABASE_URL`.** Specboards refuses to start without it
+      rather than falling back to its local file store, which has no accounts
+      and no membership checks: every request there is authorized, including
+      deleting spec files. If a boot fails with `Refusing to start: DATABASE_URL
+      is not set`, fix the connection string; do not reach for the flag below.
+- [ ] **Never set `SPECBOARDS_LOCAL_MODE` on a server.** It opts into that
+      unauthenticated file store deliberately, for a single developer reading
+      specs off a working tree. The app additionally refuses it unless the
+      process binds loopback and serves a `localhost` origin, so this is a
+      backstop, not the only control.
 
 ## 3. Secrets
 
