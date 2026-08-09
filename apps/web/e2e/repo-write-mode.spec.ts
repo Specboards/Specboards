@@ -77,7 +77,7 @@ test.describe("settings: how spec edits reach a repository", () => {
     // The override reaches the write path: this save commits rather than
     // proposing, which is the only thing that makes the setting real.
     await page.goto(`/${ws.slug}/all/backlog/work/${SPEC_ID}`);
-    const commit = page.getByRole("button", { name: /Commit changes/i });
+    const commit = page.getByRole("button", { name: /Save changes/i });
     await expect(commit).toBeVisible();
     await page.locator(".tiptap").click();
     await page.keyboard.press("End");

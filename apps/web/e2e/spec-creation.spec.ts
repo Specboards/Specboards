@@ -63,7 +63,7 @@ test.describe("spec creation: bring a spec into existence from the app", () => {
 
     // Scoped to the form: the item's own header also renders a path once the
     // spec exists, so an unscoped match would be ambiguous after the write.
-    const form = page.locator("form").filter({ hasText: /Commits a spec file/ });
+    const form = page.locator("form").filter({ hasText: /Gives this item a spec document/ });
     // The form names the exact file it is about to commit, so the author is
     // never guessing where their document went.
     await expect(form.getByText("specs/refund-window/spec.md")).toBeVisible();
@@ -123,7 +123,7 @@ test.describe("spec creation: bring a spec into existence from the app", () => {
     await expect(page.getByText("Saved", { exact: true })).toBeVisible();
 
     await page.getByRole("button", { name: /Attach a spec/i }).click();
-    const form = page.locator("form").filter({ hasText: /Commits a spec file/ });
+    const form = page.locator("form").filter({ hasText: /Gives this item a spec document/ });
     const [resp] = await Promise.all([
       page.waitForResponse(
         (r) => r.url().includes("/api/v1/specs") && r.request().method() === "POST",
@@ -294,7 +294,7 @@ test.describe("spec creation: bring a spec into existence from the app", () => {
 
     await page.goto(`/${ws.slug}/all/backlog/work/${specId}`);
     await page.getByRole("button", { name: /Attach a spec/i }).click();
-    const form = page.locator("form").filter({ hasText: /Commits a spec file/ });
+    const form = page.locator("form").filter({ hasText: /Gives this item a spec document/ });
     // No template picker on attach: the card's description is the body, so a
     // control that could not change the outcome is not offered.
     await expect(form.getByLabel(/Start from/i)).toHaveCount(0);
@@ -334,7 +334,7 @@ test.describe("spec creation: bring a spec into existence from the app", () => {
 
     await page.goto(`/${ws.slug}/all/backlog/work/${secondId}`);
     await page.getByRole("button", { name: /Attach a spec/i }).click();
-    const form = page.locator("form").filter({ hasText: /Commits a spec file/ });
+    const form = page.locator("form").filter({ hasText: /Gives this item a spec document/ });
     await form.getByRole("button", { name: /^Attach spec$/i }).click();
 
     // The collision is reported next to the field the author has to change,
