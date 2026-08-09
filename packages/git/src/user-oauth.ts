@@ -54,6 +54,136 @@ export async function exchangeGithubUserCode(
   return data.access_token;
 }
 
+/** A user-to-server token as GitHub returns it, expiry included. */
+export interface GithubUserToken {
+  accessToken: string;
+  /** Present only when the App has user-token expiration switched on. */
+  refreshToken: string | null;
+  accessTokenExpiresAt: Date | null;
+  refreshTokenExpiresAt: Date | null;
+}
+
+function secondsFromNow(value: unknown): Date | null {
+  const seconds = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(seconds) || seconds <= 0) return null;
+  return new Date(Date.now() + seconds * 1000);
+}
+
+/**
+ * Exchange an OAuth `code` for a user-to-server token, keeping the refresh
+ * token and expiries.
+ *
+ * Separate from {@link exchangeGithubUserCode}, which exists to prove identity
+ * during install and deliberately throws the token away. This one is for a
+ * token we intend to keep, so it has to carry everything needed to keep it
+ * alive.
+ */
+export async function exchangeGithubUserCodeForToken(
+  creds: GithubOauthCredentials,
+  code: string,
+  redirectUri: string,
+): Promise<GithubUserToken> {
+  const res = await fetch("https://github.com/login/oauth/access_token", {
+    method: "POST",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify({
+      client_id: creds.clientId,
+      client_secret: creds.clientSecret,
+      code,
+      redirect_uri: redirectUri,
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`GitHub OAuth code exchange failed (${res.status})`);
+  }
+  const data = (await res.json()) as {
+    access_token?: string;
+    refresh_token?: string;
+    expires_in?: number;
+    refresh_token_expires_in?: number;
+    error?: string;
+  };
+  if (!data.access_token) {
+    throw new Error(
+      `GitHub OAuth code exchange rejected: ${data.error ?? "no token returned"}`,
+    );
+  }
+  return {
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token ?? null,
+    accessTokenExpiresAt: secondsFromNow(data.expires_in),
+    refreshTokenExpiresAt: secondsFromNow(data.refresh_token_expires_in),
+  };
+}
+
+/**
+ * Trade a refresh token for a fresh user-to-server token. Throws when GitHub
+ * refuses, which callers treat as "this connection is dead" and fall back to
+ * the installation token rather than failing the author's save.
+ */
+export async function refreshGithubUserToken(
+  creds: GithubOauthCredentials,
+  refreshToken: string,
+): Promise<GithubUserToken> {
+  const res = await fetch("https://github.com/login/oauth/access_token", {
+    method: "POST",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify({
+      client_id: creds.clientId,
+      client_secret: creds.clientSecret,
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+    }),
+  });
+  if (!res.ok) throw new Error(`GitHub token refresh failed (${res.status})`);
+  const data = (await res.json()) as {
+    access_token?: string;
+    refresh_token?: string;
+    expires_in?: number;
+    refresh_token_expires_in?: number;
+    error?: string;
+  };
+  if (!data.access_token) {
+    throw new Error(`GitHub token refresh rejected: ${data.error ?? "no token"}`);
+  }
+  return {
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token ?? null,
+    accessTokenExpiresAt: secondsFromNow(data.expires_in),
+    refreshTokenExpiresAt: secondsFromNow(data.refresh_token_expires_in),
+  };
+}
+
+/**
+ * Whether this token's user can push to a repository.
+ *
+ * Checked before a write rather than discovered at commit time. A save that
+ * fails halfway with a 403 leaves the author staring at an error about
+ * permissions they have never heard of, when the honest outcome is simply to
+ * commit as the App and name them as co-author instead.
+ *
+ * Any non-answer (404 for a repo the token cannot see, a network fault, a rate
+ * limit) is treated as "no", because the fallback is always safe and guessing
+ * yes is not.
+ */
+export async function canPushToRepo(
+  token: string,
+  owner: string,
+  name: string,
+): Promise<boolean> {
+  try {
+    const res = await fetch(
+      `${GITHUB_API}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`,
+      { headers: { ...API_HEADERS, authorization: `Bearer ${token}` } },
+    );
+    if (!res.ok) return false;
+    const data = (await res.json()) as { permissions?: { push?: boolean } };
+    return data.permissions?.push === true;
+  } catch {
+    return false;
+  }
+}
+
 /** The GitHub login of the user a token belongs to. */
 export async function getGithubUserLogin(token: string): Promise<string> {
   const res = await fetch(`${GITHUB_API}/user`, {
