@@ -1,7 +1,22 @@
 # Keep host artifacts out of the image build context (infra/web.Dockerfile
 # does COPY . . from the repo root and installs/builds fresh inside the image).
+#
+# This context does not stay on the machine: `pnpm deploy:*` builds through
+# Fly's REMOTE builder, so everything not excluded here is uploaded. Anything
+# the in-container build does not need should be listed, both because uploading
+# it is slow and because it leaves the machine.
 node_modules
 **/node_modules
+# Local agent state, and in particular `.claude/worktrees`: full checkouts of
+# other branches (5.4 GB across 5 worktrees on one developer's machine). The
+# node_modules/.next rules below already stripped most of that bulk, so the
+# measured cost was 41.5 MB of context vs 8.9 MB without it - roughly 33 MB of
+# other branches' source uploaded to the remote builder on every deploy.
+# Smaller than it first looks, and still nothing the build has any use for.
+.claude
+**/.claude
+.cursor
+**/.cursor
 .pnpm-store
 # Build output, at the repo root and in every workspace package. Without the
 # `**/` globs a locally-built apps/web/.next (500MB+) gets shipped in the build
