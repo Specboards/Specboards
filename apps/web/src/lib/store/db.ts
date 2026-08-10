@@ -4490,12 +4490,12 @@ export class DbStore implements FeatureStore {
         productId ?? null,
       );
       if (resolved === null) {
-        // No default row and no product row is not a configuration state, it is
-        // a broken scope: the caller was authorized against a workspace this
-        // query cannot see. Reading that as "strict" is what made a failed save
-        // look like a deliberate setting, so it fails loudly instead. A visible
-        // workspace whose default row is somehow missing is handled inside
-        // resolveTransitionMode, which seeds it rather than throwing.
+        // Null means the workspace itself was not visible, not that it has no
+        // setting: the caller was authorized against a workspace this query
+        // cannot see. Reading that as "strict" is what made a failed save look
+        // like a deliberate setting, so it fails loudly instead. A visible
+        // workspace with no default row resolves to the built-in default
+        // inside resolveTransitionMode and never reaches here.
         throw new Error(
           `Workspace ${scope!.workspaceId} not found while reading its transition mode.`,
         );
