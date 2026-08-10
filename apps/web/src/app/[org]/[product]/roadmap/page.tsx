@@ -20,13 +20,14 @@ import {
   ALL_PRODUCTS,
   resolveActiveScope,
   scopeProductFilter,
+  scopeProductIds,
 } from "@/lib/active-product";
 import { getBoardPreferences } from "@/lib/board-preferences-service";
 import { cardFieldCatalog, resolveCardFields } from "@/lib/card-fields";
 import { LOCAL_ORG_SLUG, orgProductPath } from "@/lib/org-path";
 import { sortFeatures } from "@/lib/feature-helpers";
 import { getDb } from "@/lib/db";
-import { resolveWorkflowFor } from "@/lib/repo-config";
+import { resolveWorkflowForProducts } from "@/lib/repo-config";
 import { getStore } from "@/lib/store";
 import { compareShippedReleases, goalsForProduct } from "@/lib/store/types";
 import { listWorkspaceMembers, type WorkspaceMember } from "@/lib/workspace";
@@ -130,10 +131,13 @@ export default async function RoadmapPage({
   const scope = resolveActiveScope(products, groups, productSlug);
   if (!scope) notFound();
   const activeProduct = scope.kind === "product" ? scope.product : null;
-  // Card creation needs the status workflow (first status is the default), and
-  // transitions are configured per product, so it is resolved for the product
-  // in view; a group or "all" view uses the workspace default.
-  const workflow = await resolveWorkflowFor(access, activeProduct?.id ?? null);
+  // Card creation needs the status workflow (the first status is the default
+  // for a new card), resolved for the products in view: one product's own, or
+  // the union across a group or the "all" view.
+  const workflow = await resolveWorkflowForProducts(
+    access,
+    scopeProductIds(scope),
+  );
   const canEdit = canEditProducts(
     access,
     products,

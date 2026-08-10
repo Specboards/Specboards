@@ -1054,6 +1054,29 @@ export interface TransitionModeSettings {
   overrides: Record<string, TransitionMode>;
 }
 
+/**
+ * Which Cards settings one product has taken over, rather than inheriting.
+ *
+ * The settings screen needs this to say "following the workspace default"
+ * versus "this product's own" without re-deriving it per panel, and it cannot
+ * be inferred from the resolved values: a product that overrides a setting to
+ * exactly what it was inheriting is still overriding, and will not follow the
+ * workspace when the default next changes.
+ *
+ * Every field is false for the workspace default scope, which inherits nothing.
+ */
+export interface CardsOverrides {
+  transitionMode: boolean;
+  stages: boolean;
+  stageGates: boolean;
+  properties: boolean;
+  detailTemplates: boolean;
+  /** Built-in field visibility, for at least one level. */
+  cardFields: boolean;
+  /** Default detail template, for at least one level. */
+  levelTemplates: boolean;
+}
+
 /** Per-workspace Ideas configuration (public portal settings). */
 export interface IdeaSettings {
   portalEnabled: boolean;
@@ -1343,8 +1366,16 @@ export interface FeatureStore {
     specId: string,
     scope?: WorkspaceScope,
   ): Promise<FeatureDetail | null>;
-  /** The workspace's hierarchy levels, ordered top → leaf. */
-  listLevels(scope?: WorkspaceScope): Promise<WorkspaceLevel[]>;
+  /**
+   * The workspace's hierarchy levels, ordered top → leaf, with one product's
+   * Cards overrides applied. The hierarchy itself is always workspace-wide;
+   * `productId` only changes what each level *shows* (its built-in fields and
+   * default template). Omit it for the workspace default.
+   */
+  listLevels(
+    scope?: WorkspaceScope,
+    productId?: string | null,
+  ): Promise<WorkspaceLevel[]>;
   /**
    * Replace the workspace's hierarchy level configuration. The leaf (deepest)
    * level key is fixed (spec-backed); a removed level must have no items.
@@ -1362,12 +1393,28 @@ export interface FeatureStore {
   updateLevelFields(
     fields: Record<string, string[] | null>,
     scope?: WorkspaceScope,
+    productId?: string | null,
   ): Promise<WorkspaceLevel[]>;
   /**
    * The workspace's admin-defined workflow stages, ordered by position, or `[]`
    * when the workspace uses the built-in default workflow.
    */
-  listStatuses(scope?: WorkspaceScope): Promise<WorkspaceStatus[]>;
+  listStatuses(
+    scope?: WorkspaceScope,
+    productId?: string | null,
+  ): Promise<WorkspaceStatus[]>;
+  /**
+   * The stages a board spanning several products should show: the workspace
+   * default's, plus any stage a product in `productIds` defines that the
+   * default does not, appended after it. Nothing is ever hidden, so an item
+   * cannot vanish from a cross-product board because its product uses a stage
+   * the default has never heard of. `null` or an empty list is the default's
+   * set on its own.
+   */
+  listStatusesUnion(
+    scope: WorkspaceScope | undefined,
+    productIds: string[] | null,
+  ): Promise<WorkspaceStatus[]>;
   /**
    * Replace the workspace's workflow stages. Items whose status is no longer a
    * stage (and isn't the system `archived` status) are moved to the first
@@ -1376,12 +1423,16 @@ export interface FeatureStore {
   replaceStatuses(
     stages: StatusStageInput[],
     scope?: WorkspaceScope,
+    productId?: string | null,
   ): Promise<WorkspaceStatus[]>;
   /**
    * The workspace's stage gates (checklist items per stage), ordered by stage
    * then position. `[]` when no gates are defined.
    */
-  listStageGates(scope?: WorkspaceScope): Promise<StageGate[]>;
+  listStageGates(
+    scope?: WorkspaceScope,
+    productId?: string | null,
+  ): Promise<StageGate[]>;
   /**
    * Replace the workspace's stage gates wholesale. Positions follow the given
    * order within each stage. Completions for removed gates are dropped (FK
@@ -1390,6 +1441,7 @@ export interface FeatureStore {
   replaceStageGates(
     gates: StageGateInput[],
     scope?: WorkspaceScope,
+    productId?: string | null,
   ): Promise<StageGate[]>;
   /**
    * The gate ids completed (checked off) for one feature. Absence of an id
@@ -1414,11 +1466,13 @@ export interface FeatureStore {
   listProperties(
     scope?: WorkspaceScope,
     entity?: PropertyEntity,
+    productId?: string | null,
   ): Promise<PropertyDef[]>;
   /** Create a custom property definition; returns it with its key/id. */
   createProperty(
     input: PropertyInput,
     scope?: WorkspaceScope,
+    productId?: string | null,
   ): Promise<PropertyDef>;
   /** Update a property's label/options/levels/position (type is fixed). */
   updateProperty(
@@ -1429,11 +1483,15 @@ export interface FeatureStore {
   /** Delete a property definition (stored item values are left in place). */
   deleteProperty(id: string, scope?: WorkspaceScope): Promise<void>;
   /** The workspace's detail templates, ordered by name. */
-  listDetailTemplates(scope?: WorkspaceScope): Promise<DetailTemplate[]>;
+  listDetailTemplates(
+    scope?: WorkspaceScope,
+    productId?: string | null,
+  ): Promise<DetailTemplate[]>;
   /** Create a detail template; returns the new record. */
   createDetailTemplate(
     input: DetailTemplateInput,
     scope?: WorkspaceScope,
+    productId?: string | null,
   ): Promise<DetailTemplate>;
   /** Update a detail template's name/body. */
   updateDetailTemplate(
@@ -1450,6 +1508,7 @@ export interface FeatureStore {
   updateLevelTemplates(
     templates: Record<string, string | null>,
     scope?: WorkspaceScope,
+    productId?: string | null,
   ): Promise<WorkspaceLevel[]>;
   /** The workspace's releases, dated first (ascending), undated last. Each
    * record carries its `productId` (null for a workspace-wide portfolio
@@ -1825,6 +1884,14 @@ export interface FeatureStore {
    * query per product to tell those apart.
    */
   listTransitionModes(scope?: WorkspaceScope): Promise<TransitionModeSettings>;
+  /**
+   * Which Cards settings this product has overridden. All false for the
+   * workspace default (`productId` omitted), which has nothing to inherit.
+   */
+  cardsOverrides(
+    scope?: WorkspaceScope,
+    productId?: string | null,
+  ): Promise<CardsOverrides>;
   /**
    * Set the transition mode for one product, or for the workspace default when
    * `productId` is omitted. `mode: null` reverts a product to inheriting the

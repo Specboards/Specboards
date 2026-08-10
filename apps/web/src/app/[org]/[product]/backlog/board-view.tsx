@@ -20,6 +20,7 @@ import {
   ALL_PRODUCTS,
   resolveActiveScope,
   scopeProductFilter,
+  scopeProductIds,
 } from "@/lib/active-product";
 import { getBoardPreferences } from "@/lib/board-preferences-service";
 import { cardFieldCatalog, resolveCardFields } from "@/lib/card-fields";
@@ -34,7 +35,7 @@ import {
 import { parseSortMode, sortableProperties } from "@/lib/feature-helpers";
 import { SortControl } from "./sort-control";
 import { getDb } from "@/lib/db";
-import { resolveWorkflowFor } from "@/lib/repo-config";
+import { resolveWorkflowForProducts } from "@/lib/repo-config";
 import { getStore } from "@/lib/store";
 import { selectableCycles, selectableReleases } from "@/lib/store/types";
 import { listWorkspaceMembers, type WorkspaceMember } from "@/lib/workspace";
@@ -98,12 +99,15 @@ export async function BoardView({
   if (!scope) notFound();
   const activeProduct = scope.kind === "product" ? scope.product : null;
 
-  // Transitions are configured per product, so the board has to know which one
-  // it is showing before it can say how cards may move. A group or "all" view
-  // spans products that may disagree, so it falls back to the workspace
-  // default; the item-level check still uses each item's own product, so a card
-  // dragged in a cross-product view is validated against its own rules.
-  const workflow = await resolveWorkflowFor(access, activeProduct?.id ?? null);
+  // Stages and transitions are both per product now, so the board has to know
+  // which products it is showing before it can draw its columns. A group or
+  // "all" view takes the union of their stages, so no item is left without a
+  // column; each card is still validated against its own product's rules when
+  // it actually moves.
+  const workflow = await resolveWorkflowForProducts(
+    access,
+    scopeProductIds(scope),
+  );
   // Board columns are the workflow statuses. A `status` filter narrows the
   // board to just that one column rather than emptying every other one.
   const allColumns = workflow.statuses.filter((s) => s !== "archived");

@@ -17,7 +17,15 @@ export function CardsFieldsEditor({
   levels,
   catalog,
   canEdit,
+  productId,
 }: {
+  /**
+   * Product being configured, or null for the workspace default. Saving sends
+   * only the levels shown, which for a product is a patch on its overrides: a
+   * level it has not touched goes on inheriting, so a level added later starts
+   * with every field rather than none.
+   */
+  productId: string | null;
   levels: WorkspaceLevel[];
   catalog: CardFieldDef[];
   canEdit: boolean;
@@ -54,7 +62,7 @@ export function CardsFieldsEditor({
             return [l.key, value];
           }),
         );
-        await updateLevelFields(fields);
+        await updateLevelFields(fields, productId);
         toast.success("Card fields saved");
       } catch (err) {
         if (err instanceof AuthRequiredError) {

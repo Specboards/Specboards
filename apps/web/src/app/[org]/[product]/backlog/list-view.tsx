@@ -16,7 +16,11 @@ import { Badge } from "@/components/ui/badge";
 import { Box, BoxHeader } from "@/components/ui/box";
 import { buttonVariants } from "@/components/ui/button";
 import { pluralizeLevelLabel, resolveActiveLevel } from "@/lib/active-level";
-import { resolveActiveScope, scopeProductFilter } from "@/lib/active-product";
+import {
+  resolveActiveScope,
+  scopeProductFilter,
+  scopeProductIds,
+} from "@/lib/active-product";
 import { buildLevelRows } from "@/lib/backlog-rows";
 import { LOCAL_ORG_SLUG, orgProductPath } from "@/lib/org-path";
 import { getDb } from "@/lib/db";
@@ -35,7 +39,7 @@ import {
   sortableProperties,
   sortFeatures,
 } from "@/lib/feature-helpers";
-import { resolveWorkflowFor } from "@/lib/repo-config";
+import { resolveWorkflowForProducts } from "@/lib/repo-config";
 import { getStore } from "@/lib/store";
 import { selectableCycles, selectableReleases } from "@/lib/store/types";
 import { listWorkspaceMembers } from "@/lib/workspace";
@@ -82,10 +86,13 @@ export async function ListView({
   const scope = resolveActiveScope(products, groups, productSlug);
   if (!scope) notFound();
   const activeProduct = scope.kind === "product" ? scope.product : null;
-  // Transitions are per product; a group or "all" view spans products that may
-  // disagree, so it shows the workspace default. Each item is still validated
-  // against its own product's rules on save.
-  const workflow = await resolveWorkflowFor(access, activeProduct?.id ?? null);
+  // Per product, with a group or "all" view taking the union of the stages in
+  // scope so nothing is filtered out for want of a column. Each item is still
+  // validated against its own product's rules on save.
+  const workflow = await resolveWorkflowForProducts(
+    access,
+    scopeProductIds(scope),
+  );
   // Per-product edit gate (owner edits all; others need a product grant).
   const canEdit = canEditProducts(
     access,

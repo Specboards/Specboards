@@ -188,6 +188,7 @@ import {
   type StageGate,
   type StageGateInput,
   StageGateError,
+  type CardsOverrides,
   type StatusStageInput,
   type TransitionModeSettings,
   type WorkspaceStatus,
@@ -381,6 +382,27 @@ function ledgerChanges(
     changes.push({ field, before: before ?? null, after: after ?? null });
   }
   return changes;
+}
+
+/**
+ * Whether a level-keyed override map mentions this level at all. A `hasOwn`
+ * check rather than a truthiness or undefined one, because the maps use `null`
+ * to mean "override to the built-in behaviour", which is a different answer
+ * from "not mentioned, so inherit".
+ */
+function hasOwn<T>(map: Record<string, T>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(map, key);
+}
+
+/**
+ * Read a level-keyed override map off a jsonb column. Anything that is not a
+ * plain object (null, an array, a hand-edited scalar) reads as "no overrides",
+ * so a malformed row degrades to inheriting rather than throwing on every page
+ * that renders a card.
+ */
+function asLevelMap<T>(value: unknown): Record<string, T> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return value as Record<string, T>;
 }
 
 /** Postgres-backed store (self-host compose stack or hosted Postgres). */
@@ -840,10 +862,27 @@ export class DbStore implements FeatureStore {
     });
   }
 
-  /** The workspace's hierarchy levels, ordered top → leaf (default if none). */
+  /**
+   * The workspace's hierarchy levels, ordered top → leaf (default if none),
+   * with one product's overrides laid over them.
+   *
+   * The hierarchy itself is always workspace-wide: it is Settings > Hierarchy,
+   * not a Cards setting, and per-product levels would break rollup, portfolio
+   * releases, and the `level` key `whoami` publishes for external agents. What
+   * a product may override is what each level *shows*: its built-in fields and
+   * its default detail template. Those live in level-keyed maps on the
+   * product's settings row, since there is no per-product level row to put them
+   * on.
+   *
+   * A level absent from a map inherits; a level present with `null` overrides
+   * to "all fields" / "no template". That is what makes adding a level safe:
+   * the new level is in nobody's map, so every product inherits it rather than
+   * silently losing fields on it.
+   */
   private async levelsIn(
     tx: Tx,
     workspaceId: string,
+    productId: string | null = null,
   ): Promise<WorkspaceLevel[]> {
     const rows = await tx
       .select({
@@ -857,17 +896,62 @@ export class DbStore implements FeatureStore {
       .from(workspaceLevels)
       .where(eq(workspaceLevels.workspaceId, workspaceId))
       .orderBy(asc(workspaceLevels.position));
+
+    const overrides = productId
+      ? await this.levelOverridesIn(tx, workspaceId, productId)
+      : { cardFields: {}, levelTemplates: {} };
+
     return resolveLevels(
-      rows.map(({ cardFields, detailTemplateId, ...rest }) => ({
+      rows.map(({ cardFields, detailTemplateId, key, ...rest }) => ({
         ...rest,
-        fields: Array.isArray(cardFields) ? (cardFields as string[]) : null,
-        detailTemplateId: detailTemplateId ?? null,
+        key,
+        fields: hasOwn(overrides.cardFields, key)
+          ? overrides.cardFields[key]!
+          : Array.isArray(cardFields)
+            ? (cardFields as string[])
+            : null,
+        detailTemplateId: hasOwn(overrides.levelTemplates, key)
+          ? overrides.levelTemplates[key]!
+          : (detailTemplateId ?? null),
       })),
     );
   }
 
-  async listLevels(scope?: WorkspaceScope): Promise<WorkspaceLevel[]> {
-    return this.scoped(scope, (tx) => this.levelsIn(tx, scope!.workspaceId));
+  /** One product's level-keyed Cards overrides, empty when it has none. */
+  private async levelOverridesIn(
+    tx: Tx,
+    workspaceId: string,
+    productId: string,
+  ): Promise<{
+    cardFields: Record<string, string[] | null>;
+    levelTemplates: Record<string, string | null>;
+  }> {
+    const [row] = await tx
+      .select({
+        cardFields: productSettings.cardFields,
+        levelTemplates: productSettings.levelTemplates,
+      })
+      .from(productSettings)
+      .where(
+        and(
+          eq(productSettings.workspaceId, workspaceId),
+          eq(productSettings.productId, productId),
+        ),
+      )
+      .limit(1);
+    return {
+      cardFields: asLevelMap<string[] | null>(row?.cardFields),
+      levelTemplates: asLevelMap<string | null>(row?.levelTemplates),
+    };
+  }
+
+  async listLevels(
+    scope?: WorkspaceScope,
+    productId?: string | null,
+  ): Promise<WorkspaceLevel[]> {
+    return this.scoped(scope, (tx) =>
+      this.levelsIn(tx, scope!.workspaceId, productId ?? null),
+    );
   }
 
   async updateLevels(
@@ -943,13 +1027,22 @@ export class DbStore implements FeatureStore {
   async updateLevelFields(
     fields: Record<string, string[] | null>,
     scope?: WorkspaceScope,
+    productId?: string | null,
   ): Promise<WorkspaceLevel[]> {
+    const target = productId ?? null;
     return this.scoped(scope, async (tx) => {
       const ws = scope!.workspaceId;
-      const current = await this.levelsIn(tx, ws);
+      const current = await this.levelsIn(tx, ws, target);
       const byKey = new Map(current.map((l) => [l.key, l]));
       for (const key of Object.keys(fields)) {
         if (!byKey.has(key)) throw new LevelError(`Unknown level: ${key}`);
+      }
+      if (target) {
+        // A product's override is a patch on its map, not a replacement: the
+        // levels it did not mention keep whatever they were doing, inherited or
+        // otherwise, so editing one level never disturbs another.
+        await this.patchLevelMap(tx, ws, target, "cardFields", fields);
+        return this.levelsIn(tx, ws, target);
       }
       // Upsert: a fresh workspace may still be on the unpersisted default
       // levels, so the row might not exist yet.
@@ -974,13 +1067,48 @@ export class DbStore implements FeatureStore {
     });
   }
 
+  /**
+   * Merge a patch into one of a product's level-keyed override maps, creating
+   * the settings row if the product has none yet. Keys present in the patch are
+   * written (including an explicit null, which is an override to the built-in
+   * behaviour); keys absent from it are untouched and go on inheriting.
+   */
+  private async patchLevelMap<T>(
+    tx: Tx,
+    workspaceId: string,
+    productId: string,
+    column: "cardFields" | "levelTemplates",
+    patch: Record<string, T>,
+  ): Promise<void> {
+    const existing = await this.levelOverridesIn(tx, workspaceId, productId);
+    const merged = { ...(existing[column] as Record<string, unknown>), ...patch };
+    const written = await tx
+      .insert(productSettings)
+      .values({ workspaceId, productId, [column]: merged })
+      .onConflictDoUpdate({
+        target: [productSettings.workspaceId, productSettings.productId],
+        targetWhere: isNotNull(productSettings.productId),
+        set: { [column]: merged, updatedAt: new Date() },
+      })
+      .returning({ id: productSettings.id });
+    // Same reason as setTransitionMode: a write RLS drops silently matches zero
+    // rows and would otherwise be reported as a save.
+    if (written.length === 0) {
+      throw new Error(
+        `Product ${productId} not found while saving its Cards settings.`,
+      );
+    }
+  }
+
   async updateLevelTemplates(
     templates: Record<string, string | null>,
     scope?: WorkspaceScope,
+    productId?: string | null,
   ): Promise<WorkspaceLevel[]> {
+    const target = productId ?? null;
     return this.scoped(scope, async (tx) => {
       const ws = scope!.workspaceId;
-      const current = await this.levelsIn(tx, ws);
+      const current = await this.levelsIn(tx, ws, target);
       const byKey = new Map(current.map((l) => [l.key, l]));
       for (const key of Object.keys(templates)) {
         if (!byKey.has(key)) throw new LevelError(`Unknown level: ${key}`);
@@ -990,7 +1118,14 @@ export class DbStore implements FeatureStore {
         ...new Set(Object.values(templates).filter((v): v is string => !!v)),
       ];
       if (wanted.length > 0) {
-        const known = await tx
+        // A level may point at a template this scope can actually see: its own
+        // if it has a set, otherwise the workspace default's. Validating
+        // against the whole workspace would let a product assign another
+        // product's template.
+        const visible = new Set(
+          (await this.listDetailTemplatesIn(tx, ws, target)).map((t) => t.id),
+        );
+        const known = (await tx
           .select({ id: detailTemplates.id })
           .from(detailTemplates)
           .where(
@@ -998,12 +1133,16 @@ export class DbStore implements FeatureStore {
               eq(detailTemplates.workspaceId, ws),
               inArray(detailTemplates.id, wanted),
             ),
-          );
+          )).filter((t) => visible.has(t.id));
         const knownIds = new Set(known.map((t) => t.id));
         for (const id of wanted) {
           if (!knownIds.has(id))
             throw new LevelError(`Unknown detail template: ${id}`);
         }
+      }
+      if (target) {
+        await this.patchLevelMap(tx, ws, target, "levelTemplates", templates);
+        return this.levelsIn(tx, ws, target);
       }
       for (const [key, value] of Object.entries(templates)) {
         const level = byKey.get(key)!;
@@ -1027,25 +1166,56 @@ export class DbStore implements FeatureStore {
     });
   }
 
-  async listDetailTemplates(scope?: WorkspaceScope): Promise<DetailTemplate[]> {
-    return this.scoped(scope, async (tx) => {
+  async listDetailTemplates(
+    scope?: WorkspaceScope,
+    productId?: string | null,
+  ): Promise<DetailTemplate[]> {
+    return this.scoped(scope, async (tx) =>
+      this.listDetailTemplatesIn(tx, scope!.workspaceId, productId ?? null),
+    );
+  }
+
+  private async listDetailTemplatesIn(
+    tx: Tx,
+    workspaceId: string,
+    target: string | null,
+  ): Promise<DetailTemplate[]> {
+    {
       const rows = await tx
         .select({
           id: detailTemplates.id,
           name: detailTemplates.name,
           body: detailTemplates.body,
+          productId: detailTemplates.productId,
         })
         .from(detailTemplates)
-        .where(eq(detailTemplates.workspaceId, scope!.workspaceId))
+        .where(
+          and(
+            eq(detailTemplates.workspaceId, workspaceId),
+            target
+              ? or(
+                  eq(detailTemplates.productId, target),
+                  isNull(detailTemplates.productId),
+                )
+              : isNull(detailTemplates.productId),
+          ),
+        )
         .orderBy(asc(detailTemplates.name));
-      return rows;
-    });
+      // Own set if there is one, otherwise the workspace default's, matching
+      // how every other per-product Cards setting resolves.
+      const own = target ? rows.filter((r) => r.productId === target) : [];
+      const source =
+        own.length > 0 ? own : rows.filter((r) => r.productId === null);
+      return source.map(({ id, name, body }) => ({ id, name, body }));
+    }
   }
 
   async createDetailTemplate(
     input: DetailTemplateInput,
     scope?: WorkspaceScope,
+    productId?: string | null,
   ): Promise<DetailTemplate> {
+    const target = productId ?? null;
     return this.scoped(scope, async (tx) => {
       const name = input.name.trim();
       if (!name) throw new DetailTemplateError("Template name is required.");
@@ -1053,12 +1223,27 @@ export class DbStore implements FeatureStore {
         .insert(detailTemplates)
         .values({
           workspaceId: scope!.workspaceId,
+          productId: target,
           name,
           body: input.body ?? "",
         })
-        .onConflictDoNothing({
-          target: [detailTemplates.workspaceId, detailTemplates.name],
-        })
+        // Names are unique per scope (two partial indexes, see migration 0065),
+        // so drizzle needs the predicate to pick the right one.
+        .onConflictDoNothing(
+          target
+            ? {
+                target: [
+                  detailTemplates.workspaceId,
+                  detailTemplates.productId,
+                  detailTemplates.name,
+                ],
+                where: isNotNull(detailTemplates.productId),
+              }
+            : {
+                target: [detailTemplates.workspaceId, detailTemplates.name],
+                where: isNull(detailTemplates.productId),
+              },
+        )
         .returning({
           id: detailTemplates.id,
           name: detailTemplates.name,
@@ -2197,21 +2382,67 @@ export class DbStore implements FeatureStore {
 
   // ── Custom properties ─────────────────────────────────────────────────
 
+  /**
+   * One scope's property definitions: the product's own set if it has defined
+   * one, otherwise the workspace default's.
+   *
+   * A product narrowing its set only stops properties being *rendered*. The
+   * values stay in `features.custom_fields`, so a key the current definitions
+   * do not list is expected rather than corrupt, and re-adding the property
+   * brings its values back. Deleting on de-scope would mean an admin tidying a
+   * settings list destroys work with no way to undo it.
+   */
   private async propertiesIn(
     tx: Tx,
     ws: string,
     entity?: PropertyEntity,
+    productId: string | null = null,
   ): Promise<PropertyDef[]> {
     const rows = await tx
       .select()
       .from(workspaceProperties)
       .where(
-        entity
-          ? and(
-              eq(workspaceProperties.workspaceId, ws),
-              eq(workspaceProperties.entity, entity),
-            )
-          : eq(workspaceProperties.workspaceId, ws),
+        and(
+          eq(workspaceProperties.workspaceId, ws),
+          entity ? eq(workspaceProperties.entity, entity) : undefined,
+          productId
+            ? or(
+                eq(workspaceProperties.productId, productId),
+                isNull(workspaceProperties.productId),
+              )
+            : isNull(workspaceProperties.productId),
+        ),
+      )
+      .orderBy(
+        asc(workspaceProperties.position),
+        asc(workspaceProperties.createdAt),
+      );
+    const own = productId ? rows.filter((r) => r.productId === productId) : [];
+    const source = own.length > 0 ? own : rows.filter((r) => r.productId === null);
+    return source.map(toPropertyDef);
+  }
+
+  /**
+   * Only the rows this scope owns, ignoring anything it would inherit. Used
+   * where the question is "what has this scope defined" rather than "what does
+   * it show": key allocation, position allocation, and telling an override
+   * apart from an inheritance in the settings UI.
+   */
+  private async ownPropertiesIn(
+    tx: Tx,
+    ws: string,
+    productId: string | null,
+  ): Promise<PropertyDef[]> {
+    const rows = await tx
+      .select()
+      .from(workspaceProperties)
+      .where(
+        and(
+          eq(workspaceProperties.workspaceId, ws),
+          productId
+            ? eq(workspaceProperties.productId, productId)
+            : isNull(workspaceProperties.productId),
+        ),
       )
       .orderBy(
         asc(workspaceProperties.position),
@@ -2223,31 +2454,92 @@ export class DbStore implements FeatureStore {
   async listProperties(
     scope?: WorkspaceScope,
     entity?: PropertyEntity,
+    productId?: string | null,
   ): Promise<PropertyDef[]> {
     return this.scoped(scope, (tx) =>
-      this.propertiesIn(tx, scope!.workspaceId, entity),
+      this.propertiesIn(tx, scope!.workspaceId, entity, productId ?? null),
     );
   }
 
-  async listStatuses(scope?: WorkspaceScope): Promise<WorkspaceStatus[]> {
+  async listStatuses(
+    scope?: WorkspaceScope,
+    productId?: string | null,
+  ): Promise<WorkspaceStatus[]> {
+    return this.scoped(scope, async (tx) =>
+      this.statusesIn(tx, scope!.workspaceId, productId ?? null),
+    );
+  }
+
+  async listStatusesUnion(
+    scope: WorkspaceScope | undefined,
+    productIds: string[] | null,
+  ): Promise<WorkspaceStatus[]> {
     return this.scoped(scope, async (tx) => {
-      const rows = await tx
-        .select()
-        .from(workspaceStatuses)
-        .where(eq(workspaceStatuses.workspaceId, scope!.workspaceId))
-        .orderBy(asc(workspaceStatuses.position));
-      return rows.map((r) => ({
-        key: r.key,
-        label: r.label,
-        position: r.position,
-      }));
+      const ws = scope!.workspaceId;
+      const fallback = await this.statusesIn(tx, ws, null);
+      if (!productIds || productIds.length === 0) return fallback;
+
+      // The default's order is the spine, so a board that spans products still
+      // reads left-to-right the way the workspace laid it out. Stages only some
+      // product defines are appended after it rather than interleaved, because
+      // there is no defensible way to order a stage the default has never seen
+      // against one it has.
+      const merged: WorkspaceStatus[] = [...fallback];
+      const seen = new Set(fallback.map((s) => s.key));
+      for (const productId of productIds) {
+        for (const stage of await this.statusesIn(tx, ws, productId)) {
+          if (seen.has(stage.key)) continue;
+          seen.add(stage.key);
+          merged.push({ ...stage, position: merged.length });
+        }
+      }
+      return merged.map((s, i) => ({ ...s, position: i }));
     });
+  }
+
+  /**
+   * One scope's stages: the product's own set if it has defined one, otherwise
+   * the workspace default. Set-level rather than row-level inheritance, so a
+   * product either owns its board columns or follows the workspace; a partial
+   * override would multiply the resolution rules for no proven demand.
+   */
+  private async statusesIn(
+    tx: Tx,
+    workspaceId: string,
+    productId: string | null,
+  ): Promise<WorkspaceStatus[]> {
+    const rows = await tx
+      .select()
+      .from(workspaceStatuses)
+      .where(
+        and(
+          eq(workspaceStatuses.workspaceId, workspaceId),
+          productId
+            ? or(
+                eq(workspaceStatuses.productId, productId),
+                isNull(workspaceStatuses.productId),
+              )
+            : isNull(workspaceStatuses.productId),
+        ),
+      )
+      .orderBy(asc(workspaceStatuses.position));
+    const own = productId
+      ? rows.filter((r) => r.productId === productId)
+      : [];
+    const source = own.length > 0 ? own : rows.filter((r) => r.productId === null);
+    return source.map((r) => ({
+      key: r.key,
+      label: r.label,
+      position: r.position,
+    }));
   }
 
   async replaceStatuses(
     stages: StatusStageInput[],
     scope?: WorkspaceScope,
+    productId?: string | null,
   ): Promise<WorkspaceStatus[]> {
+    const target = productId ?? null;
     return this.scoped(scope, async (tx) => {
       const ws = scope!.workspaceId;
       const keys = stages.map((s) => s.key);
@@ -2256,11 +2548,21 @@ export class DbStore implements FeatureStore {
       // items aren't swept back onto the board.
       const validKeys = new Set([...keys, "archived"]);
 
+      // Which items this edit is allowed to touch. Editing a product's stages
+      // must not re-home another product's work, and editing the workspace
+      // default must only reach the products that actually follow it: a product
+      // with its own stage set is unaffected by a change to the default, so
+      // sweeping its items to a stage it does not have would be a bug with no
+      // way back.
+      const productScope = target
+        ? eq(features.productId, target)
+        : await this.inheritingProductsFilter(tx, ws);
+
       // Re-home any items whose current status is no longer a stage.
       const used = await tx
         .selectDistinct({ status: features.status })
         .from(features)
-        .where(eq(features.workspaceId, ws));
+        .where(and(eq(features.workspaceId, ws), productScope));
       const orphaned = used
         .map((u) => u.status)
         .filter((s) => !validKeys.has(s));
@@ -2271,6 +2573,7 @@ export class DbStore implements FeatureStore {
           .where(
             and(
               eq(features.workspaceId, ws),
+              productScope,
               inArray(features.status, orphaned),
             ),
           );
@@ -2279,10 +2582,14 @@ export class DbStore implements FeatureStore {
       // Drop stage gates whose stage was removed (renames keep the key, so only
       // deletions strand gates). Their completions cascade with the gate rows,
       // so a removed-then-recreated stage doesn't resurrect stale checklists.
+      // Scoped the same way: a product's gates guard a product's stages.
+      const gateScope = target
+        ? eq(workspaceStageGates.productId, target)
+        : isNull(workspaceStageGates.productId);
       const usedStages = await tx
         .selectDistinct({ stageKey: workspaceStageGates.stageKey })
         .from(workspaceStageGates)
-        .where(eq(workspaceStageGates.workspaceId, ws));
+        .where(and(eq(workspaceStageGates.workspaceId, ws), gateScope));
       const orphanedGateStages = usedStages
         .map((r) => r.stageKey)
         .filter((s) => !validKeys.has(s));
@@ -2292,58 +2599,125 @@ export class DbStore implements FeatureStore {
           .where(
             and(
               eq(workspaceStageGates.workspaceId, ws),
+              gateScope,
               inArray(workspaceStageGates.stageKey, orphanedGateStages),
             ),
           );
       }
 
-      // Replace the stage set wholesale (positions follow the given order).
+      // Replace this scope's stage set wholesale (positions follow the order
+      // given). An empty list is how a product reverts to inheriting: it owns
+      // no rows again, so resolution falls through to the default.
       await tx
         .delete(workspaceStatuses)
-        .where(eq(workspaceStatuses.workspaceId, ws));
+        .where(
+          and(
+            eq(workspaceStatuses.workspaceId, ws),
+            target
+              ? eq(workspaceStatuses.productId, target)
+              : isNull(workspaceStatuses.productId),
+          ),
+        );
       if (stages.length > 0) {
         await tx.insert(workspaceStatuses).values(
           stages.map((s, i) => ({
             workspaceId: ws,
+            productId: target,
             key: s.key,
             label: s.label,
             position: i,
           })),
         );
       }
-      return stages.map((s, i) => ({
-        key: s.key,
-        label: s.label,
-        position: i,
-      }));
+      return this.statusesIn(tx, ws, target);
     });
   }
 
-  async listStageGates(scope?: WorkspaceScope): Promise<StageGate[]> {
-    return this.scoped(scope, async (tx) => {
-      const rows = await tx
-        .select()
-        .from(workspaceStageGates)
-        .where(eq(workspaceStageGates.workspaceId, scope!.workspaceId))
-        .orderBy(
-          asc(workspaceStageGates.stageKey),
-          asc(workspaceStageGates.position),
-        );
-      return rows.map((r) => ({
-        id: r.id,
-        stageKey: r.stageKey,
-        label: r.label,
-        position: r.position,
-      }));
-    });
+  /**
+   * A filter matching the items governed by the workspace default: those in a
+   * product that has not defined its own stages, plus those with no product at
+   * all (legacy rows the app no longer creates).
+   */
+  private async inheritingProductsFilter(tx: Tx, workspaceId: string) {
+    const overriding = await tx
+      .selectDistinct({ productId: workspaceStatuses.productId })
+      .from(workspaceStatuses)
+      .where(
+        and(
+          eq(workspaceStatuses.workspaceId, workspaceId),
+          isNotNull(workspaceStatuses.productId),
+        ),
+      );
+    const ids = overriding
+      .map((r) => r.productId)
+      .filter((id): id is string => id !== null);
+    return ids.length > 0
+      ? or(isNull(features.productId), not(inArray(features.productId, ids)))
+      : undefined;
+  }
+
+  async listStageGates(
+    scope?: WorkspaceScope,
+    productId?: string | null,
+  ): Promise<StageGate[]> {
+    return this.scoped(scope, async (tx) =>
+      this.stageGatesIn(tx, scope!.workspaceId, productId ?? null),
+    );
+  }
+
+  /**
+   * One scope's gates: the product's own if it has defined any, otherwise the
+   * workspace default's. Gates follow stages because a gate guards a stage key,
+   * and a product that has taken over its board columns has taken over the
+   * checklists on them too.
+   */
+  private async stageGatesIn(
+    tx: Tx,
+    workspaceId: string,
+    productId: string | null,
+  ): Promise<StageGate[]> {
+    const rows = await tx
+      .select()
+      .from(workspaceStageGates)
+      .where(
+        and(
+          eq(workspaceStageGates.workspaceId, workspaceId),
+          productId
+            ? or(
+                eq(workspaceStageGates.productId, productId),
+                isNull(workspaceStageGates.productId),
+              )
+            : isNull(workspaceStageGates.productId),
+        ),
+      )
+      .orderBy(
+        asc(workspaceStageGates.stageKey),
+        asc(workspaceStageGates.position),
+      );
+    const own = productId ? rows.filter((r) => r.productId === productId) : [];
+    const source = own.length > 0 ? own : rows.filter((r) => r.productId === null);
+    return source.map((r) => ({
+      id: r.id,
+      stageKey: r.stageKey,
+      label: r.label,
+      position: r.position,
+    }));
   }
 
   async replaceStageGates(
     gates: StageGateInput[],
     scope?: WorkspaceScope,
+    productId?: string | null,
   ): Promise<StageGate[]> {
+    const target = productId ?? null;
     return this.scoped(scope, async (tx) => {
       const ws = scope!.workspaceId;
+      // Every read and write below is confined to this scope's rows, so kept
+      // gates keep their ids (and therefore their per-item completions) and a
+      // product's edit never deletes the workspace default's checklists.
+      const gateScope = target
+        ? eq(workspaceStageGates.productId, target)
+        : isNull(workspaceStageGates.productId);
       // Position is per-stage: the nth gate listed for a given stage.
       const perStage = new Map<string, number>();
       const resolved = gates.map((g) => {
@@ -2362,7 +2736,7 @@ export class DbStore implements FeatureStore {
       const existing = await tx
         .select({ id: workspaceStageGates.id })
         .from(workspaceStageGates)
-        .where(eq(workspaceStageGates.workspaceId, ws));
+        .where(and(eq(workspaceStageGates.workspaceId, ws), gateScope));
       const existingIds = new Set(existing.map((r) => r.id));
       const keepIds = new Set(
         resolved
@@ -2378,6 +2752,7 @@ export class DbStore implements FeatureStore {
           .where(
             and(
               eq(workspaceStageGates.workspaceId, ws),
+              gateScope,
               inArray(workspaceStageGates.id, toDelete),
             ),
           );
@@ -2398,6 +2773,7 @@ export class DbStore implements FeatureStore {
         } else {
           await tx.insert(workspaceStageGates).values({
             workspaceId: ws,
+            productId: target,
             stageKey: g.stageKey,
             label: g.label,
             position: g.position,
@@ -2405,20 +2781,7 @@ export class DbStore implements FeatureStore {
         }
       }
 
-      const rows = await tx
-        .select()
-        .from(workspaceStageGates)
-        .where(eq(workspaceStageGates.workspaceId, ws))
-        .orderBy(
-          asc(workspaceStageGates.stageKey),
-          asc(workspaceStageGates.position),
-        );
-      return rows.map((r) => ({
-        id: r.id,
-        stageKey: r.stageKey,
-        label: r.label,
-        position: r.position,
-      }));
+      return this.stageGatesIn(tx, ws, target);
     });
   }
 
@@ -2509,7 +2872,9 @@ export class DbStore implements FeatureStore {
   async createProperty(
     input: PropertyInput,
     scope?: WorkspaceScope,
+    productId?: string | null,
   ): Promise<PropertyDef> {
+    const target = productId ?? null;
     return this.scoped(scope, async (tx) => {
       const ws = scope!.workspaceId;
       const label = input.label.trim();
@@ -2520,9 +2885,13 @@ export class DbStore implements FeatureStore {
       const entity: PropertyEntity = input.entity ?? "item";
       // Keys and positions are scoped per entity, so an item and a release
       // property can share a key and each ordering starts at 0.
-      const existing = (await this.propertiesIn(tx, ws)).filter(
-        (p) => p.entity === entity,
-      );
+      // Uniqueness and ordering are per scope: two products may each define a
+      // "Risk", and each list starts at position 0. Resolved against this
+      // scope's own rows, not the inherited ones, so adding the first property
+      // to a product does not have to dodge the workspace's keys.
+      const existing = (
+        await this.ownPropertiesIn(tx, ws, target)
+      ).filter((p) => p.entity === entity);
       const key = propertyKeyFromLabel(
         label,
         new Set(existing.map((p) => p.key)),
@@ -2539,6 +2908,7 @@ export class DbStore implements FeatureStore {
         .insert(workspaceProperties)
         .values({
           workspaceId: ws,
+          productId: target,
           key,
           label,
           type: input.type,
@@ -4566,6 +4936,74 @@ export class DbStore implements FeatureStore {
         );
       }
       return resolved;
+    });
+  }
+
+  async cardsOverrides(
+    scope?: WorkspaceScope,
+    productId?: string | null,
+  ): Promise<CardsOverrides> {
+    const target = productId ?? null;
+    const none: CardsOverrides = {
+      transitionMode: false,
+      stages: false,
+      stageGates: false,
+      properties: false,
+      detailTemplates: false,
+      cardFields: false,
+      levelTemplates: false,
+    };
+    if (!target) return none;
+
+    return this.scoped(scope, async (tx) => {
+      const ws = scope!.workspaceId;
+      const [settings] = await tx
+        .select({
+          transitionMode: productSettings.transitionMode,
+          cardFields: productSettings.cardFields,
+          levelTemplates: productSettings.levelTemplates,
+        })
+        .from(productSettings)
+        .where(
+          and(
+            eq(productSettings.workspaceId, ws),
+            eq(productSettings.productId, target),
+          ),
+        )
+        .limit(1);
+
+      // "Owns at least one row" is the whole test for the set-shaped settings,
+      // which is why these are existence probes rather than comparisons: a
+      // product that defines the same stages as the workspace has still taken
+      // them over, and will not follow the default when it next changes.
+      const owns = async (
+        table:
+          | typeof workspaceStatuses
+          | typeof workspaceStageGates
+          | typeof workspaceProperties
+          | typeof detailTemplates,
+      ) => {
+        const rows = await tx
+          .select({ id: table.id })
+          .from(table)
+          .where(
+            and(eq(table.workspaceId, ws), eq(table.productId, target)),
+          )
+          .limit(1);
+        return rows.length > 0;
+      };
+
+      return {
+        transitionMode: settings?.transitionMode != null,
+        cardFields:
+          Object.keys(asLevelMap(settings?.cardFields)).length > 0,
+        levelTemplates:
+          Object.keys(asLevelMap(settings?.levelTemplates)).length > 0,
+        stages: await owns(workspaceStatuses),
+        stageGates: await owns(workspaceStageGates),
+        properties: await owns(workspaceProperties),
+        detailTemplates: await owns(detailTemplates),
+      };
     });
   }
 

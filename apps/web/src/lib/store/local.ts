@@ -125,6 +125,7 @@ import {
   type StageGate,
   type StageGateInput,
   StageGateError,
+  type CardsOverrides,
   type StatusStageInput,
   type TransitionModeSettings,
   type WorkspaceStatus,
@@ -3037,6 +3038,30 @@ export class LocalFileStore implements FeatureStore {
   }
 
   /** Nothing to override, for the same reason the mode is fixed above. */
+  /**
+   * Local file mode has one product by construction, so a cross-product board
+   * is the same board and the union is just the stage list.
+   */
+  async listStatusesUnion(
+    scope: WorkspaceScope | undefined,
+    _productIds: string[] | null,
+  ): Promise<WorkspaceStatus[]> {
+    return this.listStatuses(scope);
+  }
+
+  /** One product, nothing to inherit from: nothing is ever an override. */
+  async cardsOverrides(): Promise<CardsOverrides> {
+    return {
+      transitionMode: false,
+      stages: false,
+      stageGates: false,
+      properties: false,
+      detailTemplates: false,
+      cardFields: false,
+      levelTemplates: false,
+    };
+  }
+
   async listTransitionModes(
     _scope?: WorkspaceScope,
   ): Promise<TransitionModeSettings> {

@@ -896,9 +896,10 @@ export function parseCreateFeatureInput(body: unknown): CreateFeatureInput {
 /** The workspace's hierarchy levels (top → leaf). */
 export async function listLevels(
   scope?: WorkspaceScope,
+  productId?: string | null,
 ): Promise<WorkspaceLevel[]> {
   const store = await getStore();
-  return store.listLevels(scope);
+  return store.listLevels(scope, productId);
 }
 
 /** Parse and validate an untrusted hierarchy-config update body. */
@@ -974,17 +975,19 @@ export function parseLevelFieldsUpdate(
 export async function updateLevelFields(
   fields: Record<string, string[] | null>,
   scope?: WorkspaceScope,
+  productId?: string | null,
 ): Promise<WorkspaceLevel[]> {
   const store = await getStore();
-  return store.updateLevelFields(fields, scope);
+  return store.updateLevelFields(fields, scope, productId);
 }
 
 /** The workspace's custom property definitions, ordered by position. */
 export async function listProperties(
   scope?: WorkspaceScope,
+  productId?: string | null,
 ): Promise<PropertyDef[]> {
   const store = await getStore();
-  return store.listProperties(scope);
+  return store.listProperties(scope, undefined, productId);
 }
 
 /** Parse and validate an untrusted property-create body. */
@@ -1062,9 +1065,10 @@ function parseStringArray(value: unknown, field: string): string[] {
 export async function createProperty(
   input: PropertyInput,
   scope?: WorkspaceScope,
+  productId?: string | null,
 ): Promise<PropertyDef> {
   const store = await getStore();
-  return store.createProperty(input, scope);
+  return store.createProperty(input, scope, productId);
 }
 
 /** Update a custom property definition. */
@@ -1089,9 +1093,10 @@ export async function deleteProperty(
 /** The workspace's detail templates, ordered by name. */
 export async function listDetailTemplates(
   scope?: WorkspaceScope,
+  productId?: string | null,
 ): Promise<DetailTemplate[]> {
   const store = await getStore();
-  return store.listDetailTemplates(scope);
+  return store.listDetailTemplates(scope, productId);
 }
 
 /** Parse and validate an untrusted detail-template-create body. */
@@ -1145,9 +1150,10 @@ export function parseDetailTemplatePatch(body: unknown): DetailTemplatePatch {
 export async function createDetailTemplate(
   input: DetailTemplateInput,
   scope?: WorkspaceScope,
+  productId?: string | null,
 ): Promise<DetailTemplate> {
   const store = await getStore();
-  return store.createDetailTemplate(input, scope);
+  return store.createDetailTemplate(input, scope, productId);
 }
 
 /** Update a detail template. */
@@ -1200,9 +1206,10 @@ export function parseLevelTemplatesUpdate(
 export async function updateLevelTemplates(
   templates: Record<string, string | null>,
   scope?: WorkspaceScope,
+  productId?: string | null,
 ): Promise<WorkspaceLevel[]> {
   const store = await getStore();
-  return store.updateLevelTemplates(templates, scope);
+  return store.updateLevelTemplates(templates, scope, productId);
 }
 
 /**
@@ -1409,9 +1416,10 @@ export async function markAllNotificationsRead(
 /** The workspace's workflow stages, or `[]` when using the built-in default. */
 export async function listStatuses(
   scope?: WorkspaceScope,
+  productId?: string | null,
 ): Promise<WorkspaceStatus[]> {
   const store = await getStore();
-  return store.listStatuses(scope);
+  return store.listStatuses(scope, productId);
 }
 
 /**
@@ -1444,9 +1452,10 @@ export async function setTransitionMode(
 export async function replaceStatuses(
   stages: StatusStageInput[],
   scope?: WorkspaceScope,
+  productId?: string | null,
 ): Promise<WorkspaceStatus[]> {
   const store = await getStore();
-  return store.replaceStatuses(stages, scope);
+  return store.replaceStatuses(stages, scope, productId);
 }
 
 /**
@@ -1490,18 +1499,20 @@ export function parseStatusStages(body: unknown): StatusStageInput[] {
 /** The workspace's stage gates (checklist items per stage). */
 export async function listStageGates(
   scope?: WorkspaceScope,
+  productId?: string | null,
 ): Promise<StageGate[]> {
   const store = await getStore();
-  return store.listStageGates(scope);
+  return store.listStageGates(scope, productId);
 }
 
 /** Replace the workspace's stage gates wholesale (admin action). */
 export async function replaceStageGates(
   gates: StageGateInput[],
   scope?: WorkspaceScope,
+  productId?: string | null,
 ): Promise<StageGate[]> {
   const store = await getStore();
-  return store.replaceStageGates(gates, scope);
+  return store.replaceStageGates(gates, scope, productId);
 }
 
 /**

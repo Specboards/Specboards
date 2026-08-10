@@ -132,6 +132,10 @@ export const detailTemplates = pgTable(
     workspaceId: uuid("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
+    /** Owning product, or NULL for the workspace default. */
+    productId: uuid("product_id").references(() => products.id, {
+      onDelete: "cascade",
+    }),
     name: text("name").notNull(),
     /** Markdown body used as the starting point for a card's details. */
     body: text("body").notNull().default(""),
@@ -143,8 +147,14 @@ export const detailTemplates = pgTable(
       .defaultNow(),
   },
   (t) => [
-    unique("detail_templates_ws_name_uq").on(t.workspaceId, t.name),
+    // Uniqueness is a pair of partial indexes; see migration 0065.
     index("detail_templates_ws_idx").on(t.workspaceId),
+    index("detail_templates_product_idx").on(t.productId),
+    foreignKey({
+      columns: [t.productId, t.workspaceId],
+      foreignColumns: [products.id, products.workspaceId],
+      name: "detail_templates_product_ws_fk",
+    }),
   ],
 );
 
@@ -309,6 +319,22 @@ export const productSettings = pgTable(
      * modes. See TransitionMode in @specboards/core.
      */
     transitionMode: text("transition_mode"),
+    /**
+     * Per-level built-in field visibility: `{levelKey: string[] | null}`.
+     *
+     * A map rather than a `product_id` on `workspace_levels`, because levels
+     * are workspace-wide (Settings > Hierarchy, not a Cards setting) and there
+     * is only one row per level to hang an override on.
+     *
+     * An ABSENT level inherits the workspace default for that level; a level
+     * present with `null` overrides it to "every field available". That
+     * distinction is what makes adding a level safe: a new level is in nobody's
+     * map, so every product inherits it rather than being silently narrowed.
+     */
+    cardFields: jsonb("card_fields"),
+    /** Per-level default detail template: `{levelKey: uuid | null}`. Same
+     * absent-inherits/present-overrides rule as {@link cardFields}. */
+    levelTemplates: jsonb("level_templates"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -771,6 +797,13 @@ export const workspaceProperties = pgTable(
     workspaceId: uuid("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
+    /** Owning product, or NULL for the workspace default. Narrowing a
+     * product's property set hides values without deleting them: an item's
+     * `custom_fields` may hold keys the product no longer defines, and
+     * re-adding the property brings them back. */
+    productId: uuid("product_id").references(() => products.id, {
+      onDelete: "cascade",
+    }),
     key: text("key").notNull(),
     label: text("label").notNull(),
     /** One of core PROPERTY_TYPES: text/number/select/multiselect/date/user. */
@@ -791,12 +824,15 @@ export const workspaceProperties = pgTable(
       .defaultNow(),
   },
   (t) => [
-    unique("workspace_properties_ws_entity_key_uq").on(
-      t.workspaceId,
-      t.entity,
-      t.key,
-    ),
+    // Uniqueness is a pair of partial indexes (Drizzle can't express one);
+    // see migration 0065.
     index("workspace_properties_ws_idx").on(t.workspaceId),
+    index("workspace_properties_product_idx").on(t.productId),
+    foreignKey({
+      columns: [t.productId, t.workspaceId],
+      foreignColumns: [products.id, products.workspaceId],
+      name: "workspace_properties_product_ws_fk",
+    }),
   ],
 );
 
@@ -815,6 +851,12 @@ export const workspaceStatuses = pgTable(
     workspaceId: uuid("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
+    /** Owning product, or NULL for the workspace default every product
+     * inherits. The unique keys are partial indexes (Drizzle can't express
+     * one); see migration 0065. */
+    productId: uuid("product_id").references(() => products.id, {
+      onDelete: "cascade",
+    }),
     key: text("key").notNull(),
     label: text("label").notNull(),
     /** Manual ordering of stages (board column order); ascending. */
@@ -824,8 +866,13 @@ export const workspaceStatuses = pgTable(
       .defaultNow(),
   },
   (t) => [
-    unique("workspace_statuses_ws_key_uq").on(t.workspaceId, t.key),
     index("workspace_statuses_ws_idx").on(t.workspaceId),
+    index("workspace_statuses_product_idx").on(t.productId),
+    foreignKey({
+      columns: [t.productId, t.workspaceId],
+      foreignColumns: [products.id, products.workspaceId],
+      name: "workspace_statuses_product_ws_fk",
+    }),
   ],
 );
 
@@ -843,6 +890,12 @@ export const workspaceStageGates = pgTable(
     workspaceId: uuid("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
+    /** Owning product, or NULL for the workspace default. A gate always lives
+     * beside the stage it guards: a product's gates reference that product's
+     * stage keys. */
+    productId: uuid("product_id").references(() => products.id, {
+      onDelete: "cascade",
+    }),
     /** The stage this gate guards (a `workspace_statuses.key` or built-in key). */
     stageKey: text("stage_key").notNull(),
     label: text("label").notNull(),
@@ -855,6 +908,12 @@ export const workspaceStageGates = pgTable(
   (t) => [
     index("workspace_stage_gates_ws_idx").on(t.workspaceId),
     index("workspace_stage_gates_ws_stage_idx").on(t.workspaceId, t.stageKey),
+    index("workspace_stage_gates_product_idx").on(t.productId),
+    foreignKey({
+      columns: [t.productId, t.workspaceId],
+      foreignColumns: [products.id, products.workspaceId],
+      name: "workspace_stage_gates_product_ws_fk",
+    }),
   ],
 );
 

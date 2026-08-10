@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { CardsOverride } from "@/components/cards-override";
 import { AuthRequiredError, updateStatuses } from "@/lib/api-client";
 import { statusDotColor } from "@/lib/feature-helpers";
 import type { WorkspaceStatus } from "@/lib/store/types";
@@ -27,7 +28,13 @@ interface Row {
 export function WorkflowEditor({
   initial,
   canEdit,
+  productId,
+  overridden,
 }: {
+  /** Product being configured, or null for the workspace default. */
+  productId: string | null;
+  /** Whether this product has its own stages rather than inheriting. */
+  overridden: boolean;
   /** The current effective stages (DB-defined, or the built-in default). */
   initial: WorkspaceStatus[];
   canEdit: boolean;
@@ -69,6 +76,7 @@ export function WorkflowEditor({
       try {
         const stages = await updateStatuses(
           rows.map((r) => ({ key: r.key, label: r.label.trim() })),
+          productId,
         );
         setRows(stages.map((s) => ({ key: s.key, label: s.label })));
         toast.success("Workflow saved");
@@ -86,96 +94,112 @@ export function WorkflowEditor({
   }
 
   return (
-    <div className="space-y-3">
-      <ol className="space-y-2">
-        {rows.map((row, i) => (
-          <li
-            key={row.key || `new-${i}`}
-            className="flex items-center gap-2 rounded-md border bg-background p-2"
-          >
-            <GripVertical className="size-4 shrink-0 text-muted-foreground" />
-            <span
-              className="size-2.5 shrink-0 rounded-full"
-              style={{ backgroundColor: statusDotColor(row.key || row.label) }}
-            />
-            <Input
-              value={row.label}
-              onChange={(e) => setLabel(i, e.target.value)}
-              disabled={!canEdit || saving}
-              placeholder="Stage name"
-              className="h-8"
-              aria-label={`Stage ${i + 1}`}
-            />
-            {canEdit ? (
-              <div className="flex shrink-0 items-center gap-0.5">
-                <Button
-                  type="button"
-                  size="icon"
-                  variant="ghost"
-                  className="size-7"
-                  onClick={() => move(i, -1)}
-                  disabled={i === 0 || saving}
-                  aria-label="Move up"
-                >
-                  <ArrowUp className="size-3.5" />
-                </Button>
-                <Button
-                  type="button"
-                  size="icon"
-                  variant="ghost"
-                  className="size-7"
-                  onClick={() => move(i, 1)}
-                  disabled={i === rows.length - 1 || saving}
-                  aria-label="Move down"
-                >
-                  <ArrowDown className="size-3.5" />
-                </Button>
-                <Button
-                  type="button"
-                  size="icon"
-                  variant="ghost"
-                  className="size-7 text-muted-foreground hover:text-destructive"
-                  onClick={() => remove(i)}
-                  disabled={rows.length <= 2 || saving}
-                  aria-label={`Remove ${row.label || "stage"}`}
-                >
-                  <X className="size-3.5" />
-                </Button>
-              </div>
-            ) : null}
-          </li>
-        ))}
-      </ol>
+    <CardsOverride
+      productId={productId}
+      overridden={overridden}
+      canEdit={canEdit}
+      label="stages"
+      onOverride={() =>
+        // Seed the product's own set from what it is inheriting, so the admin
+        // starts from the board they already have rather than a blank one.
+        updateStatuses(
+          rows.map((r) => ({ key: r.key, label: r.label.trim() })),
+          productId,
+        ).then(() => undefined)
+      }
+      onRevert={() => updateStatuses([], productId).then(() => undefined)}
+    >
+      <div className="space-y-3">
+        <ol className="space-y-2">
+          {rows.map((row, i) => (
+            <li
+              key={row.key || `new-${i}`}
+              className="flex items-center gap-2 rounded-md border bg-background p-2"
+            >
+              <GripVertical className="size-4 shrink-0 text-muted-foreground" />
+              <span
+                className="size-2.5 shrink-0 rounded-full"
+                style={{ backgroundColor: statusDotColor(row.key || row.label) }}
+              />
+              <Input
+                value={row.label}
+                onChange={(e) => setLabel(i, e.target.value)}
+                disabled={!canEdit || saving}
+                placeholder="Stage name"
+                className="h-8"
+                aria-label={`Stage ${i + 1}`}
+              />
+              {canEdit ? (
+                <div className="flex shrink-0 items-center gap-0.5">
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="size-7"
+                    onClick={() => move(i, -1)}
+                    disabled={i === 0 || saving}
+                    aria-label="Move up"
+                  >
+                    <ArrowUp className="size-3.5" />
+                  </Button>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="size-7"
+                    onClick={() => move(i, 1)}
+                    disabled={i === rows.length - 1 || saving}
+                    aria-label="Move down"
+                  >
+                    <ArrowDown className="size-3.5" />
+                  </Button>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="size-7 text-muted-foreground hover:text-destructive"
+                    onClick={() => remove(i)}
+                    disabled={rows.length <= 2 || saving}
+                    aria-label={`Remove ${row.label || "stage"}`}
+                  >
+                    <X className="size-3.5" />
+                  </Button>
+                </div>
+              ) : null}
+            </li>
+          ))}
+        </ol>
 
-      {canEdit ? (
-        <>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={add}
-            disabled={saving}
-            className="gap-1"
-          >
-            <Plus className="size-3.5" />
-            Add stage
-          </Button>
-          <div className="flex items-center gap-3 pt-1">
+        {canEdit ? (
+          <>
             <Button
               type="button"
               size="sm"
-              onClick={onSave}
-              disabled={!dirty || !valid || saving}
+              variant="outline"
+              onClick={add}
+              disabled={saving}
+              className="gap-1"
             >
-              {saving ? "Saving…" : "Save workflow"}
+              <Plus className="size-3.5" />
+              Add stage
             </Button>
-            <p className="text-xs text-muted-foreground">
-              Removing a stage moves its items to the first stage.
-            </p>
-          </div>
-          {error ? <p className="text-xs text-destructive">{error}</p> : null}
-        </>
-      ) : null}
-    </div>
+            <div className="flex items-center gap-3 pt-1">
+              <Button
+                type="button"
+                size="sm"
+                onClick={onSave}
+                disabled={!dirty || !valid || saving}
+              >
+                {saving ? "Saving…" : "Save workflow"}
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                Removing a stage moves its items to the first stage.
+              </p>
+            </div>
+            {error ? <p className="text-xs text-destructive">{error}</p> : null}
+          </>
+        ) : null}
+      </div>
+    </CardsOverride>
   );
 }

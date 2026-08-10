@@ -564,11 +564,12 @@ export async function updateLevels(
  */
 export async function updateLevelFields(
   fields: Record<string, string[] | null>,
+  productId?: string | null,
 ): Promise<WorkspaceLevel[]> {
   const res = await apiFetch("/api/v1/levels/fields", {
     method: "PUT",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ fields }),
+    body: JSON.stringify({ fields, productId: productId ?? null }),
   });
   if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
@@ -587,11 +588,12 @@ export async function updateLevelFields(
  */
 export async function updateLevelTemplates(
   templates: Record<string, string | null>,
+  productId?: string | null,
 ): Promise<WorkspaceLevel[]> {
   const res = await apiFetch("/api/v1/levels/templates", {
     method: "PUT",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ templates }),
+    body: JSON.stringify({ templates, productId: productId ?? null }),
   });
   if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
@@ -607,11 +609,12 @@ export async function updateLevelTemplates(
 /** Create a detail template (admin-only on the server); returns it. */
 export async function createDetailTemplate(
   input: DetailTemplateInput,
+  productId?: string | null,
 ): Promise<DetailTemplate> {
   const res = await apiFetch("/api/v1/detail-templates", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(input),
+    body: JSON.stringify({ ...input, productId: productId ?? null }),
   });
   if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
@@ -678,14 +681,19 @@ export async function listStatuses(): Promise<WorkspaceStatus[]> {
   return body?.statuses ?? [];
 }
 
-/** Replace the workspace's workflow stages (admin-only); returns the new set. */
+/**
+ * Replace a product's workflow stages, or the workspace default's when
+ * `productId` is omitted; returns the new set. An empty list reverts a product
+ * to inheriting the default.
+ */
 export async function updateStatuses(
   stages: StatusStageInput[],
+  productId?: string | null,
 ): Promise<WorkspaceStatus[]> {
   const res = await apiFetch("/api/v1/statuses", {
     method: "PUT",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ statuses: stages }),
+    body: JSON.stringify({ statuses: stages, productId: productId ?? null }),
   });
   if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
@@ -746,11 +754,12 @@ export async function listStageGates(): Promise<StageGate[]> {
 /** Replace the workspace's stage gates (admin-only); returns the new set. */
 export async function updateStageGates(
   gates: StageGateInput[],
+  productId?: string | null,
 ): Promise<StageGate[]> {
   const res = await apiFetch("/api/v1/stage-gates", {
     method: "PUT",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ gates }),
+    body: JSON.stringify({ gates, productId: productId ?? null }),
   });
   if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
@@ -935,11 +944,12 @@ export async function updateIdeaSettings(
 /** Define a custom property (admin-only on the server); returns it. */
 export async function createProperty(
   input: PropertyInput,
+  productId?: string | null,
 ): Promise<PropertyDef> {
   const res = await apiFetch("/api/v1/properties", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(input),
+    body: JSON.stringify({ ...input, productId: productId ?? null }),
   });
   if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {

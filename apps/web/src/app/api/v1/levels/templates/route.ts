@@ -1,5 +1,4 @@
-import { readJsonBody } from "@/lib/api/body";
-import { authorizeOrgAdmin } from "@/lib/auth-session";
+import { authorizeCardsWrite } from "@/lib/api/cards-scope";
 import {
   InvalidPatchError,
   parseLevelTemplatesUpdate,
@@ -13,20 +12,20 @@ export const dynamic = "force-dynamic";
 /**
  * PUT /api/v1/levels/templates — assign a default detail template per
  * hierarchy level (Settings -> Cards). Body: { templates: { [levelKey]:
- * uuid | null } }; null clears the assignment. Admin-only.
+ * uuid | null }, productId? }; null clears the assignment. With a productId
+ * the assignment is that product's, and it may only name a template that
+ * product can see (its own set, or the workspace default's).
  */
 export async function PUT(req: Request) {
-  const authz = await authorizeOrgAdmin(req);
+  const authz = await authorizeCardsWrite(req);
   if (!authz.ok) return authz.response;
-
-  const parsed = await readJsonBody(req);
-  if (!parsed.ok) return parsed.response;
-  const body = parsed.body;
+  const { scope, productId, body } = authz;
 
   try {
     const levels = await updateLevelTemplates(
       parseLevelTemplatesUpdate(body),
-      authz.scope ?? undefined,
+      scope,
+      productId,
     );
     revalidateCardPages();
     return Response.json({ levels });
