@@ -158,13 +158,16 @@ export async function getItemDetailData(
 
   const [allProperties, releases, cycles, itemGoals, allGoals, allFeatures, levels, products, allGates, allCompletedGateIds] =
     await Promise.all([
-      store.listProperties(access ?? undefined, "item"),
+      // The item's own product decides which fields it carries. A product that
+      // has narrowed its set leaves the dropped values on the row, so this
+      // hides them rather than losing them, and re-adding brings them back.
+      store.listProperties(access ?? undefined, "item", feature.productId),
       store.listReleases(access ?? undefined),
       store.listCycles(access ?? undefined),
       store.listItemGoals(feature.specId, access ?? undefined),
       store.listGoals(access ?? undefined),
       store.listFeatures(access ?? undefined),
-      store.listLevels(access ?? undefined),
+      store.listLevels(access ?? undefined, feature.productId),
       store.listProducts(access ?? undefined),
       store.listStageGates(access ?? undefined),
       store.listGateCompletions(feature.specId, access ?? undefined),
@@ -246,7 +249,7 @@ export async function getItemDetailData(
   // up. Skipped entirely when no create affordance shows, so an ordinary item
   // read does not pay for a query nothing renders.
   const specTemplates = canCreateChildSpec
-    ? await store.listDetailTemplates(access ?? undefined)
+    ? await store.listDetailTemplates(access ?? undefined, feature.productId)
     : [];
 
   return {

@@ -2,8 +2,11 @@ import { revalidatePath } from "next/cache";
 
 import { isTransitionMode, type TransitionMode } from "@specboards/core";
 
-import { readJsonBody } from "@/lib/api/body";
-import { authorizeOrgAdmin, resolveReadScope } from "@/lib/auth-session";
+import {
+  authorizeCardsWrite,
+  readCardsProductId,
+} from "@/lib/api/cards-scope";
+import { resolveReadScope } from "@/lib/auth-session";
 import {
   InvalidPatchError,
   getTransitionMode,
@@ -12,7 +15,7 @@ import {
   replaceStatuses,
   setTransitionMode,
 } from "@/lib/features-service";
-import { canManageProductForScope } from "@/lib/products-service";
+
 import { resolveWorkflowFor } from "@/lib/repo-config";
 
 export const dynamic = "force-dynamic";
@@ -33,9 +36,9 @@ export async function GET(req: Request) {
   if (!authz.ok) return authz.response;
 
   const scope = authz.scope ?? undefined;
-  const productId = new URL(req.url).searchParams.get("productId");
+  const productId = readCardsProductId(req);
   const [statuses, workflow, transitionMode] = await Promise.all([
-    listStatuses(scope),
+    listStatuses(scope, productId),
     resolveWorkflowFor(authz.scope ?? null, productId),
     getTransitionMode(scope, productId),
   ]);
@@ -65,28 +68,9 @@ export async function GET(req: Request) {
  * mode.
  */
 export async function PATCH(req: Request) {
-  const parsedProduct = await readProductId(req);
-  if (!parsedProduct.ok) return parsedProduct.response;
-  const { productId, body } = parsedProduct;
-
-  // The workspace default keeps the owner-only gate it has always had. A
-  // product's own setting is the widening: membership to get a scope, then a
-  // product-admin check against that product.
-  const authz = productId
-    ? await resolveReadScope(req)
-    : await authorizeOrgAdmin(req);
+  const authz = await authorizeCardsWrite(req);
   if (!authz.ok) return authz.response;
-  const scope = authz.scope ?? undefined;
-
-  if (
-    productId &&
-    !(await canManageProductForScope(productId, scope))
-  ) {
-    return Response.json(
-      { error: "Only a product admin or the workspace owner can do this." },
-      { status: 403 },
-    );
-  }
+  const { scope, productId, body } = authz;
 
   const raw = (body as { transitionMode?: unknown } | null)?.transitionMode;
   // `null` is "inherit the workspace default", which only a product can do.
@@ -119,59 +103,4 @@ export async function PATCH(req: Request) {
   ])
     revalidatePath(path, "page");
   return Response.json({ transitionMode });
-}
-
-/**
- * Read the body once and pull `productId` out of it, because which
- * authorization the request needs depends on whether it is there. Reading the
- * body is destructive, so the parsed value is handed back for PATCH to reuse.
- */
-async function readProductId(req: Request): Promise<
-  | { ok: true; productId: string | null; body: unknown }
-  | { ok: false; response: Response }
-> {
-  const parsed = await readJsonBody(req);
-  if (!parsed.ok) return parsed;
-  const raw = (parsed.body as { productId?: unknown } | null)?.productId;
-  if (raw !== undefined && raw !== null && typeof raw !== "string") {
-    return {
-      ok: false,
-      response: Response.json(
-        { error: "productId must be a product id, or omitted." },
-        { status: 422 },
-      ),
-    };
-  }
-  return { ok: true, productId: raw ?? null, body: parsed.body };
-}
-
-/**
- * PUT /api/v1/statuses — replace the workspace's workflow stages. Admin-only
- * (it reshapes every member's board and re-homes orphaned items); local file
- * mode is ungated.
- */
-export async function PUT(req: Request) {
-  const authz = await authorizeOrgAdmin(req);
-  if (!authz.ok) return authz.response;
-  const scope = authz.scope ?? undefined;
-
-  const parsed = await readJsonBody(req);
-  if (!parsed.ok) return parsed.response;
-  const body = parsed.body;
-
-  try {
-    const statuses = await replaceStatuses(parseStatusStages(body), scope);
-    for (const path of [
-      "/[org]/[product]/backlog",
-      "/[org]/[product]/roadmap",
-      "/[org]/settings/work-cards",
-    ])
-      revalidatePath(path, "page");
-    return Response.json({ statuses });
-  } catch (err) {
-    if (err instanceof InvalidPatchError) {
-      return Response.json({ error: err.message }, { status: 422 });
-    }
-    throw err;
-  }
 }

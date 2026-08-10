@@ -72,7 +72,7 @@ export async function resolveWorkflowFor(
 ): Promise<StatusWorkflow> {
   const store = await getStore();
   const [stages, config] = await Promise.all([
-    store.listStatuses(scope ?? undefined),
+    store.listStatuses(scope ?? undefined, productId),
     resolveRepoConfig(scope),
   ]);
 
@@ -104,4 +104,51 @@ function statusLabelFromKey(key: string): string {
     .split("_")
     .map((w) => (w ? w[0]!.toUpperCase() + w.slice(1) : w))
     .join(" ");
+}
+
+/**
+ * The workflow for a view that spans several products, which may not agree.
+ *
+ * The vocabulary is the union of their stages (see `listStatusesUnion`): the
+ * workspace default's order first, then any stage only some product defines.
+ * Hiding a stage would hide the items sitting in it, and a board that silently
+ * drops work is the failure this whole epic exists to stop.
+ *
+ * The transitions come from the workspace default's mode, because there is no
+ * single product to ask. That only governs what the *board* offers; every
+ * actual move is still validated against the item's own product, so a
+ * cross-product board can never talk someone into an illegal transition.
+ *
+ * `productIds` is null or empty for a view with no product scope at all, which
+ * is the workspace default on its own.
+ */
+export async function resolveWorkflowForProducts(
+  scope: WorkspaceScope | null,
+  productIds: string[] | null,
+): Promise<StatusWorkflow> {
+  if (productIds && productIds.length === 1) {
+    return resolveWorkflowFor(scope, productIds[0]!);
+  }
+
+  const store = await getStore();
+  const [stages, config] = await Promise.all([
+    store.listStatusesUnion(scope ?? undefined, productIds),
+    resolveRepoConfig(scope),
+  ]);
+  if (configPinsTransitions(config)) return resolveWorkflow(config);
+
+  const mode = await store.getTransitionMode(scope ?? undefined, null);
+  const fromStages = workflowFromStages(stages, mode);
+  if (fromStages) return fromStages;
+
+  const vocabulary =
+    config?.statuses && config.statuses.length >= 2
+      ? config.statuses.filter((s) => s !== "archived")
+      : DEFAULT_STATUSES.filter((s) => s !== "archived");
+  return (
+    workflowFromStages(
+      vocabulary.map((key) => ({ key, label: statusLabelFromKey(key) })),
+      mode,
+    ) ?? defaultWorkflow
+  );
 }

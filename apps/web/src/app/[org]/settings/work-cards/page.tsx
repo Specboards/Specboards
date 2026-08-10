@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { CardsFieldsEditor } from "@/components/cards-fields-editor";
+import { CardsScopePicker } from "@/components/cards-scope-picker";
 import { CollapsibleSettingsGroup } from "@/components/collapsible-settings-group";
 import { DetailTemplatesManager } from "@/components/detail-templates-manager";
 import { PropertiesManager } from "@/components/properties-manager";
@@ -18,14 +19,39 @@ export const dynamic = "force-dynamic";
 /**
  * Cards settings, grouped into self-contained panels so related controls read
  * together: the item **Workflow** (the stages/board columns, how items move
- * between them, and the gates guarding each), **Fields** (which
- * built-in fields show per level, plus custom properties), and **Templates**
- * (reusable detail skeletons). Any member sees the configuration; only admins
- * can change it (matching the /api/v1 write gates).
+ * between them, and the gates guarding each), **Fields** (which built-in fields
+ * show per level, plus custom properties), and **Templates** (reusable detail
+ * skeletons).
+ *
+ * Every one of these is configured per product, with a workspace-level default
+ * that unconfigured products inherit. `?product=` says which is being edited;
+ * without it the page edits the default. That scope lives in the URL rather
+ * than in component state so it survives a refresh, is visible in the address
+ * bar, and is the same for every panel: the failure mode worth designing
+ * against is an admin editing the wrong product's workflow without noticing.
+ *
+ * Any member sees the configuration. Changing it needs product-admin rights on
+ * the product in view, or workspace ownership for the default, matching the
+ * /api/v1 write gates and the RLS behind them.
  */
-export default async function CardsSettingsPage() {
+export default async function CardsSettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const access = await requireWorkspaceAccess();
   const store = await getStore();
+  const products = await store.listProducts(access ?? undefined);
+
+  const raw = (await searchParams).product;
+  const requested = Array.isArray(raw) ? raw[0] : raw;
+  // An unknown or no-longer-visible product falls back to the workspace
+  // default rather than 404ing: a stale bookmark should land somewhere useful,
+  // and it must not confirm that a product the viewer cannot see exists.
+  const productId = products.some((p) => p.id === requested)
+    ? (requested ?? null)
+    : null;
+
   const [
     levels,
     properties,
@@ -33,25 +59,26 @@ export default async function CardsSettingsPage() {
     workflow,
     stageGates,
     transitionModes,
-    products,
+    overrides,
   ] = await Promise.all([
-    store.listLevels(access ?? undefined),
-    store.listProperties(access ?? undefined),
-    store.listDetailTemplates(access ?? undefined),
-    resolveWorkflowFor(access),
-    store.listStageGates(access ?? undefined),
+    store.listLevels(access ?? undefined, productId),
+    store.listProperties(access ?? undefined, undefined, productId),
+    store.listDetailTemplates(access ?? undefined, productId),
+    resolveWorkflowFor(access, productId),
+    store.listStageGates(access ?? undefined, productId),
     store.listTransitionModes(access ?? undefined),
-    store.listProducts(access ?? undefined),
+    store.cardsOverrides(access ?? undefined, productId),
   ]);
-  const canEdit = !access || access.role === "owner";
 
-  // Transitions is the first Cards setting to become per-product, so it is the
-  // first control on this page whose edit rights are not simply the page's:
-  // a product admin can configure their own product without owning the
-  // workspace. The route and the database both check this again.
+  const isOwner = !access || access.role === "owner";
   const manageableProductIds = products
-    .filter((p) => canEdit || p.viewerRole === "admin")
+    .filter((p) => isOwner || p.viewerRole === "admin")
     .map((p) => p.id);
+  // Editing the default is owner-only; editing a product needs admin on THAT
+  // product. Both are checked again at the route and in the database.
+  const canEdit = productId
+    ? manageableProductIds.includes(productId)
+    : isOwner;
 
   // The effective stages the editor starts from (DB-defined, or the built-in
   // default), excluding the system `archived` status.
@@ -61,6 +88,13 @@ export default async function CardsSettingsPage() {
 
   return (
     <div className="space-y-8">
+      <CardsScopePicker
+        products={products}
+        active={productId}
+        manageableProductIds={manageableProductIds}
+        canEditDefault={isOwner}
+      />
+
       <CollapsibleSettingsGroup
         id="workflow"
         title="Workflow"
@@ -71,18 +105,22 @@ export default async function CardsSettingsPage() {
           title="Stages"
           description="The board columns items move through. Rename a stage in place, reorder, add, or remove stages."
         >
-          <WorkflowEditor initial={stages} canEdit={canEdit} />
+          <WorkflowEditor
+            initial={stages}
+            canEdit={canEdit}
+            productId={productId}
+            overridden={overrides.stages}
+          />
         </Subsection>
         <Subsection
           title="Transitions"
-          description="How freely items move between the stages above. This governs the board, the API, and agents alike. Set once for the workspace, or per product where one works differently."
+          description="How freely items move between the stages above. This governs the board, the API, and agents alike."
         >
           <TransitionModeEditor
             initial={transitionModes}
-            products={products}
+            productId={productId}
             stages={stages}
-            canEditDefault={canEdit}
-            manageableProductIds={manageableProductIds}
+            canEdit={canEdit}
           />
         </Subsection>
         <Subsection
@@ -93,6 +131,8 @@ export default async function CardsSettingsPage() {
             stages={stages}
             initial={stageGates}
             canEdit={canEdit}
+            productId={productId}
+            overridden={overrides.stageGates}
           />
         </Subsection>
       </CollapsibleSettingsGroup>
@@ -105,12 +145,13 @@ export default async function CardsSettingsPage() {
       >
         <Subsection
           title="Built-in fields"
-          description="Choose which built-in fields are available on cards at each level. Name, status, parent, and release are always available."
+          description="Choose which built-in fields are available on cards at each level. Name, status, parent, and release are always available. Levels themselves are workspace-wide; edit them under Hierarchy."
         >
           <CardsFieldsEditor
             levels={levels}
             catalog={BUILTIN_METADATA_FIELDS}
             canEdit={canEdit}
+            productId={productId}
           />
         </Subsection>
         <Subsection
@@ -121,6 +162,8 @@ export default async function CardsSettingsPage() {
             levels={levels}
             properties={properties}
             canEdit={canEdit}
+            productId={productId}
+            overridden={overrides.properties}
           />
         </Subsection>
       </CollapsibleSettingsGroup>
@@ -135,6 +178,8 @@ export default async function CardsSettingsPage() {
           levels={levels}
           templates={detailTemplates}
           canEdit={canEdit}
+          productId={productId}
+          overridden={overrides.detailTemplates}
         />
       </CollapsibleSettingsGroup>
     </div>

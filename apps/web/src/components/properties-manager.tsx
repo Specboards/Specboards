@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import type { PropertyDef, PropertyEntity, PropertyType } from "@specboards/core";
 import { PROPERTY_TYPES } from "@specboards/core";
 
+import { CardsOverride } from "@/components/cards-override";
 import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -43,13 +44,50 @@ export function PropertiesManager({
   levels,
   properties,
   canEdit,
+  productId,
+  overridden,
 }: {
+  /** Product being configured, or null for the workspace default. */
+  productId: string | null;
+  /** Whether this product has its own properties rather than inheriting. */
+  overridden: boolean;
   levels: WorkspaceLevel[];
   properties: PropertyDef[];
   canEdit: boolean;
 }) {
   const [adding, setAdding] = useState(false);
   return (
+    <CardsOverride
+      productId={productId}
+      overridden={overridden}
+      canEdit={canEdit}
+      label="custom properties"
+      onOverride={async () => {
+        // Copy what the product is inheriting onto the product itself, one
+        // definition at a time (there is no bulk create), so overriding starts
+        // from the fields people are already filling in rather than a blank
+        // list. Values already stored on items keep their keys, so they light
+        // straight back up.
+        for (const p of properties) {
+          await createProperty(
+            {
+              label: p.label,
+              type: p.type,
+              options: p.options,
+              levels: p.levels,
+              entity: p.entity,
+            },
+            productId,
+          );
+        }
+      }}
+      onRevert={async () => {
+        // Once overridden, everything listed is the product's own, so this
+        // clears exactly what it defined. Item values survive: dropping a
+        // definition hides values, it does not delete them.
+        for (const p of properties) await deleteProperty(p.id);
+      }}
+    >
     <div className="max-w-2xl space-y-4">
       {properties.length === 0 && !adding ? (
         <EmptyState
@@ -80,7 +118,11 @@ export function PropertiesManager({
       {/* Start as an "Add property" affordance; reveal the form on opt-in (see
           the "add" UX rule in CLAUDE.md). */}
       {canEdit && adding ? (
-        <PropertyCreate levels={levels} onDone={() => setAdding(false)} />
+        <PropertyCreate
+          levels={levels}
+          productId={productId}
+          onDone={() => setAdding(false)}
+        />
       ) : null}
       {canEdit && !adding && properties.length > 0 ? (
         <Button size="sm" variant="outline" onClick={() => setAdding(true)}>
@@ -88,6 +130,7 @@ export function PropertiesManager({
         </Button>
       ) : null}
     </div>
+    </CardsOverride>
   );
 }
 
@@ -305,9 +348,12 @@ function PropertyRow({
 }
 
 function PropertyCreate({
+  productId,
   levels,
   onDone,
 }: {
+  /** Scope the new property is defined in; null = the workspace default. */
+  productId: string | null;
   levels: WorkspaceLevel[];
   onDone: () => void;
 }) {
@@ -347,7 +393,7 @@ function PropertyCreate({
             : {}),
           // Levels only apply to item properties; releases are workspace-wide.
           ...(entity === "item" ? { levels: levelsValue(levels, checked) } : {}),
-        });
+        }, productId);
         toast.success("Property added");
         setLabel("");
         setType("text");

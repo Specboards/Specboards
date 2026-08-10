@@ -1,7 +1,6 @@
 import { revalidatePath } from "next/cache";
 
-import { readJsonBody } from "@/lib/api/body";
-import { authorizeOrgAdmin } from "@/lib/auth-session";
+import { authorizeCardsWrite } from "@/lib/api/cards-scope";
 import {
   InvalidPatchError,
   parseLevelFieldsUpdate,
@@ -14,20 +13,24 @@ export const dynamic = "force-dynamic";
 /**
  * PUT /api/v1/levels/fields — set which metadata fields are available per
  * hierarchy level (Settings → Cards). Body: { fields: { [levelKey]:
- * string[] | null } }; null = every field. Admin-only, like PUT /api/v1/levels;
- * local file mode is ungated.
+ * string[] | null }, productId? }; null = every field.
+ *
+ * The hierarchy itself stays workspace-wide (that is PUT /api/v1/levels); this
+ * only changes what each level shows. With a productId the change is that
+ * product's, and it is a patch on the levels named: levels left out go on
+ * inheriting, which is what stops a newly added level from silently narrowing.
  */
 export async function PUT(req: Request) {
-  const authz = await authorizeOrgAdmin(req);
+  const authz = await authorizeCardsWrite(req);
   if (!authz.ok) return authz.response;
-  const scope = authz.scope ?? undefined;
-
-  const parsed = await readJsonBody(req);
-  if (!parsed.ok) return parsed.response;
-  const body = parsed.body;
+  const { scope, productId, body } = authz;
 
   try {
-    const levels = await updateLevelFields(parseLevelFieldsUpdate(body), scope);
+    const levels = await updateLevelFields(
+      parseLevelFieldsUpdate(body),
+      scope,
+      productId,
+    );
     for (const path of [
       "/[org]/[product]/backlog",
       "/[org]/settings/work-cards",

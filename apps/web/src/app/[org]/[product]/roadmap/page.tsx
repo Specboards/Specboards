@@ -20,13 +20,14 @@ import {
   ALL_PRODUCTS,
   resolveActiveScope,
   scopeProductFilter,
+  scopeProductIds,
 } from "@/lib/active-product";
 import { getBoardPreferences } from "@/lib/board-preferences-service";
 import { cardFieldCatalog, resolveCardFields } from "@/lib/card-fields";
 import { LOCAL_ORG_SLUG, orgProductPath } from "@/lib/org-path";
 import { sortFeatures } from "@/lib/feature-helpers";
 import { getDb } from "@/lib/db";
-import { resolveWorkflowFor } from "@/lib/repo-config";
+import { resolveWorkflowForProducts } from "@/lib/repo-config";
 import { getStore } from "@/lib/store";
 import { compareShippedReleases, goalsForProduct } from "@/lib/store/types";
 import { listWorkspaceMembers, type WorkspaceMember } from "@/lib/workspace";
@@ -87,12 +88,37 @@ export default async function RoadmapPage({
   const { product: productSlug } = await params;
   const sp = await searchParams;
   const store = await getStore();
+
+  // Roadmap scopes to the segment in the URL (a product, a `~key` group, or
+  // `all` = every product). Resolved before the Cards settings below it,
+  // because those are per product now and which products are in view decides
+  // what the cards carry.
+  const [products, groups] = await Promise.all([
+    store.listProducts(access ?? undefined),
+    store.listProductGroups(access ?? undefined),
+  ]);
+  const scope = resolveActiveScope(products, groups, productSlug);
+  if (!scope) notFound();
+  const activeProduct = scope.kind === "product" ? scope.product : null;
+  const productIds = scopeProductIds(scope);
+
   const allFeatures = sortFeatures(
     await store.listFeatures(access ?? undefined),
   ).filter((f) => f.status !== "archived");
   const releases = await store.listReleases(access ?? undefined);
-  const detailTemplates = await store.listDetailTemplates(access ?? undefined);
-  const properties = await store.listProperties(access ?? undefined, "item");
+  // Templates seed a NEW card, always created in one product, so a combined
+  // view offers the workspace default rather than a union.
+  const detailTemplates = await store.listDetailTemplates(
+    access ?? undefined,
+    activeProduct?.id ?? null,
+  );
+  // Union across the products in view: a column only one of them defines
+  // should still appear rather than its values becoming invisible.
+  const properties = await store.listPropertiesUnion(
+    access ?? undefined,
+    productIds,
+    "item",
+  );
   // Release-scoped custom properties power the editor in the release detail sheet.
   const releaseProperties = await store.listProperties(
     access ?? undefined,
@@ -120,20 +146,10 @@ export default async function RoadmapPage({
   );
   const releaseNames = Object.fromEntries(releases.map((r) => [r.id, r.name]));
 
-  // Roadmap scopes to the segment in the URL (a product, a `~key` group, or
-  // `all` = every product) and shows one hierarchy level at a time (default:
-  // the Feature altitude).
-  const [products, groups] = await Promise.all([
-    store.listProducts(access ?? undefined),
-    store.listProductGroups(access ?? undefined),
-  ]);
-  const scope = resolveActiveScope(products, groups, productSlug);
-  if (!scope) notFound();
-  const activeProduct = scope.kind === "product" ? scope.product : null;
-  // Card creation needs the status workflow (first status is the default), and
-  // transitions are configured per product, so it is resolved for the product
-  // in view; a group or "all" view uses the workspace default.
-  const workflow = await resolveWorkflowFor(access, activeProduct?.id ?? null);
+  // Card creation needs the status workflow (the first status is the default
+  // for a new card), resolved for the products in view: one product's own, or
+  // the union across a group or the "all" view.
+  const workflow = await resolveWorkflowForProducts(access, productIds);
   const canEdit = canEditProducts(
     access,
     products,
@@ -163,7 +179,10 @@ export default async function RoadmapPage({
           ]),
         );
 
-  const levels = await store.listLevels(access ?? undefined);
+  const levels = await store.listLevels(
+    access ?? undefined,
+    activeProduct?.id ?? null,
+  );
   const activeLevel = resolveActiveLevel(levels, sp.level);
   const features = scoped.filter((f) => f.level === activeLevel.key);
   const parentKey = parentLevelKey(activeLevel.key, levels);

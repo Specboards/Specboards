@@ -1,5 +1,8 @@
-import { readJsonBody } from "@/lib/api/body";
-import { authorizeOrgAdmin, resolveReadScope } from "@/lib/auth-session";
+import {
+  authorizeCardsWrite,
+  readCardsProductId,
+} from "@/lib/api/cards-scope";
+import { resolveReadScope } from "@/lib/auth-session";
 import {
   InvalidPatchError,
   createDetailTemplate,
@@ -11,31 +14,36 @@ import { DetailTemplateError } from "@/lib/store/types";
 
 export const dynamic = "force-dynamic";
 
-/** GET /api/v1/detail-templates — the workspace's detail templates. */
+/**
+ * GET /api/v1/detail-templates — the detail templates in force. `?productId=`
+ * resolves one product's; without it you get the workspace default's.
+ */
 export async function GET(req: Request) {
   const authz = await resolveReadScope(req);
   if (!authz.ok) return authz.response;
 
-  const templates = await listDetailTemplates(authz.scope ?? undefined);
+  const templates = await listDetailTemplates(
+    authz.scope ?? undefined,
+    readCardsProductId(req),
+  );
   return Response.json({ templates });
 }
 
 /**
  * POST /api/v1/detail-templates — create a detail template (Settings ->
- * Cards). Body: { name, body? }. Admin-only; local file mode is ungated.
+ * Cards). Body: { name, body?, productId? }. With a productId the template
+ * belongs to that product; without one it belongs to the workspace default.
  */
 export async function POST(req: Request) {
-  const authz = await authorizeOrgAdmin(req);
+  const authz = await authorizeCardsWrite(req);
   if (!authz.ok) return authz.response;
-
-  const parsed = await readJsonBody(req);
-  if (!parsed.ok) return parsed.response;
-  const body = parsed.body;
+  const { scope, productId, body } = authz;
 
   try {
     const template = await createDetailTemplate(
       parseDetailTemplateInput(body),
-      authz.scope ?? undefined,
+      scope,
+      productId,
     );
     revalidateCardPages();
     return Response.json({ template }, { status: 201 });

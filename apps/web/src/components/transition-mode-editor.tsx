@@ -5,16 +5,11 @@ import { useState, useTransition } from "react";
 import { toast } from "sonner";
 
 import { AuthRequiredError, updateTransitionMode } from "@/lib/api-client";
-import { Select } from "@/components/ui/select";
 import type {
-  ProductRecord,
   TransitionMode,
   TransitionModeSettings,
   WorkspaceStatus,
 } from "@/lib/store/types";
-
-/** The workspace default, as a `<Select>` value that cannot collide with a uuid. */
-const DEFAULT_SCOPE = "";
 
 /** A product's "no opinion of my own" choice, distinct from strict/flexible. */
 const INHERIT = "inherit";
@@ -45,14 +40,14 @@ const OPTIONS: {
  * list because the two only make sense together: the stages are the vocabulary,
  * this is what the board lets you do with it.
  *
- * The setting is configured per product, so the control first asks *what* is
- * being configured: the workspace default, or one product. A product starts out
- * inheriting the default and can take its own line; reverting is an explicit
- * "Inherit" choice rather than a delete, so nothing about the product is lost
- * when it goes back to following the workspace.
+ * Which product this is configuring comes from the page, not from a picker of
+ * its own: every panel on Settings > Cards edits the same scope, and one
+ * control saying so beats six saying it separately.
  *
- * The scope picker only appears once there is more than one product, since with
- * one product a default and an override are the same sentence said twice.
+ * A product shows an explicit "Inherit" option rather than the mode it happens
+ * to be inheriting, so following the workspace stays visibly different from
+ * being set to the same thing, and a product that reverts keeps following the
+ * default when it next changes.
  *
  * Worth stating in the UI rather than only in docs: stage gates apply in both
  * modes, so choosing Flexible loosens sequencing without giving up the
@@ -60,24 +55,19 @@ const OPTIONS: {
  */
 export function TransitionModeEditor({
   initial,
-  products,
+  productId,
   stages,
-  canEditDefault,
-  manageableProductIds,
+  canEdit,
 }: {
   /** Every mode configured in the workspace: the default, plus any overrides. */
   initial: TransitionModeSettings;
-  /** Products the viewer can see, for the scope picker. */
-  products: ProductRecord[];
+  /** Product being configured, or null for the workspace default. */
+  productId: string | null;
   /** The effective stages, used to phrase the strict option concretely. */
   stages: WorkspaceStatus[];
-  /** Whether the viewer may change the workspace default (owner only). */
-  canEditDefault: boolean;
-  /** Products the viewer may configure (product admin, or workspace owner). */
-  manageableProductIds: string[];
+  canEdit: boolean;
 }) {
   const router = useRouter();
-  const [scope, setScope] = useState<string>(DEFAULT_SCOPE);
   const [settings, setSettings] = useState<TransitionModeSettings>(initial);
   const [saving, startSave] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -95,30 +85,28 @@ export function TransitionModeEditor({
     setSettings(initial);
   }
 
-  const manageable = new Set(manageableProductIds);
-  const editingDefault = scope === DEFAULT_SCOPE;
-  const canEdit = editingDefault ? canEditDefault : manageable.has(scope);
+  const editingDefault = productId === null;
 
   // What the radios show: a product with no override of its own displays
-  // "Inherit", not the mode it happens to be inheriting, so the difference
-  // between "following the workspace" and "set to the same thing" stays visible.
+  // "Inherit", not the mode it happens to be inheriting.
   const selected: TransitionMode | typeof INHERIT = editingDefault
     ? settings.workspaceDefault
-    : (settings.overrides[scope] ?? INHERIT);
+    : (settings.overrides[productId] ?? INHERIT);
 
   function choose(next: TransitionMode | typeof INHERIT) {
     if (next === selected || !canEdit) return;
     const previous = settings;
-    const productId = editingDefault ? null : scope;
     const mode = next === INHERIT ? null : next;
 
     // Optimistic, then reconciled from the server's answer below: reverting to
     // Inherit resolves to whatever is inherited, which the client cannot assume.
     setSettings((s) => {
-      if (editingDefault) return { ...s, workspaceDefault: next as TransitionMode };
+      if (editingDefault) {
+        return { ...s, workspaceDefault: next as TransitionMode };
+      }
       const overrides = { ...s.overrides };
-      if (mode === null) delete overrides[scope];
-      else overrides[scope] = mode;
+      if (mode === null) delete overrides[productId];
+      else overrides[productId] = mode;
       return { ...s, overrides };
     });
     setError(null);
@@ -152,31 +140,6 @@ export function TransitionModeEditor({
 
   return (
     <div className="space-y-3">
-      {products.length > 1 ? (
-        <label className="flex flex-wrap items-center gap-2 text-sm">
-          <span className="text-muted-foreground">Configuring</span>
-          <Select
-            value={scope}
-            onChange={(e) => {
-              setScope(e.target.value);
-              setError(null);
-            }}
-            className="h-8 w-auto min-w-56"
-            disabled={saving}
-          >
-            <option value={DEFAULT_SCOPE}>
-              Workspace default (all products)
-            </option>
-            {products.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-                {settings.overrides[p.id] ? "" : " (inherited)"}
-              </option>
-            ))}
-          </Select>
-        </label>
-      ) : null}
-
       <fieldset className="space-y-2" disabled={!canEdit || saving}>
         <legend className="sr-only">Transitions</legend>
         {!editingDefault ? (
@@ -225,13 +188,6 @@ export function TransitionModeEditor({
           Stage gates apply in both modes: a forward move still has to satisfy
           the checklists of every stage it passes over.
         </p>
-        {!canEdit && products.length > 1 ? (
-          <p className="text-xs text-muted-foreground">
-            {editingDefault
-              ? "Only the workspace owner can change the default."
-              : "You need to be an admin of this product to change it."}
-          </p>
-        ) : null}
         {error ? <p className="text-xs text-destructive">{error}</p> : null}
       </fieldset>
     </div>

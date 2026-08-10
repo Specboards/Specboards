@@ -2,9 +2,12 @@ import { notFound } from "next/navigation";
 
 import { ActivityView } from "@/components/activity-view";
 import { activityWindow, resolveRange } from "@/lib/activity-report";
-import { resolveActiveScope } from "@/lib/active-product";
+import {
+  resolveActiveScope,
+  scopeProductIds,
+} from "@/lib/active-product";
 import { LOCAL_ORG_SLUG, orgProductPath } from "@/lib/org-path";
-import { resolveWorkflowFor } from "@/lib/repo-config";
+import { resolveWorkflowForProducts } from "@/lib/repo-config";
 import { getStore } from "@/lib/store";
 import { requireWorkspaceAccess } from "@/lib/workspace-access";
 
@@ -50,11 +53,8 @@ export default async function ActivityPage({
   const [summary, workflow] = await Promise.all([
     store.itemActivitySummary({ ...window, productIds }, access ?? undefined),
     // Only used for stage labels and ordering here, but resolved for the
-    // product in view so the report reads in that product's own terms.
-    resolveWorkflowFor(
-      access,
-      scope.kind === "product" ? scope.product.id : null,
-    ),
+    // products in view so the report reads in their own terms.
+    resolveWorkflowForProducts(access, scopeProductIds(scope)),
   ]);
 
   const scopeLabel =

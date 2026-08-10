@@ -83,3 +83,17 @@ export function scopeProductFilter(
   const ids = scope.productIds;
   return (productId) => productId !== null && ids.has(productId);
 }
+
+/**
+ * The product ids a scope covers, for resolving per-product configuration.
+ * `null` for the cross-product "all" view, which has no product list to union
+ * and therefore resolves against the workspace default.
+ *
+ * Distinct from {@link scopeProductFilter}, which answers "does this item
+ * belong in this view". This answers "whose settings shape this view".
+ */
+export function scopeProductIds(scope: ActiveScope): string[] | null {
+  if (scope.kind === "all") return null;
+  if (scope.kind === "product") return [scope.product.id];
+  return [...scope.productIds];
+}

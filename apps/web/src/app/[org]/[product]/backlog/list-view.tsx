@@ -16,7 +16,11 @@ import { Badge } from "@/components/ui/badge";
 import { Box, BoxHeader } from "@/components/ui/box";
 import { buttonVariants } from "@/components/ui/button";
 import { pluralizeLevelLabel, resolveActiveLevel } from "@/lib/active-level";
-import { resolveActiveScope, scopeProductFilter } from "@/lib/active-product";
+import {
+  resolveActiveScope,
+  scopeProductFilter,
+  scopeProductIds,
+} from "@/lib/active-product";
 import { buildLevelRows } from "@/lib/backlog-rows";
 import { LOCAL_ORG_SLUG, orgProductPath } from "@/lib/org-path";
 import { getDb } from "@/lib/db";
@@ -35,7 +39,7 @@ import {
   sortableProperties,
   sortFeatures,
 } from "@/lib/feature-helpers";
-import { resolveWorkflowFor } from "@/lib/repo-config";
+import { resolveWorkflowForProducts } from "@/lib/repo-config";
 import { getStore } from "@/lib/store";
 import { selectableCycles, selectableReleases } from "@/lib/store/types";
 import { listWorkspaceMembers } from "@/lib/workspace";
@@ -82,10 +86,13 @@ export async function ListView({
   const scope = resolveActiveScope(products, groups, productSlug);
   if (!scope) notFound();
   const activeProduct = scope.kind === "product" ? scope.product : null;
-  // Transitions are per product; a group or "all" view spans products that may
-  // disagree, so it shows the workspace default. Each item is still validated
-  // against its own product's rules on save.
-  const workflow = await resolveWorkflowFor(access, activeProduct?.id ?? null);
+  // Per product, with a group or "all" view taking the union of the stages in
+  // scope so nothing is filtered out for want of a column. Each item is still
+  // validated against its own product's rules on save.
+  const workflow = await resolveWorkflowForProducts(
+    access,
+    scopeProductIds(scope),
+  );
   // Per-product edit gate (owner edits all; others need a product grant).
   const canEdit = canEditProducts(
     access,
@@ -132,8 +139,11 @@ export async function ListView({
 
   // The table shows one level at a time (same `?level=` param as the board).
   const [levels, detailTemplates] = await Promise.all([
-    store.listLevels(access ?? undefined),
-    store.listDetailTemplates(access ?? undefined),
+    store.listLevels(access ?? undefined, activeProduct?.id ?? null),
+    // Templates seed a NEW item, always created in one product, so a combined
+    // view offers the workspace default rather than a union that could suggest
+    // a skeleton the chosen product does not have.
+    store.listDetailTemplates(access ?? undefined, activeProduct?.id ?? null),
   ]);
   const activeLevel = resolveActiveLevel(levels, sp.level);
   const childKey = childLevelKey(activeLevel.key, levels);
@@ -156,7 +166,13 @@ export async function ListView({
   // Custom properties power both the custom-field sort options and the date
   // range filters. Date-typed fields also add a from/to range filter, parsed
   // here so it applies (and shows in the bar) alongside the built-in filters.
-  const properties = await store.listProperties(access ?? undefined, "item");
+  // Union across the products in view, so a column only one of them defines
+  // still appears rather than its values becoming invisible.
+  const properties = await store.listPropertiesUnion(
+    access ?? undefined,
+    scopeProductIds(scope),
+    "item",
+  );
   const dateProps = properties.filter((p) => p.type === "date");
   const customDates = parseCustomDateFilters(
     sp,

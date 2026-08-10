@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { CardsOverride } from "@/components/cards-override";
 import { AuthRequiredError, updateStageGates } from "@/lib/api-client";
 import { statusDotColor } from "@/lib/feature-helpers";
 import type { StageGate } from "@/lib/store/types";
@@ -33,7 +34,13 @@ export function WorkflowGatesEditor({
   stages,
   initial,
   canEdit,
+  productId,
+  overridden,
 }: {
+  /** Product being configured, or null for the workspace default. */
+  productId: string | null;
+  /** Whether this product has its own gates rather than inheriting. */
+  overridden: boolean;
   /** The workflow stages (excluding `archived`), in board order. */
   stages: Stage[];
   /** The current gates across all stages. */
@@ -109,7 +116,10 @@ export function WorkflowGatesEditor({
         const passthrough = initial
           .filter((g) => !managed.has(g.stageKey))
           .map((g) => ({ id: g.id, stageKey: g.stageKey, label: g.label }));
-        const gates = await updateStageGates([...payload, ...passthrough]);
+        const gates = await updateStageGates(
+          [...payload, ...passthrough],
+          productId,
+        );
         // Re-seed state from the server so new gates pick up their ids.
         const next: Record<string, Row[]> = {};
         for (const s of stages) next[s.key] = [];
@@ -132,118 +142,136 @@ export function WorkflowGatesEditor({
   }
 
   return (
-    <div className="space-y-4">
-      <ol className="space-y-4">
-        {stages.map((stage) => {
-          const rows = byStage[stage.key] ?? [];
-          return (
-            <li key={stage.key} className="rounded-md border bg-background p-3">
-              <div className="mb-2 flex items-center gap-2">
-                <span
-                  className="size-2.5 shrink-0 rounded-full"
-                  style={{ backgroundColor: statusDotColor(stage.key) }}
-                />
-                <span className="text-sm font-medium">{stage.label}</span>
-                <span className="text-xs text-muted-foreground">
-                  {rows.length === 0
-                    ? "no gates"
-                    : `${rows.length} gate${rows.length === 1 ? "" : "s"}`}
-                </span>
-              </div>
+    <CardsOverride
+      productId={productId}
+      overridden={overridden}
+      canEdit={canEdit}
+      label="stage gates"
+      onOverride={() =>
+        // Copy the inherited checklists onto the product so overriding starts
+        // from what it already enforced rather than from nothing.
+        updateStageGates(
+          initial.map((g) => ({
+            stageKey: g.stageKey,
+            label: g.label,
+          })),
+          productId,
+        ).then(() => undefined)}
+      onRevert={() => updateStageGates([], productId).then(() => undefined)}
+    >
+      <div className="space-y-4">
+        <ol className="space-y-4">
+          {stages.map((stage) => {
+            const rows = byStage[stage.key] ?? [];
+            return (
+              <li key={stage.key} className="rounded-md border bg-background p-3">
+                <div className="mb-2 flex items-center gap-2">
+                  <span
+                    className="size-2.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: statusDotColor(stage.key) }}
+                  />
+                  <span className="text-sm font-medium">{stage.label}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {rows.length === 0
+                      ? "no gates"
+                      : `${rows.length} gate${rows.length === 1 ? "" : "s"}`}
+                  </span>
+                </div>
 
-              {rows.length > 0 ? (
-                <ul className="mb-2 space-y-1.5">
-                  {rows.map((row, i) => (
-                    <li
-                      key={row.id ?? `new-${i}`}
-                      className="flex items-center gap-2"
-                    >
-                      <Input
-                        value={row.label}
-                        onChange={(e) => setLabel(stage.key, i, e.target.value)}
-                        disabled={!canEdit || saving}
-                        placeholder="Checklist item"
-                        className="h-8"
-                        aria-label={`${stage.label} gate ${i + 1}`}
-                      />
-                      {canEdit ? (
-                        <div className="flex shrink-0 items-center gap-0.5">
-                          <Button
-                            type="button"
-                            size="icon"
-                            variant="ghost"
-                            className="size-7"
-                            onClick={() => move(stage.key, i, -1)}
-                            disabled={i === 0 || saving}
-                            aria-label="Move up"
-                          >
-                            <ArrowUp className="size-3.5" />
-                          </Button>
-                          <Button
-                            type="button"
-                            size="icon"
-                            variant="ghost"
-                            className="size-7"
-                            onClick={() => move(stage.key, i, 1)}
-                            disabled={i === rows.length - 1 || saving}
-                            aria-label="Move down"
-                          >
-                            <ArrowDown className="size-3.5" />
-                          </Button>
-                          <Button
-                            type="button"
-                            size="icon"
-                            variant="ghost"
-                            className="size-7 text-muted-foreground hover:text-destructive"
-                            onClick={() => remove(stage.key, i)}
-                            disabled={saving}
-                            aria-label="Remove gate"
-                          >
-                            <X className="size-3.5" />
-                          </Button>
-                        </div>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
+                {rows.length > 0 ? (
+                  <ul className="mb-2 space-y-1.5">
+                    {rows.map((row, i) => (
+                      <li
+                        key={row.id ?? `new-${i}`}
+                        className="flex items-center gap-2"
+                      >
+                        <Input
+                          value={row.label}
+                          onChange={(e) => setLabel(stage.key, i, e.target.value)}
+                          disabled={!canEdit || saving}
+                          placeholder="Checklist item"
+                          className="h-8"
+                          aria-label={`${stage.label} gate ${i + 1}`}
+                        />
+                        {canEdit ? (
+                          <div className="flex shrink-0 items-center gap-0.5">
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              className="size-7"
+                              onClick={() => move(stage.key, i, -1)}
+                              disabled={i === 0 || saving}
+                              aria-label="Move up"
+                            >
+                              <ArrowUp className="size-3.5" />
+                            </Button>
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              className="size-7"
+                              onClick={() => move(stage.key, i, 1)}
+                              disabled={i === rows.length - 1 || saving}
+                              aria-label="Move down"
+                            >
+                              <ArrowDown className="size-3.5" />
+                            </Button>
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              className="size-7 text-muted-foreground hover:text-destructive"
+                              onClick={() => remove(stage.key, i)}
+                              disabled={saving}
+                              aria-label="Remove gate"
+                            >
+                              <X className="size-3.5" />
+                            </Button>
+                          </div>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
 
-              {canEdit ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => add(stage.key)}
-                  disabled={saving}
-                  className="gap-1"
-                >
-                  <Plus className="size-3.5" />
-                  Add checklist item
-                </Button>
-              ) : null}
-            </li>
-          );
-        })}
-      </ol>
+                {canEdit ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => add(stage.key)}
+                    disabled={saving}
+                    className="gap-1"
+                  >
+                    <Plus className="size-3.5" />
+                    Add checklist item
+                  </Button>
+                ) : null}
+              </li>
+            );
+          })}
+        </ol>
 
-      {canEdit ? (
-        <div className="space-y-1">
-          <div className="flex items-center gap-3">
-            <Button
-              type="button"
-              size="sm"
-              onClick={onSave}
-              disabled={!dirty || !valid || saving}
-            >
-              {saving ? "Saving…" : "Save stage gates"}
-            </Button>
-            <p className="text-xs text-muted-foreground">
-              Removing a gate clears items&apos; progress on it.
-            </p>
+        {canEdit ? (
+          <div className="space-y-1">
+            <div className="flex items-center gap-3">
+              <Button
+                type="button"
+                size="sm"
+                onClick={onSave}
+                disabled={!dirty || !valid || saving}
+              >
+                {saving ? "Saving…" : "Save stage gates"}
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                Removing a gate clears items&apos; progress on it.
+              </p>
+            </div>
+            {error ? <p className="text-xs text-destructive">{error}</p> : null}
           </div>
-          {error ? <p className="text-xs text-destructive">{error}</p> : null}
-        </div>
-      ) : null}
-    </div>
+        ) : null}
+      </div>
+    </CardsOverride>
   );
 }

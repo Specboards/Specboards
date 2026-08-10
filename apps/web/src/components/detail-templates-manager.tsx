@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 import { EXAMPLE_DETAIL_TEMPLATES, type DetailTemplate } from "@specboards/core";
 
+import { CardsOverride } from "@/components/cards-override";
 import { EmptyState } from "@/components/empty-state";
 import { MarkdownEditor } from "@/components/markdown-editor";
 import { Button } from "@/components/ui/button";
@@ -35,13 +36,39 @@ export function DetailTemplatesManager({
   templates,
   levels,
   canEdit,
+  productId,
+  overridden,
 }: {
   templates: DetailTemplate[];
   levels: WorkspaceLevel[];
   canEdit: boolean;
+  /** Product being configured, or null for the workspace default. */
+  productId: string | null;
+  /** Whether this product has its own templates rather than inheriting. */
+  overridden: boolean;
 }) {
   const [adding, setAdding] = useState(false);
   return (
+    <CardsOverride
+      productId={productId}
+      overridden={overridden}
+      canEdit={canEdit}
+      label="templates"
+      onOverride={async () => {
+        // Copy the inherited templates onto the product (no bulk create), so
+        // overriding starts from the skeletons the team already writes to.
+        for (const t of templates) {
+          await createDetailTemplate({ name: t.name, body: t.body }, productId);
+        }
+      }}
+      onRevert={async () => {
+        // Everything listed is the product's own once overridden. Levels
+        // pointing at a deleted template fall back to a blank body (the FK is
+        // ON DELETE SET NULL), and the product then inherits the default's
+        // assignments again.
+        for (const t of templates) await deleteDetailTemplate(t.id);
+      }}
+    >
     <div className="max-w-2xl space-y-4">
       {templates.length === 0 && !adding ? (
         <EmptyState
@@ -71,7 +98,10 @@ export function DetailTemplatesManager({
       {/* Start as an "Add template" affordance; reveal the form on opt-in (see
           the "add" UX rule in CLAUDE.md). */}
       {canEdit && adding ? (
-        <TemplateCreate onDone={() => setAdding(false)} />
+        <TemplateCreate
+          productId={productId}
+          onDone={() => setAdding(false)}
+        />
       ) : null}
       {canEdit && !adding && templates.length > 0 ? (
         <Button size="sm" variant="outline" onClick={() => setAdding(true)}>
@@ -83,9 +113,11 @@ export function DetailTemplatesManager({
           levels={levels}
           templates={templates}
           canEdit={canEdit}
+          productId={productId}
         />
       ) : null}
     </div>
+    </CardsOverride>
   );
 }
 
@@ -187,7 +219,14 @@ function TemplateRow({
   );
 }
 
-function TemplateCreate({ onDone }: { onDone: () => void }) {
+function TemplateCreate({
+  productId,
+  onDone,
+}: {
+  /** Scope the new template belongs to; null = the workspace default. */
+  productId: string | null;
+  onDone: () => void;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   // Choosing an example remounts the editor (via key) with its starter body.
@@ -207,7 +246,7 @@ function TemplateCreate({ onDone }: { onDone: () => void }) {
     const form = e.currentTarget;
     startTransition(async () => {
       try {
-        await createDetailTemplate({ name, body });
+        await createDetailTemplate({ name, body }, productId);
         toast.success("Template added");
         form.reset();
         setExample("");
@@ -279,10 +318,13 @@ function TemplateCreate({ onDone }: { onDone: () => void }) {
 }
 
 function LevelTemplateAssign({
+  productId,
   levels,
   templates,
   canEdit,
 }: {
+  /** Scope the assignment belongs to; null = the workspace default. */
+  productId: string | null;
   levels: WorkspaceLevel[];
   templates: DetailTemplate[];
   canEdit: boolean;
@@ -304,7 +346,7 @@ function LevelTemplateAssign({
     for (const l of assignable) map[l.key] = choice[l.key] || null;
     startTransition(async () => {
       try {
-        await updateLevelTemplates(map);
+        await updateLevelTemplates(map, productId);
         toast.success("Level templates saved");
         router.refresh();
       } catch (err) {

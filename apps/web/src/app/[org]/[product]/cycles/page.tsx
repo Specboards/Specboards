@@ -1,9 +1,13 @@
 import { notFound } from "next/navigation";
 
 import { CyclesView } from "@/components/cycles-view";
-import { resolveActiveScope, scopeProductFilter } from "@/lib/active-product";
+import {
+  resolveActiveScope,
+  scopeProductFilter,
+  scopeProductIds,
+} from "@/lib/active-product";
 import { LOCAL_ORG_SLUG } from "@/lib/org-path";
-import { resolveWorkflowFor } from "@/lib/repo-config";
+import { resolveWorkflowForProducts } from "@/lib/repo-config";
 import { getStore } from "@/lib/store";
 import { cyclesForProduct } from "@/lib/store/types";
 import { canEditProducts, requireWorkspaceAccess } from "@/lib/workspace-access";
@@ -50,9 +54,11 @@ export default async function CyclesPage({
         ? scope.productIds
         : null,
   );
-  // Transitions are per product; a group or "all" view uses the workspace
-  // default, since it spans products that may be configured differently.
-  const workflow = await resolveWorkflowFor(access, activeProduct?.id ?? null);
+  // Per product, unioned across a group or the "all" view.
+  const workflow = await resolveWorkflowForProducts(
+    access,
+    scopeProductIds(scope),
+  );
 
   const inScope = scopeProductFilter(scope);
   // A single product sees its own cycles plus workspace-wide ones; a broader
