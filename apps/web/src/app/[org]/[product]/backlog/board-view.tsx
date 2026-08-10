@@ -63,13 +63,34 @@ export async function BoardView({
   const sp = await searchParams;
   const filters = parseFeatureFilters(sp);
   const store = await getStore();
+
+  // The board scopes to the segment in the URL: one product, a product group
+  // (`~key`, covering its subtree's products), or `all` = every product; it
+  // shows one hierarchy level at a time (default: the leaf/specs). Resolved
+  // first because the Cards settings below it are per product, so which
+  // products are in view decides what the cards even carry.
+  const [products, groups] = await Promise.all([
+    store.listProducts(access ?? undefined),
+    store.listProductGroups(access ?? undefined),
+  ]);
+  const scope = resolveActiveScope(products, groups, productSlug);
+  if (!scope) notFound();
+  const activeProduct = scope.kind === "product" ? scope.product : null;
+  const productIds = scopeProductIds(scope);
+
   const [allFeatures, properties, releases, cycles, detailTemplates] =
     await Promise.all([
       store.listFeatures(access ?? undefined),
-      store.listProperties(access ?? undefined, "item"),
+      // Union across the products in view, for the same reason the stages are:
+      // a column defined by only one of them should still appear rather than
+      // its values becoming invisible on a combined board.
+      store.listPropertiesUnion(access ?? undefined, productIds, "item"),
       store.listReleases(access ?? undefined),
       store.listCycles(access ?? undefined),
-      store.listDetailTemplates(access ?? undefined),
+      // Templates seed a NEW card, which is always created in one product, so
+      // a combined view offers the workspace default rather than a union that
+      // could suggest a skeleton the chosen product does not have.
+      store.listDetailTemplates(access ?? undefined, activeProduct?.id ?? null),
     ]);
 
   // Date-typed custom fields add a from/to range filter; parse those params now
@@ -88,26 +109,12 @@ export async function BoardView({
     releases.filter((r) => r.status === "shipped").map((r) => r.id),
   );
 
-  // The board scopes to the segment in the URL: one product, a product group
-  // (`~key`, covering its subtree's products), or `all` = every product; it
-  // shows one hierarchy level at a time (default: the leaf/specs).
-  const [products, groups] = await Promise.all([
-    store.listProducts(access ?? undefined),
-    store.listProductGroups(access ?? undefined),
-  ]);
-  const scope = resolveActiveScope(products, groups, productSlug);
-  if (!scope) notFound();
-  const activeProduct = scope.kind === "product" ? scope.product : null;
-
   // Stages and transitions are both per product now, so the board has to know
   // which products it is showing before it can draw its columns. A group or
   // "all" view takes the union of their stages, so no item is left without a
   // column; each card is still validated against its own product's rules when
   // it actually moves.
-  const workflow = await resolveWorkflowForProducts(
-    access,
-    scopeProductIds(scope),
-  );
+  const workflow = await resolveWorkflowForProducts(access, productIds);
   // Board columns are the workflow statuses. A `status` filter narrows the
   // board to just that one column rather than emptying every other one.
   const allColumns = workflow.statuses.filter((s) => s !== "archived");
@@ -147,7 +154,10 @@ export async function BoardView({
           ]),
         );
 
-  const levels = await store.listLevels(access ?? undefined);
+  const levels = await store.listLevels(
+    access ?? undefined,
+    activeProduct?.id ?? null,
+  );
   const activeLevel = resolveActiveLevel(levels, sp.level);
   // Cards at the active level, then narrowed by the URL filters. `featuresForLevel`
   // (pre-filter) drives the empty-state and toolbar decisions so the filter bar

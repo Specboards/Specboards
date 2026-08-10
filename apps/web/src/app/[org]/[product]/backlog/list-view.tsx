@@ -139,8 +139,11 @@ export async function ListView({
 
   // The table shows one level at a time (same `?level=` param as the board).
   const [levels, detailTemplates] = await Promise.all([
-    store.listLevels(access ?? undefined),
-    store.listDetailTemplates(access ?? undefined),
+    store.listLevels(access ?? undefined, activeProduct?.id ?? null),
+    // Templates seed a NEW item, always created in one product, so a combined
+    // view offers the workspace default rather than a union that could suggest
+    // a skeleton the chosen product does not have.
+    store.listDetailTemplates(access ?? undefined, activeProduct?.id ?? null),
   ]);
   const activeLevel = resolveActiveLevel(levels, sp.level);
   const childKey = childLevelKey(activeLevel.key, levels);
@@ -163,7 +166,13 @@ export async function ListView({
   // Custom properties power both the custom-field sort options and the date
   // range filters. Date-typed fields also add a from/to range filter, parsed
   // here so it applies (and shows in the bar) alongside the built-in filters.
-  const properties = await store.listProperties(access ?? undefined, "item");
+  // Union across the products in view, so a column only one of them defines
+  // still appears rather than its values becoming invisible.
+  const properties = await store.listPropertiesUnion(
+    access ?? undefined,
+    scopeProductIds(scope),
+    "item",
+  );
   const dateProps = properties.filter((p) => p.type === "date");
   const customDates = parseCustomDateFilters(
     sp,

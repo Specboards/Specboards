@@ -1404,6 +1404,18 @@ export interface FeatureStore {
     productId?: string | null,
   ): Promise<WorkspaceStatus[]>;
   /**
+   * The custom properties a view spanning several products should show: the
+   * workspace default's, plus any a product in `productIds` defines that the
+   * default does not. Deduplicated by (entity, key), default first. Same
+   * reasoning as `listStatusesUnion`: a combined view should not drop a column
+   * because only one of its products defines it.
+   */
+  listPropertiesUnion(
+    scope: WorkspaceScope | undefined,
+    productIds: string[] | null,
+    entity?: PropertyEntity,
+  ): Promise<PropertyDef[]>;
+  /**
    * The stages a board spanning several products should show: the workspace
    * default's, plus any stage a product in `productIds` defines that the
    * default does not, appended after it. Nothing is ever hidden, so an item

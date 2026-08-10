@@ -2461,6 +2461,34 @@ export class DbStore implements FeatureStore {
     );
   }
 
+  async listPropertiesUnion(
+    scope: WorkspaceScope | undefined,
+    productIds: string[] | null,
+    entity?: PropertyEntity,
+  ): Promise<PropertyDef[]> {
+    return this.scoped(scope, async (tx) => {
+      const ws = scope!.workspaceId;
+      const fallback = await this.propertiesIn(tx, ws, entity, null);
+      if (!productIds || productIds.length === 0) return fallback;
+
+      // Same reasoning as the stage union: a board spanning products should not
+      // drop a column because only one product defines it. Deduplicated by key,
+      // default first, so a product that redefines a key the workspace already
+      // uses does not produce two columns claiming the same field.
+      const merged = [...fallback];
+      const seen = new Set(fallback.map((p) => `${p.entity}:${p.key}`));
+      for (const productId of productIds) {
+        for (const prop of await this.propertiesIn(tx, ws, entity, productId)) {
+          const id = `${prop.entity}:${prop.key}`;
+          if (seen.has(id)) continue;
+          seen.add(id);
+          merged.push(prop);
+        }
+      }
+      return merged;
+    });
+  }
+
   async listStatuses(
     scope?: WorkspaceScope,
     productId?: string | null,

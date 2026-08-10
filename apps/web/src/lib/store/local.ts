@@ -3038,6 +3038,15 @@ export class LocalFileStore implements FeatureStore {
   }
 
   /** Nothing to override, for the same reason the mode is fixed above. */
+  /** One product by construction, so every union is just the list itself. */
+  async listPropertiesUnion(
+    scope: WorkspaceScope | undefined,
+    _productIds: string[] | null,
+    entity?: PropertyEntity,
+  ): Promise<PropertyDef[]> {
+    return this.listProperties(scope, entity);
+  }
+
   /**
    * Local file mode has one product by construction, so a cross-product board
    * is the same board and the union is just the stage list.
