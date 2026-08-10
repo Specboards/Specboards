@@ -126,6 +126,7 @@ import {
   type StageGateInput,
   StageGateError,
   type StatusStageInput,
+  type TransitionModeSettings,
   type WorkspaceStatus,
   type ResolvedGithubLink,
   type RelationDirection,
@@ -3028,13 +3029,24 @@ export class LocalFileStore implements FeatureStore {
    * dogfooding session is the case that least wants a rigid pipeline, so it is
    * always flexible. Teams that want a strict pipeline are running the DB mode.
    */
-  async getTransitionMode(_scope?: WorkspaceScope): Promise<TransitionMode> {
+  async getTransitionMode(
+    _scope?: WorkspaceScope,
+    _productId?: string | null,
+  ): Promise<TransitionMode> {
     return "flexible";
   }
 
-  async setTransitionMode(
-    mode: TransitionMode,
+  /** Nothing to override, for the same reason the mode is fixed above. */
+  async listTransitionModes(
     _scope?: WorkspaceScope,
+  ): Promise<TransitionModeSettings> {
+    return { workspaceDefault: "flexible", overrides: {} };
+  }
+
+  async setTransitionMode(
+    mode: TransitionMode | null,
+    _scope?: WorkspaceScope,
+    _productId?: string | null,
   ): Promise<TransitionMode> {
     if (mode !== "flexible") {
       throw new Error(

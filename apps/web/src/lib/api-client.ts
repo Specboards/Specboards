@@ -698,14 +698,21 @@ export async function updateStatuses(
   return body.statuses;
 }
 
-/** Set how freely items move between stages (admin only). */
+/**
+ * Set how freely items move between stages. With a `productId` this configures
+ * that product (product admins and the workspace owner); without one it sets
+ * the workspace default that unconfigured products inherit (owner only). A
+ * `null` mode reverts a product to inheriting, and returns the mode it lands on
+ * rather than null.
+ */
 export async function updateTransitionMode(
-  mode: TransitionMode,
+  mode: TransitionMode | null,
+  productId?: string | null,
 ): Promise<TransitionMode> {
   const res = await apiFetch("/api/v1/statuses", {
     method: "PATCH",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ transitionMode: mode }),
+    body: JSON.stringify({ transitionMode: mode, productId: productId ?? null }),
   });
   if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {

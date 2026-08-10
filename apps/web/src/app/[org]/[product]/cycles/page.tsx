@@ -50,7 +50,9 @@ export default async function CyclesPage({
         ? scope.productIds
         : null,
   );
-  const workflow = await resolveWorkflowFor(access);
+  // Transitions are per product; a group or "all" view uses the workspace
+  // default, since it spans products that may be configured differently.
+  const workflow = await resolveWorkflowFor(access, activeProduct?.id ?? null);
 
   const inScope = scopeProductFilter(scope);
   // A single product sees its own cycles plus workspace-wide ones; a broader

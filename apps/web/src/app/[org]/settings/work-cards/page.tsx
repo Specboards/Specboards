@@ -32,16 +32,26 @@ export default async function CardsSettingsPage() {
     detailTemplates,
     workflow,
     stageGates,
-    transitionMode,
+    transitionModes,
+    products,
   ] = await Promise.all([
     store.listLevels(access ?? undefined),
     store.listProperties(access ?? undefined),
     store.listDetailTemplates(access ?? undefined),
     resolveWorkflowFor(access),
     store.listStageGates(access ?? undefined),
-    store.getTransitionMode(access ?? undefined),
+    store.listTransitionModes(access ?? undefined),
+    store.listProducts(access ?? undefined),
   ]);
   const canEdit = !access || access.role === "owner";
+
+  // Transitions is the first Cards setting to become per-product, so it is the
+  // first control on this page whose edit rights are not simply the page's:
+  // a product admin can configure their own product without owning the
+  // workspace. The route and the database both check this again.
+  const manageableProductIds = products
+    .filter((p) => canEdit || p.viewerRole === "admin")
+    .map((p) => p.id);
 
   // The effective stages the editor starts from (DB-defined, or the built-in
   // default), excluding the system `archived` status.
@@ -65,12 +75,14 @@ export default async function CardsSettingsPage() {
         </Subsection>
         <Subsection
           title="Transitions"
-          description="How freely items move between the stages above. This governs the board, the API, and agents alike."
+          description="How freely items move between the stages above. This governs the board, the API, and agents alike. Set once for the workspace, or per product where one works differently."
         >
           <TransitionModeEditor
-            initial={transitionMode}
+            initial={transitionModes}
+            products={products}
             stages={stages}
-            canEdit={canEdit}
+            canEditDefault={canEdit}
+            manageableProductIds={manageableProductIds}
           />
         </Subsection>
         <Subsection

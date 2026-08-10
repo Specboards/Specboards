@@ -1040,6 +1040,20 @@ export type IdeaPatch = Partial<{
   productId: string | null;
 }>;
 
+/**
+ * How every product in the workspace is configured for transitions: the default
+ * plus the products that depart from it.
+ *
+ * `overrides` holds only products that have actually set a mode. A product that
+ * is absent inherits `workspaceDefault`, and so does a product whose row exists
+ * with no mode on it, so callers never have to distinguish "no row" from
+ * "explicitly inheriting" — both mean the same thing to a reader.
+ */
+export interface TransitionModeSettings {
+  workspaceDefault: TransitionMode;
+  overrides: Record<string, TransitionMode>;
+}
+
 /** Per-workspace Ideas configuration (public portal settings). */
 export interface IdeaSettings {
   portalEnabled: boolean;
@@ -1792,14 +1806,39 @@ export interface FeatureStore {
   ): Promise<IdeaStage[]>;
   /** The workspace's Ideas configuration (portal settings). */
   /**
-   * How freely items move between stages in this workspace. Drives whether the
+   * How freely items move between stages, for one product. Drives whether the
    * resolved workflow's transitions are a pipeline or fully open.
+   *
+   * `productId` names the product to resolve for; omit it (or pass null) for
+   * the workspace-wide default. A product with no override of its own resolves
+   * to that default, so a workspace that has never configured a product behaves
+   * exactly as it did when this was a single workspace setting.
    */
-  getTransitionMode(scope?: WorkspaceScope): Promise<TransitionMode>;
-  /** Set the workspace's transition mode (owner only). Returns the new mode. */
-  setTransitionMode(
-    mode: TransitionMode,
+  getTransitionMode(
     scope?: WorkspaceScope,
+    productId?: string | null,
+  ): Promise<TransitionMode>;
+  /**
+   * Every transition mode configured in the workspace, in one read: the default
+   * and each product that overrides it. For the settings screen, which has to
+   * show what is inherited as well as what is set, and would otherwise need one
+   * query per product to tell those apart.
+   */
+  listTransitionModes(scope?: WorkspaceScope): Promise<TransitionModeSettings>;
+  /**
+   * Set the transition mode for one product, or for the workspace default when
+   * `productId` is omitted. `mode: null` reverts a product to inheriting the
+   * default and is rejected for the default itself, which has nothing below it.
+   *
+   * Writing a product needs product-admin rights on that product (or workspace
+   * ownership); the default needs workspace ownership. Both are enforced in the
+   * database, not only at the route. Returns the mode now in force, which for a
+   * revert is the inherited one rather than the argument.
+   */
+  setTransitionMode(
+    mode: TransitionMode | null,
+    scope?: WorkspaceScope,
+    productId?: string | null,
   ): Promise<TransitionMode>;
   getIdeaSettings(scope?: WorkspaceScope): Promise<IdeaSettings>;
   /** Update the workspace's Ideas configuration. Returns the updated settings. */

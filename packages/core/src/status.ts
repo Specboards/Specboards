@@ -46,6 +46,16 @@ export type TransitionMode = "strict" | "flexible";
 
 export const TRANSITION_MODES: readonly TransitionMode[] = ["strict", "flexible"];
 
+/**
+ * What a workspace does before anyone chooses. Named here rather than left as a
+ * column default because the setting now lives in `product_settings`, where
+ * every value is nullable to mean "inherit": the bottom of the inheritance
+ * chain has to be a constant the code knows, not one the schema supplies.
+ * Matches the `workspaces.transition_mode` default it replaces, so a workspace
+ * that never configured this keeps behaving the same.
+ */
+export const DEFAULT_TRANSITION_MODE: TransitionMode = "flexible";
+
 /** Whether `value` is a valid {@link TransitionMode}. */
 export function isTransitionMode(value: unknown): value is TransitionMode {
   return typeof value === "string" && TRANSITION_MODES.includes(value as TransitionMode);

@@ -319,7 +319,10 @@ export async function patchFeature(
   const store = await getStore();
   const feature = await store.getFeature(specId, scope);
   if (!feature) throw new FeatureNotFoundError(specId);
-  const workflow = await resolveWorkflowFor(scope ?? null);
+  // The item's own product decides how it may move, not whichever board the
+  // request came from: a cross-product view and a product board must agree
+  // about the same item, and so must the API, which has no board at all.
+  const workflow = await resolveWorkflowFor(scope ?? null, feature.productId);
   const path = shortestTransitionPath(feature.status, patch.status, workflow);
   if (path === null) {
     throw new InvalidPatchError(
@@ -375,7 +378,8 @@ async function applyFeaturePatch(
   }
 
   if (patch.status !== undefined) {
-    const workflow = await resolveWorkflowFor(scope ?? null);
+    // Resolved for the item's product, for the reason given in patchFeature.
+    const workflow = await resolveWorkflowFor(scope ?? null, feature.productId);
     if (!canTransition(feature.status, patch.status, workflow)) {
       throw new InvalidPatchError(transitionErrorMessage(feature.status, patch.status, workflow));
     }
@@ -1410,21 +1414,30 @@ export async function listStatuses(
   return store.listStatuses(scope);
 }
 
-/** How freely items may move between stages in this workspace. */
+/**
+ * How freely items may move between stages, for one product. Omit `productId`
+ * for the workspace default.
+ */
 export async function getTransitionMode(
   scope?: WorkspaceScope,
+  productId?: string | null,
 ): Promise<TransitionMode> {
   const store = await getStore();
-  return store.getTransitionMode(scope);
+  return store.getTransitionMode(scope, productId);
 }
 
-/** Set the workspace's transition mode. Callers gate this to admins. */
+/**
+ * Set a product's transition mode, or the workspace default when `productId` is
+ * omitted. `null` reverts a product to inheriting. Callers gate this, and the
+ * database gates it again.
+ */
 export async function setTransitionMode(
-  mode: TransitionMode,
+  mode: TransitionMode | null,
   scope?: WorkspaceScope,
+  productId?: string | null,
 ): Promise<TransitionMode> {
   const store = await getStore();
-  return store.setTransitionMode(mode, scope);
+  return store.setTransitionMode(mode, scope, productId);
 }
 
 /** Replace the workspace's workflow stages. */
