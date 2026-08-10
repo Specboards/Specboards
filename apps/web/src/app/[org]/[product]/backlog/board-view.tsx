@@ -58,17 +58,9 @@ export async function BoardView({
 }) {
   const access = await requireWorkspaceAccess();
 
-  const workflow = await resolveWorkflowFor(access);
-
   const { product: productSlug } = await params;
   const sp = await searchParams;
   const filters = parseFeatureFilters(sp);
-  // Board columns are the workflow statuses. A `status` filter narrows the
-  // board to just that one column rather than emptying every other one.
-  const allColumns = workflow.statuses.filter((s) => s !== "archived");
-  const columns = filters.status
-    ? allColumns.filter((s) => s === filters.status)
-    : allColumns;
   const store = await getStore();
   const [allFeatures, properties, releases, cycles, detailTemplates] =
     await Promise.all([
@@ -105,6 +97,19 @@ export async function BoardView({
   const scope = resolveActiveScope(products, groups, productSlug);
   if (!scope) notFound();
   const activeProduct = scope.kind === "product" ? scope.product : null;
+
+  // Transitions are configured per product, so the board has to know which one
+  // it is showing before it can say how cards may move. A group or "all" view
+  // spans products that may disagree, so it falls back to the workspace
+  // default; the item-level check still uses each item's own product, so a card
+  // dragged in a cross-product view is validated against its own rules.
+  const workflow = await resolveWorkflowFor(access, activeProduct?.id ?? null);
+  // Board columns are the workflow statuses. A `status` filter narrows the
+  // board to just that one column rather than emptying every other one.
+  const allColumns = workflow.statuses.filter((s) => s !== "archived");
+  const columns = filters.status
+    ? allColumns.filter((s) => s === filters.status)
+    : allColumns;
   // Editing is per-product now: the owner can edit anything, others need an
   // admin/contributor grant on the product (any writable product in the "all"
   // or group view). Server + RLS enforce the real boundary; this gates the

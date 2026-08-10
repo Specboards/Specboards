@@ -11,6 +11,7 @@ import {
   isGoalStatus,
   keyResultProgress,
   DEFAULT_PRODUCT_KEY,
+  DEFAULT_TRANSITION_MODE,
   descendantGroupIds,
   extractSections,
   generateCycleSchedule,
@@ -67,6 +68,7 @@ import {
   ideaVotes,
   ideas,
   inArray,
+  isNotNull,
   isNull,
   itemEvents,
   not,
@@ -78,6 +80,7 @@ import {
   outboxEvents,
   productGroups,
   productMembers,
+  productSettings,
   products,
   releases,
   repositories,
@@ -186,6 +189,7 @@ import {
   type StageGateInput,
   StageGateError,
   type StatusStageInput,
+  type TransitionModeSettings,
   type WorkspaceStatus,
   type ResolvedGithubLink,
   type SavedView,
@@ -4475,52 +4479,176 @@ export class DbStore implements FeatureStore {
     });
   }
 
-  async getTransitionMode(scope?: WorkspaceScope): Promise<TransitionMode> {
+  async getTransitionMode(
+    scope?: WorkspaceScope,
+    productId?: string | null,
+  ): Promise<TransitionMode> {
     return this.scoped(scope, async (tx) => {
-      const row = await tx
-        .select({ mode: workspaces.transitionMode })
-        .from(workspaces)
-        .where(eq(workspaces.id, scope!.workspaceId))
-        .limit(1);
-
-      // No row is not a configuration state, it is a broken scope: the caller
-      // was authorized against a workspace this query cannot see. Reading that
-      // as "strict" is what made a failed save look like a deliberate setting,
-      // so it fails loudly instead.
-      if (row.length === 0) {
+      const resolved = await this.resolveTransitionMode(
+        tx,
+        scope!.workspaceId,
+        productId ?? null,
+      );
+      if (resolved === null) {
+        // Null means the workspace itself was not visible, not that it has no
+        // setting: the caller was authorized against a workspace this query
+        // cannot see. Reading that as "strict" is what made a failed save look
+        // like a deliberate setting, so it fails loudly instead. A visible
+        // workspace with no default row resolves to the built-in default
+        // inside resolveTransitionMode and never reaches here.
         throw new Error(
           `Workspace ${scope!.workspaceId} not found while reading its transition mode.`,
         );
       }
-
-      // An unrecognized value (hand-edited row) reads as the safer pipeline
-      // rather than silently opening every transition.
-      return isTransitionMode(row[0]!.mode) ? row[0]!.mode : "strict";
+      return resolved;
     });
   }
 
   async setTransitionMode(
-    mode: TransitionMode,
+    mode: TransitionMode | null,
     scope?: WorkspaceScope,
+    productId?: string | null,
   ): Promise<TransitionMode> {
-    return this.scoped(scope, async (tx) => {
-      // `returning()` so a zero-row UPDATE cannot be reported as a save. This
-      // method used to return `mode` unconditionally, which meant a write that
-      // matched nothing still produced a 200 and a success toast, and the
-      // setting only appeared to revert on the next full page load.
-      const updated = await tx
-        .update(workspaces)
-        .set({ transitionMode: mode })
-        .where(eq(workspaces.id, scope!.workspaceId))
-        .returning({ mode: workspaces.transitionMode });
+    const target = productId ?? null;
+    if (mode === null && target === null) {
+      // Nothing sits below the workspace default for it to inherit from, so
+      // "revert to inherited" is meaningless there. Refusing beats writing a
+      // null that would make every product fall through to the built-in.
+      throw new Error(
+        "The workspace default transition mode cannot be set to inherited.",
+      );
+    }
 
-      if (updated.length === 0) {
+    return this.scoped(scope, async (tx) => {
+      // `returning()` so a zero-row write cannot be reported as a save. These
+      // methods used to return `mode` unconditionally, which meant a write RLS
+      // silently dropped still produced a 200 and a success toast, and the
+      // setting only appeared to revert on the next full page load.
+      const written = await tx
+        .insert(productSettings)
+        .values({
+          workspaceId: scope!.workspaceId,
+          productId: target,
+          transitionMode: mode,
+        })
+        .onConflictDoUpdate({
+          // Matches the partial unique indexes from migration 0064: the
+          // default row is unique on workspace alone, a product row on the
+          // pair, and drizzle needs the same predicate to pick the index.
+          target: target
+            ? [productSettings.workspaceId, productSettings.productId]
+            : [productSettings.workspaceId],
+          targetWhere: target
+            ? isNotNull(productSettings.productId)
+            : isNull(productSettings.productId),
+          set: { transitionMode: mode, updatedAt: new Date() },
+        })
+        .returning({ id: productSettings.id });
+
+      if (written.length === 0) {
+        throw new Error(
+          target
+            ? `Product ${target} not found while setting its transition mode.`
+            : `Workspace ${scope!.workspaceId} not found while setting its transition mode.`,
+        );
+      }
+
+      // Report the mode now in force rather than the argument: setting a
+      // product back to inherited returns whatever it now inherits.
+      const resolved = await this.resolveTransitionMode(
+        tx,
+        scope!.workspaceId,
+        target,
+      );
+      if (resolved === null) {
         throw new Error(
           `Workspace ${scope!.workspaceId} not found while setting its transition mode.`,
         );
       }
-      return mode;
+      return resolved;
     });
+  }
+
+  async listTransitionModes(
+    scope?: WorkspaceScope,
+  ): Promise<TransitionModeSettings> {
+    return this.scoped(scope, async (tx) => {
+      const rows = await tx
+        .select({
+          productId: productSettings.productId,
+          mode: productSettings.transitionMode,
+        })
+        .from(productSettings)
+        .where(eq(productSettings.workspaceId, scope!.workspaceId));
+
+      const overrides: Record<string, TransitionMode> = {};
+      let workspaceDefault: TransitionMode = DEFAULT_TRANSITION_MODE;
+      for (const row of rows) {
+        if (!isTransitionMode(row.mode)) continue; // null = inherits; junk = ignored
+        if (row.productId === null) workspaceDefault = row.mode;
+        else overrides[row.productId] = row.mode;
+      }
+      return { workspaceDefault, overrides };
+    });
+  }
+
+  /**
+   * The transition mode in force for a product: its own override if it has one,
+   * otherwise the workspace default. `null` means neither row was visible,
+   * which callers treat as a broken scope rather than a configuration state.
+   *
+   * Both rows come back in one query because the product row alone cannot
+   * answer the question: a row that exists with a null `transitionMode` is an
+   * explicit "inherit", not an override.
+   */
+  private async resolveTransitionMode(
+    tx: Tx,
+    workspaceId: string,
+    productId: string | null,
+  ): Promise<TransitionMode | null> {
+    const rows = await tx
+      .select({
+        productId: productSettings.productId,
+        mode: productSettings.transitionMode,
+      })
+      .from(productSettings)
+      .where(
+        and(
+          eq(productSettings.workspaceId, workspaceId),
+          productId
+            ? or(
+                eq(productSettings.productId, productId),
+                isNull(productSettings.productId),
+              )
+            : isNull(productSettings.productId),
+        ),
+      );
+
+    const own = productId
+      ? rows.find((r) => r.productId === productId)?.mode
+      : null;
+    const fallback = rows.find((r) => r.productId === null)?.mode;
+    const effective = own ?? fallback ?? null;
+
+    if (effective === null) {
+      // A workspace with no default row is either invisible to this scope or
+      // was created between migration 0064 and this code deploying. Tell those
+      // apart by looking at the workspace itself, so a broken scope still fails
+      // loudly and a merely un-seeded workspace gets the documented default.
+      if (rows.length === 0) {
+        const ws = await tx
+          .select({ id: workspaces.id })
+          .from(workspaces)
+          .where(eq(workspaces.id, workspaceId))
+          .limit(1);
+        if (ws.length === 0) return null;
+      }
+      return DEFAULT_TRANSITION_MODE;
+    }
+
+    // An unrecognized value (hand-edited row) reads as the safer pipeline
+    // rather than silently opening every transition.
+    return isTransitionMode(effective) ? effective : "strict";
   }
 
   async getIdeaSettings(scope?: WorkspaceScope): Promise<IdeaSettings> {

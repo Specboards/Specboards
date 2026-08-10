@@ -55,6 +55,9 @@ export default async function GroupDashboardPage({
   const [summary, releases, workflow] = await Promise.all([
     store.getGroupSummary(scope.group.id, access ?? undefined),
     store.listReleases(access ?? undefined),
+    // Group scope only (the guard above redirects anything narrower), so there
+    // is no single product to resolve transitions for: the workspace default is
+    // the right common denominator for ordering a group's stage columns.
     resolveWorkflowFor(access),
   ]);
   const statusOrder = workflow.statuses.filter((s) => s !== "archived");

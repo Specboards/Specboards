@@ -152,7 +152,9 @@ export async function getItemDetailData(
   const db = getDb();
   const members: WorkspaceMember[] =
     access && db ? await listWorkspaceMembers(db, access.workspaceId) : [];
-  const workflow = await resolveWorkflowFor(access);
+  // The item's own product decides how it may move, so the status select on the
+  // flyout offers exactly what a save would accept, whichever board opened it.
+  const workflow = await resolveWorkflowFor(access, feature.productId);
 
   const [allProperties, releases, cycles, itemGoals, allGoals, allFeatures, levels, products, allGates, allCompletedGateIds] =
     await Promise.all([

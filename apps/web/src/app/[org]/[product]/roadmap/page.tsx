@@ -99,9 +99,6 @@ export default async function RoadmapPage({
     "release",
   );
 
-  // Card creation needs the workspace status workflow (first status is the
-  // default) and the assignable members.
-  const workflow = await resolveWorkflowFor(access);
   const db = getDb();
   const members: WorkspaceMember[] =
     access && db ? await listWorkspaceMembers(db, access.workspaceId) : [];
@@ -133,6 +130,10 @@ export default async function RoadmapPage({
   const scope = resolveActiveScope(products, groups, productSlug);
   if (!scope) notFound();
   const activeProduct = scope.kind === "product" ? scope.product : null;
+  // Card creation needs the status workflow (first status is the default), and
+  // transitions are configured per product, so it is resolved for the product
+  // in view; a group or "all" view uses the workspace default.
+  const workflow = await resolveWorkflowFor(access, activeProduct?.id ?? null);
   const canEdit = canEditProducts(
     access,
     products,

@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { and, asc, eq, inArray, or } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, or } from "drizzle-orm";
 import { z } from "zod";
 
 import {
   DEFAULT_STATUSES,
+  DEFAULT_TRANSITION_MODE,
   canReadProduct,
   canWriteProduct,
   canTransition,
@@ -30,6 +31,7 @@ import {
   members,
   productGroups,
   productMembers,
+  productSettings,
   products,
   repositories,
   workspaces,
@@ -622,8 +624,11 @@ server.tool(
           new Error("Your MCP user cannot edit this feature's product."),
         );
       }
-      // Validate against the workspace's (possibly custom) status workflow.
-      const workflow = await resolveWorkspaceWorkflow(scope.workspaceId);
+      // Validate against the item's product's (possibly custom) workflow.
+      const workflow = await resolveWorkspaceWorkflow(
+        scope.workspaceId,
+        row.productId,
+      );
       if (!canTransition(row.status, status, workflow)) {
         return errorResult(
           new Error(transitionErrorMessage(row.status, status, workflow)),
@@ -658,14 +663,19 @@ server.tool(
 );
 
 /**
- * The workspace's status workflow. Precedence mirrors the web app: admin-defined
- * stages (workspace_statuses) first, then the repo config's statuses, then the
- * built-in default. The transitions between those stages come from the
- * workspace's transition mode (strict = a pipeline, flexible = any stage to any
- * other), except where a repo config pins `transitions` itself.
+ * The status workflow for a product. Precedence mirrors the web app:
+ * admin-defined stages (workspace_statuses) first, then the repo config's
+ * statuses, then the built-in default. The transitions between those stages
+ * come from the transition mode (strict = a pipeline, flexible = any stage to
+ * any other), except where a repo config pins `transitions` itself.
+ *
+ * `productId` is the product whose rules apply, which for an item is its own:
+ * this server and the web app must agree about the same item, and the web app
+ * validates against the item's product.
  */
 async function resolveWorkspaceWorkflow(
   workspaceId: string,
+  productId: string | null,
 ): Promise<StatusWorkflow> {
   const [repo] = await db()
     .select({ config: repositories.config })
@@ -674,7 +684,7 @@ async function resolveWorkspaceWorkflow(
   const config = safeParseRepoConfig(repo?.config);
   if (configPinsTransitions(config)) return resolveWorkflow(config);
 
-  const mode = await resolveTransitionMode(workspaceId);
+  const mode = await resolveTransitionMode(workspaceId, productId);
   const stages = await db()
     .select({ key: workspaceStatuses.key, label: workspaceStatuses.label })
     .from(workspaceStatuses)
@@ -695,15 +705,44 @@ async function resolveWorkspaceWorkflow(
   );
 }
 
-/** The workspace's transition mode; an unreadable value reads as strict. */
+/**
+ * A product's transition mode: its own override if it set one, otherwise the
+ * workspace default row, otherwise the built-in default. An unreadable stored
+ * value reads as strict, the safer of the two.
+ *
+ * Both candidate rows come back in one query because a product row that exists
+ * with a null mode is an explicit "inherit", not an override.
+ */
 async function resolveTransitionMode(
   workspaceId: string,
+  productId: string | null,
 ): Promise<TransitionMode> {
-  const [row] = await db()
-    .select({ mode: workspaces.transitionMode })
-    .from(workspaces)
-    .where(eq(workspaces.id, workspaceId));
-  return isTransitionMode(row?.mode) ? row.mode : "strict";
+  const rows = await db()
+    .select({
+      productId: productSettings.productId,
+      mode: productSettings.transitionMode,
+    })
+    .from(productSettings)
+    .where(
+      and(
+        eq(productSettings.workspaceId, workspaceId),
+        productId
+          ? or(
+              eq(productSettings.productId, productId),
+              isNull(productSettings.productId),
+            )
+          : isNull(productSettings.productId),
+      ),
+    );
+  const own = productId
+    ? rows.find((r) => r.productId === productId)?.mode
+    : null;
+  const fallback = rows.find((r) => r.productId === null)?.mode;
+  const effective = own ?? fallback;
+  if (effective === null || effective === undefined) {
+    return DEFAULT_TRANSITION_MODE;
+  }
+  return isTransitionMode(effective) ? effective : "strict";
 }
 
 /**

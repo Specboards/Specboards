@@ -43,20 +43,32 @@ export async function resolveRepoConfig(
 }
 
 /**
- * Resolve the workspace's status workflow: the stage vocabulary and the moves
+ * Resolve the status workflow for a product: the stage vocabulary and the moves
  * allowed between those stages. Drives board columns, status selects, and
  * transition validation.
  *
  * The vocabulary comes from admin-defined stages in the DB (Settings -> Cards
  * -> Workflow) first, then the repo config's statuses, then the built-in
- * default. The *transitions* come from the workspace's transition mode
- * (strict = a pipeline, flexible = any stage to any other), with one exception:
- * a repo config that pins `transitions` in `.specboards/config.yml` is a
- * hand-written state machine and wins over the setting, since a team that wrote
- * one out means it.
+ * default. The *transitions* come from the transition mode (strict = a
+ * pipeline, flexible = any stage to any other), resolved in four layers:
+ *
+ *   1. a repo config that pins `transitions` in `.specboards/config.yml`
+ *   2. the product's own setting
+ *   3. the workspace default
+ *   4. the built-in default
+ *
+ * Config still wins because it is a deliberate, version-controlled state
+ * machine: a team that wrote one out means it, and it is the layer a product
+ * admin cannot silently override. Everything below it is configuration, and
+ * configuration gets more specific as it gets closer to the work.
+ *
+ * `productId` names the product being viewed; omit it (or pass null) for a
+ * cross-product view, which resolves against the workspace default. Layers 2-4
+ * are resolved by the store in one query.
  */
 export async function resolveWorkflowFor(
   scope: WorkspaceScope | null,
+  productId?: string | null,
 ): Promise<StatusWorkflow> {
   const store = await getStore();
   const [stages, config] = await Promise.all([
@@ -67,7 +79,7 @@ export async function resolveWorkflowFor(
   // A config-pinned state machine is authoritative, vocabulary and edges both.
   if (configPinsTransitions(config)) return resolveWorkflow(config);
 
-  const mode = await store.getTransitionMode(scope ?? undefined);
+  const mode = await store.getTransitionMode(scope ?? undefined, productId);
   const fromStages = workflowFromStages(stages, mode);
   if (fromStages) return fromStages;
 

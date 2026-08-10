@@ -27,7 +27,10 @@ const INSTRUCTIONS =
   "or a DB-native card's body. Where list_statuses reports transitionMode " +
   "\"strict\", stages must be walked in order: pass update_item(advance: true) " +
   "to move an item several stages in one call rather than issuing one call per " +
-  "stage. Use create_item to add a card at ANY level, including the leaf: a " +
+  "stage. transitionMode is configured per product, so pass list_statuses a " +
+  "productId when you are working in one product, or read it off read_item's " +
+  "allowedTransitions, which is always resolved for that item's own product. " +
+  "Use create_item to add a card at ANY level, including the leaf: a " +
   "spec is an optional attachment to a work item, not a requirement for one, " +
   "so work being done by a person rather than an agent is tracked as an " +
   "ordinary item and rolls up the same way. Edit an actual spec's Markdown " +

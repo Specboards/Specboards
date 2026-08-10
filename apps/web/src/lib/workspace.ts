@@ -4,13 +4,18 @@ import {
   eq,
   isNull,
   members,
+  productSettings,
   products,
   users,
   workspaceLevels,
   workspaces,
   type Database,
 } from "@specboards/db";
-import { DEFAULT_LEVELS, DEFAULT_PRODUCT_KEY } from "@specboards/core";
+import {
+  DEFAULT_LEVELS,
+  DEFAULT_PRODUCT_KEY,
+  DEFAULT_TRANSITION_MODE,
+} from "@specboards/core";
 
 import {
   isReservedOrgSlug,
@@ -431,6 +436,20 @@ async function provisionWorkspace(
     .onConflictDoNothing({
       target: [workspaceLevels.workspaceId, workspaceLevels.key],
     });
+
+  // Seed the workspace-wide Cards defaults every product inherits from. Not
+  // strictly required (resolution falls back to the built-in when the row is
+  // missing), but it means Settings shows a real stored value from day one
+  // rather than an implied one, and the row is where the other per-product
+  // settings will land as they follow transitions across.
+  await db
+    .insert(productSettings)
+    .values({
+      workspaceId: workspace.id,
+      productId: null,
+      transitionMode: DEFAULT_TRANSITION_MODE,
+    })
+    .onConflictDoNothing();
 
   // Seed the default product (every spec/item lands here until moved).
   await ensureDefaultProduct(db, workspace.id);

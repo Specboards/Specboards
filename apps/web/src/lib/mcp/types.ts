@@ -58,6 +58,23 @@ export function requireString(
 }
 
 /**
+ * An optional string argument. Absent, null, and empty all read as "not given",
+ * so an agent that fills a field it does not care about with `""` gets the
+ * documented default rather than a validation error.
+ */
+export function optionalString(
+  args: Record<string, unknown>,
+  key: string,
+): string | null {
+  const value = args[key];
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string") {
+    throw new Error(`"${key}" must be a string when given.`);
+  }
+  return value.trim() === "" ? null : value;
+}
+
+/**
  * Git-backed tools need a real workspace + database (they commit to GitHub).
  * Resolve both, or fail with a clear message in local file mode.
  */

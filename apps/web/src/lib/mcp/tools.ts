@@ -51,7 +51,12 @@ import {
 import { getStore, type GithubLink } from "@/lib/store";
 
 import { DOC_TOOLS } from "./doc-tools";
-import { requireDbScope, requireString, type McpTool } from "./types";
+import {
+  optionalString,
+  requireDbScope,
+  requireString,
+  type McpTool,
+} from "./types";
 
 /**
  * The MCP tools Specboards exposes to coding agents. Each tool is a thin adapter
@@ -160,7 +165,7 @@ export const TOOLS: McpTool[] = [
   {
     name: "list_statuses",
     description:
-      "List the workspace's status workflow: the ordered stage keys (use these " +
+      "List the status workflow: the ordered stage keys (use these " +
       "exact keys with update_item), each stage's display label, and the moves " +
       "allowed out of it, plus `transitionMode`. When the mode is `flexible`, " +
       "any stage reaches any other and a single update_item call can set any " +
@@ -168,14 +173,29 @@ export const TOOLS: McpTool[] = [
       "`backlog` reaches only `defining` or `archived`): to move an item " +
       "several stages, pass update_item(advance: true) once - do NOT issue one " +
       "call per stage. Call this before changing an item's status so you never " +
-      "have to guess a stage key.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      "have to guess a stage key. `transitionMode` is configured per product, " +
+      "so pass `productId` (see list_products) when you are working in one " +
+      "product; without it you get the workspace default, which may not be " +
+      "what that product enforces. read_item's `allowedTransitions` is always " +
+      "resolved for that item's own product.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        productId: {
+          type: "string",
+          description:
+            "Resolve transitions for this product. Omit for the workspace default.",
+        },
+      },
+      additionalProperties: false,
+    },
     write: false,
     scope: { resource: "statuses", action: "read" },
-    run: async (_args, ctx) => {
+    run: async (args, ctx) => {
+      const productId = optionalString(args, "productId") ?? null;
       const [workflow, transitionMode] = await Promise.all([
-        resolveWorkflowFor(ctx.scope ?? null),
-        getTransitionMode(ctx.scope),
+        resolveWorkflowFor(ctx.scope ?? null, productId),
+        getTransitionMode(ctx.scope, productId),
       ]);
       const titleCase = (key: string) =>
         key
@@ -406,7 +426,10 @@ export const TOOLS: McpTool[] = [
       // the workflow instead of guessing stage keys (see list_statuses). The
       // goals answer the other half of the review question: why this exists.
       const [workflow, goals] = await Promise.all([
-        resolveWorkflowFor(ctx.scope ?? null),
+        // Resolved for this item's product, since transitions are configured
+        // per product: an agent must be told what update_item will actually
+        // accept for THIS item, not what the workspace default would allow.
+        resolveWorkflowFor(ctx.scope ?? null, f.productId),
         listItemGoals(specId, ctx.scope),
       ]);
       return {

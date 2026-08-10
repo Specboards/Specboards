@@ -49,7 +49,12 @@ export default async function ActivityPage({
 
   const [summary, workflow] = await Promise.all([
     store.itemActivitySummary({ ...window, productIds }, access ?? undefined),
-    resolveWorkflowFor(access),
+    // Only used for stage labels and ordering here, but resolved for the
+    // product in view so the report reads in that product's own terms.
+    resolveWorkflowFor(
+      access,
+      scope.kind === "product" ? scope.product.id : null,
+    ),
   ]);
 
   const scopeLabel =

@@ -69,7 +69,6 @@ export async function ListView({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const access = await requireWorkspaceAccess();
-  const workflow = await resolveWorkflowFor(access);
   const sp = await searchParams;
   const filters = parseFeatureFilters(sp);
   const store = await getStore();
@@ -83,6 +82,10 @@ export async function ListView({
   const scope = resolveActiveScope(products, groups, productSlug);
   if (!scope) notFound();
   const activeProduct = scope.kind === "product" ? scope.product : null;
+  // Transitions are per product; a group or "all" view spans products that may
+  // disagree, so it shows the workspace default. Each item is still validated
+  // against its own product's rules on save.
+  const workflow = await resolveWorkflowFor(access, activeProduct?.id ?? null);
   // Per-product edit gate (owner edits all; others need a product grant).
   const canEdit = canEditProducts(
     access,

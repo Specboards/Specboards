@@ -65,10 +65,11 @@ export const workspaces = pgTable("workspaces", {
   name: text("name").notNull(),
   slug: text("slug").notNull().unique(),
   /**
-   * How freely items move between workflow stages: `strict` is a pipeline (one
-   * step forward, one back, or archive), `flexible` lets any stage reach any
-   * other. New workspaces are flexible; stage gates apply in both modes. See
-   * TransitionMode in @specboards/core.
+   * @deprecated Superseded by `product_settings.transition_mode`. Migration
+   * 0064 copied every workspace's value into its default `product_settings`
+   * row and nothing reads this column any more. It survives only so the
+   * previously-deployed version keeps working across a release or a rollback;
+   * a follow-up migration drops it. Do not read or write it.
    */
   transitionMode: text("transition_mode").notNull().default("flexible"),
   createdAt: timestamp("created_at", { withTimezone: true })
@@ -270,6 +271,57 @@ export const productMembers = pgTable(
     unique("product_members_product_user_uq").on(t.productId, t.userId),
     index("product_members_product_idx").on(t.productId),
     index("product_members_user_idx").on(t.userId),
+  ],
+);
+
+/**
+ * Cards configuration, scoped to a product. One row per product, plus one row
+ * per workspace with a NULL `productId` holding the workspace-wide default that
+ * products inherit from.
+ *
+ * Every column is nullable and means "inherit" when null, which is why the
+ * table exists at all rather than columns on `products`: a product needs to
+ * express "I have not overridden this" separately from "I have no settings",
+ * so reverting an override is a null rather than a delete of the row the other
+ * Cards settings also live on.
+ *
+ * Resolution reads at most two rows (the product's and the workspace default)
+ * and takes the first non-null value. RLS keys writes to
+ * `specboards_can_manage_product` for a product row and `specboards_is_org_admin`
+ * for the default row; the uniqueness of the default row is a partial index
+ * (Drizzle can't express one, so it is in migration 0064 by hand).
+ */
+export const productSettings = pgTable(
+  "product_settings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    /** NULL = the workspace-wide default row every product falls back to. */
+    productId: uuid("product_id").references(() => products.id, {
+      onDelete: "cascade",
+    }),
+    /**
+     * How freely items move between workflow stages: `strict` is a pipeline
+     * (one step forward, one back, or archive), `flexible` lets any stage reach
+     * any other. NULL inherits the workspace default. Stage gates apply in both
+     * modes. See TransitionMode in @specboards/core.
+     */
+    transitionMode: text("transition_mode"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    foreignKey({
+      columns: [t.productId, t.workspaceId],
+      foreignColumns: [products.id, products.workspaceId],
+      name: "product_settings_product_ws_fk",
+    }),
   ],
 );
 
