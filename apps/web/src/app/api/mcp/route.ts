@@ -1,5 +1,10 @@
 import { readTextBodyWithin } from "@/lib/api/body";
-import { handleMcpMessage, resolveMcpAuth, rpcError } from "@/lib/mcp/rpc";
+import {
+  checkMcpRequestQuota,
+  handleMcpMessage,
+  resolveMcpAuth,
+  rpcError,
+} from "@/lib/mcp/rpc";
 import { logSecurityEvent } from "@/lib/security-log";
 
 /** Reject bodies larger than this before parsing (JSON-RPC calls are small). */
@@ -79,6 +84,23 @@ export async function POST(req: Request) {
     return unauthorized(req);
   }
   const messages = Array.isArray(body) ? body : [body];
+
+  // Charge the whole batch before running any of it, so an over-budget caller
+  // is refused as one request rather than part-applied. The body carries the
+  // reason as well as the header: an MCP client parses JSON-RPC and would
+  // otherwise report a bare 429 to the model as "the server disconnected".
+  const retryAfter = await checkMcpRequestQuota(auth, messages.length);
+  if (retryAfter !== null) {
+    return Response.json(
+      rpcError(
+        null,
+        -32000,
+        `Rate limit exceeded. Retry after ${retryAfter}s.`,
+      ),
+      { status: 429, headers: { "Retry-After": String(retryAfter) } },
+    );
+  }
+
   const responses = [];
   for (const message of messages) {
     const response = await handleMcpMessage(message, auth);

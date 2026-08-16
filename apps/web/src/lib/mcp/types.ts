@@ -24,6 +24,13 @@ export interface McpContext {
    * tools never read this themselves.
    */
   scopes: string[];
+  /**
+   * Rate-limit identity for the *credential*, not the user: two OAuth clients
+   * belonging to one person get separate keys, so a runaway agent cannot
+   * exhaust its owner's other connections. `null` in local file mode, which has
+   * no database to count in. Read by the RPC layer only; tools ignore it.
+   */
+  credentialKey: string | null;
 }
 
 export interface McpTool {
@@ -34,6 +41,18 @@ export interface McpTool {
   /** Marks a mutating tool. Any member may attempt it; per-product write
    * (owner, or an admin/contributor grant) is enforced by the store on run. */
   write: boolean;
+  /**
+   * Marks a tool whose ordinary path commits to a git repository, which costs a
+   * GitHub round trip and a commit rather than a row update. These are counted
+   * against the much tighter `mcpWrite` quota, per call, so a 50-call batch
+   * cannot smuggle 50 commits past the per-request counter.
+   *
+   * A few of these commit only for some arguments (`delete_item` only with
+   * `removeSpec`, the doc tools only for a GitHub-backed area). They are still
+   * flagged: over-counting a cheap call against a generous budget is the safe
+   * direction, and the alternative is a quota that depends on arguments.
+   */
+  commits?: boolean;
   /**
    * The API-key scope this tool requires, the same `<resource>:<action>`
    * vocabulary the REST routes derive from their URL. Required, not optional:
