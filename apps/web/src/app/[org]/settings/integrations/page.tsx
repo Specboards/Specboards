@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 
 import { AgentsCard } from "@/components/agents-card";
 import { ApiKeysCard } from "@/components/api-keys-card";
+import { ConnectedAgentsCard } from "@/components/connected-agents-card";
 import { IntegrationsTabs } from "@/components/integrations-tabs";
 import { McpCard } from "@/components/mcp-card";
 import {
@@ -22,6 +23,7 @@ import { getServerSessionUser } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
 import { isGithubConfigured } from "@/lib/github-app";
 import { loadWorkspaceInstallations, NO_INSTALLATIONS } from "@/lib/github-connect";
+import { listMcpConnections } from "@/lib/mcp/workspace-binding";
 import { leafLevel } from "@specboards/core";
 
 import { getStore } from "@/lib/store";
@@ -99,6 +101,10 @@ export default async function IntegrationsSettingsPage({
 
   const endpoint = await mcpEndpoint();
 
+  // The caller's own OAuth connections. Per-user, not per-workspace: an OAuth
+  // connection acts as a person, so it is theirs to review and revoke.
+  const connections = await listMcpConnections(db, user.id);
+
   const keys = await listApiKeys(db, user.id);
   // Dates aren't serializable across the server/client boundary; send ISO.
   const initialKeys = keys.map((k) => ({
@@ -166,7 +172,12 @@ export default async function IntegrationsSettingsPage({
   return (
     <IntegrationsTabs
       initialTab={tab}
-      mcp={<McpCard endpoint={endpoint} />}
+      mcp={
+        <div className="space-y-4">
+          <McpCard endpoint={endpoint} />
+          <ConnectedAgentsCard initialConnections={connections} />
+        </div>
+      }
       agents={
         <AgentsCard
           initialAgents={agents}

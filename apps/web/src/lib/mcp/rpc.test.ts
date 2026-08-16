@@ -23,6 +23,12 @@ function ctx(scopes: string[], over: Partial<McpContext> = {}): McpContext {
     role: "member",
     isLocal: false,
     scopes,
+    // No credential key: these cases assert the scope gate, which runs before
+    // any quota, and a null key keeps the rate limiter out of the way.
+    credentialKey: null,
+    // Default to allowed, so these cases keep asserting the scope gate alone.
+    // The destructive gate has its own describe block below.
+    allowDestructive: true,
     ...over,
   };
 }

@@ -2,11 +2,16 @@ import { keyScopesSatisfy } from "@/lib/api-scopes";
 import { getAuth } from "@/lib/auth";
 import { orgSlugFromRequest, resolveReadAccess } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
+import { checkQuota, QUOTAS } from "@/lib/rate-limit";
 import { resolveApiMembership } from "@/lib/workspace";
 
 import { TOOLS } from "./tools";
 import { type McpContext, type McpTool } from "./types";
-import { boundWorkspaceSlug, oauthClientName } from "./workspace-binding";
+import {
+  boundConnection,
+  oauthClientName,
+  touchMcpConnection,
+} from "./workspace-binding";
 
 /**
  * A minimal, stateless MCP server over the Streamable HTTP transport, spoken as
@@ -109,10 +114,18 @@ export async function resolveMcpAuth(req: Request): Promise<McpAuth> {
   const access = await resolveReadAccess(req);
   if (access.ok) {
     if (!access.access) {
-      // Local file mode (auth disabled): everything allowed with no scope.
+      // Local file mode (auth disabled): everything allowed with no scope, and
+      // no database to count a quota in.
       return {
         ok: true,
-        ctx: { scope: undefined, role: null, isLocal: true, scopes: [] },
+        ctx: {
+          scope: undefined,
+          role: null,
+          isLocal: true,
+          scopes: [],
+          credentialKey: null,
+          allowDestructive: true,
+        },
       };
     }
     return {
@@ -131,6 +144,14 @@ export async function resolveMcpAuth(req: Request): Promise<McpAuth> {
         // Carried through so each tool call can be checked against the key's
         // grants; `/api/mcp` has no path-derived scope to check instead.
         scopes: access.credential.scopes,
+        // `key:` matches the REST side's `apiRequest` scope id, deliberately:
+        // one key's budget should be the same budget whichever surface it hits.
+        credentialKey: access.credential.viaKey
+          ? `key:${access.access.userId}`
+          : `session:${access.access.userId}`,
+        // A key's scopes are its whole gate: there is no consent screen on this
+        // path to have asked anything narrower.
+        allowDestructive: true,
       },
     };
   }
@@ -148,9 +169,10 @@ export async function resolveMcpAuth(req: Request): Promise<McpAuth> {
   const oauth = await resolveOAuthUser(req);
   if (oauth) {
     const db = getDb();
-    const orgSlug =
-      orgSlugFromRequest(req) ??
-      (db ? await boundWorkspaceSlug(db, oauth.userId, oauth.clientId) : null);
+    const binding = db
+      ? await boundConnection(db, oauth.userId, oauth.clientId)
+      : null;
+    const orgSlug = orgSlugFromRequest(req) ?? binding?.slug ?? null;
     const resolved = db
       ? await resolveApiMembership(db, oauth.userId, orgSlug)
       : null;
@@ -161,6 +183,11 @@ export async function resolveMcpAuth(req: Request): Promise<McpAuth> {
           : NO_WORKSPACE_MESSAGE;
       return { ok: false, unauthenticated: false, message };
     }
+    // Best-effort: a failed bump must not fail the call it was recording.
+    if (db) {
+      await touchMcpConnection(db, oauth.userId, oauth.clientId).catch(() => {});
+    }
+
     return {
       ok: true,
       ctx: {
@@ -179,8 +206,20 @@ export async function resolveMcpAuth(req: Request): Promise<McpAuth> {
         },
         role: resolved.membership.role,
         isLocal: false,
-        // OAuth consent grants the client the user's access, not a scope subset.
-        scopes: [],
+        // Per connection, not per user: two agents one person authorised get
+        // independent budgets, so a runaway one cannot starve the other.
+        credentialKey: `oauth:${oauth.clientId}:${oauth.userId}`,
+        // What the user granted this client on the consent screen. A connection
+        // made before consent asked has no stored grant, and `[]` is
+        // unrestricted, so those keep the access they had rather than breaking
+        // mid-flight. New connections always carry a real list.
+        scopes: binding?.scopes ?? [],
+        // Keyed off `scopes`, not off the row: a binding written before this
+        // shipped has NULL scopes and `allow_destructive` sitting at its column
+        // default of false, so reading the flag directly would quietly strip
+        // delete access from every live connection. NULL scopes means "never
+        // asked", and never-asked keeps what it had.
+        allowDestructive: binding?.scopes == null ? true : binding.allowDestructive,
       },
     };
   }
@@ -236,8 +275,37 @@ function canWriteCtx(ctx: McpContext): boolean {
  * scope-limited.
  */
 export function toolAllowedByScope(tool: McpTool, ctx: McpContext): boolean {
+  if (tool.destructive && !ctx.allowDestructive) return false;
   if (ctx.scopes.length === 0) return true;
   return keyScopesSatisfy(ctx.scopes, tool.scope);
+}
+
+/**
+ * Count this request's `calls` against the credential's MCP request quota,
+ * returning the retry delay in seconds when it is over budget and `null` when
+ * it may proceed.
+ *
+ * `calls` is the JSON-RPC batch length, not 1. A batch of 50 is 50 units of
+ * work, and charging it as one request would let any caller multiply its real
+ * quota fiftyfold simply by batching.
+ *
+ * Unauthenticated requests are not counted: they never reach a tool, and there
+ * is no credential to key on. The endpoint is authenticated on every path, so
+ * the credential is the right scope (`lib/client-ip.ts` carries the trust model
+ * that would be needed to limit by IP, and it only holds for public intake).
+ */
+export async function checkMcpRequestQuota(
+  auth: McpAuth,
+  calls: number,
+): Promise<number | null> {
+  if (!auth.ok || !auth.ctx.credentialKey) return null;
+  const result = await checkQuota(
+    getDb(),
+    QUOTAS.mcpRequest,
+    auth.ctx.credentialKey,
+    calls,
+  );
+  return result.ok ? null : result.retryAfter;
 }
 
 type JsonRpcId = string | number | null;
@@ -354,12 +422,27 @@ async function handleToolCall(
     return ok(id, toolError(auth.message));
   }
   if (!toolAllowedByScope(tool, auth.ctx)) {
+    // Two different refusals, and the difference is actionable: a missing scope
+    // is fixed by minting a better credential, a withheld destructive grant by
+    // reconnecting and choosing differently. One message for both would send
+    // the agent looking in the wrong place.
+    if (tool.destructive && !auth.ctx.allowDestructive) {
+      logMcpCall({ tool: tool.name, denied: "destructive" });
+      return ok(
+        id,
+        toolError(
+          `"${tool.name}" deletes data, and this connection was not granted ` +
+            `that. Ask the person who connected it to reconnect and allow ` +
+            `deletion, or make the change without deleting.`,
+        ),
+      );
+    }
     const { resource, action } = tool.scope;
     logMcpCall({ tool: tool.name, denied: "scope", required: `${resource}:${action}` });
     return ok(
       id,
       toolError(
-        `This API key lacks the "${resource}:${action}" scope, which ` +
+        `This credential lacks the "${resource}:${action}" scope, which ` +
           `"${tool.name}" requires.`,
       ),
     );
@@ -369,6 +452,32 @@ async function handleToolCall(
       id,
       toolError("You must belong to a workspace to make changes."),
     );
+  }
+  // Counted per call, after the cheap checks, so a refused or unauthorized call
+  // does not spend a commit's worth of budget. A per-request counter cannot do
+  // this job: one batch can carry 50 commits.
+  if (tool.commits && auth.ctx.credentialKey) {
+    const quota = await checkQuota(
+      getDb(),
+      QUOTAS.mcpWrite,
+      auth.ctx.credentialKey,
+    );
+    if (!quota.ok) {
+      logMcpCall({
+        tool: tool.name,
+        denied: "rate_limit",
+        retryAfter: quota.retryAfter,
+      });
+      return ok(
+        id,
+        toolError(
+          `Rate limit reached for tools that commit to git ` +
+            `(${QUOTAS.mcpWrite.limit} per ` +
+            `${QUOTAS.mcpWrite.windowSec / 60} minutes). Wait ` +
+            `${quota.retryAfter}s and retry; reads are unaffected.`,
+        ),
+      );
+    }
   }
   const rawArgs = (params as { arguments?: unknown })?.arguments;
   const args =

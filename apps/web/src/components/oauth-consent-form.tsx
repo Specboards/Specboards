@@ -13,6 +13,11 @@ import {
 import { FormError, FormField } from "@/components/ui/form-field";
 import { Select } from "@/components/ui/select";
 import { signOut } from "@/lib/auth-client";
+import {
+  CONNECTION_GRANTS,
+  DEFAULT_CONNECTION_GRANT,
+  type ConnectionGrantId,
+} from "@/lib/mcp/connection-grants";
 
 /** Human copy for the OIDC scopes the MCP provider supports. */
 const SCOPE_COPY: Record<string, string> = {
@@ -108,18 +113,22 @@ export function OAuthConsentForm({
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [workspaceId, setWorkspaceId] = useState(workspaces[0]?.id ?? "");
+  const [grant, setGrant] = useState<ConnectionGrantId>(
+    DEFAULT_CONNECTION_GRANT,
+  );
   const multiWorkspace = workspaces.length > 1;
 
   function decide(accept: boolean) {
     startTransition(async () => {
       setError(null);
-      // Persist the workspace choice before approving. If this fails we stop
-      // rather than mint a token that resolves to the wrong (or no) workspace.
+      // Persist the workspace choice and the grant before approving. If this
+      // fails we stop rather than mint a token that resolves to the wrong (or
+      // no) workspace, or one whose authority was never recorded.
       if (accept && workspaceId) {
         const bind = await fetch("/api/mcp/workspace-binding", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ clientId, workspaceId }),
+          body: JSON.stringify({ clientId, workspaceId, grant }),
         });
         if (!bind.ok) {
           setError("Could not set the workspace for this connection. Try again.");
@@ -150,8 +159,8 @@ export function OAuthConsentForm({
         <CardTitle>Authorize {clientName}</CardTitle>
         <CardDescription>
           <span className="font-medium text-foreground">{clientName}</span> wants to
-          access Specboards. It will act with your role and see the same products and
-          specs you can.
+          access Specboards. It acts as you, so it can never reach a product you
+          cannot; choose below how much of that access it gets.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -183,6 +192,25 @@ export function OAuthConsentForm({
             <span className="font-medium text-foreground">{workspaces[0]?.name}</span>
           </div>
         )}
+
+        <div>
+          <FormField label="What it may do">
+            <Select
+              value={grant}
+              onChange={(e) => setGrant(e.target.value as ConnectionGrantId)}
+              disabled={pending}
+            >
+              {CONNECTION_GRANTS.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.label}
+                </option>
+              ))}
+            </Select>
+          </FormField>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {CONNECTION_GRANTS.find((g) => g.id === grant)?.describe}
+          </p>
+        </div>
 
         {scopes.length > 0 ? (
           <ul className="space-y-1.5 text-sm text-muted-foreground">
