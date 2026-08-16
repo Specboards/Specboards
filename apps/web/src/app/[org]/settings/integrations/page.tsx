@@ -1,6 +1,7 @@
 import { eq, repositories } from "@specboards/db";
 import { headers } from "next/headers";
 
+import { AgentsCard } from "@/components/agents-card";
 import { ApiKeysCard } from "@/components/api-keys-card";
 import { ConnectedAgentsCard } from "@/components/connected-agents-card";
 import { IntegrationsTabs } from "@/components/integrations-tabs";
@@ -17,6 +18,7 @@ import {
 } from "@/components/ui/card";
 import { WebhooksCard } from "@/components/webhooks-card";
 import { listApiKeys } from "@/lib/api-keys";
+import { listServiceAccounts } from "@/lib/service-accounts-service";
 import { getServerSessionUser } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
 import { isGithubConfigured } from "@/lib/github-app";
@@ -125,6 +127,11 @@ export default async function IntegrationsSettingsPage({
   const endpoints = isAdmin
     ? await listWebhookEndpoints(db, access.workspaceId)
     : [];
+  // Agent identities are owner-only to see as well as to manage: the listing
+  // names every product each one can reach, which is not a member's business.
+  const agents = isAdmin
+    ? await listServiceAccounts(db, access.workspaceId)
+    : [];
 
   // Repository management: any member sees the connected list; only admins get
   // the GitHub setup/connect controls (matching the API authorization).
@@ -170,6 +177,13 @@ export default async function IntegrationsSettingsPage({
           <McpCard endpoint={endpoint} />
           <ConnectedAgentsCard initialConnections={connections} />
         </div>
+      }
+      agents={
+        <AgentsCard
+          initialAgents={agents}
+          products={products.map((p) => ({ id: p.id, name: p.name }))}
+          canManage={isAdmin}
+        />
       }
       apiKeys={<ApiKeysCard initialKeys={initialKeys} />}
       webhooks={
