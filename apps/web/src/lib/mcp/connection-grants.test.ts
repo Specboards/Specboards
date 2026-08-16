@@ -27,6 +27,9 @@ function ctxFor(id: string): McpContext {
     isLocal: false,
     scopes: grant.scopes,
     allowDestructive: grant.allowDestructive,
+    // Irrelevant here: the quota keyed off this runs in the route, not in the
+    // scope gate these cases exercise.
+    credentialKey: null,
   };
 }
 

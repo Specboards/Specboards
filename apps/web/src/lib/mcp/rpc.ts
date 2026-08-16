@@ -2,6 +2,7 @@ import { keyScopesSatisfy } from "@/lib/api-scopes";
 import { getAuth } from "@/lib/auth";
 import { orgSlugFromRequest, resolveReadAccess } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
+import { checkQuota, QUOTAS } from "@/lib/rate-limit";
 import { resolveApiMembership } from "@/lib/workspace";
 
 import { TOOLS } from "./tools";
@@ -113,7 +114,8 @@ export async function resolveMcpAuth(req: Request): Promise<McpAuth> {
   const access = await resolveReadAccess(req);
   if (access.ok) {
     if (!access.access) {
-      // Local file mode (auth disabled): everything allowed with no scope.
+      // Local file mode (auth disabled): everything allowed with no scope, and
+      // no database to count a quota in.
       return {
         ok: true,
         ctx: {
@@ -121,6 +123,7 @@ export async function resolveMcpAuth(req: Request): Promise<McpAuth> {
           role: null,
           isLocal: true,
           scopes: [],
+          credentialKey: null,
           allowDestructive: true,
         },
       };
@@ -141,6 +144,11 @@ export async function resolveMcpAuth(req: Request): Promise<McpAuth> {
         // Carried through so each tool call can be checked against the key's
         // grants; `/api/mcp` has no path-derived scope to check instead.
         scopes: access.credential.scopes,
+        // `key:` matches the REST side's `apiRequest` scope id, deliberately:
+        // one key's budget should be the same budget whichever surface it hits.
+        credentialKey: access.credential.viaKey
+          ? `key:${access.access.userId}`
+          : `session:${access.access.userId}`,
         // A key's scopes are its whole gate: there is no consent screen on this
         // path to have asked anything narrower.
         allowDestructive: true,
@@ -198,6 +206,9 @@ export async function resolveMcpAuth(req: Request): Promise<McpAuth> {
         },
         role: resolved.membership.role,
         isLocal: false,
+        // Per connection, not per user: two agents one person authorised get
+        // independent budgets, so a runaway one cannot starve the other.
+        credentialKey: `oauth:${oauth.clientId}:${oauth.userId}`,
         // What the user granted this client on the consent screen. A connection
         // made before consent asked has no stored grant, and `[]` is
         // unrestricted, so those keep the access they had rather than breaking
@@ -267,6 +278,34 @@ export function toolAllowedByScope(tool: McpTool, ctx: McpContext): boolean {
   if (tool.destructive && !ctx.allowDestructive) return false;
   if (ctx.scopes.length === 0) return true;
   return keyScopesSatisfy(ctx.scopes, tool.scope);
+}
+
+/**
+ * Count this request's `calls` against the credential's MCP request quota,
+ * returning the retry delay in seconds when it is over budget and `null` when
+ * it may proceed.
+ *
+ * `calls` is the JSON-RPC batch length, not 1. A batch of 50 is 50 units of
+ * work, and charging it as one request would let any caller multiply its real
+ * quota fiftyfold simply by batching.
+ *
+ * Unauthenticated requests are not counted: they never reach a tool, and there
+ * is no credential to key on. The endpoint is authenticated on every path, so
+ * the credential is the right scope (`lib/client-ip.ts` carries the trust model
+ * that would be needed to limit by IP, and it only holds for public intake).
+ */
+export async function checkMcpRequestQuota(
+  auth: McpAuth,
+  calls: number,
+): Promise<number | null> {
+  if (!auth.ok || !auth.ctx.credentialKey) return null;
+  const result = await checkQuota(
+    getDb(),
+    QUOTAS.mcpRequest,
+    auth.ctx.credentialKey,
+    calls,
+  );
+  return result.ok ? null : result.retryAfter;
 }
 
 type JsonRpcId = string | number | null;
@@ -413,6 +452,32 @@ async function handleToolCall(
       id,
       toolError("You must belong to a workspace to make changes."),
     );
+  }
+  // Counted per call, after the cheap checks, so a refused or unauthorized call
+  // does not spend a commit's worth of budget. A per-request counter cannot do
+  // this job: one batch can carry 50 commits.
+  if (tool.commits && auth.ctx.credentialKey) {
+    const quota = await checkQuota(
+      getDb(),
+      QUOTAS.mcpWrite,
+      auth.ctx.credentialKey,
+    );
+    if (!quota.ok) {
+      logMcpCall({
+        tool: tool.name,
+        denied: "rate_limit",
+        retryAfter: quota.retryAfter,
+      });
+      return ok(
+        id,
+        toolError(
+          `Rate limit reached for tools that commit to git ` +
+            `(${QUOTAS.mcpWrite.limit} per ` +
+            `${QUOTAS.mcpWrite.windowSec / 60} minutes). Wait ` +
+            `${quota.retryAfter}s and retry; reads are unaffected.`,
+        ),
+      );
+    }
   }
   const rawArgs = (params as { arguments?: unknown })?.arguments;
   const args =
