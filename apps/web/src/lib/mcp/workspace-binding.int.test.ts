@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDb, type Database } from "@specboards/db";
 
 import {
-  boundWorkspaceSlug,
+  boundConnection,
   consentWorkspaceOptions,
   oauthClientName,
   recordMcpWorkspaceBinding,
@@ -72,12 +72,12 @@ describe.skipIf(!OWNER_URL)("MCP workspace binding", () => {
   });
 
   it("returns no bound slug before a choice is recorded", async () => {
-    expect(await boundWorkspaceSlug(db, userId, clientId)).toBeNull();
+    expect(await boundConnection(db, userId, clientId)).toBeNull();
   });
 
   it("records the chosen workspace and reads it back as a slug", async () => {
     await recordMcpWorkspaceBinding(db, { userId, clientId, workspaceId: ws.a });
-    expect(await boundWorkspaceSlug(db, userId, clientId)).toBe(slug.a);
+    expect((await boundConnection(db, userId, clientId))?.slug).toBe(slug.a);
   });
 
   it("reads back the client's registered name, for attributing its changes", async () => {
@@ -93,7 +93,7 @@ describe.skipIf(!OWNER_URL)("MCP workspace binding", () => {
 
   it("upserts on (user, client) so re-picking overwrites, not duplicates", async () => {
     await recordMcpWorkspaceBinding(db, { userId, clientId, workspaceId: ws.b });
-    expect(await boundWorkspaceSlug(db, userId, clientId)).toBe(slug.b);
+    expect((await boundConnection(db, userId, clientId))?.slug).toBe(slug.b);
 
     const rows = await owner`
       select count(*)::int as n from mcp_workspace_bindings

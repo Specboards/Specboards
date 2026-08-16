@@ -608,6 +608,9 @@ export const TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: true,
+    // Only with `removeSpec`, but flagged unconditionally: see McpTool.commits.
+    commits: true,
+    destructive: true,
     scope: { resource: "features", action: "write" },
     run: async (args, ctx) => {
       const specId = requireString(args, "specId");
@@ -722,6 +725,7 @@ export const TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: true,
+    commits: true,
     scope: { resource: "features", action: "write" },
     run: async (args, ctx) => {
       const { db, scope } = requireDbScope(ctx);
@@ -798,6 +802,7 @@ export const TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: true,
+    commits: true,
     scope: { resource: "specs", action: "write" },
     run: async (args, ctx) => {
       const { db, scope } = requireDbScope(ctx);
@@ -1451,6 +1456,7 @@ export const TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: true,
+    destructive: true,
     scope: { resource: "goals", action: "write" },
     run: async (args, ctx) => {
       const id = requireString(args, "id");
@@ -1574,6 +1580,7 @@ export const TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: true,
+    destructive: true,
     scope: { resource: "key-results", action: "write" },
     run: async (args, ctx) => {
       const id = requireString(args, "id");
@@ -1817,6 +1824,7 @@ export const TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: true,
+    destructive: true,
     scope: { resource: "features", action: "write" },
     run: async (args, ctx) => {
       const specId = requireString(args, "specId");

@@ -30,16 +30,26 @@ skipped, never fatal.
 ### 1. A service account + scoped API key
 
 Create a dedicated **service account** so sync activity is attributed to a bot,
-not a human. As an owner (from a browser session), call `POST
-/api/v1/org/service-accounts` with a name and the scopes it needs -
-`features:write` (status changes + PR links) and `statuses:read` (so
-`--advance` can read the workflow):
+not a human. The easiest path is **Settings -> Integrations -> Agents ->
+Add agent**: give it a name, tick `features` and `statuses` (write for the
+first, so status changes and PR links land; read is enough for the second, which
+only lets `--advance` read the workflow), choose which products it may reach,
+and copy the `sb_…` key, which is shown once. That page also rotates and revokes
+the key later.
+
+The equivalent over the API, as an owner from a browser session:
 
 ```bash
 curl -X POST https://app.specboards.ai/api/v1/org/service-accounts \
   -H 'content-type: application/json' --cookie "$SESSION" \
   -d '{"name":"CI sync bot","scopes":["features:write","statuses:read"]}'
 ```
+
+Note the difference: omitting `productGrants`, as above, grants the account
+**contributor on every product in the workspace**, which is what a workspace-wide
+sync bot wants. Send an explicit `productGrants` list (even an empty one) to
+narrow it. The Agents UI always sends one, so an agent created there only ever
+reaches the products that were ticked.
 
 The response returns the `sb_…` key once. (A personal full-access key under
 **Settings -> API keys** also works, but attributes activity to you.)

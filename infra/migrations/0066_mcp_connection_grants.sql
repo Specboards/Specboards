@@ -1,0 +1,42 @@
+-- Give an MCP OAuth connection a grant of its own.
+--
+-- Until now `resolveMcpAuth` returned `scopes: []` for every OAuth-connected
+-- agent, and `[]` means UNRESTRICTED everywhere in `keyScopesSatisfy`. So a
+-- connected agent could do everything its authorising user could, including
+-- `delete_item` and `delete_goal`, with no way to narrow it. That is tolerable
+-- when the agent and the user are the same person's tools, and not tolerable
+-- for a customer pointing an in-house agent at a shared board.
+--
+-- The grant hangs off `mcp_workspace_bindings` rather than a new table because
+-- that row already exists for exactly this purpose: it is the per-(user,
+-- client) record the consent screen writes before approving, and it is already
+-- read on every OAuth request to resolve the workspace. Better Auth owns the
+-- token records and its `scopes` column is the OIDC set (openid / profile /
+-- email / offline_access), which cannot carry an application-level grant, so
+-- storing it ourselves next to the workspace choice is the supported shape.
+--
+--   scopes             NULL = no grant was ever recorded. Every connection made
+--                      before this shipped is in that state and keeps working
+--                      with the full access of its user, because breaking live
+--                      agents to close this is worse than the gap. Distinct
+--                      from `{}`, which would mean the same thing to
+--                      `keyScopesSatisfy` but by accident rather than by
+--                      decision; `{}` is never written.
+--   allow_destructive  Whether the connection may call the tools that destroy
+--                      data. This cannot be a scope: `delete_item` and
+--                      `update_item` both require `features:write`, so no
+--                      `<resource>:<action>` grant separates them. Defaults
+--                      false, so a re-consenting connection has to be given it
+--                      deliberately.
+--   last_used_at       When the connection last authenticated a call, so the
+--                      "Connected agents" list can show a stale connection as
+--                      stale rather than making the user guess.
+--
+-- No RLS change. All three columns land on a table whose existing policies are
+-- row-scoped, and Postgres policies do not vary by column, so the reads and
+-- writes already permitted on this row cover the new fields. The auth path
+-- reaches this table through the owner connection in any case.
+
+ALTER TABLE "mcp_workspace_bindings" ADD COLUMN "scopes" text[];--> statement-breakpoint
+ALTER TABLE "mcp_workspace_bindings" ADD COLUMN "allow_destructive" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "mcp_workspace_bindings" ADD COLUMN "last_used_at" timestamp with time zone;
