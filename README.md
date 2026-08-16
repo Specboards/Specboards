@@ -154,10 +154,20 @@ Specboards speaks the Model Context Protocol so coding agents (Claude Code and
 others) can read and drive the backlog. Two ways to connect:
 
 **Hosted endpoint (recommended).** Every deployment serves an authenticated MCP
-endpoint at `POST /api/mcp` (e.g. `https://app.specboards.ai/api/mcp`) with OAuth
-2.1 sign-in, or an `x-api-key` for service accounts. Point your client at it,
-approve the browser consent screen, and the connection binds to your user and
-the workspace you pick.
+endpoint at `POST /api/mcp` (e.g. `https://app.specboards.ai/api/mcp`). Two ways
+to authenticate:
+
+- **OAuth 2.1** for a person's own coding agent. Point your client at the URL,
+  approve the browser consent screen (which asks which workspace to bind to and
+  how much access to grant), and the connection binds to your user.
+- **`Authorization: Bearer sb_…`** for anything running unattended, using an
+  agent identity's key (Settings → Integrations → Agents). `x-api-key: sb_…`
+  is accepted too, but prefer the bearer header: it is what MCP clients
+  configure by default, and what the endpoint's own error text names.
+
+For connecting a customer's agent, the guide at `/docs/agents` in the app covers
+this properly: the two paths, what each grant allows, worked authoring flows,
+the request and write quotas, and what the board records about an agent.
 
 Tools, by what they manage:
 
