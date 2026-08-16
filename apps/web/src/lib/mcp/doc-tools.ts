@@ -365,6 +365,8 @@ export const DOC_TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: true,
+    // Only for a GitHub-backed area: see McpTool.commits.
+    commits: true,
     scope: { resource: "docs", action: "write" },
     run: async (args, ctx) => {
       const target = await resolveTarget(ctx, args);
@@ -476,6 +478,8 @@ export const DOC_TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: true,
+    // Only for a GitHub-backed area: see McpTool.commits.
+    commits: true,
     scope: { resource: "docs", action: "write" },
     run: async (args, ctx) => {
       const target = await resolveTarget(ctx, args);
@@ -596,6 +600,8 @@ export const DOC_TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: true,
+    // Only for a GitHub-backed area: see McpTool.commits.
+    commits: true,
     scope: { resource: "docs", action: "write" },
     run: async (args, ctx) => {
       const target = await resolveTarget(ctx, args);
