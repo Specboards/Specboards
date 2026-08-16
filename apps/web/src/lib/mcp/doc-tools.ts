@@ -596,6 +596,7 @@ export const DOC_TOOLS: McpTool[] = [
       additionalProperties: false,
     },
     write: true,
+    destructive: true,
     scope: { resource: "docs", action: "write" },
     run: async (args, ctx) => {
       const target = await resolveTarget(ctx, args);

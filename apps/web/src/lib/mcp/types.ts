@@ -24,6 +24,15 @@ export interface McpContext {
    * tools never read this themselves.
    */
   scopes: string[];
+  /**
+   * Whether this credential may call tools flagged {@link McpTool.destructive}.
+   *
+   * Only an OAuth connection can have this withheld, because only its consent
+   * screen asks the question. An API key is governed by its scopes alone, and
+   * local file mode by nothing, so both are `true`: this narrows the OAuth path
+   * and changes nothing elsewhere.
+   */
+  allowDestructive: boolean;
 }
 
 export interface McpTool {
@@ -34,6 +43,17 @@ export interface McpTool {
   /** Marks a mutating tool. Any member may attempt it; per-product write
    * (owner, or an admin/contributor grant) is enforced by the store on run. */
   write: boolean;
+  /**
+   * Marks a tool that destroys data rather than changing it, so an OAuth
+   * connection can be granted authorship without also being granted deletion.
+   *
+   * This has to be its own flag because no `<resource>:<action>` scope
+   * separates these: `delete_item` and `update_item` both require
+   * `features:write`. A consent screen that could only offer resource scopes
+   * would have to choose between "cannot edit anything" and "can delete
+   * everything", which is why the destructive set is called out by name.
+   */
+  destructive?: boolean;
   /**
    * The API-key scope this tool requires, the same `<resource>:<action>`
    * vocabulary the REST routes derive from their URL. Required, not optional:

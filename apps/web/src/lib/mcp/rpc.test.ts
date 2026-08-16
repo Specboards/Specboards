@@ -23,6 +23,9 @@ function ctx(scopes: string[], over: Partial<McpContext> = {}): McpContext {
     role: "member",
     isLocal: false,
     scopes,
+    // Default to allowed, so these cases keep asserting the scope gate alone.
+    // The destructive gate has its own describe block below.
+    allowDestructive: true,
     ...over,
   };
 }
