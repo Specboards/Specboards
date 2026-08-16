@@ -235,7 +235,13 @@ export function buildOpenApiDocument(baseUrl: string): Record<string, unknown> {
       },
       "/api/v1/org/service-accounts": {
         get: { tags: ["org"], summary: "List service (bot) accounts (owner only).", responses: { "200": ok("The service accounts.") } },
-        post: { tags: ["org"], summary: "Create a service account + scoped key (owner, session only).", requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { name: { type: "string" }, scopes: { type: "array", items: { type: "string" } }, expiresInDays: { type: "integer" }, productGrants: { type: "array", items: { type: "object" } } }, required: ["name"] } } } }, responses: { "201": ok("The account and its key (plaintext once).") } },
+        post: { tags: ["org"], summary: "Create a service account + scoped key (owner, session only). Omitting productGrants grants contributor on every product; send an explicit list (even empty) to narrow it.", requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { name: { type: "string" }, scopes: { type: "array", items: { type: "string" } }, expiresInDays: { type: "integer" }, productGrants: { type: "array", items: { type: "object" } } }, required: ["name"] } } } }, responses: { "201": ok("The account and its key (plaintext once).") } },
+      },
+      "/api/v1/org/service-accounts/{userId}": {
+        delete: { tags: ["org"], summary: "Revoke a service account: kill its keys and drop its membership and product grants (owner only). Its user row survives so past edits stay attributed.", responses: { "204": { description: "Revoked." } } },
+      },
+      "/api/v1/org/service-accounts/{userId}/rotate": {
+        post: { tags: ["org"], summary: "Revoke a service account's keys and mint a replacement with the same scopes (owner, session only).", requestBody: { required: false, content: { "application/json": { schema: { type: "object", properties: { expiresInDays: { type: "integer" } } } } } }, responses: { "201": ok("The new key (plaintext once).") } },
       },
     },
   };
