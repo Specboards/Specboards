@@ -602,6 +602,7 @@ export const DOC_TOOLS: McpTool[] = [
     write: true,
     // Only for a GitHub-backed area: see McpTool.commits.
     commits: true,
+    destructive: true,
     scope: { resource: "docs", action: "write" },
     run: async (args, ctx) => {
       const target = await resolveTarget(ctx, args);

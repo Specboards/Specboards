@@ -7,7 +7,11 @@ import { resolveApiMembership } from "@/lib/workspace";
 
 import { TOOLS } from "./tools";
 import { type McpContext, type McpTool } from "./types";
-import { boundWorkspaceSlug, oauthClientName } from "./workspace-binding";
+import {
+  boundConnection,
+  oauthClientName,
+  touchMcpConnection,
+} from "./workspace-binding";
 
 /**
  * A minimal, stateless MCP server over the Streamable HTTP transport, spoken as
@@ -120,6 +124,7 @@ export async function resolveMcpAuth(req: Request): Promise<McpAuth> {
           isLocal: true,
           scopes: [],
           credentialKey: null,
+          allowDestructive: true,
         },
       };
     }
@@ -144,6 +149,9 @@ export async function resolveMcpAuth(req: Request): Promise<McpAuth> {
         credentialKey: access.credential.viaKey
           ? `key:${access.access.userId}`
           : `session:${access.access.userId}`,
+        // A key's scopes are its whole gate: there is no consent screen on this
+        // path to have asked anything narrower.
+        allowDestructive: true,
       },
     };
   }
@@ -161,9 +169,10 @@ export async function resolveMcpAuth(req: Request): Promise<McpAuth> {
   const oauth = await resolveOAuthUser(req);
   if (oauth) {
     const db = getDb();
-    const orgSlug =
-      orgSlugFromRequest(req) ??
-      (db ? await boundWorkspaceSlug(db, oauth.userId, oauth.clientId) : null);
+    const binding = db
+      ? await boundConnection(db, oauth.userId, oauth.clientId)
+      : null;
+    const orgSlug = orgSlugFromRequest(req) ?? binding?.slug ?? null;
     const resolved = db
       ? await resolveApiMembership(db, oauth.userId, orgSlug)
       : null;
@@ -174,6 +183,11 @@ export async function resolveMcpAuth(req: Request): Promise<McpAuth> {
           : NO_WORKSPACE_MESSAGE;
       return { ok: false, unauthenticated: false, message };
     }
+    // Best-effort: a failed bump must not fail the call it was recording.
+    if (db) {
+      await touchMcpConnection(db, oauth.userId, oauth.clientId).catch(() => {});
+    }
+
     return {
       ok: true,
       ctx: {
@@ -192,11 +206,20 @@ export async function resolveMcpAuth(req: Request): Promise<McpAuth> {
         },
         role: resolved.membership.role,
         isLocal: false,
-        // OAuth consent grants the client the user's access, not a scope subset.
-        scopes: [],
         // Per connection, not per user: two agents one person authorised get
         // independent budgets, so a runaway one cannot starve the other.
         credentialKey: `oauth:${oauth.clientId}:${oauth.userId}`,
+        // What the user granted this client on the consent screen. A connection
+        // made before consent asked has no stored grant, and `[]` is
+        // unrestricted, so those keep the access they had rather than breaking
+        // mid-flight. New connections always carry a real list.
+        scopes: binding?.scopes ?? [],
+        // Keyed off `scopes`, not off the row: a binding written before this
+        // shipped has NULL scopes and `allow_destructive` sitting at its column
+        // default of false, so reading the flag directly would quietly strip
+        // delete access from every live connection. NULL scopes means "never
+        // asked", and never-asked keeps what it had.
+        allowDestructive: binding?.scopes == null ? true : binding.allowDestructive,
       },
     };
   }
@@ -252,6 +275,7 @@ function canWriteCtx(ctx: McpContext): boolean {
  * scope-limited.
  */
 export function toolAllowedByScope(tool: McpTool, ctx: McpContext): boolean {
+  if (tool.destructive && !ctx.allowDestructive) return false;
   if (ctx.scopes.length === 0) return true;
   return keyScopesSatisfy(ctx.scopes, tool.scope);
 }
@@ -398,12 +422,27 @@ async function handleToolCall(
     return ok(id, toolError(auth.message));
   }
   if (!toolAllowedByScope(tool, auth.ctx)) {
+    // Two different refusals, and the difference is actionable: a missing scope
+    // is fixed by minting a better credential, a withheld destructive grant by
+    // reconnecting and choosing differently. One message for both would send
+    // the agent looking in the wrong place.
+    if (tool.destructive && !auth.ctx.allowDestructive) {
+      logMcpCall({ tool: tool.name, denied: "destructive" });
+      return ok(
+        id,
+        toolError(
+          `"${tool.name}" deletes data, and this connection was not granted ` +
+            `that. Ask the person who connected it to reconnect and allow ` +
+            `deletion, or make the change without deleting.`,
+        ),
+      );
+    }
     const { resource, action } = tool.scope;
     logMcpCall({ tool: tool.name, denied: "scope", required: `${resource}:${action}` });
     return ok(
       id,
       toolError(
-        `This API key lacks the "${resource}:${action}" scope, which ` +
+        `This credential lacks the "${resource}:${action}" scope, which ` +
           `"${tool.name}" requires.`,
       ),
     );

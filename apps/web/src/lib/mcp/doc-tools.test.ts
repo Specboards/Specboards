@@ -120,6 +120,7 @@ const ctx: McpContext = {
   scopes: [],
   // Likewise no quota: the rate limit is applied by the RPC layer, not here.
   credentialKey: null,
+  allowDestructive: true,
 };
 
 function page(over: Partial<DocPageRecord> & { id: string }): DocPageRecord {

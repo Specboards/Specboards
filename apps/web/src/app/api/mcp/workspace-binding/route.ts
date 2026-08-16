@@ -1,6 +1,7 @@
 import { readJsonBody } from "@/lib/api/body";
 import { getBrowserSessionUser } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
+import { connectionGrantById } from "@/lib/mcp/connection-grants";
 import { recordMcpWorkspaceBinding } from "@/lib/mcp/workspace-binding";
 import { getMembershipFor } from "@/lib/workspace";
 
@@ -26,7 +27,11 @@ export async function POST(req: Request) {
 
   const parsed = await readJsonBody(req);
   if (!parsed.ok) return parsed.response;
-  const body = parsed.body as { clientId?: unknown; workspaceId?: unknown };
+  const body = parsed.body as {
+    clientId?: unknown;
+    workspaceId?: unknown;
+    grant?: unknown;
+  };
 
   const clientId = typeof body.clientId === "string" ? body.clientId : "";
   const workspaceId =
@@ -46,10 +51,18 @@ export async function POST(req: Request) {
     );
   }
 
+  // The grant is resolved from an id, never taken as a scope list off the wire.
+  // This body arrives from a browser mid-consent, so accepting arbitrary scopes
+  // here would let a crafted request widen a connection past what the screen
+  // offered. An unknown or absent id falls back to the default grant, which is
+  // the narrow one.
+  const grant = connectionGrantById(body.grant);
+
   await recordMcpWorkspaceBinding(db, {
     userId: user.id,
     clientId,
     workspaceId,
+    grant: { scopes: grant.scopes, allowDestructive: grant.allowDestructive },
   });
-  return Response.json({ ok: true });
+  return Response.json({ ok: true, grant: grant.id });
 }
