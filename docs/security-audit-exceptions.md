@@ -11,16 +11,27 @@ exception past its review-by date should be re-evaluated, not renewed by habit.
 
 ## Accepted exceptions
 
-### GHSA-frvp-7c67-39w9 — `@hono/node-server` serve-static path traversal
+None. `pnpm run audit` passes with an empty `ignoreGhsas`, so the gate is
+currently reporting on the whole production tree with nothing muted.
 
-- **Severity:** moderate (below the high/critical gate, but recorded so a full
-  audit stays clean and the acceptance is explicit).
-- **Why accepted:** the vulnerability is a Windows-only path traversal in
-  `serve-static` via an encoded backslash (`%5C`). Our deployment runs on Linux
-  (Fly.io), where the code path is unreachable. The app also does not serve
-  static files through this adapter; the dependency arrives transitively via
-  `@modelcontextprotocol/sdk`.
-- **Fix status:** the fix exists only in `@hono/node-server` 2.x, a major
-  version the MCP SDK does not yet accept.
-- **Review by:** 2026-10-01, or sooner if `@modelcontextprotocol/sdk` adopts
-  `@hono/node-server` 2.x (drop the exception then and take the upgrade).
+## Retired exceptions
+
+Kept so a re-opened alert is recognised as one we have already reasoned about,
+rather than triaged from scratch.
+
+### GHSA-frvp-7c67-39w9 - `@hono/node-server` serve-static path traversal
+
+- **Accepted:** 2026-07-23. **Retired:** 2026-08-16, fixed by upgrade.
+- **What it was:** a Windows-only path traversal in `serve-static` via an
+  encoded backslash (`%5C`). Accepted because our deployment runs on Linux
+  (Fly.io), where the code path is unreachable, and because the app does not
+  serve static files through this adapter at all: the dependency arrives
+  transitively via `@modelcontextprotocol/sdk`.
+- **Why it was accepted rather than fixed:** at the time the only fix was in
+  `@hono/node-server` 2.x, a major version the MCP SDK did not accept.
+- **How it was resolved:** the fix was later backported to the 1.x line in
+  1.19.15, which sits inside the `^1.19.9` range the SDK already allows. A
+  `pnpm.overrides` entry of `^1.19.15` floors it there. The SDK now also accepts
+  `^2.0.5`, but the override deliberately stays on 1.x: this is a security
+  patch, and the smallest bump that fixes it carries the least risk. Revisit
+  when there is a reason to be on 2.x beyond it being newer.
