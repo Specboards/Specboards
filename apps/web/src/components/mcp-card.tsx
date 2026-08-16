@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -73,8 +74,16 @@ export function McpCard({ endpoint }: { endpoint: string }) {
           update your backlog and specs. Agents can list and read items, change
           status and metadata, edit a spec&rsquo;s Markdown (committed to your
           repo), and break a card down into child specs. Add the URL below and
-          your client will walk you through signing in; the agent then acts as
-          you and inherits your workspace role.
+          your client will walk you through signing in, including choosing how
+          much access to grant it.{" "}
+          <Link
+            href="/docs/agents"
+            className="underline underline-offset-2 hover:text-foreground"
+          >
+            Connect your own agent
+          </Link>{" "}
+          covers the two ways to connect, what each grant allows, worked
+          authoring flows, and the request and write limits.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -95,8 +104,11 @@ export function McpCard({ endpoint }: { endpoint: string }) {
           <div className="space-y-2 pt-2">
             <CopyBlock value={claudeCodeKeyCmd} label="Claude Code with an API key" />
             <p className="text-xs text-muted-foreground">
-              Replace <code className="font-mono">sb_YOUR_KEY</code> with a key
-              from the API keys tab.
+              Replace <code className="font-mono">sb_YOUR_KEY</code> with an
+              agent&rsquo;s key from the Agents tab. A personal key from the API
+              keys tab works too, but it acts as you and inherits everything you
+              can do; an agent identity can be granted less and revoked on its
+              own.
             </p>
           </div>
         </details>
