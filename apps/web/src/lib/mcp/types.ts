@@ -75,6 +75,24 @@ export function optionalString(
 }
 
 /**
+ * An optional row cap for a list tool: absent means "no cap", any given value
+ * must be a positive integer within `max`.
+ *
+ * List tools that return a whole workspace are the surface an agent meets first
+ * on a board it did not set up, and the one most likely to blow its context
+ * before it has learned anything. Rejecting a bad limit loudly beats silently
+ * ignoring it, which would look to the caller like the cap did not work.
+ */
+export function optionalLimit(value: unknown, max: number): number | null {
+  if (value === undefined || value === null) return null;
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isInteger(n) || n < 1 || n > max) {
+    throw new Error(`"limit" must be a whole number between 1 and ${max}.`);
+  }
+  return n;
+}
+
+/**
  * Git-backed tools need a real workspace + database (they commit to GitHub).
  * Resolve both, or fail with a clear message in local file mode.
  */

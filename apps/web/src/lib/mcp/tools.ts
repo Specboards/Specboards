@@ -52,6 +52,7 @@ import { getStore, type GithubLink } from "@/lib/store";
 
 import { DOC_TOOLS } from "./doc-tools";
 import {
+  optionalLimit,
   optionalString,
   requireDbScope,
   requireString,
@@ -320,8 +321,11 @@ export const TOOLS: McpTool[] = [
     description:
       "List work items (specs and DB-native cards) in the caller's workspace " +
       "with their metadata. Optionally filter by status, product key, product " +
-      "group key (includes nested groups' products), or assignee user id. " +
-      "Returns lean rows; call read_item for full content.",
+      "group key (includes nested groups' products), assignee user id, " +
+      "release id, or cycle id, and cap the number of rows with `limit`. " +
+      "Returns lean rows; call read_item for full content. On a large " +
+      "workspace ALWAYS filter or pass `limit`: an unfiltered call returns " +
+      "every item in the workspace and can exceed your context.",
     inputSchema: {
       type: "object",
       properties: {
@@ -339,6 +343,26 @@ export const TOOLS: McpTool[] = [
         assignee: {
           type: "string",
           description: "Filter to items assigned to this user id.",
+        },
+        release: {
+          type: "string",
+          description:
+            "Filter to items scheduled into this release id (see " +
+            "list_releases). This is the id, not the release name.",
+        },
+        cycle: {
+          type: "string",
+          description:
+            "Filter to items scheduled into this cycle id (see list_cycles). " +
+            "Independent of `release`: an item can be in both.",
+        },
+        limit: {
+          type: "integer",
+          minimum: 1,
+          maximum: 500,
+          description:
+            "Return at most this many rows (1-500). Applied after the " +
+            "filters, in the same order the rows come back.",
         },
       },
       additionalProperties: false,
@@ -373,11 +397,16 @@ export const TOOLS: McpTool[] = [
       const status = typeof args.status === "string" ? args.status : undefined;
       const assignee =
         typeof args.assignee === "string" ? args.assignee : undefined;
-      return features
+      const release = typeof args.release === "string" ? args.release : undefined;
+      const cycle = typeof args.cycle === "string" ? args.cycle : undefined;
+      const limit = optionalLimit(args.limit, 500);
+      const rows = features
         .filter(
           (f) =>
             (!status || f.status === status) &&
             (!assignee || f.assigneeId === assignee) &&
+            (!release || f.releaseId === release) &&
+            (!cycle || f.cycleId === cycle) &&
             (!productId || f.productId === productId) &&
             (!groupProductIds ||
               (f.productId !== null && groupProductIds.has(f.productId))),
@@ -400,6 +429,7 @@ export const TOOLS: McpTool[] = [
           blockedByCount: f.blockedByCount,
           path: f.path,
         }));
+      return limit === null ? rows : rows.slice(0, limit);
     },
   },
   {
@@ -792,27 +822,72 @@ export const TOOLS: McpTool[] = [
       "of items scheduled into each. Pass a release `id` to update_item's " +
       "`releaseId` to schedule an item into it (the item must belong to the " +
       "release's product, or the release must be a portfolio release). Dated " +
-      "releases come first (ascending target date), undated last.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      "releases come first (ascending target date), undated last. Lean by " +
+      "default: pass `verbose: true` for each release's notes and release-notes " +
+      "body, which on a workspace with much release history is large.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        productId: {
+          type: "string",
+          description:
+            "Filter to one product's releases (see list_products for ids). " +
+            "Portfolio releases, which belong to no product, are excluded.",
+        },
+        status: {
+          type: "string",
+          enum: ["planned", "in_progress", "shipped"],
+          description: "Filter to releases in this state.",
+        },
+        verbose: {
+          type: "boolean",
+          description:
+            "Include `notes` and `releaseNotesBody`. Off by default: these are " +
+            "long-form prose and returning every release's costs far more " +
+            "context than the rest of the listing put together.",
+        },
+      },
+      additionalProperties: false,
+    },
     write: false,
     scope: { resource: "releases", action: "read" },
-    run: async (_args, ctx) => {
+    run: async (args, ctx) => {
       const releases = await listReleases(ctx.scope);
-      return releases.map((r) => ({
-        id: r.id,
-        name: r.name,
-        productId: r.productId,
-        status: r.status,
-        startDate: r.startDate,
-        targetDate: r.targetDate,
-        shippedDate: r.shippedDate,
-        notes: r.notes,
-        releaseNotesMode: r.releaseNotesMode,
-        releaseNotesBody: r.releaseNotesBody,
-        releaseNotesUrl: r.releaseNotesUrl,
-        customFields: r.customFields,
-        itemCount: r.itemCount,
-      }));
+      const productId =
+        typeof args.productId === "string" ? args.productId : undefined;
+      const status = typeof args.status === "string" ? args.status : undefined;
+      const verbose = args.verbose === true;
+      return releases
+        .filter(
+          (r) =>
+            (!productId || r.productId === productId) &&
+            (!status || r.status === status),
+        )
+        .map((r) => ({
+          id: r.id,
+          name: r.name,
+          productId: r.productId,
+          status: r.status,
+          startDate: r.startDate,
+          targetDate: r.targetDate,
+          shippedDate: r.shippedDate,
+          releaseNotesMode: r.releaseNotesMode,
+          releaseNotesUrl: r.releaseNotesUrl,
+          customFields: r.customFields,
+          itemCount: r.itemCount,
+          // Withheld unless asked for, but say so rather than just omitting the
+          // keys: an agent that cannot see `notes` should know it exists and
+          // how to get it, not conclude the release has none.
+          ...(verbose
+            ? { notes: r.notes, releaseNotesBody: r.releaseNotesBody }
+            : {
+                notesOmitted:
+                  (r.notes?.length ?? 0) > 0 ||
+                  (r.releaseNotesBody?.length ?? 0) > 0
+                    ? "Pass verbose: true to include notes and releaseNotesBody."
+                    : undefined,
+              }),
+        }));
     },
   },
   {

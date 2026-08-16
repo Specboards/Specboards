@@ -260,10 +260,61 @@ function ambiguous(candidates: RepoCoords[], where: string): Error {
   );
 }
 
+/**
+ * Every other repo in the workspace, as `owner/name`, for a not-found message.
+ * Best effort: if this lookup fails the caller still gets the original error.
+ */
+async function otherRepoSlugs(
+  workspaceId: string,
+  exclude: RepoCoords,
+): Promise<string[]> {
+  try {
+    const db = getDb()!;
+    const all = await db
+      .select(REPO_COLUMNS)
+      .from(repositories)
+      .where(eq(repositories.workspaceId, workspaceId));
+    return all.filter((r) => r.repoId !== exclude.repoId).map(repoSlug);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * What to say when the artifact is not in the repo we looked in.
+ *
+ * Name the way out, not just the wall. The repo is usually *inferred* (the
+ * item's own spec repo, then its product's, then the workspace's), so an agent
+ * that opened its pull request in a different connected repo gets a true
+ * statement it cannot act on: the repo it names is not the repo it used, and
+ * nothing tells it that a `repo` argument exists. The ambiguous-repo error
+ * already points the way; this one used to dead-end.
+ *
+ * `alternatives` is empty when the caller named the repo explicitly, since
+ * someone who passed `repo` does not need to be told the argument exists.
+ */
+export function notFoundMessage(
+  kind: GithubLinkInput["kind"],
+  searched: string,
+  alternatives: string[],
+): string {
+  const what = kind.replace("_", " ");
+  if (alternatives.length === 0) {
+    return `That ${what} was not found in ${searched}.`;
+  }
+  return (
+    `That ${what} was not found in ${searched}, which is the repository ` +
+    `this item resolves to. If it lives in another connected repository ` +
+    `(${alternatives.join(", ")}), pass repo: "owner/name".`
+  );
+}
+
 /** Resolve a link's GitHub metadata (title/state/url) for caching. */
 async function resolveMetadata(
   repo: RepoCoords,
   input: GithubLinkInput,
+  /** Named in the not-found message so the caller can retry against them. */
+  alternatives: string[] = [],
 ): Promise<GithubArtifactMeta> {
   const db = getDb()!;
   const app = await getGithubApp(db);
@@ -283,7 +334,7 @@ async function resolveMetadata(
   } catch (err) {
     if (isNotFound(err)) {
       throw new InvalidGithubLinkError(
-        `That ${input.kind.replace("_", " ")} was not found in ${repo.owner}/${repo.name}.`,
+        notFoundMessage(input.kind, repoSlug(repo), alternatives),
       );
     }
     throw err;
@@ -325,7 +376,14 @@ export async function addFeatureGithubLink(
     input.repo,
   );
 
-  const meta = await resolveMetadata(repo, input);
+  // Only worth naming alternatives when the repo was inferred: a caller who
+  // named one explicitly and got it wrong does not need to be told the argument
+  // exists.
+  const meta = await resolveMetadata(
+    repo,
+    input,
+    input.repo ? [] : await otherRepoSlugs(scope.workspaceId, repo),
+  );
   const resolved: ResolvedGithubLink = {
     repoId: repo.repoId,
     kind: input.kind,
