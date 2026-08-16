@@ -96,6 +96,10 @@ const ctx: McpContext = {
   role: "member",
   isLocal: false,
   scopes: [],
+  // Neither gate is what these cases exercise: they are about filtering and
+  // capping, which run inside the tool rather than in the RPC layer above it.
+  credentialKey: null,
+  allowDestructive: true,
 };
 
 const run = (name: string, args: Record<string, unknown>) =>
