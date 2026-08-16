@@ -1905,6 +1905,29 @@ export const mcpWorkspaceBindings = pgTable(
     workspaceId: uuid("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
+    /**
+     * The Specboards scopes this connection was granted at consent time.
+     *
+     * NULL means no grant was ever recorded, which is every connection made
+     * before consent asked the question. Those keep their existing behaviour
+     * (the full access of the authorizing user) rather than breaking mid-flight;
+     * `[]` would mean the same thing to `keyScopesSatisfy` but by accident, so
+     * the two are kept distinct: NULL is "never asked", `[]` is unreachable.
+     *
+     * Better Auth's own `scopes` are the OIDC set (openid/profile/email/
+     * offline_access) and cannot carry an application grant, so this is stored
+     * alongside the workspace choice the consent screen already records.
+     */
+    scopes: text("scopes").array(),
+    /**
+     * Whether the connection may call the tools that destroy data
+     * (`McpTool.destructive`). Separate from `scopes` because it cannot be
+     * expressed as one: `delete_item` and `update_item` both require
+     * `features:write`, so no resource scope distinguishes them.
+     */
+    allowDestructive: boolean("allow_destructive").notNull().default(false),
+    /** Last time this connection authenticated a call, for the settings list. */
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
