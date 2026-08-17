@@ -131,6 +131,25 @@ export function commonModels(models: string[]): string[] {
   return chat.length > 0 ? chat : models;
 }
 
+/**
+ * What the save request should say about the credential.
+ *
+ * Tri-state, matching the route: the field absent means "keep the stored key",
+ * null destroys it, a string replaces it. Both mistakes here are expensive in
+ * opposite directions - an absent field where null was meant leaves a key the
+ * admin believes they revoked, and a null where absent was meant silently
+ * breaks the connection because someone renamed the model. A typed key wins
+ * over a pending removal, being the later and more specific instruction.
+ */
+export function credentialPatch(
+  typed: string,
+  dropStoredKey: boolean,
+): { apiKey?: string | null } {
+  if (typed.trim()) return { apiKey: typed.trim() };
+  if (dropStoredKey) return { apiKey: null };
+  return {};
+}
+
 /** A message that reads as what it is, rather than as more helper text. */
 function NoticeLine({ notice }: { notice: Notice }) {
   if (!notice) return null;
@@ -181,6 +200,12 @@ export function ModelProviderCard({
   const [baseUrl, setBaseUrl] = useState(initialProvider?.baseUrl ?? "");
   const [model, setModel] = useState(initialProvider?.model ?? "");
   const [apiKey, setApiKey] = useState("");
+  // Set from the edit form to destroy the stored key while keeping the
+  // endpoint, which is revocation without having to rebuild the connection.
+  const [dropKey, setDropKey] = useState(false);
+  // Disconnecting destroys a credential that cannot be read back, so it asks
+  // first. Inline rather than window.confirm(), which blocks the extension.
+  const [confirming, setConfirming] = useState(false);
   const [status, setStatus] = useState<Notice>(null);
   const [testResult, setTestResult] = useState<Notice>(null);
   const [pending, startTransition] = useTransition();
@@ -205,9 +230,14 @@ export function ModelProviderCard({
   /** Only worth offering the toggle when the filter actually hid something. */
   const hiddenCount = models && shortlist ? models.length - shortlist.length : 0;
   /** A stored key can only be reused against the endpoint it was stored for. */
-  const hasUsableStoredKey = Boolean(
+  const storedKeyForThisEndpoint = Boolean(
     provider?.credentialHint && provider && sameEndpoint(provider.baseUrl, baseUrl),
   );
+  /**
+   * And not once this edit has asked for it to be destroyed: the picker must
+   * not keep working off a credential the form says is on its way out.
+   */
+  const hasUsableStoredKey = storedKeyForThisEndpoint && !dropKey;
   const canProbe =
     baseUrl.trim().length > 0 &&
     (apiKey.trim().length > 0 || hasUsableStoredKey || selected.keyless);
@@ -218,6 +248,7 @@ export function ModelProviderCard({
     setBaseUrl(startingUrl);
     setModel(provider?.model ?? "");
     setApiKey("");
+    setDropKey(false);
     setStatus(null);
     setModels(null);
     setListNote(null);
@@ -245,6 +276,7 @@ export function ModelProviderCard({
     setBaseUrl(preset);
     setModel("");
     setApiKey("");
+    setDropKey(false);
     setFreeText(false);
     forgetModels();
   }
@@ -326,9 +358,7 @@ export function ModelProviderCard({
         body: JSON.stringify({
           baseUrl,
           model,
-          // Only send the key when one was typed. Omitting it means "keep the
-          // stored one", so editing the model name does not wipe the credential.
-          ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+          ...credentialPatch(apiKey, dropKey),
         }),
       });
       const data = (await res.json().catch(() => ({}))) as {
@@ -339,11 +369,19 @@ export function ModelProviderCard({
         setStatus({ kind: "error", message: data.error ?? "Could not save." });
         return;
       }
+      const removed = dropKey && !apiKey.trim();
       setProvider(data.provider);
       setApiKey("");
+      setDropKey(false);
       setOpen(false);
       setTestResult(null);
-      setStatus({ kind: "ok", message: "Model connection saved." });
+      setStatus({
+        kind: "ok",
+        message: removed
+          ? "Saved, and the stored key destroyed. The key itself is still valid " +
+            "at the provider until you revoke it there."
+          : "Model connection saved.",
+      });
     });
   }
 
@@ -357,7 +395,13 @@ export function ModelProviderCard({
       }
       setProvider(null);
       setTestResult(null);
-      setStatus({ kind: "ok", message: "Model disconnected and the key destroyed." });
+      setConfirming(false);
+      setStatus({
+        kind: "ok",
+        message:
+          "Model disconnected and the stored key destroyed. The key itself is " +
+          "still valid at the provider until you revoke it there.",
+      });
     });
   }
 
@@ -449,7 +493,7 @@ export function ModelProviderCard({
 
             <NoticeLine notice={testResult} />
 
-            {canManage && (
+            {canManage && !confirming && (
               <div className="flex flex-wrap gap-2">
                 <Button
                   type="button"
@@ -467,11 +511,57 @@ export function ModelProviderCard({
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={disconnect}
-                  disabled={pending}
+                  onClick={() => setConfirming(true)}
                 >
                   Disconnect
                 </Button>
+              </div>
+            )}
+
+            {canManage && confirming && (
+              <div className="space-y-2 rounded border border-destructive/50 bg-destructive/10 p-3">
+                <p className="text-sm font-medium text-destructive">
+                  Disconnect this model?
+                </p>
+                {/* Naming the consequences is the point of this step. A stored
+                    key cannot be read back, so "undo" means going and finding
+                    it again, and the half people forget is that destroying our
+                    copy is not the same as revoking it at the provider. */}
+                <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+                  <li>
+                    Assistant features that need inference stop working until a
+                    model is connected again.
+                  </li>
+                  <li>
+                    {provider.credentialHint
+                      ? `The stored key ••••${provider.credentialHint} is destroyed here and cannot be recovered. It stays valid at the provider until you revoke it there.`
+                      : "The endpoint and model settings are destroyed. No key is stored for this connection."}
+                  </li>
+                  <li>Your specs, boards and items are not affected.</li>
+                </ul>
+                <div className="flex flex-wrap gap-2 pt-1">
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    size="sm"
+                    onClick={disconnect}
+                    disabled={pending}
+                  >
+                    {pending
+                      ? "Disconnecting…"
+                      : provider.credentialHint
+                        ? "Disconnect and destroy the key"
+                        : "Disconnect"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setConfirming(false)}
+                  >
+                    Cancel
+                  </Button>
+                </div>
               </div>
             )}
           </div>
@@ -543,20 +633,56 @@ export function ModelProviderCard({
                 value={apiKey}
                 onChange={(e) => {
                   setApiKey(e.target.value);
+                  // Typing a key is the clearer instruction, so it cancels a
+                  // pending removal rather than fighting it at save time.
+                  setDropKey(false);
                   forgetModels();
                 }}
                 placeholder={
-                  provider?.credentialHint && hasUsableStoredKey
+                  hasUsableStoredKey && provider?.credentialHint
                     ? `Leave blank to keep ••••${provider.credentialHint}`
-                    : selected.keyless
-                      ? "Leave blank if the endpoint needs no key"
-                      : "Paste your key"
+                    : dropKey
+                      ? "Paste a key, or leave blank to store none"
+                      : selected.keyless
+                        ? "Leave blank if the endpoint needs no key"
+                        : "Paste your key"
                 }
                 autoComplete="off"
               />
               <p className="text-xs text-muted-foreground">
-                Encrypted at rest and never sent back to the browser.
+                Encrypted at rest and never sent back to the browser. Pasting a
+                new one here rotates it: the old key is destroyed on save and the
+                next call uses the new one.
               </p>
+
+              {/* Revocation without rebuilding the connection. Only offered
+                  when there is something to revoke, and it takes effect on
+                  save like every other change in this form. */}
+              {storedKeyForThisEndpoint &&
+                (dropKey ? (
+                  <p className="text-xs text-destructive">
+                    The stored key will be destroyed when you save. Remember to
+                    revoke it at the provider too.{" "}
+                    <button
+                      type="button"
+                      className="underline underline-offset-2"
+                      onClick={() => setDropKey(false)}
+                    >
+                      Keep it instead
+                    </button>
+                  </p>
+                ) : (
+                  <button
+                    type="button"
+                    className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                    onClick={() => {
+                      setDropKey(true);
+                      forgetModels();
+                    }}
+                  >
+                    Remove the stored key without disconnecting
+                  </button>
+                ))}
 
               <div className="pt-1">
                 <Button

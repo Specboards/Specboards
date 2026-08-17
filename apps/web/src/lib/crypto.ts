@@ -7,7 +7,8 @@ import {
 
 /**
  * Authenticated symmetric encryption for secrets at rest (GitHub App private
- * key, webhook secret). AES-256-GCM with a per-value random salt + IV; the key
+ * key, webhook secret, model provider API key). AES-256-GCM with a per-value
+ * random salt + IV; the key
  * is derived from `BETTER_AUTH_SECRET` via scrypt, so no extra key management.
  *
  * Stored format is a single base64 blob: salt(16) | iv(12) | tag(16) | ct.

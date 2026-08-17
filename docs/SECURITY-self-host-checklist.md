@@ -55,12 +55,14 @@ roughly by how much damage getting them wrong causes.
 - [ ] **Set `BETTER_AUTH_SECRET` (32+ characters, `openssl rand -hex 32`).**
       One secret keys three things: Better Auth session signing, the GitHub
       install-cookie HMAC, and AES-256-GCM encryption of secrets at rest (the
-      GitHub App private key and webhook secret). Compose refuses to start
+      GitHub App private key, webhook secret, and model provider API keys).
+      Compose refuses to start
       without it, and the app refuses a value under 32 characters rather than
       deriving a weak key.
 - [ ] Understand what rotating it costs **before** you rotate it: everyone is
-      signed out, and any GitHub App credentials encrypted under the old key
-      become undecryptable, so the GitHub integration must be set up again.
+      signed out, and any GitHub App credentials or model provider keys
+      encrypted under the old key become undecryptable, so the GitHub
+      integration and every workspace's model connection must be set up again.
       Unlike the database role passwords above, this is a migration rather than
       a config edit.
 - [ ] Keep secrets in `infra/.env` (gitignored) or your platform's secret store,
@@ -111,7 +113,30 @@ a live backstop behind the app-code workspace filters.
       see `docs/RUNBOOK-webhook-egress-policy.md` for the constraints and
       options.
 
-## 6. Backups
+## 6. Model provider (bring your own model)
+
+Only relevant once a workspace connects its own inference. Full detail in
+`docs/RUNBOOK-model-provider-credentials.md`.
+
+- [ ] Know that the provider API key is encrypted at rest under
+      `BETTER_AUTH_SECRET`, like the GitHub credentials above, so rotating that
+      secret makes every stored provider key undecryptable and each workspace
+      must paste its key again.
+- [ ] **Set `SPECBOARDS_MODEL_ALLOW_PRIVATE=1` only if** your inference runs on
+      a private address inside your own network, which is the normal on-prem
+      case. It permits private/loopback targets and plain http for the model
+      endpoint, and drops connection pinning for it. A multi-tenant deployment
+      refuses to boot with it set.
+- [ ] Leave it unset otherwise: the model endpoint is then held to the same
+      HTTPS-only, globally-routable, pinned-connection policy as webhooks.
+- [ ] Do not reach for `SPECBOARDS_WEBHOOK_ALLOW_PRIVATE` to solve a model
+      problem. They are separate flags so that allowing a local model does not
+      also re-point webhook deliveries at your internal network.
+- [ ] Tell workspace owners that disconnecting a model destroys our copy of the
+      key but does **not** revoke it at the vendor. On a suspected leak, revoke
+      at the vendor first, then disconnect here.
+
+## 7. Backups
 
 - [ ] **Take regular backups** of the Postgres volume / database (`pg_dump` or a
       volume snapshot on a schedule).
@@ -122,7 +147,7 @@ a live backstop behind the app-code workspace filters.
 - [ ] Apply the same access controls and retention limits to backup storage as
       to the database itself.
 
-## 7. Application configuration
+## 8. Application configuration
 
 - [ ] Review `SPECBOARDS_BLOCK_PUBLIC_EMAIL_DOMAINS`: set it to `true` if you
       want to reject sign-ups from consumer email providers (gmail.com,
@@ -141,7 +166,7 @@ a live backstop behind the app-code workspace filters.
       clients: blunter, but not forgeable. On Fly this does not arise, because
       `Fly-Client-IP` is set at the edge and takes precedence.
 
-## 8. License notices (AGPL)
+## 9. License notices (AGPL)
 
 - [ ] The app ships an in-app source + license notice at `/legal`, linked from
       the sidebar footer, satisfying the AGPLv3 source-availability obligation

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   commonModels,
+  credentialPatch,
   ModelProviderCard,
   modelPickerOptions,
   type ModelProviderView,
@@ -95,6 +96,47 @@ describe("with a connection", () => {
     expect(html).not.toContain("Disconnect");
     // Still shows what is configured, which is the point of an owner-only tab.
     expect(html).toContain("gpt-4o-mini");
+  });
+
+  it("does not arm the disconnect until it is asked for", () => {
+    // Disconnecting destroys a credential that cannot be read back, so the
+    // first click must open the confirmation rather than perform the delete.
+    // What this pins is that the confirmation is not sitting open by default,
+    // which would train people to click through it.
+    const html = render(connected);
+    expect(html).toContain("Disconnect");
+    expect(html).not.toContain("Disconnect this model?");
+    expect(html).not.toContain("Disconnect and destroy the key");
+  });
+});
+
+/**
+ * What a save says about the credential.
+ *
+ * The tri-state is the whole of rotation and revocation from the browser's
+ * side, and both ways of getting it wrong are quiet: sending nothing where null
+ * was meant leaves a key an admin believes they revoked, and sending null where
+ * nothing was meant breaks the connection because someone edited the model
+ * name. Neither shows up as an error.
+ */
+describe("the credential field on a save", () => {
+  it("is absent when nothing was typed, keeping the stored key", () => {
+    expect(credentialPatch("", false)).toEqual({});
+    expect("apiKey" in credentialPatch("   ", false)).toBe(false);
+  });
+
+  it("is null when the stored key was asked to go", () => {
+    expect(credentialPatch("", true)).toEqual({ apiKey: null });
+  });
+
+  it("carries a typed key, trimmed, which is what rotation is", () => {
+    expect(credentialPatch("  sk-live-123  ", false)).toEqual({ apiKey: "sk-live-123" });
+  });
+
+  it("lets a typed key override a pending removal", () => {
+    // Asking to remove the key and then pasting one is a change of mind, not a
+    // request to destroy the key that was just typed.
+    expect(credentialPatch("sk-new", true)).toEqual({ apiKey: "sk-new" });
   });
 });
 
