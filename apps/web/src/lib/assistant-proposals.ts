@@ -2,6 +2,7 @@ import {
   and,
   assistantMessages,
   eq,
+  isNull,
   users,
   type Database,
 } from "@specboards/db";
@@ -137,26 +138,86 @@ async function loadProposal(
   return { feature, proposed: proposal, baseSha: row.baseSha };
 }
 
-/** Stamp the decision on the message and return the turn as it now reads. */
-async function settle(
+/**
+ * Take the decision, atomically, *before* anything is applied.
+ *
+ * The check in {@link loadProposal} is for the message it produces, not for
+ * safety: between reading the row and writing to the item, a second request
+ * (two people with the panel open, or one person double-clicking Accept) can do
+ * the whole thing too, and the item gets written twice. A conditional update is
+ * the only operation here that is atomic, so it is what decides who won, and it
+ * runs first. If the write then fails the claim is released, which is why this
+ * is a claim rather than a record.
+ */
+async function claim(
   db: Database,
   scope: WorkspaceScope,
   messageId: string,
   outcome: "accepted" | "rejected",
-  commitSha: string | null,
-): Promise<AssistantMessageView> {
+): Promise<{ resolvedAt: Date }> {
   const now = new Date();
-  const [updated] = await db
+  const claimed = await db
     .update(assistantMessages)
     .set({
       proposalOutcome: outcome,
       proposalResolvedBy: scope.userId,
       proposalResolvedAt: now,
-      proposalCommitSha: commitSha,
     })
+    .where(
+      and(
+        eq(assistantMessages.id, messageId),
+        // The whole guard. Anything already decided is not ours to decide.
+        isNull(assistantMessages.proposalOutcome),
+      ),
+    )
+    .returning({ id: assistantMessages.id });
+  if (claimed.length === 0) {
+    throw new ProposalSettledError("Someone already decided about this proposal.");
+  }
+  return { resolvedAt: now };
+}
+
+/** Put a claim back when the write it was taken for did not happen. */
+async function release(db: Database, messageId: string): Promise<void> {
+  await db
+    .update(assistantMessages)
+    .set({
+      proposalOutcome: null,
+      proposalResolvedBy: null,
+      proposalResolvedAt: null,
+    })
+    .where(eq(assistantMessages.id, messageId));
+}
+
+/** The turn as it now reads, for the panel to swap in. */
+async function settled(
+  db: Database,
+  scope: WorkspaceScope,
+  messageId: string,
+  outcome: "accepted" | "rejected",
+  resolvedAt: Date,
+  commitSha: string | null,
+): Promise<AssistantMessageView> {
+  if (commitSha) {
+    // Written after the commit exists rather than guessed before it: a sha on a
+    // row that no commit matches is worse than no sha.
+    await db
+      .update(assistantMessages)
+      .set({ proposalCommitSha: commitSha })
+      .where(eq(assistantMessages.id, messageId));
+  }
+  const [row] = await db
+    .select({
+      id: assistantMessages.id,
+      content: assistantMessages.content,
+      authorId: assistantMessages.authorId,
+      model: assistantMessages.model,
+      createdAt: assistantMessages.createdAt,
+    })
+    .from(assistantMessages)
     .where(eq(assistantMessages.id, messageId))
-    .returning();
-  if (!updated) throw new ProposalNotFoundError("That proposal is no longer here.");
+    .limit(1);
+  if (!row) throw new ProposalNotFoundError("That proposal is no longer here.");
 
   const [who] = await db
     .select({ name: users.name })
@@ -165,20 +226,20 @@ async function settle(
     .limit(1);
 
   return {
-    id: updated.id,
+    id: row.id,
     role: "assistant",
-    content: updated.content,
-    authorId: updated.authorId,
+    content: row.content,
+    authorId: row.authorId,
     // Not resolved: the panel already holds the thread and only replaces the
     // one turn, so it keeps the author name it loaded. Looking it up again
     // would be a query to restore a value the caller never lost.
     authorName: null,
-    model: updated.model,
-    createdAt: updated.createdAt.toISOString(),
+    model: row.model,
+    createdAt: row.createdAt.toISOString(),
     proposal: {
       outcome,
       resolvedByName: who?.name ?? null,
-      resolvedAt: now.toISOString(),
+      resolvedAt: resolvedAt.toISOString(),
       commitSha,
     },
   };
@@ -200,8 +261,9 @@ export async function rejectProposal(
   messageId: string,
 ): Promise<ProposalResult> {
   const { feature } = await loadProposal(db, scope, specId, messageId);
+  const { resolvedAt } = await claim(db, scope, messageId, "rejected");
   return {
-    message: await settle(db, scope, messageId, "rejected", null),
+    message: await settled(db, scope, messageId, "rejected", resolvedAt, null),
     body: feature.content,
   };
 }
@@ -237,32 +299,58 @@ export async function acceptProposal(
     );
   }
 
+  // Claimed before the write, so a double-click cannot apply the same text
+  // twice. Released if the write does not happen, so a refusal at the repo
+  // leaves a proposal somebody can still act on rather than one marked
+  // accepted with nothing to show for it.
+  const { resolvedAt } = await claim(db, scope, messageId, "accepted");
+
   if (feature.isDbNative) {
     // A card's body is a database column, so the human path is the ordinary
     // patch and so is this one. `patchFeature` does its own product-write check
     // and writes the change ledger, which is where the item's history of this
     // edit comes from.
-    await patchFeature(specId, { details: body }, scope);
+    try {
+      await patchFeature(specId, { details: body }, scope);
+    } catch (err) {
+      await release(db, messageId);
+      throw err;
+    }
     return {
-      message: await settle(db, scope, messageId, "accepted", null),
+      message: await settled(db, scope, messageId, "accepted", resolvedAt, null),
       body,
     };
   }
 
-  const result = await updateSpecContent(db, scope, specId, body, {
-    // Not a pre-built message: the write path decides whether the acting user
-    // also needs a co-author trailer, which depends on whose token authors the
-    // commit, and that is not knowable here.
-    assistantDrafted: true,
-    // Guarded against the version the model was shown, not against whatever is
-    // there now. A spec someone edited in the meantime is merged with, exactly
-    // as it would be for a human whose editor had been open that long, and only
-    // a genuine overlap is refused.
-    ...(baseSha ? { expectedBlobSha: baseSha } : {}),
-  });
+  let result;
+  try {
+    result = await updateSpecContent(db, scope, specId, body, {
+      // Not a pre-built message: the write path decides whether the acting user
+      // also needs a co-author trailer, which depends on whose token authors the
+      // commit, and that is not knowable here.
+      assistantDrafted: true,
+      // Guarded against the version the model was shown, not against whatever is
+      // there now. A spec someone edited in the meantime is merged with, exactly
+      // as it would be for a human whose editor had been open that long, and only
+      // a genuine overlap is refused.
+      ...(baseSha ? { expectedBlobSha: baseSha } : {}),
+    });
+  } catch (err) {
+    // Most importantly a conflict: the reviewer has to be able to come back to
+    // this proposal once the collision is sorted out.
+    await release(db, messageId);
+    throw err;
+  }
 
   return {
-    message: await settle(db, scope, messageId, "accepted", result.commitSha),
+    message: await settled(
+      db,
+      scope,
+      messageId,
+      "accepted",
+      resolvedAt,
+      result.commitSha,
+    ),
     body: result.mergedBody ?? body,
     commitSha: result.commitSha,
     ...(result.pullRequest

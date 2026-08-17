@@ -535,6 +535,41 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
       ).rejects.toThrow(proposals.ProposalSettledError);
     });
 
+    it("applies once when two accepts race", async () => {
+      const turn = await propose();
+      // The window the sequential check cannot close: two people with the panel
+      // open, or one person double-clicking. Both requests read an unresolved
+      // proposal, and without an atomic claim both go on to write.
+      const results = await Promise.allSettled([
+        proposals.acceptProposal(db, asOwner, specId, turn.id),
+        proposals.acceptProposal(db, asOwner, specId, turn.id),
+      ]);
+      expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+      expect(await bodyNow()).toBe(NEW_BODY);
+
+      const [row] = await sql<{ n: string }[]>`
+        select count(*) as n from assistant_messages
+        where id = ${turn.id} and proposal_outcome = 'accepted'`;
+      expect(row!.n).toBe("1");
+    });
+
+    it("leaves a proposal open when the write it was accepted for fails", async () => {
+      const turn = await propose();
+      // An empty body is refused before anything is claimed, so the proposal
+      // must still be there to act on afterwards. A card marked accepted with
+      // nothing applied is the worst of both.
+      await expect(
+        proposals.acceptProposal(db, asOwner, specId, turn.id, { body: "   " }),
+      ).rejects.toThrow(proposals.ProposalInvalidError);
+
+      const thread = await svc.listAssistantThread(db, asOwner, specId);
+      expect(thread[1]!.proposal!.outcome).toBeNull();
+      expect(await bodyNow()).toBe(ITEM_BODY);
+      // And it can still be accepted properly.
+      await proposals.acceptProposal(db, asOwner, specId, turn.id);
+      expect(await bodyNow()).toBe(NEW_BODY);
+    });
+
     it("refuses someone who can read the item but not change it", async () => {
       const turn = await propose();
       // A workspace member with no role on the product. They can see the item
