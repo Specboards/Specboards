@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 
 import { EmptyState } from "@/components/empty-state";
+import { LocalTime } from "@/components/local-time";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -24,14 +25,17 @@ export interface ApiKeyView {
 
 type Status = { kind: "ok" | "error"; message: string } | null;
 
-function fmt(iso: string | null): string {
-  if (!iso) return "never";
-  return new Date(iso).toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-}
+/**
+ * Date-only options, hoisted so the value is a stable identity rather than a
+ * fresh object each render. See {@link LocalTime} for why a timestamp is a
+ * component and not a string: formatting one during SSR breaks hydration and
+ * takes this card's buttons with it.
+ */
+const DATE_ONLY: Intl.DateTimeFormatOptions = {
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+};
 
 export function ApiKeysCard({ initialKeys }: { initialKeys: ApiKeyView[] }) {
   const [keys, setKeys] = useState<ApiKeyView[]>(initialKeys);
@@ -231,8 +235,19 @@ export function ApiKeysCard({ initialKeys }: { initialKeys: ApiKeyView[] }) {
                   <p className="truncate text-sm font-medium">{k.name}</p>
                   <p className="text-xs text-muted-foreground">
                     <code className="font-mono">{k.prefix}…</code> · created{" "}
-                    {fmt(k.createdAt)} · last used {fmt(k.lastUsedAt)}
-                    {k.expiresAt ? ` · expires ${fmt(k.expiresAt)}` : ""}
+                    <LocalTime iso={k.createdAt} options={DATE_ONLY} fallback="never" />{" "}
+                    · last used{" "}
+                    <LocalTime iso={k.lastUsedAt} options={DATE_ONLY} fallback="never" />
+                    {k.expiresAt ? (
+                      <>
+                        {" · expires "}
+                        <LocalTime
+                          iso={k.expiresAt}
+                          options={DATE_ONLY}
+                          fallback="never"
+                        />
+                      </>
+                    ) : null}
                   </p>
                 </div>
                 <Button

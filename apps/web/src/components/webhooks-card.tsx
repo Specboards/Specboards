@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 
 import { EmptyState } from "@/components/empty-state";
+import { LocalTime } from "@/components/local-time";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -509,14 +510,18 @@ export function WebhooksCard({
   );
 }
 
-function formatWhen(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
+/**
+ * Delivery-log format, hoisted so the value is a stable identity rather than a
+ * fresh object each render. See {@link LocalTime} for why a timestamp is a
+ * component and not a string: formatting one during SSR breaks hydration and
+ * takes this card's buttons, including Redeliver, with it.
+ */
+const DELIVERY_TIME: Intl.DateTimeFormatOptions = {
+  month: "short",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+};
 
 /** Recent deliveries for one endpoint, with a per-row redeliver action. */
 function DeliveryLog({
@@ -585,7 +590,7 @@ function DeliveryLog({
                 ) : null}
               </td>
               <td className="whitespace-nowrap px-2 py-1.5 text-muted-foreground">
-                {formatWhen(d.createdAt)}
+                <LocalTime iso={d.createdAt} options={DELIVERY_TIME} />
               </td>
               <td className="px-2 py-1.5 text-right">
                 <Button

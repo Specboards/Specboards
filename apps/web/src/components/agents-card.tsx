@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 
 import { EmptyState } from "@/components/empty-state";
+import { LocalTime } from "@/components/local-time";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -59,14 +60,17 @@ const EXPIRY_CHOICES = [
   { value: "", label: "Never expires" },
 ];
 
-function fmt(iso: string | null): string {
-  if (!iso) return "never";
-  return new Date(iso).toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-}
+/**
+ * Date-only options, shared so the value is a stable identity rather than a
+ * fresh object on every render. See {@link LocalTime} for why a timestamp is a
+ * component here and not a string: formatting one during SSR breaks hydration
+ * and takes this card's buttons with it.
+ */
+const DATE_ONLY: Intl.DateTimeFormatOptions = {
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+};
 
 /** "12 read, 4 write" - enough to judge an agent without opening anything. */
 function describeScopes(scopes: string[]): string {
@@ -528,8 +532,17 @@ export function AgentsCard({
                         <>no live key · </>
                       )}
                       {describeScopes(a.scopes)} · last used{" "}
-                      {fmt(a.key?.lastUsedAt ?? null)} · expires{" "}
-                      {fmt(a.key?.expiresAt ?? null)}
+                      <LocalTime
+                        iso={a.key?.lastUsedAt ?? null}
+                        options={DATE_ONLY}
+                        fallback="never"
+                      />{" "}
+                      · expires{" "}
+                      <LocalTime
+                        iso={a.key?.expiresAt ?? null}
+                        options={DATE_ONLY}
+                        fallback="never"
+                      />
                     </p>
                     <p className="text-xs text-muted-foreground">
                       {granted || "No product access"}

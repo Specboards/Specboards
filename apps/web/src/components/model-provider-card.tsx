@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 
 import { EmptyState } from "@/components/empty-state";
+import { LocalTime } from "@/components/local-time";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -99,27 +100,6 @@ export function modelPickerOptions(
 ): string[] {
   if (!models || models.length === 0) return [];
   return configured && !models.includes(configured) ? [configured, ...models] : models;
-}
-
-/**
- * A timestamp that does not break the page.
- *
- * `toLocaleString()` renders in the server's timezone during SSR and in the
- * viewer's on hydration. React sees two different strings, throws away the
- * tree it was given (error #418), and the card's buttons never receive their
- * handlers: every control here goes dead, silently, and only once a call has
- * been made, which is exactly when someone is most likely to press one.
- *
- * So the first client render must produce the same text the server did. UTC
- * is that text; the viewer's own timezone is applied after mount, when React
- * is no longer comparing.
- */
-function LocalTime({ iso }: { iso: string }) {
-  const [text, setText] = useState(() => `${iso.slice(0, 16).replace("T", " ")} UTC`);
-  useEffect(() => {
-    setText(new Date(iso).toLocaleString());
-  }, [iso]);
-  return <>{text}</>;
 }
 
 /** A message that reads as what it is, rather than as more helper text. */

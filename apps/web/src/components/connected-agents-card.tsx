@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 
 import { EmptyState } from "@/components/empty-state";
+import { LocalTime } from "@/components/local-time";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -23,14 +24,17 @@ export interface ConnectedAgentView {
   createdAt: string;
 }
 
-function fmt(iso: string | null): string {
-  if (!iso) return "never";
-  return new Date(iso).toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-}
+/**
+ * Date-only options, hoisted so the value is a stable identity rather than a
+ * fresh object each render. See {@link LocalTime} for why a timestamp is a
+ * component and not a string: formatting one during SSR breaks hydration and
+ * takes this card's buttons with it.
+ */
+const DATE_ONLY: Intl.DateTimeFormatOptions = {
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+};
 
 /**
  * The MCP clients this person has authorized over OAuth: what each was granted,
@@ -98,7 +102,10 @@ export function ConnectedAgentsCard({
                     {describeStoredGrant(c.scopes, c.allowDestructive)}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    connected {fmt(c.createdAt)} · last used {fmt(c.lastUsedAt)}
+                    connected{" "}
+                    <LocalTime iso={c.createdAt} options={DATE_ONLY} fallback="never" />{" "}
+                    · last used{" "}
+                    <LocalTime iso={c.lastUsedAt} options={DATE_ONLY} fallback="never" />
                   </p>
                 </div>
                 <Button
