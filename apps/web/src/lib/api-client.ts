@@ -454,6 +454,55 @@ export async function getAssistantThread(specId: string): Promise<{
   };
 }
 
+/** One child the assistant suggested, before anybody has agreed to it. */
+export interface ProposedChild {
+  title: string;
+  details: string;
+}
+
+export type BreakdownSuggestion =
+  | {
+      ok: true;
+      prose: string;
+      children: ProposedChild[];
+      childLevelKey: string;
+      childLevelLabel: string;
+    }
+  | { ok: false; error: { kind: string; message: string } };
+
+/**
+ * Ask the assistant to propose the level below an item. Creates nothing: the
+ * caller creates whatever the reviewer ticks, through the ordinary
+ * {@link createWorkItem}.
+ *
+ * A failure at the customer's own model endpoint comes back as a value rather
+ * than a thrown error, the same as {@link askAssistant}, because it is a state
+ * to render rather than a bug to report.
+ */
+export async function suggestBreakdown(
+  specId: string,
+): Promise<BreakdownSuggestion> {
+  const res = await apiFetch(
+    `/api/v1/assistant/${encodeURIComponent(specId)}/breakdown`,
+    { method: "POST" },
+  );
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as
+    | (BreakdownSuggestion & { error?: string | { kind: string; message: string } })
+    | null;
+  // Our own refusals (unknown item, no level below, no permission) arrive as an
+  // ordinary status with a plain string message.
+  if (!res.ok) {
+    const message =
+      typeof body?.error === "string"
+        ? body.error
+        : `The assistant failed (${res.status}).`;
+    throw new Error(message);
+  }
+  if (!body) throw new Error("The assistant returned nothing.");
+  return body;
+}
+
 /** What came back from accepting or rejecting a proposed edit. */
 export interface ProposalOutcome {
   message: AssistantMessageView;

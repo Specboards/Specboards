@@ -29,6 +29,7 @@
  * a comment.
  */
 
+import { breakdownInstructions } from "./breakdown";
 import { PROPOSAL_INSTRUCTIONS } from "./proposals";
 
 /** One labelled thing that goes into the prompt, and into the disclosure. */
@@ -168,6 +169,57 @@ const TOO_LONG_TO_PROPOSE = [
  * disclosure claiming we sent something we did not.
  */
 export function assembleItemContext(input: ItemContextInput): AssembledContext {
+  const fields = buildFields(input);
+
+  // A shortened description cannot be safely rewritten; see TOO_LONG_TO_PROPOSE.
+  const sawWholeBody = !fields.some((f) => f.label === "Description" && f.truncated);
+  const rules = !input.canEdit
+    ? READ_ONLY
+    : sawWholeBody
+      ? PROPOSAL_INSTRUCTIONS
+      : TOO_LONG_TO_PROPOSE;
+  return {
+    systemPrompt: renderPrompt(fields, rules),
+    fields,
+    canPropose: input.canEdit && sawWholeBody,
+  };
+}
+
+/**
+ * The same item, described for a different job: proposing the level below it.
+ *
+ * A sibling of {@link assembleItemContext} rather than a flag on it, because
+ * the two send the same facts and ask for entirely different things, and a
+ * function whose instructions branch four ways is one nobody can read. What
+ * they share is what matters: the same field list, so the disclosure stays
+ * true, and the same renderer, so neither can quietly start sending something
+ * the other does not.
+ *
+ * Truncation of the description is not a problem here the way it is for an
+ * edit. A breakdown proposes new items rather than replacing the body, so a
+ * shortened description costs a little context and cannot delete anything.
+ */
+export function assembleBreakdownContext(
+  input: ItemContextInput,
+  childLevelLabel: string,
+): AssembledContext {
+  const fields = buildFields(input);
+  return {
+    systemPrompt: renderPrompt(
+      fields,
+      breakdownInstructions(
+        childLevelLabel,
+        input.children.map((c) => c.title),
+      ),
+    ),
+    fields,
+    // Not a proposal-to-the-body task at all; the flag is about spec edits.
+    canPropose: false,
+  };
+}
+
+/** The facts about the item, in the order they appear in the prompt. */
+function buildFields(input: ItemContextInput): ContextField[] {
   const fields: ContextField[] = [];
 
   fields.push({ label: "Title", value: input.title.trim() });
@@ -206,13 +258,7 @@ export function assembleItemContext(input: ItemContextInput): AssembledContext {
     fields.push({ label: "Description", value, truncated });
   }
 
-  // A shortened description cannot be safely rewritten; see TOO_LONG_TO_PROPOSE.
-  const sawWholeBody = !fields.some((f) => f.label === "Description" && f.truncated);
-  return {
-    systemPrompt: renderPrompt(fields, input.canEdit, sawWholeBody),
-    fields,
-    canPropose: input.canEdit && sawWholeBody,
-  };
+  return fields;
 }
 
 /**
@@ -223,11 +269,7 @@ export function assembleItemContext(input: ItemContextInput): AssembledContext {
  * it has not seen the end of, and the person reading that answer has no way to
  * tell. Saying so costs a line and turns a wrong answer into a caveated one.
  */
-function renderPrompt(
-  fields: ContextField[],
-  canEdit: boolean,
-  sawWholeBody: boolean,
-): string {
+function renderPrompt(fields: ContextField[], rules: string): string {
   const rendered = fields.map((f) => {
     const note = f.truncated ? " (shortened; you have not been shown all of it)" : "";
     // Multi-line values read better as a block than as "Label: line1 line2".
@@ -235,13 +277,8 @@ function renderPrompt(
       ? `${f.label}${note}:\n${f.value}`
       : `${f.label}${note}: ${f.value}`;
   });
-  // The writing rules go above the item, not below it: instructions that follow
-  // a long document are the ones a small model loses track of first, and the
-  // rule it must not lose is the one saying its proposal is not an edit.
-  const rules = !canEdit
-    ? READ_ONLY
-    : sawWholeBody
-      ? PROPOSAL_INSTRUCTIONS
-      : TOO_LONG_TO_PROPOSE;
+  // The rules go above the item, not below it: instructions that follow a long
+  // document are the ones a small model loses track of first, and the rule it
+  // must not lose is the one saying nothing it produces is applied.
   return `${ROLE}\n\n${rules}\n\n---\n\n${rendered.join("\n\n")}`;
 }

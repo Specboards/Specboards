@@ -123,10 +123,29 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
           res.writeHead(404).end();
           return;
         }
-        captured.push(JSON.parse(body) as CapturedRequest);
+        const request = JSON.parse(body) as CapturedRequest & { stream?: boolean };
+        captured.push(request);
         if (failNext) {
           res.writeHead(401, { "content-type": "application/json" });
           res.end(JSON.stringify({ error: { message: "bad key" } }));
+          return;
+        }
+
+        // A breakdown is a plain completion, not a stream. Honouring the flag
+        // rather than always streaming is what makes this stub able to stand in
+        // for both, and answering SSE to a non-streaming request is exactly the
+        // protocol mismatch a real endpoint would never produce.
+        if (!request.stream) {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(
+            JSON.stringify({
+              model: "stub-model-v1",
+              choices: [
+                { message: { role: "assistant", content: answerFrames.join("") } },
+              ],
+              usage: { prompt_tokens: 31, completion_tokens: 7, total_tokens: 38 },
+            }),
+          );
           return;
         }
 
@@ -424,6 +443,182 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
     await ask(asOwner, specId, "Now ask.");
     const system = captured[0]!.messages.find((m) => m.role === "system")!.content;
     for (const field of disclosed) expect(system).toContain(field.value);
+  });
+
+  /**
+   * Breaking an item down into the level below it.
+   *
+   * The claim under test is the same negative one as for an edit: a model
+   * listing eight child items must leave the board with exactly as many items
+   * as it had. Creating them is the caller's job through the ordinary create
+   * path, so what is pinned here is what comes *back*, and that nothing moves.
+   */
+  describe("breaking an item down", () => {
+    let breakdown: typeof import("./breakdown-service");
+
+    /** Make the stub answer with a list of children. */
+    const proposing = (...titles: string[]) => {
+      answerFrames = [
+        "Split by surface.\n\n<<<BEGIN PROPOSED BREAKDOWN>>>\n",
+        titles.map((t) => `- ${t}\n  What ${t.toLowerCase()} covers.`).join("\n"),
+        "\n<<<END PROPOSED BREAKDOWN>>>",
+      ];
+    };
+
+    const childCount = async () => {
+      const [row] = await sql<{ n: string }[]>`
+        select count(*) as n from features
+        where workspace_id = ${ws} and parent_id = (
+          select id from features
+          where workspace_id = ${ws} and spec_id = ${specId})`;
+      return Number(row!.n);
+    };
+
+    beforeAll(async () => {
+      breakdown = await import("./breakdown-service");
+    });
+
+    beforeEach(async () => {
+      await connectStub();
+    });
+
+    it("proposes the level below and creates nothing", async () => {
+      proposing("Connect a provider", "Ask a question");
+      const before = await childCount();
+      const outcome = await breakdown.proposeBreakdown(db, asOwner, specId);
+
+      expect(outcome.ok).toBe(true);
+      if (!outcome.ok) return;
+      expect(outcome.children.map((c) => c.title)).toEqual([
+        "Connect a provider",
+        "Ask a question",
+      ]);
+      expect(outcome.prose).toBe("Split by surface.");
+      // The whole rule: a proposal is a list, not an action.
+      expect(await childCount()).toBe(before);
+    });
+
+    it("asks for the level the workspace actually has below this one", async () => {
+      // Levels are configurable. This workspace calls them Epics and Stories,
+      // so an epic breaks down into Stories and nothing else.
+      proposing("A story");
+      const outcome = await breakdown.proposeBreakdown(db, asOwner, specId);
+      expect(outcome.ok && outcome.childLevelKey).toBe("story");
+      expect(outcome.ok && outcome.childLevelLabel).toBe("Stories");
+
+      const system = captured.at(-1)!.messages.find((m) => m.role === "system")!
+        .content;
+      expect(system).toContain("Stories items");
+    });
+
+    it("does not ask a completion endpoint to stream", async () => {
+      // A breakdown is only useful whole. Streaming it would mean tick boxes
+      // that appear and rename themselves while somebody reads them.
+      proposing("A story");
+      await breakdown.proposeBreakdown(db, asOwner, specId);
+      expect(
+        (captured.at(-1) as unknown as { stream?: boolean }).stream,
+      ).toBeFalsy();
+    });
+
+    it("drops anything that repeats a child already there", async () => {
+      // The prompt asks for the gap; this is the backstop. A duplicate that
+      // slips through becomes a second card with the same name that somebody
+      // has to notice and delete.
+      const store = await (await import("./store")).getStore();
+      await store.createFeature(
+        { title: "Connect a provider", level: "story", parentSpecId: specId },
+        asOwner,
+      );
+      proposing("Connect a provider.", "Ask a question");
+      const outcome = await breakdown.proposeBreakdown(db, asOwner, specId);
+
+      // Matched loosely: trailing punctuation and case do not make a new card.
+      expect(outcome.ok && outcome.children.map((c) => c.title)).toEqual([
+        "Ask a question",
+      ]);
+      await sql`delete from features
+        where workspace_id = ${ws} and level = 'story'`;
+    });
+
+    it("drops a repeat within one proposal", async () => {
+      proposing("Ask a question", "ask a question");
+      const outcome = await breakdown.proposeBreakdown(db, asOwner, specId);
+      expect(outcome.ok && outcome.children).toHaveLength(1);
+    });
+
+    it("tells the model what is already under the parent", async () => {
+      const store = await (await import("./store")).getStore();
+      await store.createFeature(
+        { title: "Connect a provider", level: "story", parentSpecId: specId },
+        asOwner,
+      );
+      proposing("Ask a question");
+      await breakdown.proposeBreakdown(db, asOwner, specId);
+
+      const system = captured.at(-1)!.messages.find((m) => m.role === "system")!
+        .content;
+      expect(system).toContain("Connect a provider");
+      expect(system).toMatch(/only what is missing/);
+      await sql`delete from features
+        where workspace_id = ${ws} and level = 'story'`;
+    });
+
+    it("refuses an item that is already at the lowest level", async () => {
+      const store = await (await import("./store")).getStore();
+      const leaf = await store.createFeature(
+        { title: "A story", level: "story", parentSpecId: specId },
+        asOwner,
+      );
+      await expect(
+        breakdown.proposeBreakdown(db, asOwner, leaf.specId),
+      ).rejects.toThrow(breakdown.BreakdownLevelError);
+      // Refused before anything was spent, which is the point of checking it
+      // here rather than letting the model propose into a level that is not
+      // there and failing on create.
+      expect(captured).toHaveLength(0);
+      await sql`delete from features
+        where workspace_id = ${ws} and level = 'story'`;
+    });
+
+    it("refuses someone who cannot add items under it", async () => {
+      proposing("A story");
+      await expect(
+        breakdown.proposeBreakdown(db, asOutsider, specId),
+      ).rejects.toThrow(breakdown.BreakdownForbiddenError);
+      // Nothing spent. Proposing work for someone who has no button to press
+      // costs the workspace money to produce a list they cannot use.
+      expect(captured).toHaveLength(0);
+    });
+
+    it("refuses an item the caller cannot see", async () => {
+      await expect(
+        breakdown.proposeBreakdown(db, asOutsider, closedSpecId),
+      ).rejects.toThrow(svc.AssistantItemError);
+      expect(captured).toHaveLength(0);
+    });
+
+    it("reports a considered empty breakdown as a success", async () => {
+      // The model is told to propose nothing when the parent already looks
+      // fully broken down, so an empty list is an answer and its sentence is
+      // the useful part. Reporting it as a failure would be a lie.
+      answerFrames = [
+        "This is already covered by the items under it.\n",
+        "<<<BEGIN PROPOSED BREAKDOWN>>>\n<<<END PROPOSED BREAKDOWN>>>",
+      ];
+      const outcome = await breakdown.proposeBreakdown(db, asOwner, specId);
+      expect(outcome.ok).toBe(true);
+      expect(outcome.ok && outcome.children).toEqual([]);
+      expect(outcome.ok && outcome.prose).toMatch(/already covered/);
+    });
+
+    it("says so plainly when no model is connected", async () => {
+      await sql`delete from model_providers where workspace_id = ${ws}`;
+      const outcome = await breakdown.proposeBreakdown(db, asOwner, specId);
+      expect(outcome.ok).toBe(false);
+      expect(!outcome.ok && outcome.error.kind).toBe("not_configured");
+      expect(!outcome.ok && outcome.error.message).toMatch(/Settings/i);
+    });
   });
 
   /**
