@@ -521,6 +521,70 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
       expect(await bodyNow()).toBe(mine);
     });
 
+    it("applies only the changes the reviewer ticked", async () => {
+      // Accept-in-part. The selection is made in the browser and arrives here
+      // as a body, so what this pins is that the composed document survives the
+      // write intact: the taken change lands, the untaken one leaves the
+      // original line exactly where it was, and nothing in between moves.
+      const { composeFromHunks, diffHunks, diffLines } = await import(
+        "@specboards/core"
+      );
+      // Spaced out on purpose. Two edits within a few lines of each other are
+      // deliberately one hunk (their context windows touch), which is right for
+      // reading and useless for testing a choice between two.
+      const long = [
+        "# Rate limiting",
+        "",
+        "Throttle the public API.",
+        "",
+        "## Limits",
+        "",
+        "Sixty a minute.",
+        "",
+        "## Who it applies to",
+        "",
+        "Every unauthenticated caller.",
+        "Authenticated callers get their own budget.",
+        "Internal services are exempt.",
+        "",
+        "## Rollout",
+        "",
+        "Behind a flag for the first week.",
+        "",
+        "## Open questions",
+        "",
+        "What happens on burst?",
+      ].join("\n");
+      await sql`update features set details = ${long}
+        where workspace_id = ${ws} and spec_id = ${specId}`;
+
+      const rewritten = long
+        .replace("Sixty a minute.", "Sixty a minute, per API key.")
+        .replace("What happens on burst?", "Burst returns 429 with Retry-After.");
+      answerFrames = [
+        "Two changes.\n\n<<<BEGIN PROPOSED SPEC>>>\n",
+        `${rewritten}\n`,
+        "<<<END PROPOSED SPEC>>>",
+      ];
+      const turn = (await ask(asOwner, specId, "Tighten both sections.")).turns![1]!;
+
+      // Two separate regions, which is what makes a partial choice meaningful.
+      const hunks = diffHunks(diffLines(long, rewritten));
+      expect(hunks).toHaveLength(2);
+
+      const onlyTheSecond = composeFromHunks(long, rewritten, new Set([1]));
+      await proposals.acceptProposal(db, asOwner, specId, turn.id, {
+        body: onlyTheSecond,
+      });
+
+      const after = await bodyNow();
+      expect(after).toContain("Burst returns 429 with Retry-After.");
+      // Not merely absent: the line it would have replaced is still there.
+      expect(after).toContain("Sixty a minute.");
+      expect(after).not.toContain("per API key");
+      expect(after).toContain("# Rate limiting");
+    });
+
     it("records a rejection and leaves the item alone", async () => {
       const turn = await propose();
       const result = await proposals.rejectProposal(db, asOwner, specId, turn.id);

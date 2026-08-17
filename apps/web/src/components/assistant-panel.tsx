@@ -2,9 +2,11 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
+
+import { composeFromHunks, diffHunks, diffLines } from "@specboards/core";
 
 import { SpecDiff } from "@/components/spec-diff";
 import { Button } from "@/components/ui/button";
@@ -159,6 +161,53 @@ function ProposalReview({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(proposed);
 
+  /**
+   * How many separate changes this proposal makes, which is what a partial
+   * accept picks from. Recomputed from the draft, so editing the text
+   * reshuffles the changes rather than leaving the selection pointing at
+   * regions that have moved.
+   */
+  const hunkCount = useMemo(
+    () => diffHunks(diffLines(current, draft)).length,
+    [current, draft],
+  );
+
+  /** Changes being taken, by index. Everything, until someone unticks one. */
+  const [taken, setTaken] = useState<ReadonlySet<number>>(new Set());
+  // Reset whenever the set of changes could have moved under the selection: a
+  // stale index does not error, it applies a different change, which is the
+  // one failure mode here that nobody would catch.
+  useEffect(() => {
+    setTaken(new Set(Array.from({ length: hunkCount }, (_, i) => i)));
+  }, [hunkCount, current, draft]);
+
+  const toggleHunk = (index: number) =>
+    setTaken((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(index)) next.add(index);
+      return next;
+    });
+
+  const partial = taken.size < hunkCount;
+  const nothingTaken = hunkCount > 0 && taken.size === 0;
+
+  /**
+   * Apply what is ticked.
+   *
+   * Composed from the selection rather than sent as "these hunk indices", so
+   * the server keeps exactly one notion of an accepted proposal: a body. It
+   * also means a partial accept is guarded, merged and recorded identically to
+   * a whole one, instead of being a second write path with its own edge cases.
+   */
+  const accept = () => {
+    if (nothingTaken) return;
+    if (!partial) {
+      onResolve("accept", draft === proposed ? undefined : draft);
+      return;
+    }
+    onResolve("accept", composeFromHunks(current, draft, taken));
+  };
+
   if (state.outcome) {
     return (
       <div className="mt-2 space-y-2 rounded-md border bg-muted/30 p-3 text-xs">
@@ -215,19 +264,25 @@ function ProposalReview({
           className="font-mono text-2xs"
         />
       ) : (
-        <SpecDiff before={current} after={draft} />
+        <SpecDiff
+          before={current}
+          after={draft}
+          // Only offered to someone who could act on the selection. A reader
+          // ticking boxes that lead to no button is worse than no boxes.
+          {...(canEdit
+            ? { selected: taken, onToggleHunk: toggleHunk }
+            : {})}
+        />
       )}
 
       {canEdit ? (
         <div className="flex flex-wrap items-center gap-2">
-          <Button
-            size="sm"
-            disabled={busy}
-            onClick={() =>
-              onResolve("accept", draft === proposed ? undefined : draft)
-            }
-          >
-            {busy ? "Applying…" : "Accept"}
+          <Button size="sm" disabled={busy || nothingTaken} onClick={accept}>
+            {busy
+              ? "Applying…"
+              : partial
+                ? `Accept ${taken.size} of ${hunkCount} changes`
+                : "Accept"}
           </Button>
           <Button
             size="sm"
@@ -245,7 +300,13 @@ function ProposalReview({
           >
             Reject
           </Button>
-          {draft !== proposed && !editing ? (
+          {nothingTaken ? (
+            // Applying nothing is not an accept, and pretending it is would
+            // record a decision the item cannot show. Reject is right there.
+            <p className="text-2xs text-muted-foreground">
+              Nothing is ticked. Reject turns the whole proposal down.
+            </p>
+          ) : draft !== proposed && !editing ? (
             <p className="text-2xs text-muted-foreground">
               Showing your edited version.
             </p>

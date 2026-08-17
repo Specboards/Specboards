@@ -42,6 +42,17 @@ export interface DiffHunk {
   removed: number;
 }
 
+/**
+ * Unchanged lines kept either side of a change, for orientation.
+ *
+ * Shared rather than a per-call default, because it decides where hunk
+ * boundaries fall and therefore what a hunk *index* means. A view that renders
+ * with one value and a compose that reconstructs with another would agree about
+ * how many hunks there are and disagree about which lines are in them, which
+ * produces a document the person never saw and no error anywhere.
+ */
+export const DIFF_CONTEXT = 3;
+
 /** Split into lines, treating the empty document as no lines rather than one. */
 function splitLines(text: string): string[] {
   return text === "" ? [] : text.split("\n");
@@ -106,7 +117,7 @@ export function diffLines(before: string, after: string): DiffLine[] {
  * two small edits reads as one region rather than two boxes with a single line
  * of "unchanged" wedged between them.
  */
-export function diffHunks(lines: DiffLine[], context = 3): DiffHunk[] {
+export function diffHunks(lines: DiffLine[], context = DIFF_CONTEXT): DiffHunk[] {
   const hunks: DiffHunk[] = [];
   let current: DiffHunk | null = null;
 
@@ -135,4 +146,60 @@ export function diffHunks(lines: DiffLine[], context = 3): DiffHunk[] {
     }
   }
   return hunks;
+}
+
+/**
+ * The document you get by taking some of a proposal's changes and leaving the
+ * rest, expressed as which hunks to include.
+ *
+ * ── Why hunks are the unit ──────────────────────────────────────────────────
+ * Not individual lines. A change is usually a removal and the addition that
+ * replaces it, and letting someone take the addition without the removal
+ * produces a document that says the same thing twice, or the removal without
+ * the addition and it says nothing at all. Neither is what they meant, and
+ * neither is a state either side wrote. A hunk is the smallest run that stays
+ * coherent when taken whole.
+ *
+ * ── How it reconstructs ─────────────────────────────────────────────────────
+ * Every line of the diff has a side it belongs on. Unchanged lines survive
+ * either way. An addition is in the result only if its hunk was taken; a
+ * removal is in the result only if its hunk was *not*, because leaving a change
+ * behind means keeping the line it would have deleted. That is the whole rule,
+ * and it holds because {@link diffHunks} puts every changed line in exactly one
+ * hunk.
+ *
+ * Selecting every hunk therefore reproduces `after` exactly, and selecting none
+ * reproduces `before` exactly. Both are worth knowing: they are what make
+ * "accept all" and "accept nothing" the same operation as accept and reject,
+ * rather than a third code path that can drift from them.
+ */
+export function composeFromHunks(
+  before: string,
+  after: string,
+  selected: ReadonlySet<number>,
+  context = DIFF_CONTEXT,
+): string {
+  const lines = diffLines(before, after);
+  const hunks = diffHunks(lines, context);
+
+  // Changed-line index -> the hunk that owns it. Built once rather than
+  // searched per line, and it is also what makes the invariant checkable: a
+  // changed line with no owner would silently take the wrong side.
+  const owner = new Map<number, number>();
+  for (const [h, hunk] of hunks.entries()) {
+    for (let i = hunk.start; i < hunk.end; i++) {
+      if (lines[i]!.kind !== "same") owner.set(i, h);
+    }
+  }
+
+  const out: string[] = [];
+  for (const [i, line] of lines.entries()) {
+    if (line.kind === "same") {
+      out.push(line.text);
+      continue;
+    }
+    const taken = selected.has(owner.get(i)!);
+    if (line.kind === "add" ? taken : !taken) out.push(line.text);
+  }
+  return out.join("\n");
 }
