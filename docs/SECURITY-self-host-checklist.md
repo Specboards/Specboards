@@ -116,7 +116,8 @@ a live backstop behind the app-code workspace filters.
 ## 6. Model provider (bring your own model)
 
 Only relevant once a workspace connects its own inference. Full detail in
-`docs/RUNBOOK-model-provider-credentials.md`.
+`docs/RUNBOOK-model-provider-credentials.md`; setup, air-gapped operation and
+private TLS in `docs/GUIDE-self-hosted-model.md`.
 
 - [ ] Know that the provider API key is encrypted at rest under
       `BETTER_AUTH_SECRET`, like the GitHub credentials above, so rotating that
@@ -129,6 +130,11 @@ Only relevant once a workspace connects its own inference. Full detail in
       refuses to boot with it set.
 - [ ] Leave it unset otherwise: the model endpoint is then held to the same
       HTTPS-only, globally-routable, pinned-connection policy as webhooks.
+- [ ] If your endpoint presents a certificate from an internal authority or a
+      self-signed one, set **`SPECBOARDS_MODEL_CA_CERT`** (PEM text or a path to
+      a PEM file) rather than `NODE_TLS_REJECT_UNAUTHORIZED=0`. The former adds
+      trust for the model endpoint only; the latter disables certificate
+      verification for webhooks, GitHub and outbound email as well.
 - [ ] Do not reach for `SPECBOARDS_WEBHOOK_ALLOW_PRIVATE` to solve a model
       problem. They are separate flags so that allowing a local model does not
       also re-point webhook deliveries at your internal network.

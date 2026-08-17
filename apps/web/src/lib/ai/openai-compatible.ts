@@ -1,7 +1,6 @@
 import { fetch as undiciFetch } from "undici";
 
-import { pinnedAgent } from "@/lib/egress";
-import { resolveModelTarget } from "@/lib/ai/egress";
+import { modelDispatcher, resolveModelTarget } from "@/lib/ai/egress";
 import type {
   CompletionOutcome,
   CompletionRequest,
@@ -179,6 +178,65 @@ export function vendorHeaders(
   return {};
 }
 
+/**
+ * Certificate failures, and what an operator is supposed to do about each.
+ *
+ * These are the errors an on-prem deployment hits first: inference behind an
+ * internal CA or a self-signed certificate, which Node does not trust. Left
+ * alone they surface as an unreachable endpoint, and the natural response is to
+ * go and look at firewalls, which is the wrong place entirely. Naming the
+ * variable that fixes it turns a day into a minute.
+ */
+const TLS_ADVICE: Record<string, string> = {
+  DEPTH_ZERO_SELF_SIGNED_CERT:
+    "The endpoint presented a self-signed certificate. Point " +
+    "SPECBOARDS_MODEL_CA_CERT at that certificate to trust it.",
+  SELF_SIGNED_CERT_IN_CHAIN:
+    "The endpoint's certificate chain is signed by a private authority. Point " +
+    "SPECBOARDS_MODEL_CA_CERT at that authority's certificate.",
+  UNABLE_TO_VERIFY_LEAF_SIGNATURE:
+    "The endpoint's certificate could not be verified against a known " +
+    "authority. Point SPECBOARDS_MODEL_CA_CERT at your internal CA certificate.",
+  UNABLE_TO_GET_ISSUER_CERT_LOCALLY:
+    "The endpoint's certificate was issued by an authority this deployment " +
+    "does not know. Point SPECBOARDS_MODEL_CA_CERT at your internal CA " +
+    "certificate.",
+  CERT_HAS_EXPIRED:
+    "The endpoint's certificate has expired. Renew it at the endpoint; this is " +
+    "not something Specboards can be configured around.",
+  ERR_TLS_CERT_ALTNAME_INVALID:
+    "The endpoint's certificate does not name the host in the base URL. Use " +
+    "the hostname the certificate was issued for.",
+};
+
+/**
+ * The reason a request never got a reply.
+ *
+ * undici reports every connection failure as the bare string "fetch failed"
+ * and hangs the real error off `cause`, so reporting `err.message` tells the
+ * user precisely nothing. Unwrapping is what makes a refused connection, a DNS
+ * miss and an untrusted certificate distinguishable at all.
+ */
+export function transportReason(err: unknown): string {
+  const cause = (err as { cause?: unknown } | null)?.cause;
+  const code =
+    typeof (cause as { code?: unknown })?.code === "string"
+      ? ((cause as { code: string }).code)
+      : typeof (err as { code?: unknown })?.code === "string"
+        ? ((err as { code: string }).code)
+        : null;
+
+  if (code && TLS_ADVICE[code]) return TLS_ADVICE[code];
+
+  const detail =
+    cause instanceof Error && cause.message
+      ? cause.message
+      : err instanceof Error && err.message
+        ? err.message
+        : "request failed";
+  return code ? `${detail} (${code})` : detail;
+}
+
 /** A reply that arrived, or the reason none did. */
 type Transport =
   | { ok: true; status: number; text: string }
@@ -206,8 +264,7 @@ async function send(
     return { ok: false, error: { kind: "blocked", message: target.reason, status: null } };
   }
 
-  const agent =
-    target.addresses.length > 0 ? pinnedAgent(target.addresses, timeoutMs) : undefined;
+  const agent = modelDispatcher(target.addresses, timeoutMs);
 
   try {
     const res = await undiciFetch(endpointUrl(config.baseUrl, path), {
@@ -232,14 +289,12 @@ async function send(
     return { ok: true, status: res.status, text: await res.text() };
   } catch (err) {
     // undici throws for DNS, TLS, connection refused and the abort signal.
-    // All of them are "we could not reach it", which is the one the user can
-    // act on, so they are not split further here.
+    // All of them are "we could not reach it", but the reason underneath is
+    // what tells someone whether to fix a firewall, a URL or a certificate.
     const message =
       err instanceof Error && err.name === "TimeoutError"
         ? `The model endpoint did not respond within ${Math.round(timeoutMs / 1000)}s.`
-        : `Could not reach the model endpoint: ${
-            err instanceof Error ? err.message : "request failed"
-          }`;
+        : `Could not reach the model endpoint: ${transportReason(err)}`;
     return { ok: false, error: { kind: "unreachable", message, status: null } };
   } finally {
     await agent?.close().catch(() => {});

@@ -144,12 +144,22 @@ export async function resolveTarget(
  * moment later, by which time the record may point somewhere private. TLS SNI
  * and certificate validation still use the original hostname.
  *
+ * `tls` carries per-feature trust settings (the model path can be told about a
+ * private certificate authority; webhooks pass nothing and keep Node's
+ * defaults). It cannot disable verification, only widen what is verified
+ * against, which is the property that makes it safe to expose here.
+ *
  * The caller owns the returned agent and must `close()` it.
  */
-export function pinnedAgent(addresses: PinnedAddress[], timeoutMs: number): Agent {
+export function pinnedAgent(
+  addresses: PinnedAddress[],
+  timeoutMs: number,
+  tls: { ca?: string[] } = {},
+): Agent {
   return new Agent({
     connect: {
       timeout: timeoutMs,
+      ...(tls.ca ? { ca: tls.ca } : {}),
       lookup(_hostname, options, callback) {
         if (options && options.all) {
           callback(null, addresses as never);

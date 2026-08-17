@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createOpenAiCompatibleClient,
   endpointUrl,
+  transportReason,
   vendorHeaders,
 } from "./openai-compatible";
 
@@ -457,5 +458,46 @@ describe("listing models", () => {
     expect(out.ok === false && out.error.kind).toBe("blocked");
     expect(lastRequest).toBeNull();
     delete process.env.SPECBOARDS_MULTI_TENANT;
+  });
+});
+
+/**
+ * Why a request never got a reply.
+ *
+ * undici reports every connection failure as the bare string "fetch failed"
+ * and puts the real error on `cause`. Passing that through was telling users
+ * nothing at the exact moment they most needed a direction to look in: a
+ * refused port, an unresolvable host and an untrusted certificate all read
+ * identically, and only one of them is a firewall problem.
+ */
+describe("the reason a connection failed", () => {
+  const wrapped = (code: string, message: string) =>
+    Object.assign(new TypeError("fetch failed"), {
+      cause: Object.assign(new Error(message), { code }),
+    });
+
+  it("unwraps the cause rather than reporting 'fetch failed'", () => {
+    const reason = transportReason(wrapped("ECONNREFUSED", "connect ECONNREFUSED 10.0.0.4:8000"));
+    expect(reason).toContain("ECONNREFUSED");
+    expect(reason).not.toBe("fetch failed");
+  });
+
+  it("names the fix for a certificate a private authority signed", () => {
+    // The on-prem case. Without this the operator goes looking at the network.
+    expect(transportReason(wrapped("SELF_SIGNED_CERT_IN_CHAIN", "self-signed certificate in certificate chain")))
+      .toContain("SPECBOARDS_MODEL_CA_CERT");
+  });
+
+  it("does not offer a certificate to trust when the certificate expired", () => {
+    // Trusting a new authority cannot fix an expired certificate, and saying
+    // so would send someone to configure a variable that will not help.
+    const reason = transportReason(wrapped("CERT_HAS_EXPIRED", "certificate has expired"));
+    expect(reason).toContain("expired");
+    expect(reason).not.toContain("SPECBOARDS_MODEL_CA_CERT");
+  });
+
+  it("still says something when there is no cause to unwrap", () => {
+    expect(transportReason(new Error("socket hang up"))).toBe("socket hang up");
+    expect(transportReason("not an error at all")).toBe("request failed");
   });
 });

@@ -15,7 +15,11 @@
  *    hatch (see lib/ai/egress.ts). A separate flag and a separate guard, so
  *    allowing a self-hosted model cannot silently re-point webhooks at the
  *    internal network as well.
- * 5. Start the in-process webhook outbox drainer. No-op in local file mode,
+ * 5. Model TLS: if a private certificate authority is configured for the model
+ *    endpoint, read it now (see lib/ai/tls.ts). A mistyped path should stop the
+ *    release rather than surface as an unreachable endpoint on someone's first
+ *    call.
+ * 6. Start the in-process webhook outbox drainer. No-op in local file mode,
  *    where `startDrainer` finds no database.
  */
 export async function register(): Promise<void> {
@@ -35,6 +39,9 @@ export async function register(): Promise<void> {
 
     const { assertModelEgressPolicy } = await import("@/lib/ai/egress");
     assertModelEgressPolicy();
+
+    const { assertModelTlsConfig } = await import("@/lib/ai/tls");
+    assertModelTlsConfig();
 
     const { startDrainer } = await import("@/lib/webhooks/drainer");
     startDrainer();

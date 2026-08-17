@@ -1,4 +1,13 @@
-import { resolveTarget, type TargetResolution, type UrlCheck } from "@/lib/egress";
+import { Agent } from "undici";
+
+import { modelCaBundle } from "@/lib/ai/tls";
+import {
+  pinnedAgent,
+  resolveTarget,
+  type PinnedAddress,
+  type TargetResolution,
+  type UrlCheck,
+} from "@/lib/egress";
 import { isMultiTenant } from "@/lib/tenancy";
 
 /**
@@ -92,4 +101,29 @@ export async function resolveModelTarget(raw: string): Promise<TargetResolution>
 export async function assertReachableModelUrl(raw: string): Promise<UrlCheck> {
   const result = await resolveModelTarget(raw);
   return result.ok ? { ok: true } : { ok: false, reason: result.reason };
+}
+
+/**
+ * The dispatcher one model request should use, or undefined when Node's
+ * defaults are already right.
+ *
+ * Two independent reasons to need one, and they arrive separately. Pinning
+ * applies when the policy resolved concrete addresses, which is the hosted
+ * case. A private certificate authority applies when an operator configured
+ * one, which is the on-prem case, and it must still take effect where there is
+ * nothing to pin: with `SPECBOARDS_MODEL_ALLOW_PRIVATE` set the policy returns
+ * no addresses, and that is exactly the deployment most likely to be presenting
+ * an internal certificate. Handling only the first would have left private TLS
+ * working everywhere except where it is needed.
+ *
+ * The caller owns the agent and must `close()` it.
+ */
+export function modelDispatcher(
+  addresses: PinnedAddress[],
+  timeoutMs: number,
+): Agent | undefined {
+  const ca = modelCaBundle();
+  if (addresses.length > 0) return pinnedAgent(addresses, timeoutMs, ca ? { ca } : {});
+  if (ca) return new Agent({ connect: { timeout: timeoutMs, ca } });
+  return undefined;
 }

@@ -125,6 +125,27 @@ Optional environment flags for a hosted deployment:
 - `POSTMARK_SERVER_TOKEN` / `EMAIL_FROM` - transactional email (verification,
   password reset, invites, access-request notifications). Unset = email is a
   logged no-op.
+- `SPECBOARDS_MODEL_ALLOW_PRIVATE` - let the model endpoint be a private or
+  loopback address, which is what a self-hosted runtime on your own network is.
+  Off by default and ignored (refused at boot) on a multi-tenant deployment.
+- `SPECBOARDS_MODEL_CA_CERT` - PEM text, or a path to a PEM file, for an
+  internal certificate authority or a self-signed certificate the model endpoint
+  presents. Adds trust for the model endpoint only; public roots stay trusted.
+
+### Bring your own model
+
+Point Specboards at inference you own: an API key for a hosted provider, or the
+base URL of a model you run yourself. Anything speaking the OpenAI-compatible
+API works, which covers the hosted providers as well as vLLM, Ollama, llama.cpp
+and most corporate gateways. Your workspace holds the vendor relationship and
+pays for usage; keys are encrypted at rest and never returned to the browser.
+
+Configure it in the app at Settings → Integrations → Model connection.
+
+- Self-hosted, air-gapped, and private TLS, with worked examples:
+  [`docs/GUIDE-self-hosted-model.md`](./docs/GUIDE-self-hosted-model.md).
+- Credential storage, rotation, revocation, and the egress policy:
+  [`docs/RUNBOOK-model-provider-credentials.md`](./docs/RUNBOOK-model-provider-credentials.md).
 
 ## Working with specs
 
