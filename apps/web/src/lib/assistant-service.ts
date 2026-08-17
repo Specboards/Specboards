@@ -10,9 +10,9 @@ import {
 } from "@specboards/db";
 
 import { assembleItemContext, type ContextField } from "@/lib/ai/item-context";
-import type { ModelErrorKind, ModelMessage } from "@/lib/ai/provider";
+import type { ModelErrorKind, ModelMessage, TokenUsage } from "@/lib/ai/provider";
 import { statusLabel } from "@/lib/feature-helpers";
-import { completeWithWorkspaceModel } from "@/lib/model-provider-service";
+import { streamWithWorkspaceModel } from "@/lib/model-provider-service";
 import { resolveWorkflowFor } from "@/lib/repo-config";
 import { getStore } from "@/lib/store";
 import type { FeatureDetail, WorkspaceScope } from "@/lib/store/types";
@@ -253,24 +253,53 @@ async function buildContext(scope: WorkspaceScope, feature: FeatureDetail) {
   });
 }
 
+/** What the caller of a turn observes, in order. */
+export type AssistantEvent =
+  /** A fragment of the answer, to append to what is on screen. */
+  | { kind: "delta"; text: string }
+  /** The answer finished and both turns are now in the thread. */
+  | { kind: "done"; turns: AssistantMessageView[] }
+  | {
+      kind: "error";
+      error: { kind: ModelErrorKind | "not_configured"; message: string };
+    };
+
 /**
- * Ask the assistant something about an item, and record both turns.
+ * Begin a turn: authorize, validate, and return the stream of what happens.
  *
- * ── Why nothing is persisted when the call fails ────────────────────────────
- * The alternative is to write the question first, so a failed call leaves a
- * question sitting in the thread with no answer under it. That reads as the
- * assistant having ignored someone, it replays into the next request's history
- * as an unanswered turn, and it makes a retry look like the person asked twice.
- * Writing both turns together after a success keeps the thread well formed, and
- * the composer still holds the text, so a retry costs a click rather than
- * retyping.
+ * ── Why the setup is eager and only the tokens are lazy ─────────────────────
+ * A generator runs nothing until it is first pulled, which would put "you
+ * cannot see this item" and "that message is too long" *inside* the response
+ * body, long after the HTTP status was chosen. So everything that can be known
+ * before the endpoint is called happens here and throws here, and the caller
+ * gets back an iterator that only ever produces the events below. The route can
+ * therefore still answer 404 or 422 properly, and once it starts streaming it
+ * is committed to a 200 that it can honour.
+ *
+ * ── What is persisted, and when ─────────────────────────────────────────────
+ * Both turns are written together after the answer completes, never before. A
+ * question written up front would sit in the thread with no answer under it
+ * whenever the endpoint failed: that reads as the assistant ignoring someone,
+ * it replays into the next request as an unanswered turn, and a retry looks
+ * like the person asked twice.
+ *
+ * ── What cancelling does ────────────────────────────────────────────────────
+ * Nothing is kept. Cancel means "stop, this is not what I wanted", and the
+ * half-sentence it stopped on is worse than useless in a thread: it would be
+ * replayed as context into every later question and drag the answers with it.
+ * It is also the only option the protocol leaves us, since an aborted stream
+ * never reaches the chunk that carries the usage numbers, so a row written for
+ * it would claim a cost we cannot know. The tokens already produced are still
+ * billed by the provider; that is inherent in stopping a generation, and no
+ * bookkeeping on our side changes it.
  */
-export async function sendAssistantMessage(
+export async function startAssistantTurn(
   db: Database,
   scope: WorkspaceScope,
   specId: string,
   text: string,
-): Promise<AssistantSendOutcome> {
+  opts: { signal?: AbortSignal } = {},
+): Promise<AsyncGenerator<AssistantEvent>> {
   const question = text.trim();
   if (!question) throw new AssistantInputError("A message is required.");
   if (question.length > MAX_TURN_CHARS) {
@@ -294,24 +323,69 @@ export async function sendAssistantMessage(
     { role: "user", content: question },
   ];
 
-  const outcome = await completeWithWorkspaceModel(db, scope.workspaceId, {
-    messages,
-  });
+  return run();
 
-  if (!outcome.ok) {
-    if (outcome.error.kind === "not_configured") {
-      return {
-        ok: false,
-        error: {
-          kind: "not_configured",
-          message:
-            "No model is connected for this workspace. An admin can connect one in Settings under Integrations.",
-        },
-      };
+  async function* run(): AsyncGenerator<AssistantEvent> {
+    let answer = "";
+    let model: string | null = null;
+    let usage: TokenUsage = {
+      promptTokens: null,
+      completionTokens: null,
+      totalTokens: null,
+    };
+    let finished = false;
+
+    for await (const event of streamWithWorkspaceModel(db, scope.workspaceId, {
+      messages,
+      ...(opts.signal ? { signal: opts.signal } : {}),
+    })) {
+      if (event.kind === "not_configured") {
+        yield {
+          kind: "error",
+          error: {
+            kind: "not_configured",
+            message:
+              "No model is connected for this workspace. An admin can connect one in Settings under Integrations.",
+          },
+        };
+        return;
+      }
+      if (event.kind === "error") {
+        yield { kind: "error", error: event.error };
+        return;
+      }
+      if (event.kind === "delta") {
+        answer += event.text;
+        yield { kind: "delta", text: event.text };
+        continue;
+      }
+      // done
+      model = event.model;
+      usage = event.usage;
+      finished = true;
     }
-    return { ok: false, error: outcome.error };
-  }
 
+    // The stream ended without a terminal event, which is how the adapter
+    // reports a cancel. Nothing is written; see the note above.
+    if (!finished) return;
+
+    yield {
+      kind: "done",
+      turns: await persistTurns(db, scope, featureId, question, answer, model, usage),
+    };
+  }
+}
+
+/** Write the pair and return them as the browser will see them. */
+async function persistTurns(
+  db: Database,
+  scope: WorkspaceScope,
+  featureId: string,
+  question: string,
+  answer: string,
+  model: string | null,
+  usage: TokenUsage,
+): Promise<AssistantMessageView[]> {
   const now = new Date();
   const inserted = await db
     .insert(assistantMessages)
@@ -328,13 +402,13 @@ export async function sendAssistantMessage(
         workspaceId: scope.workspaceId,
         featureId,
         role: "assistant",
-        content: outcome.text,
+        content: answer,
         // The person who asked, so every row in the thread names someone
         // accountable for it. `role` is what says a model wrote this one.
         authorId: scope.userId,
-        model: outcome.model,
-        promptTokens: outcome.usage.promptTokens,
-        completionTokens: outcome.usage.completionTokens,
+        model,
+        promptTokens: usage.promptTokens,
+        completionTokens: usage.completionTokens,
         // One millisecond later, so the ordering of a pair written in the same
         // statement is decided here rather than by however Postgres happens to
         // resolve two identical timestamps.
@@ -351,18 +425,16 @@ export async function sendAssistantMessage(
     .where(eq(users.id, scope.userId))
     .limit(1);
   const authorName = author?.name ?? null;
-  return {
-    ok: true,
-    turns: inserted.map((row) =>
-      toView({
-        id: row.id,
-        role: row.role,
-        content: row.content,
-        authorId: row.authorId,
-        authorName,
-        model: row.model,
-        createdAt: row.createdAt,
-      }),
-    ),
-  };
+
+  return inserted.map((row) =>
+    toView({
+      id: row.id,
+      role: row.role,
+      content: row.content,
+      authorId: row.authorId,
+      authorName,
+      model: row.model,
+      createdAt: row.createdAt,
+    }),
+  );
 }

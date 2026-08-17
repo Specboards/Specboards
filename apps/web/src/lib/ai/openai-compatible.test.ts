@@ -6,9 +6,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createOpenAiCompatibleClient,
   endpointUrl,
+  sseDataLines,
+  streamChunkFrom,
   transportReason,
   vendorHeaders,
 } from "./openai-compatible";
+import type { ModelError, TokenUsage } from "./provider";
 
 /**
  * The adapter, driven against a real HTTP server rather than a mocked `fetch`.
@@ -527,5 +530,223 @@ describe("what a call reaches", () => {
 
     expect(requestCount).toBe(1);
     expect(lastRequest?.url).toBe("/v1/models");
+  });
+});
+
+/**
+ * SSE framing, as pure functions.
+ *
+ * This is the part of streaming most likely to be quietly wrong. A chunk
+ * boundary falls wherever TCP puts it, routinely mid-line and mid-JSON, and a
+ * parser that assumes one network chunk is one event works perfectly against a
+ * fast local runtime and drops or corrupts frames from a slow remote one. That
+ * failure is invisible in a demo and shows up as answers with holes in them.
+ */
+describe("reading a server-sent event stream", () => {
+  it("returns complete data lines and holds back the rest", () => {
+    const { data, rest } = sseDataLines('data: {"a":1}\n\ndata: {"b":2');
+    expect(data).toEqual(['{"a":1}']);
+    // The half-arrived line is kept, not parsed and not lost.
+    expect(rest).toBe('data: {"b":2');
+  });
+
+  it("reassembles a frame split across two chunks", () => {
+    const first = sseDataLines('data: {"choices":[{"delta":{"con');
+    expect(first.data).toEqual([]);
+    const second = sseDataLines(`${first.rest}tent":"hi"}}]}\n\n`);
+    expect(second.data).toHaveLength(1);
+    expect(streamChunkFrom(second.data[0]!)?.text).toBe("hi");
+  });
+
+  it("accepts CRLF line endings", () => {
+    const { data } = sseDataLines('data: {"a":1}\r\n\r\n');
+    expect(data).toEqual(['{"a":1}']);
+  });
+
+  it("ignores keepalive comments and other fields", () => {
+    // Gateways send `:` comments to hold an idle connection open, and some
+    // send `event:` lines. Parsing either as content would inject junk into
+    // the answer.
+    const { data } = sseDataLines(': keep-alive\nevent: message\ndata: {"a":1}\n\n');
+    expect(data).toEqual(['{"a":1}']);
+  });
+
+  it("treats the DONE sentinel as no chunk rather than as text", () => {
+    expect(streamChunkFrom("[DONE]")).toBeNull();
+  });
+
+  it("drops a malformed frame instead of failing the answer", () => {
+    // The endpoint has already sent real text by this point. Losing one frame
+    // degrades the answer; throwing would lose all of it.
+    expect(streamChunkFrom("{not json")).toBeNull();
+  });
+
+  it("reads the model and usage off a frame that carries them", () => {
+    const chunk = streamChunkFrom(
+      JSON.stringify({
+        model: "served-model",
+        choices: [{ delta: {} }],
+        usage: { prompt_tokens: 3, completion_tokens: 4, total_tokens: 7 },
+      }),
+    );
+    expect(chunk?.model).toBe("served-model");
+    expect(chunk?.usage?.totalTokens).toBe(7);
+    expect(chunk?.text).toBeNull();
+  });
+});
+
+/** Serve an SSE stream, one frame per entry, then `[DONE]`. */
+function serveStream(frames: unknown[], opts: { holdOpen?: boolean } = {}) {
+  server = createServer((req, res) => {
+    const chunks: Buffer[] = [];
+    req.on("data", (c: Buffer) => chunks.push(c));
+    req.on("end", async () => {
+      requestCount += 1;
+      lastRequest = {
+        url: req.url ?? "",
+        headers: req.headers as Record<string, string>,
+        body: Buffer.concat(chunks).toString("utf8"),
+      };
+      res.writeHead(200, { "Content-Type": "text/event-stream" });
+      for (const frame of frames) {
+        res.write(`data: ${JSON.stringify(frame)}\n\n`);
+        await new Promise((r) => setTimeout(r, 5));
+      }
+      if (opts.holdOpen) return; // never finishes; the caller must cancel
+      res.write("data: [DONE]\n\n");
+      res.end();
+    });
+  });
+  return listen();
+}
+
+const streamCall = (signal?: AbortSignal) =>
+  createOpenAiCompatibleClient({
+    baseUrl,
+    model: "test-model",
+    apiKey: "sk-test-key-a91c",
+  }).stream({
+    messages: [{ role: "user", content: "hi" }],
+    timeoutMs: 5_000,
+    ...(signal ? { signal } : {}),
+  });
+
+async function drain(signal?: AbortSignal) {
+  const deltas: string[] = [];
+  let done: { usage: TokenUsage; model: string | null } | null = null;
+  let error: ModelError | null = null;
+  for await (const event of streamCall(signal)) {
+    if (event.kind === "delta") deltas.push(event.text);
+    else if (event.kind === "done") done = { usage: event.usage, model: event.model };
+    else error = event.error;
+  }
+  return { deltas, text: deltas.join(""), done, error };
+}
+
+describe("streaming a completion", () => {
+  it("delivers the answer in pieces and then finishes", async () => {
+    await serveStream([
+      { model: "served-model", choices: [{ delta: { content: "Hello" } }] },
+      { model: "served-model", choices: [{ delta: { content: ", world" } }] },
+      {
+        model: "served-model",
+        choices: [{ delta: {} }],
+        usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 },
+      },
+    ]);
+
+    const out = await drain();
+    expect(out.deltas).toEqual(["Hello", ", world"]);
+    expect(out.done?.model).toBe("served-model");
+    expect(out.done?.usage.totalTokens).toBe(7);
+    expect(out.error).toBeNull();
+  });
+
+  it("asks for usage on the final frame", async () => {
+    await serveStream([{ choices: [{ delta: { content: "x" } }] }]);
+    await drain();
+    const body = JSON.parse(lastRequest!.body) as Record<string, unknown>;
+    expect(body.stream).toBe(true);
+    // Without this OpenAI reports no usage at all on a stream, and the
+    // assistant would store a turn whose cost is permanently unknown.
+    expect(body.stream_options).toEqual({ include_usage: true });
+  });
+
+  it("retries without stream_options when the endpoint rejects it", async () => {
+    // Negotiated from what the server says, the same way the max_tokens fork
+    // is: a runtime that has never heard of stream_options must still work,
+    // and guessing which ones those are is a list we would maintain forever.
+    let seen = 0;
+    server = createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on("data", (c: Buffer) => chunks.push(c));
+      req.on("end", () => {
+        requestCount += 1;
+        lastRequest = {
+          url: req.url ?? "",
+          headers: req.headers as Record<string, string>,
+          body: Buffer.concat(chunks).toString("utf8"),
+        };
+        seen += 1;
+        if (seen === 1) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              error: { message: "unknown field: stream_options" },
+            }),
+          );
+          return;
+        }
+        res.writeHead(200, { "Content-Type": "text/event-stream" });
+        res.write(
+          `data: ${JSON.stringify({ choices: [{ delta: { content: "ok" } }] })}\n\n`,
+        );
+        res.write("data: [DONE]\n\n");
+        res.end();
+      });
+    });
+    await listen();
+
+    const out = await drain();
+    expect(out.text).toBe("ok");
+    expect(requestCount).toBe(2);
+    expect(JSON.parse(lastRequest!.body).stream_options).toBeUndefined();
+  });
+
+  it("reports a refused key as an error event, not a throw", async () => {
+    await serve(401, JSON.stringify({ error: { message: "bad key" } }));
+    const out = await drain();
+    expect(out.deltas).toEqual([]);
+    expect(out.error?.kind).toBe("auth");
+    expect(out.done).toBeNull();
+  });
+
+  it("reports a stream that says nothing at all", async () => {
+    // An endpoint that opens a stream and closes it having sent no content is
+    // not answering with an empty string; it is not doing what it claimed.
+    // Rendering that as a blank reply gives the user nothing to act on.
+    await serveStream([]);
+    const out = await drain();
+    expect(out.error?.kind).toBe("protocol");
+  });
+
+  it("ends silently when the caller cancels", async () => {
+    await serveStream([{ choices: [{ delta: { content: "partial" } }] }], {
+      holdOpen: true,
+    });
+    const controller = new AbortController();
+    const deltas: string[] = [];
+    let terminal: string | null = null;
+    for await (const event of streamCall(controller.signal)) {
+      if (event.kind === "delta") {
+        deltas.push(event.text);
+        controller.abort();
+      } else terminal = event.kind;
+    }
+
+    expect(deltas).toEqual(["partial"]);
+    // No terminal event at all: that absence is how a consumer tells "stopped
+    // on request" from "finished" and from "broke".
+    expect(terminal).toBeNull();
   });
 });

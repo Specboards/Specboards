@@ -60,7 +60,40 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
 
   /** Set to make the stub fail the next call, exercising the failure path. */
   let failNext = false;
+  /** Pace the stub's frames so a turn can be cancelled part-way through. */
+  let slow = false;
+  /** Set by the stub when the client hung up, which is how a cancel looks
+   * from the provider's side and the only signal it ever gets. */
+  let disconnected = false;
   let captured: CapturedRequest[] = [];
+
+  /**
+   * Run a turn to completion, collecting what a caller would observe.
+   *
+   * The production path is a stream, so the tests drive the stream. Draining
+   * it here rather than keeping a second non-streaming entry point means there
+   * is exactly one implementation of "what gets persisted", instead of two
+   * that have to be kept in agreement.
+   */
+  async function ask(
+    scope: { userId: string; workspaceId: string },
+    id: string,
+    text: string,
+    opts: { signal?: AbortSignal; onDelta?: (t: string) => void } = {},
+  ) {
+    const turn = await svc.startAssistantTurn(db, scope, id, text, opts);
+    const deltas: string[] = [];
+    let done: import("./assistant-service").AssistantMessageView[] | null = null;
+    let error: { kind: string; message: string } | null = null;
+    for await (const event of turn) {
+      if (event.kind === "delta") {
+        deltas.push(event.text);
+        opts.onDelta?.(event.text);
+      } else if (event.kind === "done") done = event.turns;
+      else error = event.error;
+    }
+    return { deltas, text: deltas.join(""), turns: done, error };
+  }
 
   beforeAll(async () => {
     const { createDb } = await import("@specboards/db");
@@ -68,28 +101,58 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
     svc = await import("./assistant-service");
     providers = await import("./model-provider-service");
 
+    // A streaming stub. It answers "A stub answer." in three frames, which is
+    // what makes reassembly a real assertion rather than a formality: a client
+    // that only handled one-frame answers would pass against a non-streaming
+    // stub and lose two thirds of every real reply.
     server = createServer((req, res) => {
       let body = "";
       req.on("data", (chunk) => (body += chunk));
-      req.on("end", () => {
-        if (req.url?.endsWith("/chat/completions")) {
-          captured.push(JSON.parse(body) as CapturedRequest);
-          if (failNext) {
-            res.writeHead(401, { "content-type": "application/json" });
-            res.end(JSON.stringify({ error: { message: "bad key" } }));
-            return;
-          }
-          res.writeHead(200, { "content-type": "application/json" });
-          res.end(
-            JSON.stringify({
-              model: "stub-model-v1",
-              choices: [{ message: { role: "assistant", content: "A stub answer." } }],
-              usage: { prompt_tokens: 31, completion_tokens: 7, total_tokens: 38 },
-            }),
-          );
+      req.on("end", async () => {
+        if (!req.url?.endsWith("/chat/completions")) {
+          res.writeHead(404).end();
           return;
         }
-        res.writeHead(404).end();
+        captured.push(JSON.parse(body) as CapturedRequest);
+        if (failNext) {
+          res.writeHead(401, { "content-type": "application/json" });
+          res.end(JSON.stringify({ error: { message: "bad key" } }));
+          return;
+        }
+
+        res.writeHead(200, {
+          "content-type": "text/event-stream",
+          "cache-control": "no-cache",
+        });
+        const frame = (payload: unknown) =>
+          res.write(`data: ${JSON.stringify(payload)}\n\n`);
+
+        // Per-request, not shared. `close` fires at the end of EVERY response,
+        // so a shared flag would latch after the first call and make the stub
+        // refuse every later one.
+        let hungUp = false;
+        res.on("close", () => {
+          hungUp = true;
+          // Only an early close is a client hanging up. A response that
+          // finished normally also emits `close`, and counting that as a
+          // disconnect would make the cancel assertion pass for free.
+          if (!res.writableFinished) disconnected = true;
+        });
+
+        for (const part of ["A ", "stub ", "answer."]) {
+          if (hungUp) return;
+          frame({ model: "stub-model-v1", choices: [{ delta: { content: part } }] });
+          // In slow mode the caller gets time to hit Stop between frames.
+          if (slow) await new Promise((r) => setTimeout(r, 300));
+        }
+        if (hungUp) return;
+        frame({
+          model: "stub-model-v1",
+          choices: [{ delta: {} }],
+          usage: { prompt_tokens: 31, completion_tokens: 7, total_tokens: 38 },
+        });
+        res.write("data: [DONE]\n\n");
+        res.end();
       });
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -132,6 +195,8 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
 
   beforeEach(async () => {
     failNext = false;
+    slow = false;
+    disconnected = false;
     captured = [];
     await sql`delete from assistant_messages where workspace_id = ${ws}`;
     await sql`delete from model_providers where workspace_id = ${ws}`;
@@ -157,23 +222,21 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
 
   it("answers a question and records both turns", async () => {
     await connectStub();
-    const outcome = await svc.sendAssistantMessage(
-      db,
-      asOwner,
-      specId,
-      "  What is missing here?  ",
-    );
+    const outcome = await ask(asOwner, specId, "  What is missing here?  ");
 
-    expect(outcome.ok).toBe(true);
-    if (!outcome.ok) return;
+    // Delivered in pieces, and reassembled into the answer that gets stored.
+    expect(outcome.deltas.length).toBeGreaterThan(1);
+    expect(outcome.text).toBe("A stub answer.");
+
+    expect(outcome.error).toBeNull();
     expect(outcome.turns).toHaveLength(2);
-    expect(outcome.turns[0]!.role).toBe("user");
-    expect(outcome.turns[0]!.content).toBe("What is missing here?"); // trimmed
-    expect(outcome.turns[1]!.role).toBe("assistant");
-    expect(outcome.turns[1]!.content).toBe("A stub answer.");
+    expect(outcome.turns![0]!.role).toBe("user");
+    expect(outcome.turns![0]!.content).toBe("What is missing here?"); // trimmed
+    expect(outcome.turns![1]!.role).toBe("assistant");
+    expect(outcome.turns![1]!.content).toBe("A stub answer.");
     // The model that actually answered, not the one asked for: a gateway is
     // free to substitute, and this is what the panel shows.
-    expect(outcome.turns[1]!.model).toBe("stub-model-v1");
+    expect(outcome.turns![1]!.model).toBe("stub-model-v1");
 
     const thread = await svc.listAssistantThread(db, asOwner, specId);
     expect(thread.map((m) => m.role)).toEqual(["user", "assistant"]);
@@ -184,9 +247,17 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
     expect(thread[1]!.authorName).toBe("Ada");
   });
 
+  it("asks the endpoint to stream", async () => {
+    await connectStub();
+    await ask(asOwner, specId, "Anything?");
+    // Without this the endpoint would answer in one piece and every claim
+    // about progressive rendering above would be vacuously true.
+    expect((captured[0] as unknown as { stream: boolean }).stream).toBe(true);
+  });
+
   it("records what the answer cost, as the endpoint reported it", async () => {
     await connectStub();
-    await svc.sendAssistantMessage(db, asOwner, specId, "Anything?");
+    await ask(asOwner, specId, "Anything?");
 
     const [row] = await sql<{ prompt_tokens: number; completion_tokens: number }[]>`
       select prompt_tokens, completion_tokens from assistant_messages
@@ -197,7 +268,7 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
 
   it("sends the item's own content, and nothing about anyone", async () => {
     await connectStub();
-    await svc.sendAssistantMessage(db, asOwner, specId, "Grill me.");
+    await ask(asOwner, specId, "Grill me.");
 
     const system = captured[0]!.messages.find((m) => m.role === "system")!.content;
     expect(system).toContain("Rate limiting");
@@ -213,8 +284,8 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
 
   it("replays the conversation so far on the next question", async () => {
     await connectStub();
-    await svc.sendAssistantMessage(db, asOwner, specId, "First question.");
-    await svc.sendAssistantMessage(db, asOwner, specId, "Second question.");
+    await ask(asOwner, specId, "First question.");
+    await ask(asOwner, specId, "Second question.");
 
     const second = captured[1]!.messages;
     expect(second.map((m) => m.role)).toEqual([
@@ -231,7 +302,7 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
   it("caps how much history is replayed", async () => {
     await connectStub();
     for (let i = 0; i < svc.HISTORY_TURN_LIMIT; i++) {
-      await svc.sendAssistantMessage(db, asOwner, specId, `Question ${i}.`);
+      await ask(asOwner, specId, `Question ${i}.`);
     }
     const last = captured.at(-1)!.messages;
     // System + the capped history + the new question. Without the cap a long
@@ -248,22 +319,45 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
   it("writes nothing when the model call fails", async () => {
     await connectStub();
     failNext = true;
-    const outcome = await svc.sendAssistantMessage(db, asOwner, specId, "Hello?");
+    const outcome = await ask(asOwner, specId, "Hello?");
 
-    expect(outcome.ok).toBe(false);
-    if (outcome.ok) return;
-    expect(outcome.error.kind).toBe("auth");
+    expect(outcome.turns).toBeNull();
+    expect(outcome.error?.kind).toBe("auth");
     // A question with no answer under it reads as the assistant ignoring
     // someone, and it replays into the next request as an unanswered turn.
     expect(await svc.listAssistantThread(db, asOwner, specId)).toHaveLength(0);
   });
 
+  it("keeps nothing when a turn is stopped part-way through", async () => {
+    await connectStub();
+    slow = true;
+    const controller = new AbortController();
+    // Abort as soon as there is something on screen, which is the only moment
+    // Stop is reachable in the UI: before the first token there is nothing to
+    // stop, and after the last there is nothing left to stop.
+    const outcome = await ask(asOwner, specId, "Stop me.", {
+      signal: controller.signal,
+      onDelta: () => controller.abort(),
+    });
+
+    expect(outcome.deltas.length).toBeGreaterThan(0);
+    // No terminal event: not a completed answer, and not an error either.
+    expect(outcome.turns).toBeNull();
+    expect(outcome.error).toBeNull();
+    // A partial answer replayed as history would drag every later answer with
+    // it, and an aborted stream never carries the usage a row would need.
+    expect(await svc.listAssistantThread(db, asOwner, specId)).toHaveLength(0);
+    // The provider is told by the connection closing; there is no cancel call
+    // in the protocol. Without this it keeps generating tokens we still pay
+    // for and nobody will ever read.
+    await new Promise((r) => setTimeout(r, 100));
+    expect(disconnected).toBe(true);
+  });
+
   it("says so plainly when no model is connected", async () => {
-    const outcome = await svc.sendAssistantMessage(db, asOwner, specId, "Hi.");
-    expect(outcome.ok).toBe(false);
-    if (outcome.ok) return;
-    expect(outcome.error.kind).toBe("not_configured");
-    expect(outcome.error.message).toMatch(/Settings/i);
+    const outcome = await ask(asOwner, specId, "Hi.");
+    expect(outcome.error?.kind).toBe("not_configured");
+    expect(outcome.error?.message).toMatch(/Settings/i);
     expect(await svc.isModelConnected(db, ws)).toBe(false);
   });
 
@@ -280,7 +374,7 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
       svc.listAssistantThread(db, asOutsider, closedSpecId),
     ).rejects.toThrow(svc.AssistantItemError);
     await expect(
-      svc.sendAssistantMessage(db, asOutsider, closedSpecId, "What is this?"),
+      ask(asOutsider, closedSpecId, "What is this?"),
     ).rejects.toThrow(svc.AssistantItemError);
     expect(captured).toHaveLength(0);
   });
@@ -288,7 +382,7 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
   it("rejects an empty question without calling anything", async () => {
     await connectStub();
     await expect(
-      svc.sendAssistantMessage(db, asOwner, specId, "   "),
+      ask(asOwner, specId, "   "),
     ).rejects.toThrow(svc.AssistantInputError);
     expect(captured).toHaveLength(0);
   });
@@ -296,7 +390,7 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
   it("rejects a question longer than the endpoint would take", async () => {
     await connectStub();
     await expect(
-      svc.sendAssistantMessage(db, asOwner, specId, "x".repeat(svc.MAX_TURN_CHARS + 1)),
+      ask(asOwner, specId, "x".repeat(svc.MAX_TURN_CHARS + 1)),
     ).rejects.toThrow(svc.AssistantInputError);
     expect(captured).toHaveLength(0);
   });
@@ -314,7 +408,7 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
     expect(captured).toHaveLength(0);
 
     await connectStub();
-    await svc.sendAssistantMessage(db, asOwner, specId, "Now ask.");
+    await ask(asOwner, specId, "Now ask.");
     const system = captured[0]!.messages.find((m) => m.role === "system")!.content;
     for (const field of disclosed) expect(system).toContain(field.value);
   });
@@ -394,26 +488,38 @@ describe.skipIf(!DB_URL || !RUNTIME_URL)(
     });
 
     it(
-      "answers from the real model and persists the exchange",
+      "streams from the real model and persists the exchange",
       async () => {
-        const outcome = await svc.sendAssistantMessage(
+        const turn = await svc.startAssistantTurn(
           db,
           scope,
           rtSpecId,
           "In one sentence, what is the biggest gap in this definition?",
         );
+        const deltas: string[] = [];
+        let turns: import("./assistant-service").AssistantMessageView[] | null = null;
+        let error: unknown = null;
+        for await (const event of turn) {
+          if (event.kind === "delta") deltas.push(event.text);
+          else if (event.kind === "done") turns = event.turns;
+          else error = event.error;
+        }
 
-        expect(outcome.ok).toBe(true);
-        if (!outcome.ok) return;
+        expect(error).toBeNull();
+        // The claim streaming actually makes: a real runtime hands the answer
+        // over in pieces, not as one block at the end. A stub can be made to
+        // do either, so this is the assertion only a real one can settle.
+        expect(deltas.length).toBeGreaterThan(1);
         // Not asserted: what it says. A 0.5B model on CPU says whatever it
         // likes, and asserting on content would make this a test of the model
         // rather than of the path to it.
-        expect(outcome.turns[1]!.content.length).toBeGreaterThan(0);
-        expect(outcome.turns[1]!.model).toBe(RUNTIME_MODEL);
+        expect(turns![1]!.content).toBe(deltas.join(""));
+        expect(turns![1]!.content.length).toBeGreaterThan(0);
+        expect(turns![1]!.model).toBe(RUNTIME_MODEL);
 
         const thread = await svc.listAssistantThread(db, scope, rtSpecId);
         expect(thread).toHaveLength(2);
-        expect(thread[1]!.content).toBe(outcome.turns[1]!.content);
+        expect(thread[1]!.content).toBe(turns![1]!.content);
       },
       // A small model on CPU is not fast, and the first call loads weights.
       120_000,

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 
 import { Button } from "@/components/ui/button";
@@ -100,7 +100,15 @@ export function AssistantPanel({ specId }: { specId: string }) {
     settingsLink: boolean;
   } | null>(null);
   const [showContext, setShowContext] = useState(false);
-  const [pending, startTransition] = useTransition();
+  /** The answer as it arrives. Null when no turn is in flight. */
+  const [streaming, setStreaming] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const pending = streaming !== null;
+
+  // Abandon an in-flight answer when the panel goes away (the section is
+  // collapsed, or the flyout switches items). Without this the request keeps
+  // running and the customer keeps paying for tokens that have nowhere to go.
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   useEffect(() => {
     let active = true;
@@ -124,38 +132,52 @@ export function AssistantPanel({ specId }: { specId: string }) {
     };
   }, [specId]);
 
-  function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const question = draft.trim();
-    if (!question) return;
-    startTransition(async () => {
-      setFailure(null);
-      try {
-        const outcome = await askAssistant(specId, question);
-        if (!outcome.ok) {
-          setFailure(
-            assistantErrorAdvice(outcome.error.kind, outcome.error.message),
-          );
-          // The draft is deliberately left in the composer. Nothing was
-          // persisted, so clearing it would lose the question to a failure the
-          // person can often fix and retry in one click.
-          return;
-        }
+    if (!question || pending) return;
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setFailure(null);
+    setStreaming("");
+
+    try {
+      const outcome = await askAssistant(specId, question, {
+        signal: controller.signal,
+        onDelta: (text) => setStreaming((prev) => (prev ?? "") + text),
+      });
+
+      if (outcome.ok) {
         setMessages((prev) => [...(prev ?? []), ...outcome.turns]);
         setDraft("");
-      } catch (err) {
-        if (err instanceof AuthRequiredError) {
-          window.location.href = `/sign-in?from=${encodeURIComponent(
-            window.location.pathname,
-          )}`;
-          return;
-        }
-        setFailure({
-          text: err instanceof Error ? err.message : "The assistant failed.",
-          settingsLink: false,
-        });
+        return;
       }
-    });
+      // Cancelling is not a failure and gets no error panel. The partial
+      // answer is dropped rather than left on screen, because the server
+      // stored nothing: showing it would imply a turn that does not exist and
+      // would vanish on the next reload anyway.
+      if ("cancelled" in outcome) return;
+
+      setFailure(assistantErrorAdvice(outcome.error.kind, outcome.error.message));
+      // The draft is deliberately left in the composer. Nothing was persisted,
+      // so clearing it would lose the question to a failure the person can
+      // often fix and retry in one click.
+    } catch (err) {
+      if (err instanceof AuthRequiredError) {
+        window.location.href = `/sign-in?from=${encodeURIComponent(
+          window.location.pathname,
+        )}`;
+        return;
+      }
+      setFailure({
+        text: err instanceof Error ? err.message : "The assistant failed.",
+        settingsLink: false,
+      });
+    } finally {
+      abortRef.current = null;
+      setStreaming(null);
+    }
   }
 
   const settingsHref = orgHref("/settings/integrations?tab=model");
@@ -191,7 +213,7 @@ export function AssistantPanel({ specId }: { specId: string }) {
         </div>
       ) : null}
 
-      {messages.length === 0 ? (
+      {messages.length === 0 && !pending ? (
         <p className="text-xs text-muted-foreground">
           Nothing asked about this item yet. Anyone who can see it can read this
           conversation.
@@ -224,6 +246,24 @@ export function AssistantPanel({ specId }: { specId: string }) {
               )}
             </li>
           ))}
+          {/* The turn in flight. Rendered inside the same list as the settled
+              ones so the answer appears where it will finally live, rather
+              than jumping position when it completes. */}
+          {pending ? (
+            <li className="space-y-1" aria-live="polite">
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span className="font-medium text-foreground">Assistant</span>
+                <span>{streaming ? "answering…" : "thinking…"}</span>
+              </div>
+              {streaming ? (
+                <div className="prose prose-sm prose-neutral max-w-none dark:prose-invert">
+                  <ReactMarkdown>{streaming}</ReactMarkdown>
+                </div>
+              ) : (
+                <Skeleton className="h-4 w-2/3" />
+              )}
+            </li>
+          ) : null}
         </ul>
       )}
 
@@ -237,11 +277,27 @@ export function AssistantPanel({ specId }: { specId: string }) {
             disabled={pending}
           />
           <div className="flex items-center gap-2">
-            <Button type="submit" size="sm" disabled={pending || !draft.trim()}>
-              {pending ? "Thinking…" : "Ask"}
-            </Button>
+            {/* Stop replaces Ask rather than sitting beside it: while an answer
+                is arriving there is exactly one thing to do, and a disabled
+                Ask next to a live Stop is two controls saying one thing. */}
+            {pending ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => abortRef.current?.abort()}
+              >
+                Stop
+              </Button>
+            ) : (
+              <Button type="submit" size="sm" disabled={!draft.trim()}>
+                Ask
+              </Button>
+            )}
             <p className="text-xs text-muted-foreground">
-              Runs on the model this workspace connected.
+              {pending
+                ? "Stopping keeps nothing: the answer is only saved once it finishes."
+                : "Runs on the model this workspace connected."}
             </p>
           </div>
         </form>

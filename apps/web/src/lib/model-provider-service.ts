@@ -11,6 +11,8 @@ import type {
   CompletionOutcome,
   ModelListOutcome,
   ProviderConfig,
+  StreamEvent,
+  StreamRequest,
 } from "@/lib/ai/provider";
 import { decryptSecret, encryptSecret } from "@/lib/crypto";
 
@@ -332,6 +334,46 @@ export async function listWorkspaceModels(
  * outcome, because "no model connected" is a setup prompt rather than a failure
  * to report.
  */
+/**
+ * Stream one completion against the workspace's configured model.
+ *
+ * The streaming twin of {@link completeWithWorkspaceModel}, and the same
+ * contract: no exceptions, `not_configured` as a distinct outcome, and the
+ * adapter's events passed through untouched.
+ *
+ * `last_used_at` is stamped on the first delta rather than at the end. What it
+ * answers is "is this connection actually serving the product", and by the time
+ * a token has arrived that is already true. Waiting for the stream to finish
+ * would leave a cancelled answer looking like the connection was never used,
+ * which is the opposite of what happened.
+ */
+export async function* streamWithWorkspaceModel(
+  db: Database,
+  workspaceId: string,
+  req: StreamRequest,
+): AsyncGenerator<StreamEvent | { kind: "not_configured" }> {
+  const resolved = await resolveConfig(db, workspaceId);
+  if (!resolved) {
+    yield { kind: "not_configured" };
+    return;
+  }
+
+  let stamped = false;
+  for await (const event of createOpenAiCompatibleClient(resolved.config).stream(req)) {
+    if (!stamped && (event.kind === "delta" || event.kind === "done")) {
+      stamped = true;
+      // Best effort, and deliberately not awaited into the critical path: a
+      // token in flight must not wait on a bookkeeping write.
+      void db
+        .update(modelProviders)
+        .set({ lastUsedAt: new Date() })
+        .where(eq(modelProviders.id, resolved.id))
+        .catch(() => {});
+    }
+    yield event;
+  }
+}
+
 export async function completeWithWorkspaceModel(
   db: Database,
   workspaceId: string,

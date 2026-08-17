@@ -4,7 +4,8 @@ import {
   AssistantInputError,
   AssistantItemError,
   getAssistantPanelData,
-  sendAssistantMessage,
+  startAssistantTurn,
+  type AssistantEvent,
 } from "@/lib/assistant-service";
 import { getDb } from "@/lib/db";
 
@@ -69,15 +70,34 @@ export async function GET(req: Request, { params }: Params) {
 /**
  * POST /api/v1/assistant/:specId - ask a question. Body: { message }.
  *
- * Returns 200 with `{ modelError: { kind, message } }` when the *model* refused
- * or could not be reached, rather than mapping it onto an HTTP status. The
- * request to Specboards succeeded; what failed is a call to a third party the
- * customer configured, and the panel needs `kind` to tell "connect a model
+ * Answers with a stream of newline-delimited JSON events, one per line:
+ * `{"kind":"delta","text":"…"}` repeatedly, then exactly one
+ * `{"kind":"done","turns":[…]}` or `{"kind":"error","error":{kind,message}}`.
+ *
+ * ── Why NDJSON and not server-sent events ───────────────────────────────────
+ * SSE is the convention and its one real advantage, `EventSource`, is
+ * unavailable to us: `EventSource` cannot issue a POST, and the question does
+ * not belong in a URL. That leaves reading the body off `fetch` either way, and
+ * once you are doing that, "split on newline, parse each line" is the whole
+ * protocol, with no framing rules to get subtly wrong.
+ *
+ * ── Why a model failure is a line in a 200 ──────────────────────────────────
+ * By the time the endpoint refuses we may already have sent text, and the
+ * status line is long gone. Rather than have failures arrive one way before the
+ * first token and another way after, they are always an event. The request to
+ * Specboards genuinely did succeed; what failed is a call to a third party the
+ * customer configured, and `kind` is what lets the panel tell "connect a model
  * first" from "your key is wrong" from "that endpoint is unreachable".
  *
- * Under its own key rather than `error`, which is a string everywhere else on
- * this API. A client that reads `error` for a message would otherwise render
- * "[object Object]" at exactly the moment it has something useful to say.
+ * Refusals that are *ours* - unknown item, unusable message - still come back
+ * as ordinary 404/422 JSON, because they are decided before any streaming
+ * starts. That is why {@link startAssistantTurn} does its checks eagerly.
+ *
+ * ── Cancelling ──────────────────────────────────────────────────────────────
+ * The browser aborts its fetch; `req.signal` fires; the abort is passed down to
+ * the upstream request, which closes the connection to the provider. There is
+ * no cancel call in the protocol, so closing the connection is the mechanism.
+ * The stream ends with no terminal event and nothing is written.
  */
 export async function POST(req: Request, { params }: Params) {
   const authz = await authorizeWrite(req);
@@ -90,15 +110,15 @@ export async function POST(req: Request, { params }: Params) {
   if (!parsed.ok) return parsed.response;
   const body = parsed.body as Record<string, unknown>;
 
+  let turn: AsyncGenerator<AssistantEvent>;
   try {
-    const outcome = await sendAssistantMessage(
+    turn = await startAssistantTurn(
       db,
       authz.scope,
       specId,
       typeof body.message === "string" ? body.message : "",
+      { signal: req.signal },
     );
-    if (!outcome.ok) return Response.json({ modelError: outcome.error });
-    return Response.json({ turns: outcome.turns }, { status: 201 });
   } catch (err) {
     if (err instanceof AssistantItemError) {
       return Response.json({ error: err.message }, { status: 404 });
@@ -108,4 +128,61 @@ export async function POST(req: Request, { params }: Params) {
     }
     throw err;
   }
+
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const write = (event: AssistantEvent) => {
+        // Enqueueing to a stream whose consumer has gone throws. That is the
+        // normal end of a cancelled turn, not a fault worth logging.
+        try {
+          controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+        } catch {
+          // The reader is gone; the loop below ends on the next abort check.
+        }
+      };
+      try {
+        for await (const event of turn) write(event);
+      } catch (err) {
+        // An unexpected throw mid-stream: the status is already sent, so the
+        // only way to say anything is another event.
+        if (!req.signal.aborted) {
+          write({
+            kind: "error",
+            error: {
+              kind: "unknown",
+              message:
+                err instanceof Error
+                  ? err.message
+                  : "The assistant stopped unexpectedly.",
+            },
+          });
+        }
+      } finally {
+        try {
+          controller.close();
+        } catch {
+          // Already closed by the disconnect.
+        }
+      }
+    },
+    cancel() {
+      // The reader went away (navigation, tab close). Ending the generator
+      // releases the upstream connection rather than leaving it producing
+      // tokens nobody will ever read, which the customer is still paying for.
+      void turn.return(undefined);
+    },
+  });
+
+  return new Response(stream, {
+    status: 200,
+    headers: {
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+      "Cache-Control": "no-store, no-transform",
+      // Tells an nginx-family proxy not to sit on the body until it is
+      // complete, which would deliver the whole answer at once and make all
+      // of this pointless.
+      "X-Accel-Buffering": "no",
+    },
+  });
 }

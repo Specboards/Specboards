@@ -9,6 +9,8 @@ import type {
   ModelErrorKind,
   ModelListOutcome,
   ProviderConfig,
+  StreamEvent,
+  StreamRequest,
   TokenUsage,
 } from "@/lib/ai/provider";
 
@@ -237,6 +239,82 @@ export function transportReason(err: unknown): string {
   return code ? `${detail} (${code})` : detail;
 }
 
+/**
+ * Pull complete `data:` payloads out of an accumulating SSE buffer.
+ *
+ * Returns the payloads that are definitely complete plus the bytes that are
+ * not, which the caller feeds back in with the next chunk. Splitting this out
+ * as a pure function is what makes the awkward part testable: a chunk boundary
+ * falls wherever TCP decides, routinely mid-line and mid-JSON, and a parser
+ * that assumes one chunk is one event works perfectly against a fast local
+ * runtime and corrupts answers from a slow remote one.
+ *
+ * Comment lines (`:` keepalives, which several gateways send to hold the
+ * connection open) and non-`data` fields are dropped rather than parsed.
+ */
+export function sseDataLines(buffer: string): { data: string[]; rest: string } {
+  const data: string[] = [];
+  // A trailing fragment with no newline yet is incomplete by definition. Note
+  // this also correctly holds back a complete-looking line that simply has not
+  // had its terminator arrive.
+  const lastBreak = buffer.lastIndexOf("\n");
+  if (lastBreak === -1) return { data, rest: buffer };
+
+  const complete = buffer.slice(0, lastBreak);
+  const rest = buffer.slice(lastBreak + 1);
+
+  for (const raw of complete.split("\n")) {
+    // \r\n line endings: the spec allows them and some servers emit them.
+    const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+    if (!line.startsWith("data:")) continue;
+    const payload = line.slice(5).trim();
+    if (payload) data.push(payload);
+  }
+  return { data, rest };
+}
+
+/** What one streamed chunk contributes. Any field may be absent. */
+export interface StreamChunk {
+  text: string | null;
+  model: string | null;
+  usage: TokenUsage | null;
+}
+
+/**
+ * Read one `data:` payload.
+ *
+ * Returns null for anything that is not a usable chunk, including the
+ * `[DONE]` sentinel and any JSON we cannot make sense of. A malformed chunk in
+ * the middle of an otherwise good stream is not worth failing the whole answer
+ * over: the endpoint has already sent real text, and dropping one frame
+ * degrades the answer where throwing would lose it.
+ */
+export function streamChunkFrom(payload: string): StreamChunk | null {
+  if (payload === "[DONE]") return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(payload);
+  } catch {
+    return null;
+  }
+  const root = (parsed ?? {}) as Record<string, unknown>;
+  const choices = Array.isArray(root.choices) ? root.choices : [];
+  const first = (choices[0] ?? {}) as Record<string, unknown>;
+  const delta = (first.delta ?? {}) as Record<string, unknown>;
+  const content = delta.content;
+  return {
+    text: typeof content === "string" && content !== "" ? content : null,
+    model: typeof root.model === "string" ? root.model : null,
+    // Present only on the final chunk, and only when the endpoint bothers.
+    usage: root.usage ? usageFrom(root.usage) : null,
+  };
+}
+
+/** Whether a 400 is the endpoint rejecting `stream_options` specifically. */
+function rejectsStreamOptions(body: string): boolean {
+  return /stream_options/i.test(body);
+}
+
 /** A reply that arrived, or the reason none did. */
 type Transport =
   | { ok: true; status: number; text: string }
@@ -332,6 +410,213 @@ function modelIdsFrom(parsed: unknown): string[] | null {
   return [...ids].sort((a, b) => a.localeCompare(b));
 }
 
+/**
+ * The streamed form of a completion.
+ *
+ * Written as its own function rather than folded into {@link send}, which
+ * reads the whole body before returning: the entire point here is not to.
+ *
+ * ── The timeout is an idle timeout ──────────────────────────────────────────
+ * `complete` bounds the whole call, which is right when one reply either
+ * arrives or does not. Applying that to a stream would kill a perfectly
+ * healthy answer for the crime of being long, and long answers are exactly
+ * what streaming exists for. So the clock measures the gap between chunks and
+ * resets on each one: a stream that is producing tokens is never interrupted,
+ * and one that has silently stalled still fails rather than hanging forever.
+ */
+async function* streamCompletion(
+  config: ProviderConfig,
+  req: StreamRequest,
+): AsyncGenerator<StreamEvent> {
+  const idleMs = req.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+
+  const target = await resolveModelTarget(config.baseUrl);
+  if (!target.ok) {
+    yield {
+      kind: "error",
+      error: { kind: "blocked", message: target.reason, status: null },
+    };
+    return;
+  }
+
+  const agent = modelDispatcher(target.addresses, idleMs);
+
+  // Reset on every chunk; see the note above.
+  const idle = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const bump = () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => idle.abort(), idleMs);
+  };
+
+  /** True when the caller asked us to stop, as opposed to anything going wrong. */
+  const cancelled = () => req.signal?.aborted === true;
+
+  try {
+    bump();
+    const signal = req.signal
+      ? AbortSignal.any([idle.signal, req.signal])
+      : idle.signal;
+
+    // Two things an endpoint may reject that we would rather ask for: usage
+    // reporting on the final chunk, and `max_tokens` under its older name.
+    // Both are negotiated from what the server actually says, the same way
+    // `complete` does it, rather than from a list of which vendors want what.
+    let wantUsage = true;
+    let tokenParam: "max_tokens" | "max_completion_tokens" = "max_tokens";
+
+    let res: Awaited<ReturnType<typeof undiciFetch>> | null = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const body = JSON.stringify({
+        model: config.model,
+        messages: req.messages.map((m) => ({ role: m.role, content: m.content })),
+        ...(req.maxTokens !== undefined ? { [tokenParam]: req.maxTokens } : {}),
+        ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
+        stream: true,
+        ...(wantUsage ? { stream_options: { include_usage: true } } : {}),
+      });
+
+      res = await undiciFetch(endpointUrl(config.baseUrl, "chat/completions"), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "text/event-stream",
+          "User-Agent": "Specboards/1.0",
+          ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}),
+          ...vendorHeaders(config.baseUrl, config.apiKey),
+        },
+        body,
+        redirect: "manual",
+        signal,
+        ...(agent ? { dispatcher: agent } : {}),
+      });
+
+      if (res.status !== 400) break;
+      const text = await res.text();
+      // Only retry when the endpoint named the thing it did not like. A blind
+      // retry would turn one bad request into three.
+      if (wantUsage && rejectsStreamOptions(text)) {
+        wantUsage = false;
+        continue;
+      }
+      if (
+        req.maxTokens !== undefined &&
+        tokenParam === "max_tokens" &&
+        wantsCompletionTokens(text)
+      ) {
+        tokenParam = "max_completion_tokens";
+        continue;
+      }
+      yield {
+        kind: "error",
+        error: {
+          kind: kindForStatus(400, text),
+          message: reasonFromBody(text)
+            ? `The model endpoint returned HTTP 400: ${reasonFromBody(text)}`
+            : "The model endpoint returned HTTP 400.",
+          status: 400,
+        },
+      };
+      return;
+    }
+
+    if (!res) return;
+
+    if (res.status < 200 || res.status >= 300) {
+      const text = await res.text();
+      const reason = reasonFromBody(text);
+      yield {
+        kind: "error",
+        error: {
+          kind: kindForStatus(res.status, text),
+          message: reason
+            ? `The model endpoint returned HTTP ${res.status}: ${reason}`
+            : `The model endpoint returned HTTP ${res.status}.`,
+          status: res.status,
+        },
+      };
+      return;
+    }
+
+    if (!res.body) {
+      yield {
+        kind: "error",
+        error: {
+          kind: "protocol",
+          message: "The endpoint accepted the request but sent no stream.",
+          status: res.status,
+        },
+      };
+      return;
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let model: string | null = null;
+    let usage: TokenUsage | null = null;
+    let sawText = false;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bump();
+      buffer += decoder.decode(value, { stream: true });
+      const { data, rest } = sseDataLines(buffer);
+      buffer = rest;
+      for (const payload of data) {
+        const chunk = streamChunkFrom(payload);
+        if (!chunk) continue;
+        if (chunk.model) model = chunk.model;
+        if (chunk.usage) usage = chunk.usage;
+        if (chunk.text) {
+          sawText = true;
+          yield { kind: "delta", text: chunk.text };
+        }
+      }
+    }
+
+    if (!sawText && !usage) {
+      // A stream that closed having said nothing at all is not a valid empty
+      // answer, it is an endpoint that is not doing what it claimed. Reporting
+      // it as an error beats rendering a blank reply the user cannot explain.
+      yield {
+        kind: "error",
+        error: {
+          kind: "protocol",
+          message:
+            "The endpoint opened a stream and closed it without sending an " +
+            "answer. Check that the base URL points at an OpenAI-compatible " +
+            "API root.",
+          status: res.status,
+        },
+      };
+      return;
+    }
+
+    yield {
+      kind: "done",
+      usage: usage ?? { promptTokens: null, completionTokens: null, totalTokens: null },
+      model,
+    };
+  } catch (err) {
+    // A caller-initiated cancel lands here as an abort. It is not a failure and
+    // gets no terminal event: the iteration simply ends, which is how a
+    // consumer tells "stopped on request" from "stopped because it broke".
+    if (cancelled()) return;
+    const message = idle.signal.aborted
+      ? `The model endpoint stopped sending for ${Math.round(idleMs / 1000)}s.`
+      : `Could not reach the model endpoint: ${transportReason(err)}`;
+    yield {
+      kind: "error",
+      error: { kind: "unreachable", message, status: null },
+    };
+  } finally {
+    if (timer) clearTimeout(timer);
+    await agent?.close().catch(() => {});
+  }
+}
+
 export function createOpenAiCompatibleClient(config: ProviderConfig): ModelClient {
   return {
     async complete(req: CompletionRequest): Promise<CompletionOutcome> {
@@ -424,6 +709,10 @@ export function createOpenAiCompatibleClient(config: ProviderConfig): ModelClien
         usage: usageFrom(root.usage),
         model: typeof root.model === "string" ? root.model : null,
       };
+    },
+
+    stream(req: StreamRequest) {
+      return streamCompletion(config, req);
     },
 
     async listModels(opts): Promise<ModelListOutcome> {

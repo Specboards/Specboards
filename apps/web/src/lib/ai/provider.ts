@@ -8,9 +8,10 @@
  * would not survive that, so this is deliberately the smallest surface the
  * assistant epic actually needs.
  *
- * Streaming is NOT here yet. It is the obvious next method and the shape is
- * known, but nothing calls it, and an unused method with no caller to constrain
- * it tends to be the wrong shape by the time one arrives.
+ * Streaming arrived with its first caller (the assistant panel), which is what
+ * decided its shape: an async iterable of events rather than a callback, and
+ * failures as events rather than throws, so a caller writes one loop and
+ * handles a refused key in the same place it handles a token.
  */
 
 /** A single turn. `system` is separated by the adapter, not by callers. */
@@ -118,8 +119,47 @@ export interface ProviderConfig {
   apiKey: string | null;
 }
 
+/**
+ * One thing that happened while a streamed answer was being produced.
+ *
+ * `error` is an event rather than a thrown exception because a stream can fail
+ * *after* it has already delivered text: the endpoint dies mid-answer, the key
+ * is revoked between chunks, the connection drops. A caller that has to catch
+ * for those but branch for the ones that happen before the first token would
+ * have two ways to handle the same situation, and would get one of them wrong.
+ *
+ * At most one terminal event (`done` or `error`) is emitted, and nothing
+ * follows it.
+ */
+export type StreamEvent =
+  /** A fragment of the answer. Fragments concatenate; none is a whole word. */
+  | { kind: "delta"; text: string }
+  /** The answer finished normally. Usage is whatever the endpoint reported,
+   * which for a stream is often nothing at all: several runtimes omit it, and
+   * an aborted stream never reaches the chunk that carries it. */
+  | { kind: "done"; usage: TokenUsage; model: string | null }
+  | { kind: "error"; error: ModelError };
+
+export interface StreamRequest extends CompletionRequest {
+  /**
+   * Cancels the call. The endpoint is told to stop by the connection closing,
+   * which is the only mechanism the protocol has: there is no "cancel" call.
+   * Tokens already generated are already paid for.
+   */
+  signal?: AbortSignal;
+}
+
 export interface ModelClient {
   complete(req: CompletionRequest): Promise<CompletionOutcome>;
+  /**
+   * The same request, delivered as it is produced.
+   *
+   * Separate from `complete` rather than an option on it because the return
+   * types have nothing in common and callers genuinely want one or the other:
+   * a connection test wants the whole answer and a timing, a chat panel wants
+   * the first token as soon as it exists.
+   */
+  stream(req: StreamRequest): AsyncIterable<StreamEvent>;
   /**
    * What this endpoint says it serves, for a picker instead of a typed string.
    *

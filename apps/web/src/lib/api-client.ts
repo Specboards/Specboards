@@ -445,8 +445,19 @@ export async function getAssistantThread(specId: string): Promise<{
   };
 }
 
+/** One line of the assistant's NDJSON stream, as the browser sees it. */
+export type AssistantStreamEvent =
+  | { kind: "delta"; text: string }
+  | { kind: "done"; turns: AssistantMessageView[] }
+  | { kind: "error"; error: { kind: string; message: string } };
+
 /**
- * Ask the assistant about an item.
+ * Ask the assistant about an item, rendering the answer as it arrives.
+ *
+ * `onDelta` is called with each fragment. The resolved value is the outcome:
+ * the persisted pair on success, an error to render on failure, or `cancelled`
+ * when the caller aborted, which is not a failure and should not be reported
+ * as one.
  *
  * A failure at the customer's own model endpoint comes back as a value rather
  * than a thrown error: it is not a bug to report but a state the panel renders,
@@ -456,29 +467,85 @@ export async function getAssistantThread(specId: string): Promise<{
 export async function askAssistant(
   specId: string,
   message: string,
+  opts: { onDelta?: (text: string) => void; signal?: AbortSignal } = {},
 ): Promise<
   | { ok: true; turns: AssistantMessageView[] }
   | { ok: false; error: { kind: string; message: string } }
+  | { ok: false; cancelled: true }
 > {
-  const res = await apiFetch(
-    `/api/v1/assistant/${encodeURIComponent(specId)}`,
-    {
+  let res: Response;
+  try {
+    res = await apiFetch(`/api/v1/assistant/${encodeURIComponent(specId)}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ message }),
-    },
-  );
+      ...(opts.signal ? { signal: opts.signal } : {}),
+    });
+  } catch (err) {
+    if (opts.signal?.aborted) return { ok: false, cancelled: true };
+    throw err;
+  }
   if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as {
-    turns?: AssistantMessageView[];
-    modelError?: { kind: string; message: string };
-    error?: string;
-  } | null;
-  if (body?.modelError) return { ok: false, error: body.modelError };
-  if (!res.ok || !body?.turns) {
+
+  // Our own refusals (unknown item, unusable message) are decided before any
+  // streaming starts and still arrive as ordinary JSON with a status.
+  if (!res.ok || !res.body) {
+    const body = (await res.json().catch(() => null)) as { error?: string } | null;
     throw new Error(body?.error ?? `The assistant failed (${res.status}).`);
   }
-  return { ok: true, turns: body.turns };
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let outcome:
+    | { ok: true; turns: AssistantMessageView[] }
+    | { ok: false; error: { kind: string; message: string } }
+    | null = null;
+
+  const consume = (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    let event: AssistantStreamEvent;
+    try {
+      event = JSON.parse(trimmed) as AssistantStreamEvent;
+    } catch {
+      // A line we cannot parse is dropped rather than failing an answer that
+      // is otherwise arriving fine.
+      return;
+    }
+    if (event.kind === "delta") opts.onDelta?.(event.text);
+    else if (event.kind === "done") outcome = { ok: true, turns: event.turns };
+    else if (event.kind === "error") outcome = { ok: false, error: event.error };
+  };
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      // Everything up to the last newline is complete; the tail may be a
+      // fragment of a line that has not finished arriving.
+      const lastBreak = buffer.lastIndexOf("\n");
+      if (lastBreak === -1) continue;
+      for (const line of buffer.slice(0, lastBreak).split("\n")) consume(line);
+      buffer = buffer.slice(lastBreak + 1);
+    }
+    consume(buffer);
+  } catch (err) {
+    if (opts.signal?.aborted) return { ok: false, cancelled: true };
+    throw err;
+  }
+
+  if (opts.signal?.aborted) return { ok: false, cancelled: true };
+  return (
+    outcome ?? {
+      ok: false,
+      error: {
+        kind: "unknown",
+        message: "The answer stopped before it finished.",
+      },
+    }
+  );
 }
 
 /** Post a comment to a feature; returns the created record. */
