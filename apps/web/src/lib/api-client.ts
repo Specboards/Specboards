@@ -422,6 +422,9 @@ export async function getAssistantThread(specId: string): Promise<{
   messages: AssistantMessageView[];
   context: AssistantContextField[];
   modelConnected: boolean;
+  canEdit: boolean;
+  canPropose: boolean;
+  body: string;
 }> {
   const res = await apiFetch(
     `/api/v1/assistant/${encodeURIComponent(specId)}`,
@@ -431,6 +434,9 @@ export async function getAssistantThread(specId: string): Promise<{
     messages?: AssistantMessageView[];
     context?: AssistantContextField[];
     modelConnected?: boolean;
+    canEdit?: boolean;
+    canPropose?: boolean;
+    body?: string;
     error?: string;
   } | null;
   if (!res.ok || !body?.messages || !body?.context) {
@@ -442,7 +448,61 @@ export async function getAssistantThread(specId: string): Promise<{
     messages: body.messages,
     context: body.context,
     modelConnected: Boolean(body.modelConnected),
+    canEdit: Boolean(body.canEdit),
+    canPropose: Boolean(body.canPropose),
+    body: body.body ?? "",
   };
+}
+
+/** What came back from accepting or rejecting a proposed edit. */
+export interface ProposalOutcome {
+  message: AssistantMessageView;
+  /** The item's description afterwards, so the diff baseline moves with it. */
+  body: string;
+  commitSha?: string;
+  pullRequest?: { number: number; url: string; created: boolean };
+  mergedWith?: number;
+}
+
+/**
+ * Accept or reject an edit the assistant proposed.
+ *
+ * `body` is "edit before accepting": the reviewer's own text, which replaces
+ * what was drafted. Omitting it accepts the draft as written.
+ *
+ * A conflict comes back as {@link SpecConflictError}, the same type a hand-made
+ * save raises, because it is the same situation and the caller needs the same
+ * thing: the version that won, not just the news that it did.
+ */
+export async function resolveProposal(
+  specId: string,
+  messageId: string,
+  action: "accept" | "reject",
+  opts: { body?: string } = {},
+): Promise<ProposalOutcome> {
+  const res = await apiFetch(
+    `/api/v1/features/${encodeURIComponent(specId)}/proposals`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        messageId,
+        action,
+        ...(opts.body !== undefined ? { body: opts.body } : {}),
+      }),
+    },
+  );
+  if (res.status === 401) throw new AuthRequiredError();
+  const payload = (await res.json().catch(() => null)) as
+    | (ProposalOutcome & { conflict?: SpecConflict; error?: string })
+    | null;
+  if (res.status === 409 && payload?.conflict) {
+    throw new SpecConflictError(payload.error ?? "", payload.conflict);
+  }
+  if (!res.ok || !payload?.message) {
+    throw new Error(payload?.error ?? `That did not go through (${res.status}).`);
+  }
+  return payload;
 }
 
 /** One line of the assistant's NDJSON stream, as the browser sees it. */

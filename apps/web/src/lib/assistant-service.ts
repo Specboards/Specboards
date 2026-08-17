@@ -1,4 +1,6 @@
+import { canWriteProduct } from "@specboards/core";
 import {
+  alias,
   and,
   asc,
   assistantMessages,
@@ -10,6 +12,7 @@ import {
 } from "@specboards/db";
 
 import { assembleItemContext, type ContextField } from "@/lib/ai/item-context";
+import { parseAnswer } from "@/lib/ai/proposals";
 import type { ModelErrorKind, ModelMessage, TokenUsage } from "@/lib/ai/provider";
 import { statusLabel } from "@/lib/feature-helpers";
 import { streamWithWorkspaceModel } from "@/lib/model-provider-service";
@@ -22,24 +25,42 @@ import type { FeatureDetail, WorkspaceScope } from "@/lib/store/types";
  *
  * ── Where authorization comes from ──────────────────────────────────────────
  * Every entry point resolves the item through the store first
- * ({@link resolveItem}), which is what applies product visibility. That read is
- * heavier than a bare existence check, and it is deliberate: the conversation
- * is about the item's content, so "may this person read this item" and "may
- * this person read this thread" have to be one decision made in one place. Two
- * checks that agree today are two checks that can disagree later.
+ * ({@link resolveAssistantItem}), which is what applies product visibility. That
+ * read is heavier than a bare existence check, and it is deliberate: the
+ * conversation is about the item's content, so "may this person read this item"
+ * and "may this person read this thread" have to be one decision made in one
+ * place. Two checks that agree today are two checks that can disagree later.
  *
  * ── Why nothing here writes to the item ─────────────────────────────────────
  * This module has no path that changes a spec, a card, or anything else about
- * the item. That is the epic's hard constraint rather than an accident of the
- * current slice: what the assistant produces becomes a reviewable proposal a
- * human accepts, travelling the same write path as a human edit. When that
- * lands it goes beside this, not inside it.
+ * the item, and that is the epic's hard constraint rather than an accident. An
+ * answer may *contain* a proposed edit, which is inert text until a person
+ * accepts it; applying one lives in `assistant-proposals.ts`, deliberately
+ * beside this rather than inside it, and goes through the same write path a
+ * human edit takes. There is no code path from a model's output to a write.
  */
 
 /** The item does not exist, or the caller cannot see it. Routes map to 404. */
 export class AssistantItemError extends Error {}
 /** A bad turn (empty, or longer than an endpoint will take). Routes map to 422. */
 export class AssistantInputError extends Error {}
+
+/**
+ * What became of a proposed edit carried by a turn.
+ *
+ * The proposed text itself is deliberately absent: it is already in `content`,
+ * and the browser parses it out with the same function the server does. Sending
+ * it twice would create two copies of one string that can drift, where the one
+ * that is rendered and the one that would be applied stop being the same text.
+ */
+export interface ProposalState {
+  /** Null while nobody has decided. */
+  outcome: "accepted" | "rejected" | null;
+  resolvedByName: string | null;
+  resolvedAt: string | null;
+  /** Where an accepted edit landed, for a git-backed spec. */
+  commitSha: string | null;
+}
 
 /** One persisted turn, as the browser sees it. */
 export interface AssistantMessageView {
@@ -52,6 +73,8 @@ export interface AssistantMessageView {
   /** What answered, as the endpoint reported it. Null on a user turn. */
   model: string | null;
   createdAt: string;
+  /** Present only when this turn actually contains a proposal. */
+  proposal: ProposalState | null;
 }
 
 export type AssistantSendOutcome =
@@ -87,7 +110,16 @@ function toView(row: {
   authorName: string | null;
   model: string | null;
   createdAt: Date;
+  proposalOutcome?: string | null;
+  proposalResolvedByName?: string | null;
+  proposalResolvedAt?: Date | null;
+  proposalCommitSha?: string | null;
 }): AssistantMessageView {
+  // Whether there is a proposal is decided by reading the content, never by the
+  // outcome column, which is null both for "not decided yet" and for "there was
+  // never one". The content is the only place that distinction lives.
+  const hasProposal =
+    row.role === "assistant" && parseAnswer(row.content).proposal !== null;
   return {
     id: row.id,
     role: row.role === "assistant" ? "assistant" : "user",
@@ -96,6 +128,17 @@ function toView(row: {
     authorName: row.authorName,
     model: row.model,
     createdAt: row.createdAt.toISOString(),
+    proposal: hasProposal
+      ? {
+          outcome:
+            row.proposalOutcome === "accepted" || row.proposalOutcome === "rejected"
+              ? row.proposalOutcome
+              : null,
+          resolvedByName: row.proposalResolvedByName ?? null,
+          resolvedAt: row.proposalResolvedAt?.toISOString() ?? null,
+          commitSha: row.proposalCommitSha ?? null,
+        }
+      : null,
   };
 }
 
@@ -105,7 +148,7 @@ function toView(row: {
  * which is the right conflation to preserve: distinguishing them would let a
  * caller enumerate items in products they cannot see.
  */
-async function resolveItem(
+export async function resolveAssistantItem(
   db: Database,
   scope: WorkspaceScope,
   specId: string,
@@ -128,6 +171,13 @@ async function resolveItem(
   return { feature, featureId: row.id };
 }
 
+/**
+ * Who accepted or rejected a proposal, joined separately from who asked. Two
+ * aliases of `users` rather than one, because they are routinely different
+ * people: that is the whole shape of a review.
+ */
+const resolvers = alias(users, "proposal_resolvers");
+
 async function readThread(
   db: Database,
   workspaceId: string,
@@ -142,9 +192,14 @@ async function readThread(
       model: assistantMessages.model,
       createdAt: assistantMessages.createdAt,
       authorName: users.name,
+      proposalOutcome: assistantMessages.proposalOutcome,
+      proposalResolvedAt: assistantMessages.proposalResolvedAt,
+      proposalCommitSha: assistantMessages.proposalCommitSha,
+      proposalResolvedByName: resolvers.name,
     })
     .from(assistantMessages)
     .leftJoin(users, eq(users.id, assistantMessages.authorId))
+    .leftJoin(resolvers, eq(resolvers.id, assistantMessages.proposalResolvedBy))
     .where(
       and(
         eq(assistantMessages.workspaceId, workspaceId),
@@ -161,7 +216,7 @@ export async function listAssistantThread(
   scope: WorkspaceScope,
   specId: string,
 ): Promise<AssistantMessageView[]> {
-  const { featureId } = await resolveItem(db, scope, specId);
+  const { featureId } = await resolveAssistantItem(db, scope, specId);
   return readThread(db, scope.workspaceId, featureId);
 }
 
@@ -170,6 +225,45 @@ export interface AssistantPanelData {
   messages: AssistantMessageView[];
   context: ContextField[];
   modelConnected: boolean;
+  /**
+   * Whether this person may accept a proposal. The accept route checks for
+   * itself; this is so the panel does not offer a button that would be refused,
+   * and so the model is not told it can propose to someone who cannot accept.
+   */
+  canEdit: boolean;
+  /**
+   * Whether the assistant will be invited to propose an edit at all. False for
+   * someone who cannot write, and false when the description is too long to
+   * send whole: a replacement body drafted from a shortened description would
+   * delete everything past the cut. The panel says so rather than leaving
+   * someone asking why the assistant has stopped offering.
+   */
+  canPropose: boolean;
+  /**
+   * The item's description as it is right now, which is what a proposal is
+   * diffed against. Sent from here rather than read off the page so the diff
+   * shown and the text the accept is guarded against come from one place.
+   */
+  body: string;
+}
+
+/**
+ * Whether this scope may change this item's description.
+ *
+ * The same check the write paths make, asked early. Duplicating a permission
+ * check is usually how they drift, so this one is only ever advisory: it decides
+ * what to *offer*, and `updateSpecContent` / `patchFeature` still decide what
+ * happens. A disagreement between them costs a refused click, not a bad write.
+ */
+export async function canEditItem(
+  scope: WorkspaceScope,
+  feature: FeatureDetail,
+): Promise<boolean> {
+  const store = await getStore();
+  const access = await store.getProductAccess(scope);
+  return feature.productId === null
+    ? access.isOrgAdmin
+    : access.isOrgAdmin || canWriteProduct(access, feature.productId);
 }
 
 /**
@@ -185,13 +279,21 @@ export async function getAssistantPanelData(
   scope: WorkspaceScope,
   specId: string,
 ): Promise<AssistantPanelData> {
-  const { feature, featureId } = await resolveItem(db, scope, specId);
+  const { feature, featureId } = await resolveAssistantItem(db, scope, specId);
+  const canEdit = await canEditItem(scope, feature);
   const [messages, assembled, modelConnected] = await Promise.all([
     readThread(db, scope.workspaceId, featureId),
-    buildContext(scope, feature),
+    buildContext(scope, feature, canEdit),
     isModelConnected(db, scope.workspaceId),
   ]);
-  return { messages, context: assembled.fields, modelConnected };
+  return {
+    messages,
+    context: assembled.fields,
+    modelConnected,
+    canEdit,
+    canPropose: assembled.canPropose,
+    body: feature.content,
+  };
 }
 
 /**
@@ -223,7 +325,11 @@ export async function isModelConnected(
   return Boolean(row);
 }
 
-async function buildContext(scope: WorkspaceScope, feature: FeatureDetail) {
+async function buildContext(
+  scope: WorkspaceScope,
+  feature: FeatureDetail,
+  canEdit: boolean,
+) {
   const store = await getStore();
   const [workflow, levels, goals] = await Promise.all([
     resolveWorkflowFor(scope, feature.productId),
@@ -234,6 +340,7 @@ async function buildContext(scope: WorkspaceScope, feature: FeatureDetail) {
   const ownIndex = levels.findIndex((l) => l.key === feature.level);
 
   return assembleItemContext({
+    canEdit,
     title: feature.title,
     levelLabel: levels[ownIndex]?.label ?? feature.level,
     statusLabel: statusLabel(feature.status, workflow),
@@ -308,8 +415,9 @@ export async function startAssistantTurn(
     );
   }
 
-  const { feature, featureId } = await resolveItem(db, scope, specId);
-  const { systemPrompt } = await buildContext(scope, feature);
+  const { feature, featureId } = await resolveAssistantItem(db, scope, specId);
+  const canEdit = await canEditItem(scope, feature);
+  const { systemPrompt } = await buildContext(scope, feature, canEdit);
   const history = await readThread(db, scope.workspaceId, featureId);
 
   const messages: ModelMessage[] = [
@@ -371,7 +479,13 @@ export async function startAssistantTurn(
 
     yield {
       kind: "done",
-      turns: await persistTurns(db, scope, featureId, question, answer, model, usage),
+      turns: await persistTurns(db, scope, featureId, question, answer, model, usage, {
+        // The version the draft was written against, recorded now rather than
+        // read at accept time. A proposal can sit on a card for a day, and what
+        // makes accepting it safe is being guarded against the document the
+        // model was actually shown.
+        baseSha: feature.blobSha,
+      }),
     };
   }
 }
@@ -385,8 +499,14 @@ async function persistTurns(
   answer: string,
   model: string | null,
   usage: TokenUsage,
+  opts: { baseSha: string | null },
 ): Promise<AssistantMessageView[]> {
   const now = new Date();
+  // Recorded only when the answer actually carries a proposal, so a sha on a
+  // row always means "this text was drafted against that version" rather than
+  // "this turn happened while the spec looked like that".
+  const proposalBaseSha =
+    parseAnswer(answer).proposal === null ? null : opts.baseSha;
   const inserted = await db
     .insert(assistantMessages)
     .values([
@@ -409,6 +529,7 @@ async function persistTurns(
         model,
         promptTokens: usage.promptTokens,
         completionTokens: usage.completionTokens,
+        proposalBaseSha,
         // One millisecond later, so the ordering of a pair written in the same
         // statement is decided here rather than by however Postgres happens to
         // resolve two identical timestamps.
@@ -426,6 +547,9 @@ async function persistTurns(
     .limit(1);
   const authorName = author?.name ?? null;
 
+  // A freshly written pair has no resolution yet, so the proposal columns are
+  // left at their defaults rather than mapped: `toView` reads the content to
+  // decide whether there is a proposal at all.
   return inserted.map((row) =>
     toView({
       id: row.id,

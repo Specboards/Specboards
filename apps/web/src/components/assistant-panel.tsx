@@ -1,17 +1,23 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import { toast } from "sonner";
 
+import { SpecDiff } from "@/components/spec-diff";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import type { ContextField } from "@/lib/ai/item-context";
+import { parseAnswer, proposalStarted } from "@/lib/ai/proposals";
 import {
   AuthRequiredError,
   askAssistant,
   getAssistantThread,
+  resolveProposal,
+  SpecConflictError,
 } from "@/lib/api-client";
 import type { AssistantMessageView } from "@/lib/assistant-service";
 import { useOrgPath } from "@/lib/use-org";
@@ -118,6 +124,136 @@ function turnTime(iso: string): string {
 }
 
 /**
+ * A proposed edit, and the decision about it.
+ *
+ * ── Why the buttons are here and not in the item editor ─────────────────────
+ * The proposal is part of a conversation and only makes sense beside the
+ * sentence explaining it. Lifting it into the description editor would separate
+ * "here is what I changed and why" from "here is the change", and a reviewer
+ * would be approving a diff with the reasoning two sections away.
+ *
+ * ── Why "edit before accepting" is a plain textarea ─────────────────────────
+ * It is deliberately not the Markdown editor the description uses. This is a
+ * correction to somebody else's draft made in the middle of reviewing it, and
+ * dropping a full editing surface into the middle of a diff makes the panel
+ * about writing rather than about deciding. The reviewer who wants the real
+ * editor accepts and then edits the item, which is one more click and the right
+ * shape.
+ */
+function ProposalReview({
+  proposed,
+  current,
+  state,
+  canEdit,
+  busy,
+  onResolve,
+}: {
+  proposed: string;
+  current: string;
+  state: NonNullable<AssistantMessageView["proposal"]>;
+  canEdit: boolean;
+  busy: boolean;
+  onResolve: (action: "accept" | "reject", body?: string) => void;
+}) {
+  const [showDiff, setShowDiff] = useState(state.outcome === null);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(proposed);
+
+  if (state.outcome) {
+    return (
+      <div className="mt-2 space-y-2 rounded-md border bg-muted/30 p-3 text-xs">
+        <p className="text-muted-foreground">
+          {/* Names the person, because "which was it" is the question this
+              record exists to answer six months later. */}
+          {state.outcome === "accepted" ? "Accepted" : "Not taken"} by{" "}
+          <span className="font-medium text-foreground">
+            {state.resolvedByName ?? "someone"}
+          </span>
+          {state.resolvedAt ? (
+            <span title={new Date(state.resolvedAt).toLocaleString()}>
+              {" "}
+              at {turnTime(state.resolvedAt)}
+            </span>
+          ) : null}
+          {state.commitSha ? (
+            <span className="font-mono"> ({state.commitSha.slice(0, 7)})</span>
+          ) : null}
+        </p>
+        <button
+          type="button"
+          onClick={() => setShowDiff((v) => !v)}
+          className="text-muted-foreground underline-offset-2 hover:underline"
+        >
+          {showDiff ? "Hide" : "Show"} what was proposed
+        </button>
+        {/* Diffed against the description as it is *now*, not as it was then,
+            so a settled proposal reopened later shows what it would still do
+            rather than replaying history. That is the honest reading for
+            something that was rejected and might be reconsidered. */}
+        {showDiff ? <SpecDiff before={current} after={proposed} /> : null}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-2 space-y-3 rounded-md border border-link/40 bg-link/5 p-3">
+      <p className="text-xs font-medium">Proposed change to the description</p>
+
+      {editing ? (
+        <Textarea
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          rows={14}
+          className="font-mono text-2xs"
+        />
+      ) : (
+        <SpecDiff before={current} after={draft} />
+      )}
+
+      {canEdit ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            disabled={busy}
+            onClick={() =>
+              onResolve("accept", draft === proposed ? undefined : draft)
+            }
+          >
+            {busy ? "Applying…" : "Accept"}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={() => setEditing((v) => !v)}
+          >
+            {editing ? "Back to the diff" : "Edit before accepting"}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={busy}
+            onClick={() => onResolve("reject")}
+          >
+            Reject
+          </Button>
+          {draft !== proposed && !editing ? (
+            <p className="text-2xs text-muted-foreground">
+              Showing your edited version.
+            </p>
+          ) : null}
+        </div>
+      ) : (
+        <p className="text-2xs text-muted-foreground">
+          You can read this proposal but not apply it. Someone with edit access
+          to this item can accept it.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
  * One settled turn.
  *
  * Its own component so each can hold its own expanded state; a `useState` per
@@ -131,11 +267,25 @@ function turnTime(iso: string): string {
 function AssistantTurn({
   message,
   collapsible,
+  itemBody,
+  canEdit,
+  busy,
+  onResolve,
 }: {
   message: AssistantMessageView;
   collapsible: boolean;
+  /** The description as it stands, which is what a proposal is diffed against. */
+  itemBody: string;
+  canEdit: boolean;
+  busy: boolean;
+  onResolve: (action: "accept" | "reject", body?: string) => void;
 }) {
-  const long = message.content.length > LONG_MESSAGE_CHARS;
+  // Parsed here rather than sent by the server: the panel has to parse the
+  // stream as it arrives anyway, and one parser is what stops the text a
+  // reviewer is shown from drifting away from the text an accept would apply.
+  const { prose, proposal } = parseAnswer(message.content);
+  const shown = message.role === "assistant" ? prose : message.content;
+  const long = shown.length > LONG_MESSAGE_CHARS;
   const [open, setOpen] = useState(false);
   const clamped = collapsible && long && !open;
 
@@ -158,12 +308,10 @@ function AssistantTurn({
       <div className={clamped ? "relative max-h-24 overflow-hidden" : undefined}>
         {message.role === "assistant" ? (
           <div className="prose prose-sm prose-neutral max-w-none dark:prose-invert">
-            <ReactMarkdown>{message.content}</ReactMarkdown>
+            <ReactMarkdown>{shown}</ReactMarkdown>
           </div>
         ) : (
-          <p className="whitespace-pre-wrap break-words text-sm">
-            {message.content}
-          </p>
+          <p className="whitespace-pre-wrap break-words text-sm">{shown}</p>
         )}
         {clamped ? (
           // Fades rather than cutting flat, so it reads as "there is more"
@@ -181,6 +329,20 @@ function AssistantTurn({
           {open ? "Show less" : "Show more"}
         </button>
       ) : null}
+
+      {/* Never clamped away with the prose. An undecided proposal is the one
+          thing on this card waiting for a person, and hiding it behind "Show
+          more" is how it gets forgotten. */}
+      {proposal && message.proposal ? (
+        <ProposalReview
+          proposed={proposal}
+          current={itemBody}
+          state={message.proposal}
+          canEdit={canEdit}
+          busy={busy}
+          onResolve={onResolve}
+        />
+      ) : null}
     </li>
   );
 }
@@ -195,18 +357,27 @@ function AssistantTurn({
  * opt-in the "add" convention asks for, and a conversation panel whose only
  * control is a button to reveal the input reads as broken rather than tidy.
  *
- * Streaming is deliberately not here yet. It matters (these are the customer's
- * tokens and a long answer with no feedback feels hung) and it is the next
- * thing to add, but it changes the transport rather than the shape, and the
- * shape is what needed proving end to end first.
+ * An answer may carry a proposed edit, which is inert text until someone
+ * accepts it here. The panel never applies anything itself: accepting posts to
+ * the item's own write route, which is the same one a hand-made edit takes.
  */
 export function AssistantPanel({ specId }: { specId: string }) {
   const orgHref = useOrgPath();
+  const router = useRouter();
   const [messages, setMessages] = useState<AssistantMessageView[] | null>(null);
   const [context, setContext] = useState<ContextField[]>([]);
   const [modelConnected, setModelConnected] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  /** Whether this person may accept a proposal, decided by the server. */
+  const [canEdit, setCanEdit] = useState(false);
+  /** Whether the assistant is being invited to propose one at all. */
+  const [canPropose, setCanPropose] = useState(false);
+  /** The description a proposal is diffed against. Moves when one is accepted. */
+  const [itemBody, setItemBody] = useState("");
+  /** The proposal currently being applied, so its buttons can say so. */
+  const [resolving, setResolving] = useState<string | null>(null);
+  const [proposalError, setProposalError] = useState<string | null>(null);
   const [failure, setFailure] = useState<{
     text: string;
     settingsLink: boolean;
@@ -243,6 +414,9 @@ export function AssistantPanel({ specId }: { specId: string }) {
         setMessages(res.messages);
         setContext(res.context);
         setModelConnected(res.modelConnected);
+        setCanEdit(res.canEdit);
+        setCanPropose(res.canPropose);
+        setItemBody(res.body);
       })
       .catch((err) => {
         if (!active) return;
@@ -303,8 +477,94 @@ export function AssistantPanel({ specId }: { specId: string }) {
     }
   }
 
+  /**
+   * Accept or reject one proposal.
+   *
+   * Every outcome the person needs to act on is surfaced, because this is the
+   * one place in the panel where a click changes the product: a change that
+   * went to review instead of live, and a change that merged with somebody
+   * else's edit, both look like plain success if nobody says otherwise.
+   */
+  async function onResolve(
+    messageId: string,
+    action: "accept" | "reject",
+    body?: string,
+  ) {
+    if (resolving) return;
+    setResolving(messageId);
+    setProposalError(null);
+    try {
+      const outcome = await resolveProposal(specId, messageId, action, {
+        ...(body !== undefined ? { body } : {}),
+      });
+      setMessages((prev) =>
+        (prev ?? []).map((m) =>
+          m.id === messageId
+            ? // The server does not re-resolve the author's name, so the turn
+              // keeps the one it was loaded with rather than losing it.
+              { ...outcome.message, authorName: m.authorName }
+            : m,
+        ),
+      );
+      setItemBody(outcome.body);
+
+      if (action === "reject") {
+        toast.success("Left as it is.");
+        return;
+      }
+      if (outcome.pullRequest) {
+        toast.success(
+          outcome.pullRequest.created
+            ? `Sent for review as #${outcome.pullRequest.number}`
+            : `Added to review #${outcome.pullRequest.number}`,
+        );
+        // Nothing on the default branch changed, so there is nothing to refetch
+        // and a refresh would redraw the old text as if the accept had failed.
+        return;
+      }
+      toast.success(
+        outcome.mergedWith
+          ? "Applied, and merged with a change made in the meantime."
+          : "Applied to the item.",
+      );
+      // The description elsewhere on the page is server-rendered, so it keeps
+      // showing the old text until this runs.
+      router.refresh();
+    } catch (err) {
+      if (err instanceof AuthRequiredError) {
+        window.location.href = `/sign-in?from=${encodeURIComponent(
+          window.location.pathname,
+        )}`;
+        return;
+      }
+      if (err instanceof SpecConflictError) {
+        // The proposal stays open rather than being marked resolved: it was
+        // not applied, and a card claiming otherwise is worse than the error.
+        setProposalError(
+          `${err.message} Open the description and edit it there, or ask the ` +
+            "assistant again now that the spec has moved.",
+        );
+        setItemBody(err.conflict.currentContent);
+        return;
+      }
+      setProposalError(
+        err instanceof Error ? err.message : "That did not go through.",
+      );
+    } finally {
+      setResolving(null);
+    }
+  }
+
   const settingsHref = orgHref("/settings/integrations?tab=model");
   const { visible, hidden } = threadWindow(messages ?? [], showAll);
+  // A proposal arriving mid-stream is rendered as a note rather than as raw
+  // Markdown: the marker lines and a half-written spec body scrolling past look
+  // like the assistant has lost the thread.
+  const streamingProse =
+    streaming !== null && proposalStarted(streaming)
+      ? parseAnswer(streaming).prose
+      : streaming;
+  const streamingProposal = streaming !== null && proposalStarted(streaming);
 
   if (loadError) {
     return <p className="text-xs text-destructive">{loadError}</p>;
@@ -363,6 +623,10 @@ export function AssistantPanel({ specId }: { specId: string }) {
               // anything while an answer is streaming in below it, since the
               // thing being read is then the one at the bottom.
               collapsible={i < visible.length - 1 || pending}
+              itemBody={itemBody}
+              canEdit={canEdit}
+              busy={resolving === m.id}
+              onResolve={(action, body) => onResolve(m.id, action, body)}
             />
           ))}
           {/* The turn in flight. Rendered inside the same list as the settled
@@ -386,11 +650,20 @@ export function AssistantPanel({ specId }: { specId: string }) {
                   ref={streamBoxRef}
                   className="max-h-72 overflow-y-auto rounded border border-border/60 p-2 prose prose-sm prose-neutral max-w-none dark:prose-invert"
                 >
-                  <ReactMarkdown>{streaming}</ReactMarkdown>
+                  <ReactMarkdown>{streamingProse ?? ""}</ReactMarkdown>
                 </div>
               ) : (
                 <Skeleton className="h-4 w-2/3" />
               )}
+              {/* Deliberately not the diff yet. A diff recomputed on every
+                  token flickers, and half a proposed body diffs as "the rest
+                  of the spec is being deleted", which is alarming and untrue.
+                  The change is shown once there is a whole one to show. */}
+              {streamingProposal ? (
+                <p className="text-xs text-muted-foreground">
+                  Drafting a proposed change to the description…
+                </p>
+              ) : null}
             </li>
           ) : null}
         </ul>
@@ -426,10 +699,26 @@ export function AssistantPanel({ specId }: { specId: string }) {
             <p className="text-xs text-muted-foreground">
               {pending
                 ? "Stopping keeps nothing: the answer is only saved once it finishes."
-                : "Runs on the model this workspace connected."}
+                : canPropose
+                  ? "Runs on the model this workspace connected. Ask it to rewrite part of the description and it will propose a change for you to review."
+                  : canEdit
+                    ? // The one case worth explaining rather than leaving as a
+                      // silent absence: the assistant is perfectly willing and
+                      // is being held back, and nothing on screen would say so.
+                      "Runs on the model this workspace connected. This description is too long to send whole, so the assistant can suggest wording but cannot propose an edit to it."
+                    : "Runs on the model this workspace connected."}
             </p>
           </div>
         </form>
+      ) : null}
+
+      {/* A refused accept, kept out of the model-failure panel above because it
+          is a different kind of problem with a different fix: nothing was spent
+          and nothing about the model connection is wrong. */}
+      {proposalError ? (
+        <div className="rounded-md border border-warning/50 bg-warning/5 p-3 text-sm">
+          <p>{proposalError}</p>
+        </div>
       ) : null}
 
       {failure ? (

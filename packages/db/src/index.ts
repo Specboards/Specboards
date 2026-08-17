@@ -5,3 +5,7 @@ export * from "./rls-probe.js";
 // (a second drizzle instance, e.g. via better-auth's peer deps, makes the
 // types nominally incompatible).
 export { and, asc, count, desc, eq, inArray, isNotNull, isNull, lt, ne, not, or, sql } from "drizzle-orm";
+// Same reason: joining one table twice needs an alias, and reaching into
+// drizzle-orm for it in an app file is how the second-instance type mismatch
+// gets in.
+export { alias } from "drizzle-orm/pg-core";

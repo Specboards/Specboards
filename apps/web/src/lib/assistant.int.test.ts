@@ -42,6 +42,14 @@ const closedProduct = randomUUID();
 const asOwner = { userId: user.owner, workspaceId: ws };
 const asOutsider = { userId: user.outsider, workspaceId: ws };
 
+/**
+ * The item's description at the start of every test. Restored in `beforeEach`
+ * because the proposal tests below actually change it, and a test that reads
+ * "the assistant is sent the item's content" must not depend on which tests ran
+ * before it.
+ */
+const ITEM_BODY = "Throttle the public API. Unclear what happens on burst.";
+
 /** The last request body the stub endpoint received, parsed. */
 interface CapturedRequest {
   model: string;
@@ -66,6 +74,8 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
    * from the provider's side and the only signal it ever gets. */
   let disconnected = false;
   let captured: CapturedRequest[] = [];
+  /** What the stub answers with, in frames. Replaced by the proposal tests. */
+  let answerFrames = ["A ", "stub ", "answer."];
 
   /**
    * Run a turn to completion, collecting what a caller would observe.
@@ -139,7 +149,7 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
           if (!res.writableFinished) disconnected = true;
         });
 
-        for (const part of ["A ", "stub ", "answer."]) {
+        for (const part of answerFrames) {
           if (hungUp) return;
           frame({ model: "stub-model-v1", choices: [{ delta: { content: part } }] });
           // In slow mode the caller gets time to hit Stop between frames.
@@ -181,7 +191,7 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
         title: "Rate limiting",
         level: "epic",
         productId: openProduct,
-        details: "Throttle the public API. Unclear what happens on burst.",
+        details: ITEM_BODY,
       },
       asOwner,
     );
@@ -198,9 +208,12 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
     slow = false;
     disconnected = false;
     captured = [];
+    answerFrames = ["A ", "stub ", "answer."];
     await sql`delete from assistant_messages where workspace_id = ${ws}`;
     await sql`delete from model_providers where workspace_id = ${ws}`;
     await sql`delete from model_provider_credentials where workspace_id = ${ws}`;
+    await sql`update features set details = ${ITEM_BODY}
+      where workspace_id = ${ws} and spec_id = ${specId}`;
   });
 
   afterAll(async () => {
@@ -412,6 +425,174 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
     const system = captured[0]!.messages.find((m) => m.role === "system")!.content;
     for (const field of disclosed) expect(system).toContain(field.value);
   });
+
+  /**
+   * Proposed edits: what an answer containing one does, and does not, do.
+   *
+   * The claim under test is the epic's hard constraint, and it is a *negative*
+   * one: a model saying it has rewritten the spec must leave the spec exactly
+   * as it was. Negative claims are the ones that quietly stop being true, so
+   * the item's body is read back from the database after every step here rather
+   * than inferred from what the call returned.
+   *
+   * These items are DB-native cards, so accepting goes through `patchFeature`.
+   * The git-backed branch calls `updateSpecContent`, the same function the spec
+   * editor's own Save calls, and is not exercised here: it needs a connected
+   * repository, which this suite has none of.
+   */
+  describe("an edit the assistant proposed", () => {
+    let proposals: typeof import("./assistant-proposals");
+    const NEW_BODY = "# Rate limiting\n\nThrottle the public API.\n\n## On burst\n\nReturn 429.";
+
+    /** Make the stub answer with a proposal, and ask for one. */
+    async function propose(scope = asOwner) {
+      answerFrames = [
+        "I added a section on burst behaviour.\n\n",
+        "<<<BEGIN PROPOSED SPEC>>>\n",
+        `${NEW_BODY}\n`,
+        "<<<END PROPOSED SPEC>>>",
+      ];
+      const outcome = await ask(scope, specId, "Write the burst behaviour.");
+      return outcome.turns![1]!;
+    }
+
+    /** The item's description as the database has it right now. */
+    async function bodyNow() {
+      const [row] = await sql<{ details: string | null }[]>`
+        select details from features
+        where workspace_id = ${ws} and spec_id = ${specId}`;
+      return row!.details;
+    }
+
+    beforeAll(async () => {
+      proposals = await import("./assistant-proposals");
+    });
+
+    beforeEach(async () => {
+      await connectStub();
+    });
+
+    it("changes nothing by itself", async () => {
+      const turn = await propose();
+
+      // The whole rule, stated as an assertion: the model produced an edit and
+      // the item is untouched.
+      expect(await bodyNow()).toBe(ITEM_BODY);
+      expect(turn.proposal).not.toBeNull();
+      expect(turn.proposal!.outcome).toBeNull();
+      // The prose and the proposal are both kept in the stored message, so a
+      // reload shows the same thing the live answer did.
+      expect(turn.content).toContain("burst behaviour");
+      expect(turn.content).toContain("BEGIN PROPOSED SPEC");
+    });
+
+    it("applies to the item once a person accepts it", async () => {
+      const turn = await propose();
+      const result = await proposals.acceptProposal(db, asOwner, specId, turn.id);
+
+      expect(await bodyNow()).toBe(NEW_BODY);
+      expect(result.body).toBe(NEW_BODY);
+      expect(result.message.proposal!.outcome).toBe("accepted");
+      // Named, because "a human accepted it" is the claim, and an accept
+      // credited to nobody cannot support it.
+      expect(result.message.proposal!.resolvedByName).toBe("Ada");
+      expect(result.message.proposal!.resolvedAt).not.toBeNull();
+    });
+
+    it("applies the reviewer's own text when they edited it first", async () => {
+      const turn = await propose();
+      const mine = `${NEW_BODY}\n\nRetry after the window closes.`;
+      await proposals.acceptProposal(db, asOwner, specId, turn.id, { body: mine });
+
+      // What lands is what the person approved, not what the model wrote.
+      expect(await bodyNow()).toBe(mine);
+    });
+
+    it("records a rejection and leaves the item alone", async () => {
+      const turn = await propose();
+      const result = await proposals.rejectProposal(db, asOwner, specId, turn.id);
+
+      expect(await bodyNow()).toBe(ITEM_BODY);
+      expect(result.message.proposal!.outcome).toBe("rejected");
+      // Kept, not deleted: "we considered this wording and did not take it" is
+      // part of how a colleague reconstructs why the spec says what it says.
+      const thread = await svc.listAssistantThread(db, asOwner, specId);
+      expect(thread).toHaveLength(2);
+      expect(thread[1]!.proposal!.outcome).toBe("rejected");
+    });
+
+    it("refuses to resolve the same proposal twice", async () => {
+      const turn = await propose();
+      await proposals.acceptProposal(db, asOwner, specId, turn.id);
+
+      // Two people with the panel open, or one person double-clicking. Applying
+      // it again would re-apply text that has since been edited.
+      await expect(
+        proposals.acceptProposal(db, asOwner, specId, turn.id),
+      ).rejects.toThrow(proposals.ProposalSettledError);
+      await expect(
+        proposals.rejectProposal(db, asOwner, specId, turn.id),
+      ).rejects.toThrow(proposals.ProposalSettledError);
+    });
+
+    it("refuses someone who can read the item but not change it", async () => {
+      const turn = await propose();
+      // A workspace member with no role on the product. They can see the item
+      // and the conversation; accepting is an edit and edits are not theirs.
+      await expect(
+        proposals.acceptProposal(db, asOutsider, specId, turn.id),
+      ).rejects.toThrow(proposals.ProposalForbiddenError);
+      expect(await bodyNow()).toBe(ITEM_BODY);
+    });
+
+    it("does not offer proposing to someone who could not accept", async () => {
+      const panel = await svc.getAssistantPanelData(db, asOutsider, specId);
+      expect(panel.canEdit).toBe(false);
+
+      await ask(asOutsider, specId, "Rewrite this for me.");
+      const system = captured.at(-1)!.messages.find((m) => m.role === "system")!.content;
+      expect(system).not.toContain("BEGIN PROPOSED SPEC");
+      expect(system).toMatch(/no write access|cannot change anything/i);
+    });
+
+    it("refuses a message that carries no proposal", async () => {
+      const outcome = await ask(asOwner, specId, "Just a question.");
+      const turn = outcome.turns![1]!;
+      expect(turn.proposal).toBeNull();
+      await expect(
+        proposals.acceptProposal(db, asOwner, specId, turn.id),
+      ).rejects.toThrow(proposals.ProposalInvalidError);
+    });
+
+    it("refuses a proposal id that belongs to a different item", async () => {
+      const turn = await propose();
+      // The message id is real and the caller can write this product; only the
+      // item in the URL is wrong. Without matching on both, an id could be
+      // resolved through whichever item the caller happens to have access to.
+      await expect(
+        proposals.acceptProposal(db, asOwner, closedSpecId, turn.id),
+      ).rejects.toThrow();
+      expect(await bodyNow()).toBe(ITEM_BODY);
+    });
+
+    it("carries the whole exchange into the next question", async () => {
+      const turn = await propose();
+      await proposals.acceptProposal(db, asOwner, specId, turn.id);
+      answerFrames = ["Anything else?"];
+      await ask(asOwner, specId, "Now what?");
+
+      // The proposal stays in the replayed history as the assistant wrote it.
+      // Stripping it would leave the model unable to answer "why did you write
+      // it that way", which is the next thing anyone asks.
+      const replayed = captured.at(-1)!.messages;
+      expect(replayed.some((m) => m.content.includes("BEGIN PROPOSED SPEC"))).toBe(
+        true,
+      );
+      // And the system prompt now carries the accepted text as the description,
+      // so the assistant is not still reasoning about the version it replaced.
+      expect(replayed[0]!.content).toContain("Return 429.");
+    });
+  });
 });
 
 /**
@@ -522,6 +703,36 @@ describe.skipIf(!DB_URL || !RUNTIME_URL)(
         expect(thread[1]!.content).toBe(turns![1]!.content);
       },
       // A small model on CPU is not fast, and the first call loads weights.
+      120_000,
+    );
+
+    it(
+      "can be got to emit a proposal block a real parser reads back",
+      async () => {
+        // The one claim the stub cannot settle. Proposals are a marker block
+        // rather than a tool call precisely because tool calling is the least
+        // uniformly implemented part of the OpenAI API and small models emit
+        // malformed calls; that argument is only worth anything if a small
+        // model can actually produce the block.
+        const { parseAnswer } = await import("./ai/proposals");
+        const turn = await svc.startAssistantTurn(
+          db,
+          scope,
+          rtSpecId,
+          "Rewrite the description to add a section called Non-goals. " +
+            "Reply with the proposal block and nothing else.",
+        );
+        let answer = "";
+        for await (const event of turn) {
+          if (event.kind === "delta") answer += event.text;
+        }
+
+        const { proposal } = parseAnswer(answer);
+        // Not asserted: what the proposal says. A 0.5B model writes what it
+        // likes and the point here is the envelope, not the content.
+        expect(proposal, `model answered:\n${answer}`).not.toBeNull();
+        expect(proposal).not.toContain("BEGIN PROPOSED SPEC");
+      },
       120_000,
     );
   },

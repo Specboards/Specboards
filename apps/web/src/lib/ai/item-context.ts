@@ -29,6 +29,8 @@
  * a comment.
  */
 
+import { PROPOSAL_INSTRUCTIONS } from "./proposals";
+
 /** One labelled thing that goes into the prompt, and into the disclosure. */
 export interface ContextField {
   /** Shown to the user in the "what is sent" list. */
@@ -42,6 +44,15 @@ export interface ContextField {
 
 export interface ItemContextInput {
   title: string;
+  /**
+   * Whether this person may change the item. False turns off the proposal
+   * instructions entirely, so a reader with no write access is never offered an
+   * edit they would be refused when they clicked accept. Telling the model
+   * instead of hiding the button matters: a model that has been told it can
+   * propose will keep offering to, and "shall I draft that for you?" from
+   * something that cannot is worse than never mentioning it.
+   */
+  canEdit: boolean;
   /** The workspace's own word for this level ("Epic", "Feature"), not a key:
    * levels are configurable and the model should use the customer's language. */
   levelLabel: string;
@@ -62,6 +73,13 @@ export interface AssembledContext {
   systemPrompt: string;
   /** Exactly what the prompt was built from, in the order it appears in it. */
   fields: ContextField[];
+  /**
+   * Whether the model was actually invited to propose an edit. False when the
+   * caller cannot write, and false when the description was too long to send
+   * whole, which is the case worth naming: a whole-body replacement drafted
+   * from a shortened description deletes everything past the cut.
+   */
+  canPropose: boolean;
 }
 
 /**
@@ -103,10 +121,43 @@ const ROLE = [
   "generic ones. When the definition is vague about scope, failure cases,",
   "non-goals or how success is measured, say so plainly rather than writing",
   "around the gap.",
-  "",
+].join(" ");
+
+/**
+ * What a reader is told instead of the proposal instructions.
+ *
+ * Stated as plainly as the instructions are, and for the same reason: a model
+ * with no rule about writing will happily answer "I've added that for you" and
+ * the person will believe it.
+ */
+const READ_ONLY = [
   "You cannot change anything. You have no tools and no write access: nothing",
   "you say is applied to the item unless a person does it themselves. Do not",
   "claim to have made an edit.",
+].join(" ");
+
+/**
+ * What a model is told when the description was too long to send whole.
+ *
+ * ── The bug this prevents ───────────────────────────────────────────────────
+ * A proposal is a *whole replacement body*. A model shown the first eight
+ * thousand characters of a spec and asked to rewrite it will propose those
+ * eight thousand characters back, and accepting that deletes the rest. The diff
+ * would show the deletion, so a careful reviewer would catch it, but the trap
+ * is that nothing about the situation looks unusual: the assistant did as it
+ * was asked, and the reviewer is reading the change they requested rather than
+ * auditing the end of a document they have already read.
+ *
+ * So the offer is withdrawn rather than qualified. A model that has been told
+ * it may propose will propose, and a rule saying "but not if you were given a
+ * shortened description" is one more thing for a small model to get wrong at
+ * exactly the moment the cost is highest.
+ */
+const TOO_LONG_TO_PROPOSE = [
+  "You cannot propose an edit to this item, because you have not been shown",
+  "all of its description: it was too long to send. Suggest wording in your",
+  "reply for the person to apply themselves, and say why you cannot propose it",
+  "directly if they ask for an edit. Do not claim to have made a change.",
 ].join(" ");
 
 /**
@@ -155,7 +206,13 @@ export function assembleItemContext(input: ItemContextInput): AssembledContext {
     fields.push({ label: "Description", value, truncated });
   }
 
-  return { systemPrompt: renderPrompt(fields), fields };
+  // A shortened description cannot be safely rewritten; see TOO_LONG_TO_PROPOSE.
+  const sawWholeBody = !fields.some((f) => f.label === "Description" && f.truncated);
+  return {
+    systemPrompt: renderPrompt(fields, input.canEdit, sawWholeBody),
+    fields,
+    canPropose: input.canEdit && sawWholeBody,
+  };
 }
 
 /**
@@ -166,7 +223,11 @@ export function assembleItemContext(input: ItemContextInput): AssembledContext {
  * it has not seen the end of, and the person reading that answer has no way to
  * tell. Saying so costs a line and turns a wrong answer into a caveated one.
  */
-function renderPrompt(fields: ContextField[]): string {
+function renderPrompt(
+  fields: ContextField[],
+  canEdit: boolean,
+  sawWholeBody: boolean,
+): string {
   const rendered = fields.map((f) => {
     const note = f.truncated ? " (shortened; you have not been shown all of it)" : "";
     // Multi-line values read better as a block than as "Label: line1 line2".
@@ -174,5 +235,13 @@ function renderPrompt(fields: ContextField[]): string {
       ? `${f.label}${note}:\n${f.value}`
       : `${f.label}${note}: ${f.value}`;
   });
-  return `${ROLE}\n\n---\n\n${rendered.join("\n\n")}`;
+  // The writing rules go above the item, not below it: instructions that follow
+  // a long document are the ones a small model loses track of first, and the
+  // rule it must not lose is the one saying its proposal is not an edit.
+  const rules = !canEdit
+    ? READ_ONLY
+    : sawWholeBody
+      ? PROPOSAL_INSTRUCTIONS
+      : TOO_LONG_TO_PROPOSE;
+  return `${ROLE}\n\n${rules}\n\n---\n\n${rendered.join("\n\n")}`;
 }

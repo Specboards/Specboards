@@ -156,6 +156,23 @@ private TLS in `docs/GUIDE-self-hosted-model.md`.
       `features` for exactly this reason: it is the only scope that spends money
       outside Specboards, and `assistant:write` on a key is an unmetered
       inference channel at your provider. `assistant:read` only reads threads.
+- [ ] Know that the assistant can **propose** an edit to an item's description
+      and cannot apply one. A proposal is inert text inside a stored message; it
+      changes nothing until a person opens the item, reads the diff, and accepts
+      it. Accepting then goes through the ordinary item write path: the same
+      product-write permission, the same repo write mode (so a repo in
+      pull-request mode gets a pull request), the same conflict guard, and the
+      same history. There is no code path from a model's output to a write.
+- [ ] Understand what granting one key **both** `assistant:write` and
+      `features:write` means: that key can make the assistant draft an edit and
+      then accept it, with no person in between. Accepting deliberately lives at
+      `POST /api/v1/features/{specId}/proposals` so the two are separate grants.
+      If you want an agent that can ask but never apply, give it
+      `assistant:write` and `features:read`.
+- [ ] Read the git history for accepted edits if you need to tell them apart.
+      They commit as `docs(spec): <name> accepted an assistant edit to <title>`,
+      with the accepting person in the `Co-authored-by` trailer. The model is
+      never named as an author, and the assistant never holds a git credential.
 
 ## 7. Backups
 

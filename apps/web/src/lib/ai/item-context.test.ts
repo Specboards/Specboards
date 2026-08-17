@@ -18,6 +18,7 @@ function input(over: Partial<ItemContextInput> = {}): ItemContextInput {
     children: [],
     goals: [],
     tags: [],
+    canEdit: true,
     ...over,
   };
 }
@@ -51,12 +52,57 @@ describe("what the assistant is told about an item", () => {
     );
   });
 
-  it("tells the model it cannot change anything", () => {
+  it("tells a model that cannot propose that it cannot change anything", () => {
     // The hard constraint of this epic is that the assistant never writes. A
     // model that believes it has applied an edit will say so, and the person
     // reading that has no reason to doubt it.
-    const { systemPrompt } = assembleItemContext(input());
+    const { systemPrompt } = assembleItemContext(input({ canEdit: false }));
     expect(systemPrompt).toMatch(/no write access|cannot change anything/i);
+  });
+
+  it("tells a model that can propose that proposing is still not editing", () => {
+    // The same failure with a subtler cause. Once a model has been told it may
+    // propose, "I've updated the spec" becomes the natural way to describe what
+    // it just did, and the person never clicks accept because they believe it
+    // is done.
+    const { systemPrompt } = assembleItemContext(input({ canEdit: true }));
+    expect(systemPrompt).toMatch(/Proposing is not editing/);
+    expect(systemPrompt).toMatch(/Never say you have made, applied or\s+saved/);
+  });
+
+  it("does not offer proposing to someone who could not accept", () => {
+    // A reader with no write access being asked "shall I draft that for you?"
+    // by something that cannot is worse than it never coming up.
+    const { systemPrompt, canPropose } = assembleItemContext(
+      input({ canEdit: false }),
+    );
+    expect(systemPrompt).not.toContain("BEGIN PROPOSED SPEC");
+    expect(canPropose).toBe(false);
+  });
+
+  it("withdraws the offer when the description was too long to send whole", () => {
+    // The expensive one. A proposal is a whole replacement body: a model shown
+    // the first 8,000 characters of a spec and asked to rewrite it proposes
+    // those 8,000 characters back, and accepting deletes the rest. Nothing
+    // about that looks unusual to the person who asked for the edit.
+    const { systemPrompt, canPropose, fields } = assembleItemContext(
+      input({ canEdit: true, body: "x".repeat(BODY_CHAR_LIMIT + 1) }),
+    );
+    expect(fields.find((f) => f.label === "Description")?.truncated).toBe(true);
+    expect(canPropose).toBe(false);
+    expect(systemPrompt).not.toContain("BEGIN PROPOSED SPEC");
+    // Withdrawn with a reason, so the model can say why rather than refusing
+    // for no stated cause, which reads as it being broken.
+    expect(systemPrompt).toMatch(/not been shown\s+all of its description/);
+  });
+
+  it("still offers proposing on a description that just fits", () => {
+    // The boundary either side of it, because "truncated" is the whole
+    // condition and an off-by-one here silently turns the feature off.
+    const { canPropose } = assembleItemContext(
+      input({ canEdit: true, body: "x".repeat(BODY_CHAR_LIMIT) }),
+    );
+    expect(canPropose).toBe(true);
   });
 });
 

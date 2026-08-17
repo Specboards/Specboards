@@ -106,6 +106,17 @@ function oneLine(value: string): string {
  * Co-authored-by: Jane Doe <jane-doe-8f3a2b1c@users.noreply.specboards.ai>
  * ```
  *
+ * With `assistantDrafted`, the same shape with the provenance changed:
+ *
+ * ```
+ * docs(spec): Jane Doe accepted an assistant edit to Refund policy
+ *
+ * Drafted by the Specboards assistant and accepted by a person.
+ * specs/refunds/spec.md
+ *
+ * Co-authored-by: Jane Doe <jane-doe-8f3a2b1c@users.noreply.specboards.ai>
+ * ```
+ *
  * The path moves into the body because the title is the useful identifier for
  * a reader and the path is the useful one for a tool; putting the path in the
  * subject spends the only line most people read on the less useful of the two.
@@ -118,14 +129,35 @@ export function specCommitMessage(input: {
   path: string;
   /** Null when the write has no attributable person (sync, an automation). */
   author: CommitAuthor | null;
+  /**
+   * True when the text was drafted by the assistant and a person accepted it.
+   *
+   * The card this implements asks that someone reading a requirement in six
+   * months can tell which it was, and `git log` is where they will look. A
+   * commit that says "Jane updated Refund policy" when Jane read a diff and
+   * clicked accept is not false so much as unanswerable: it gives the reader no
+   * way to know a model wrote the words. So the verb changes, and the body
+   * says so outright.
+   *
+   * The trailer does not change. Jane is still the person accountable for the
+   * requirement; crediting the model as an author would attribute a decision to
+   * something nobody can ask about it afterwards.
+   */
+  assistantDrafted?: boolean;
 }): string {
   const title = oneLine(input.title) || input.path;
   const verb = VERB[input.action];
+  const what = input.assistantDrafted ? `an assistant edit to ${title}` : title;
   const subject = input.author
-    ? `docs(spec): ${oneLine(input.author.name)} ${verb.withAuthor} ${title}`
-    : `docs(spec): ${verb.plain} ${title}`;
+    ? `docs(spec): ${oneLine(input.author.name)} ${
+        input.assistantDrafted ? "accepted" : verb.withAuthor
+      } ${what}`
+    : `docs(spec): ${input.assistantDrafted ? "accept" : verb.plain} ${what}`;
 
-  const lines = [subject, "", "Edited in Specboards.", input.path];
+  const provenance = input.assistantDrafted
+    ? "Drafted by the Specboards assistant and accepted by a person."
+    : "Edited in Specboards.";
+  const lines = [subject, "", provenance, input.path];
   if (input.author) {
     lines.push(
       "",

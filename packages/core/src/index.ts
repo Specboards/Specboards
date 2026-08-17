@@ -1,5 +1,6 @@
 export * from "./spec.js";
 export * from "./merge.js";
+export * from "./diff.js";
 export * from "./status.js";
 export * from "./ideas.js";
 export * from "./cycles.js";

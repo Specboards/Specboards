@@ -385,7 +385,18 @@ export async function updateSpecContent(
   scope: WorkspaceScope,
   specId: string,
   body: string,
-  opts: { message?: string; expectedBlobSha?: string } = {},
+  opts: {
+    message?: string;
+    expectedBlobSha?: string;
+    /**
+     * The text came from the assistant and a person accepted it, which changes
+     * only how the commit is worded. Passed as a flag rather than as a
+     * pre-built `message` so that attribution stays assembled in one place:
+     * whether the acting user gets a co-author trailer depends on whether their
+     * own GitHub token authored the commit, and only this function knows that.
+     */
+    assistantDrafted?: boolean;
+  } = {},
 ): Promise<SpecWriteResult> {
   // A refusal is recorded too. Git has no record of a commit that never
   // happened, and that is exactly the case someone is investigating when they
@@ -420,6 +431,7 @@ export async function updateSpecContent(
       title,
       path,
       author: asAuthor ? null : await resolveCommitAuthor(db, scope.userId),
+      ...(opts.assistantDrafted ? { assistantDrafted: true } : {}),
     });
   const { mode } = resolveWriteMode(repo.config, repo.writeModeOverride);
   const { commitSha, blobSha, pullRequest, mergedWith, mergedBody } = await writeMerged(

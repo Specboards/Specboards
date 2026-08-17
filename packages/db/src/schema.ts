@@ -2377,6 +2377,24 @@ export const assistantMessages = pgTable(
      * not zero and must not be summed as if it were. */
     promptTokens: integer("prompt_tokens"),
     completionTokens: integer("completion_tokens"),
+    /**
+     * What happened to the proposed edit this turn carried: `accepted`,
+     * `rejected`, or null for unresolved. Whether there *is* a proposal is
+     * decided by parsing `content`, never by this column, so the two can never
+     * disagree about it.
+     */
+    proposalOutcome: text("proposal_outcome"),
+    proposalResolvedBy: uuid("proposal_resolved_by"),
+    proposalResolvedAt: timestamp("proposal_resolved_at", { withTimezone: true }),
+    /** Commit an accepted proposal landed in, for a git-backed spec. */
+    proposalCommitSha: text("proposal_commit_sha"),
+    /**
+     * Blob sha of the description the proposal was drafted against, so
+     * accepting takes the same guarded, merged path a human save takes rather
+     * than overwriting whatever landed in the meantime. Null for a DB-native
+     * card, which has no blob.
+     */
+    proposalBaseSha: text("proposal_base_sha"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
