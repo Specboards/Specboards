@@ -5,10 +5,12 @@ import {
   MAX_SKILLS,
   MAX_SKILL_INSTRUCTION_CHARS,
   mergeSkills,
+  moveSkill,
   parseSkills,
   SkillInputError,
   skillKeyFrom,
   skillRowsToStore,
+  skillsSortedByName,
   skillTask,
   type Skill,
   type SkillRow,
@@ -27,8 +29,28 @@ function row(over: Partial<SkillRow> = {}): SkillRow {
 }
 
 function skill(over: Partial<Skill> = {}): Skill {
-  const { position: _position, ...rest } = row();
-  return { ...rest, builtIn: false, customised: false, ...over };
+  return {
+    key: "ours",
+    name: "Our way",
+    description: "",
+    instructions: "Do it our way.",
+    builtIn: false,
+    customised: false,
+    enabled: true,
+    ...over,
+  };
+}
+
+/** A row that stores only where a built-in sits, leaving its wording to us. */
+function positionOnly(key: string, position: number): SkillRow {
+  return {
+    key,
+    name: null,
+    description: null,
+    instructions: null,
+    enabled: true,
+    position,
+  };
 }
 
 describe("the skills a workspace has", () => {
@@ -38,9 +60,13 @@ describe("the skills a workspace has", () => {
     expect(skills.every((s) => s.builtIn && s.enabled && !s.customised)).toBe(true);
   });
 
-  it("puts a team's own skills after the built-ins", () => {
+  it("gives a stored skill its place ahead of built-ins that have none", () => {
+    // A stored position is something a person arranged; a missing one is a
+    // built-in we shipped after they last arranged anything. Migration 0071
+    // backfills the rows that make this total, so in practice the only skills
+    // without a position are ones added in a release since.
     const skills = mergeSkills([row({ key: "ours" })]);
-    expect(skills.at(-1)).toMatchObject({ key: "ours", builtIn: false });
+    expect(skills[0]).toMatchObject({ key: "ours", builtIn: false });
     expect(skills).toHaveLength(BUILT_IN_SKILLS.length + 1);
   });
 
@@ -60,14 +86,6 @@ describe("the skills a workspace has", () => {
     expect(skills.filter((s) => s.key === "grill")).toHaveLength(1);
   });
 
-  it("keeps a built-in in its own place when it is overridden", () => {
-    // Otherwise customising the first skill moves it to the end of the row, and
-    // the button someone reaches for by position is now a different one.
-    const before = mergeSkills([]).map((s) => s.key);
-    const after = mergeSkills([row({ key: "grill", position: 9 })]).map((s) => s.key);
-    expect(after).toEqual(before);
-  });
-
   it("carries a switched-off built-in through as disabled", () => {
     const skills = mergeSkills([row({ key: "gaps", enabled: false })]);
     expect(skills.find((s) => s.key === "gaps")?.enabled).toBe(false);
@@ -78,35 +96,143 @@ describe("the skills a workspace has", () => {
       row({ key: "b", position: 2 }),
       row({ key: "a", position: 1 }),
     ]);
-    expect(skills.slice(BUILT_IN_SKILLS.length).map((s) => s.key)).toEqual([
-      "a",
-      "b",
+    expect(skills.slice(0, 2).map((s) => s.key)).toEqual(["a", "b"]);
+  });
+});
+
+describe("the order a workspace arranged", () => {
+  const keys = BUILT_IN_SKILLS.map((b) => b.key);
+
+  it("puts the built-ins wherever the stored positions say", () => {
+    const reversed = [...keys].reverse();
+    const skills = mergeSkills(reversed.map((k, i) => positionOnly(k, i)));
+    expect(skills.map((s) => s.key)).toEqual(reversed);
+  });
+
+  it("keeps a reordered built-in's wording coming from the code", () => {
+    // The whole reason the columns are nullable. If reordering stored the text,
+    // every later improvement to these prompts would stop reaching a workspace
+    // the day somebody dragged a button, and nobody would connect the two.
+    const skills = mergeSkills([positionOnly("draft", 0), positionOnly("grill", 1)]);
+    const grill = skills.find((s) => s.key === "grill")!;
+    expect(grill.instructions).toBe(BUILT_IN_SKILLS.find((b) => b.key === "grill")!.instructions);
+    expect(grill.customised).toBe(false);
+  });
+
+  it("resolves each field on its own", () => {
+    // A team that renamed a skill but left its instructions alone keeps
+    // tracking those instructions.
+    const skills = mergeSkills([
+      { ...positionOnly("grill", 0), name: "Interrogate me" },
+    ]);
+    const grill = skills.find((s) => s.key === "grill")!;
+    expect(grill.name).toBe("Interrogate me");
+    expect(grill.instructions).toBe(
+      BUILT_IN_SKILLS.find((b) => b.key === "grill")!.instructions,
+    );
+    expect(grill.customised).toBe(true);
+  });
+
+  it("interleaves a team's own skills with the built-ins", () => {
+    // Ordering is over one list, not two: a team that wants its own skill first
+    // must be able to put it first.
+    const skills = mergeSkills([
+      row({ key: "ours", position: 0 }),
+      positionOnly("grill", 1),
+      positionOnly("gaps", 2),
+      positionOnly("draft", 3),
+    ]);
+    expect(skills.map((s) => s.key)).toEqual(["ours", "grill", "gaps", "draft"]);
+  });
+
+  it("puts a newly shipped built-in last rather than into the middle", () => {
+    // A workspace that arranged its buttons a year ago should get a new one
+    // appearing at the end, not silently shifting the ones people reach for by
+    // position.
+    const arranged = mergeSkills([positionOnly("draft", 0), positionOnly("grill", 1)]);
+    expect(arranged.map((s) => s.key)).toEqual(["draft", "grill", "gaps"]);
+  });
+
+  it("moves a skill up and down without disturbing the rest", () => {
+    const list = [skill({ key: "a" }), skill({ key: "b" }), skill({ key: "c" })];
+    expect(moveSkill(list, 2, -1).map((s) => s.key)).toEqual(["a", "c", "b"]);
+    expect(moveSkill(list, 0, 1).map((s) => s.key)).toEqual(["b", "a", "c"]);
+  });
+
+  it("leaves the list alone at either end", () => {
+    const list = [skill({ key: "a" }), skill({ key: "b" })];
+    expect(moveSkill(list, 0, -1).map((s) => s.key)).toEqual(["a", "b"]);
+    expect(moveSkill(list, 1, 1).map((s) => s.key)).toEqual(["a", "b"]);
+  });
+
+  it("sorts by name regardless of case", () => {
+    const list = [
+      skill({ key: "c", name: "apple" }),
+      skill({ key: "a", name: "Banana" }),
+      skill({ key: "b", name: "Cherry" }),
+    ];
+    expect(skillsSortedByName(list).map((s) => s.name)).toEqual([
+      "apple",
+      "Banana",
+      "Cherry",
     ]);
   });
 });
 
 describe("deciding what is worth storing", () => {
-  it("stores nothing for a workspace that changed nothing", () => {
-    // The point of the whole design: opening the settings page and pressing Save
-    // must not pin a workspace to today's wording of prompts we still intend to
+  it("stores no text for a workspace that changed nothing", () => {
+    // The point of the whole design. A row is written for every skill, because
+    // position and on/off need one, but the wording stays null so it keeps
+    // resolving from the code and keeps tracking prompts we still intend to
     // improve.
-    expect(skillRowsToStore(mergeSkills([]))).toEqual([]);
+    const stored = skillRowsToStore(mergeSkills([]));
+    expect(stored).toHaveLength(BUILT_IN_SKILLS.length);
+    expect(
+      stored.every(
+        (r) => r.name === null && r.description === null && r.instructions === null,
+      ),
+    ).toBe(true);
   });
 
-  it("stores a built-in once its wording is changed", () => {
+  it("stores a built-in's wording once it is changed", () => {
     const skills = mergeSkills([]).map((s) =>
       s.key === "grill" ? { ...s, instructions: "Ask harder." } : s,
     );
     const stored = skillRowsToStore(skills);
-    expect(stored).toHaveLength(1);
-    expect(stored[0]).toMatchObject({ key: "grill", instructions: "Ask harder." });
+    const grill = stored.find((r) => r.key === "grill")!;
+    expect(grill.instructions).toBe("Ask harder.");
+    // Only the field that changed. The name and description go on tracking us.
+    expect(grill.name).toBeNull();
+    expect(grill.description).toBeNull();
   });
 
-  it("stores a built-in that was switched off, even unedited", () => {
+  it("stores a cleared description as empty rather than as inherit", () => {
+    // Otherwise clearing our one-liner resolves back to it on the next load and
+    // looks like the edit did not save.
+    const skills = mergeSkills([]).map((s) =>
+      s.key === "grill" ? { ...s, description: "" } : s,
+    );
+    expect(skillRowsToStore(skills).find((r) => r.key === "grill")!.description).toBe(
+      "",
+    );
+  });
+
+  it("records a built-in that was switched off, without storing its text", () => {
     const skills = mergeSkills([]).map((s) =>
       s.key === "draft" ? { ...s, enabled: false } : s,
     );
-    expect(skillRowsToStore(skills).map((s) => s.key)).toEqual(["draft"]);
+    const draft = skillRowsToStore(skills).find((r) => r.key === "draft")!;
+    expect(draft.enabled).toBe(false);
+    expect(draft.instructions).toBeNull();
+  });
+
+  it("survives a round trip through storage with the order intact", () => {
+    const reordered = moveSkill(mergeSkills([]), 2, -2);
+    const back = mergeSkills(skillRowsToStore(reordered));
+    expect(back.map((s) => s.key)).toEqual(reordered.map((s) => s.key));
+    expect(back.map((s) => s.instructions)).toEqual(
+      reordered.map((s) => s.instructions),
+    );
   });
 
   it("numbers positions from the order it is given", () => {

@@ -2440,13 +2440,19 @@ export const workspaceAssistantSkills = pgTable(
     /** Stable identifier; what makes an override an override. Never re-derived
      * from the name, which a rename would otherwise silently orphan. */
     key: text("key").notNull(),
-    name: text("name").notNull(),
+    /**
+     * Null means "whatever the built-in says", which is what a position-only row
+     * stores. That is what lets a workspace reorder the buttons without pinning
+     * the prompts to the wording they had that day; see migration 0071. Null is
+     * meaningless on a skill the team invented, and the service refuses it there.
+     */
+    name: text("name"),
     /** One line under the button. Never sent to the model. */
-    description: text("description").notNull().default(""),
-    instructions: text("instructions").notNull(),
+    description: text("description"),
+    instructions: text("instructions"),
     /** False hides it from the panel without losing the wording. */
     enabled: boolean("enabled").notNull().default(true),
-    /** Order among the team's own skills; built-ins are always first. */
+    /** Where this skill sits in the row of buttons, ascending. */
     position: integer("position").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()

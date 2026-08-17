@@ -498,6 +498,13 @@
       "when": 1787400000000,
       "tag": "0070_assistant_skills",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1787410000000,
+      "tag": "0071_assistant_skill_order",
+      "breakpoints": true
     }
   ]
 }

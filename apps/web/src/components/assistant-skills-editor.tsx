@@ -1,15 +1,19 @@
 "use client";
 
-import { useState } from "react";
+import { ArrowDown, ArrowUp } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import {
   BUILT_IN_SKILLS,
+  MAX_SKILL_DESCRIPTION_CHARS,
   MAX_SKILL_INSTRUCTION_CHARS,
   MAX_SKILL_NAME_CHARS,
   MAX_SKILLS,
+  moveSkill,
   skillKeyFrom,
   skillRowsToStore,
+  skillsSortedByName,
   type Skill,
 } from "@/lib/ai/skills";
 import { saveAssistantSkills } from "@/lib/api-client";
@@ -36,6 +40,24 @@ import { Textarea } from "@/components/ui/textarea";
  * on. Copy-to-new would leave two buttons called "Grill me" and no way to tell
  * which one a past conversation used.
  */
+/**
+ * How long a reorder waits before it is written.
+ *
+ * Long enough to absorb a run of clicks moving one skill several places, short
+ * enough that nobody navigates away in the gap without noticing. The unmount
+ * flush covers them if they do.
+ */
+export const ORDER_SAVE_DELAY_MS = 700;
+
+/**
+ * Below this many skills, the A-to-Z control is not offered.
+ *
+ * Sorting three buttons is not organising anything, and a control that does
+ * almost nothing still has to be read and dismissed by everyone who opens the
+ * page. It appears once a team has enough of their own to have lost track.
+ */
+export const SORT_CONTROL_THRESHOLD = 5;
+
 export function AssistantSkillsEditor({
   initial,
   canEdit,
@@ -48,14 +70,54 @@ export function AssistantSkillsEditor({
   const [editing, setEditing] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * The order the person has arranged but that has not been written yet.
+   *
+   * Moving something is the one action here done in bursts: three clicks to
+   * shift a skill three places. So the arrows rearrange the list at once and the
+   * write is deferred, rather than each click going through a round trip that
+   * disables the button it was aimed at.
+   */
+  const orderTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** The latest arrangement, for the deferred write to read at the time it
+   * fires rather than the one captured when it was scheduled. */
+  const latest = useRef<Skill[]>(initial);
+
+  useEffect(() => {
+    // A pending order that never gets written is worse than no reordering at
+    // all, so leaving the page flushes it rather than dropping it.
+    const timer = orderTimer;
+    return () => {
+      if (timer.current) {
+        clearTimeout(timer.current);
+        void saveAssistantSkills(skillRowsToStore(latest.current)).catch(() => {
+          // Nothing left to tell: the component is gone. The order reverts on
+          // the next load, which is the honest outcome of a failed write.
+        });
+      }
+    };
+  }, []);
+
+  function remember(next: Skill[]) {
+    latest.current = next;
+    setSkills(next);
+  }
 
   async function persist(next: Skill[], done: string) {
+    // A pending reorder is folded into this write rather than racing it: two
+    // whole-set replaces in flight at once means whichever lands second wins,
+    // and that is as likely to be the older arrangement.
+    if (orderTimer.current) {
+      clearTimeout(orderTimer.current);
+      orderTimer.current = null;
+    }
     setSaving(true);
     setError(null);
+    remember(next);
     try {
-      // Only what differs from the built-ins is sent; see `skillRowsToStore`.
+      // Only text that differs from the built-ins is sent; see `skillRowsToStore`.
       const saved = await saveAssistantSkills(skillRowsToStore(next));
-      setSkills(saved);
+      remember(saved);
       setEditing(null);
       toast.success(done);
     } catch (err) {
@@ -112,12 +174,33 @@ export function AssistantSkillsEditor({
     );
   }
 
+  /**
+   * Move one skill up or down the row of buttons.
+   *
+   * Rearranges on screen at once and defers the write, so a burst of clicks is
+   * one request and the arrows stay live throughout. The reorder itself costs a
+   * workspace nothing: a built-in whose wording nobody has touched is stored
+   * with null text, so it keeps tracking the code (see `skillRowsToStore`).
+   */
+  function onMove(from: number, delta: number) {
+    remember(moveSkill(skills, from, delta));
+    if (orderTimer.current) clearTimeout(orderTimer.current);
+    orderTimer.current = setTimeout(() => {
+      orderTimer.current = null;
+      void persist(latest.current, "Order saved.");
+    }, ORDER_SAVE_DELAY_MS);
+  }
+
+  function onSortByName() {
+    void persist(skillsSortedByName(skills), "Sorted A to Z.");
+  }
+
   const full = skills.length >= MAX_SKILLS;
 
   return (
     <div className="space-y-3">
       <ul className="divide-y rounded-md border">
-        {skills.map((skill) =>
+        {skills.map((skill, i) =>
           editing === skill.key ? (
             <li key={skill.key} className="p-3">
               <SkillForm
@@ -132,7 +215,33 @@ export function AssistantSkillsEditor({
               key={skill.key}
               className="flex flex-wrap items-start justify-between gap-3 p-3"
             >
-              <div className="min-w-0 space-y-1">
+              {canEdit ? (
+                <div className="flex shrink-0 items-center gap-0.5 pt-0.5">
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="size-7"
+                    disabled={saving || i === 0}
+                    onClick={() => onMove(i, -1)}
+                    aria-label={`Move ${skill.name} up`}
+                  >
+                    <ArrowUp className="size-3.5" />
+                  </Button>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="size-7"
+                    disabled={saving || i === skills.length - 1}
+                    onClick={() => onMove(i, 1)}
+                    aria-label={`Move ${skill.name} down`}
+                  >
+                    <ArrowDown className="size-3.5" />
+                  </Button>
+                </div>
+              ) : null}
+              <div className="min-w-0 flex-1 space-y-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-sm font-medium">{skill.name}</span>
                   {skill.builtIn ? (
@@ -229,15 +338,30 @@ export function AssistantSkillsEditor({
           />
         </div>
       ) : canEdit ? (
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          disabled={saving || full}
-          onClick={() => setEditing("")}
-        >
-          Add a skill
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={saving || full}
+            onClick={() => setEditing("")}
+          >
+            Add a skill
+          </Button>
+          {/* Only once there is enough to have lost track of; the arrows above
+              are the ordinary way to arrange a handful. */}
+          {skills.length >= SORT_CONTROL_THRESHOLD ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={saving}
+              onClick={onSortByName}
+            >
+              Sort A to Z
+            </Button>
+          ) : null}
+        </div>
       ) : null}
 
       {full ? (
@@ -293,6 +417,7 @@ function SkillForm({
       >
         <Input
           value={description}
+          maxLength={MAX_SKILL_DESCRIPTION_CHARS}
           onChange={(e) => setDescription(e.target.value)}
           placeholder="Asks the awkward questions until the definition stops being vague."
         />

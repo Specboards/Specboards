@@ -53,8 +53,27 @@ export interface Skill extends SkillDef {
   enabled: boolean;
 }
 
-/** What a workspace has stored, before merging with the built-ins. */
-export interface SkillRow extends SkillDef {
+/**
+ * What a workspace has stored, before merging with the built-ins.
+ *
+ * ── Why the text is nullable ────────────────────────────────────────────────
+ * Null means "whatever the built-in says", and it is what lets a workspace put
+ * the skills in its own order without freezing their wording. Ordering has to be
+ * stored per skill, so dragging one built-in past another writes a row for both;
+ * if that row had to carry the text as well, reordering would silently pin every
+ * skill to the wording it had that afternoon, and no later improvement to those
+ * prompts would ever reach that workspace again. Nobody would connect the two.
+ *
+ * So a row says two separable things: where this skill sits and whether it is
+ * on (always), and what it says (only when a team has actually rewritten it).
+ * Null is meaningless on a skill the team invented, and the parser refuses it
+ * there rather than storing a row that resolves to nothing.
+ */
+export interface SkillRow {
+  key: string;
+  name: string | null;
+  description: string | null;
+  instructions: string | null;
   enabled: boolean;
   position: number;
 }
@@ -158,65 +177,131 @@ export const BUILT_IN_SKILLS: readonly SkillDef[] = [
   },
 ];
 
+/** The built-in with this key, if there is one. */
+export function builtInSkill(key: string): SkillDef | undefined {
+  return BUILT_IN_SKILLS.find((b) => b.key === key);
+}
+
 /**
- * The workspace's skills: the built-ins, overridden or extended by its rows.
+ * The workspace's skills, in the order they should appear: the built-ins,
+ * reordered, overridden or extended by the workspace's rows.
  *
- * Built-ins come first and in code order, so the flagship skill is the first
- * button on every workspace and does not move when someone adds one of their
- * own. A team's own skills follow in their stored order.
+ * A workspace that has stored nothing gets the built-ins in code order. Once it
+ * has stored anything, its rows carry the order, because saving stores a row for
+ * every skill on the page (see {@link skillRowsToStore}). A built-in with no row
+ * therefore only happens when we have shipped a new one since that workspace
+ * last saved, and it goes on the end: appearing last is a new button to notice,
+ * whereas appearing in the middle silently shifts the ones people have learned
+ * the position of.
  */
 export function mergeSkills(rows: readonly SkillRow[]): Skill[] {
   const byKey = new Map(rows.map((r) => [r.key, r]));
 
-  const builtIns = BUILT_IN_SKILLS.map((def) => {
+  const resolved = BUILT_IN_SKILLS.map((def, i) => {
     const row = byKey.get(def.key);
-    return row
-      ? { ...row, builtIn: true, customised: true }
-      : { ...def, builtIn: true, customised: false, enabled: true };
+    return {
+      skill: {
+        key: def.key,
+        // Null is "whatever the built-in says", which is what a position-only
+        // row stores. Resolved per field, so a team that renamed a skill but
+        // left its instructions alone keeps tracking those instructions.
+        name: row?.name ?? def.name,
+        description: row?.description ?? def.description,
+        instructions: row?.instructions ?? def.instructions,
+        builtIn: true,
+        customised: Boolean(
+          row && (row.name !== null || row.description !== null || row.instructions !== null),
+        ),
+        enabled: row?.enabled ?? true,
+      },
+      // Unrowed built-ins sort after every stored one, keeping code order
+      // among themselves.
+      order: row ? row.position : Number.MAX_SAFE_INTEGER - BUILT_IN_SKILLS.length + i,
+    };
   });
 
   const own = rows
-    .filter((r) => !BUILT_IN_SKILLS.some((b) => b.key === r.key))
-    .slice()
-    .sort((a, b) => a.position - b.position)
-    .map((r) => ({ ...r, builtIn: false, customised: false }));
+    .filter((r) => !builtInSkill(r.key))
+    .map((r) => ({
+      skill: {
+        key: r.key,
+        // A team's own skill always carries its own text; the parser refuses to
+        // store one that does not, so these fall back only to keep the types
+        // honest rather than to describe a row that exists.
+        name: r.name ?? "",
+        description: r.description ?? "",
+        instructions: r.instructions ?? "",
+        builtIn: false,
+        customised: false,
+        enabled: r.enabled,
+      },
+      order: r.position,
+    }));
 
-  return [...builtIns, ...own];
+  return [...resolved, ...own]
+    .sort((a, b) => a.order - b.order)
+    .map((e) => e.skill);
 }
 
 /**
- * The rows worth storing for a set of skills.
+ * The rows to store for a set of skills, in the order they are given.
  *
- * An untouched built-in is deliberately NOT stored. If it were, a workspace that
- * opened this page and pressed Save would be pinned forever to whatever the
- * built-in said that day, and every later improvement to it would silently pass
- * them by. Storing only what a team actually changed means the ones they left
- * alone keep tracking the code.
+ * A row is written for every skill, because position and on/off are facts about
+ * a workspace's arrangement that only a row can hold. What is NOT written is the
+ * text of a built-in nobody has rewritten: those columns go in as null, so the
+ * skill keeps resolving from the code and keeps tracking every later improvement
+ * to that prompt. Reordering the buttons therefore costs a workspace nothing.
+ *
+ * The one thing this cannot express is "put a built-in back exactly where the
+ * code has it", since after any save its position is stored. That is the right
+ * trade: the order on screen is the order a person arranged, and a button that
+ * moves on its own after a release would be worse than one that stays put.
  */
 export function skillRowsToStore(skills: readonly Skill[]): SkillRow[] {
-  const rows: SkillRow[] = [];
-  for (const skill of skills) {
-    const def = BUILT_IN_SKILLS.find((b) => b.key === skill.key);
-    if (def && unchanged(def, skill)) continue;
-    rows.push({
+  return skills.map((skill, position) => {
+    const def = builtInSkill(skill.key);
+    return {
       key: skill.key,
-      name: skill.name,
-      description: skill.description,
-      instructions: skill.instructions,
+      name: def && skill.name === def.name ? null : skill.name,
+      description:
+        def && skill.description === def.description ? null : skill.description,
+      instructions:
+        def && skill.instructions === def.instructions ? null : skill.instructions,
       enabled: skill.enabled,
-      position: rows.length,
-    });
-  }
-  return rows;
+      position,
+    };
+  });
 }
 
-function unchanged(def: SkillDef, skill: Skill): boolean {
-  return (
-    skill.enabled &&
-    skill.name === def.name &&
-    skill.description === def.description &&
-    skill.instructions === def.instructions
-  );
+/** The same skills, ordered by name. Case-insensitive so "grill" sorts with
+ * "Grill" rather than after every capitalised name. */
+export function skillsSortedByName(skills: readonly Skill[]): Skill[] {
+  return skills
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+}
+
+/**
+ * Move one skill up or down, returning a new list.
+ *
+ * A pure function because the off-by-one is the whole thing: a move that drops
+ * the wrong neighbour looks almost right on a list of three and is wrong on a
+ * list of ten. Out-of-range moves return the list unchanged rather than
+ * throwing, so the caller does not have to guard the ends twice.
+ */
+export function moveSkill(
+  skills: readonly Skill[],
+  from: number,
+  delta: number,
+): Skill[] {
+  const to = from + delta;
+  if (from < 0 || from >= skills.length || to < 0 || to >= skills.length) {
+    return skills.slice();
+  }
+  const next = skills.slice();
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, moved!);
+  return next;
 }
 
 /**
@@ -255,52 +340,90 @@ export function parseSkill(raw: unknown, taken: readonly string[]): SkillRow {
   }
   const input = raw as Record<string, unknown>;
 
-  const name = typeof input.name === "string" ? input.name.trim() : "";
-  if (!name) throw new SkillInputError("A skill needs a name.");
-  if (name.length > MAX_SKILL_NAME_CHARS) {
-    throw new SkillInputError(
-      `A skill name can be at most ${MAX_SKILL_NAME_CHARS} characters.`,
-    );
-  }
-
-  const instructions =
-    typeof input.instructions === "string" ? input.instructions.trim() : "";
-  if (!instructions) {
-    throw new SkillInputError(
-      `"${name}" has no instructions, so running it would do nothing.`,
-    );
-  }
-  if (instructions.length > MAX_SKILL_INSTRUCTION_CHARS) {
-    throw new SkillInputError(
-      `"${name}" is longer than the ${MAX_SKILL_INSTRUCTION_CHARS.toLocaleString()} characters a skill can hold.`,
-    );
-  }
-
-  const description =
-    typeof input.description === "string" ? input.description.trim() : "";
-  if (description.length > MAX_SKILL_DESCRIPTION_CHARS) {
-    throw new SkillInputError(
-      `The description of "${name}" can be at most ${MAX_SKILL_DESCRIPTION_CHARS} characters.`,
-    );
-  }
-
   // A key sent by the client is honoured only if it is well formed; anything
   // else gets one derived from the name. Honouring it is what lets a workspace
   // override a built-in, and what keeps an edit an edit rather than a new skill
   // beside the old one.
   const sent = typeof input.key === "string" ? input.key.trim() : "";
-  const key = /^[a-z0-9][a-z0-9-]{0,63}$/.test(sent)
-    ? sent
-    : skillKeyFrom(name, taken);
+  const wellFormed = /^[a-z0-9][a-z0-9-]{0,63}$/.test(sent);
+  const def = wellFormed ? builtInSkill(sent) : undefined;
+
+  // Null is a legitimate value on a built-in's row: it stores that skill's
+  // position and on/off state while leaving its wording to the code. On a skill
+  // the team invented there is no code to fall back to, so the same row would
+  // resolve to a nameless button that instructs nothing.
+  const name = required(input.name, MAX_SKILL_NAME_CHARS, "name", def?.name);
+  if (name === null && !def) throw new SkillInputError("A skill needs a name.");
+
+  const label = name ?? def?.name ?? "A skill";
+  const instructions = required(
+    input.instructions,
+    MAX_SKILL_INSTRUCTION_CHARS,
+    "instructions",
+    def?.instructions,
+    label,
+  );
+  if (instructions === null && !def) {
+    throw new SkillInputError(
+      `"${label}" has no instructions, so running it would do nothing.`,
+    );
+  }
+
+  // Unlike the two above, an empty description is a value rather than an
+  // omission: clearing a built-in's one-liner is a thing a team may want, and
+  // folding it back to null would resolve to ours again and look like the edit
+  // did not save.
+  const submitted =
+    typeof input.description === "string" ? input.description.trim() : null;
+  if (submitted !== null && submitted.length > MAX_SKILL_DESCRIPTION_CHARS) {
+    throw new SkillInputError(
+      `The description of "${label}" can be at most ${MAX_SKILL_DESCRIPTION_CHARS} characters.`,
+    );
+  }
+  const description = submitted === def?.description ? null : submitted;
 
   return {
-    key,
+    key: wellFormed ? sent : skillKeyFrom(label, taken),
     name,
     description,
     instructions,
     enabled: input.enabled !== false,
     position: 0,
   };
+}
+
+/**
+ * A field a skill cannot do without: trimmed, length-checked, and reduced to
+ * null when it adds nothing over the built-in.
+ *
+ * Null means two different things depending on the key, which is why the caller
+ * checks it rather than this: on a built-in it means "keep using ours", and on a
+ * skill the team invented it means the submission is incomplete.
+ *
+ * Text identical to the built-in's is stored as null rather than as a copy. That
+ * is what keeps "I only reordered them" from becoming "I now have my own fork of
+ * all three prompts". The browser already does this in `skillRowsToStore`; doing
+ * it here too means an API client gets the same treatment rather than quietly
+ * opting its workspace out of every future improvement.
+ */
+function required(
+  raw: unknown,
+  limit: number,
+  field: string,
+  builtIn: string | undefined,
+  label?: string,
+): string | null {
+  if (typeof raw !== "string") return null;
+  const value = raw.trim();
+  if (value.length > limit) {
+    throw new SkillInputError(
+      label
+        ? `The ${field} of "${label}" can be at most ${limit.toLocaleString()} characters.`
+        : `A skill ${field} can be at most ${limit.toLocaleString()} characters.`,
+    );
+  }
+  if (!value || value === builtIn) return null;
+  return value;
 }
 
 /**

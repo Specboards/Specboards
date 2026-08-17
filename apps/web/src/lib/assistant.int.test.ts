@@ -1072,6 +1072,32 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
       expect(data.activeSkillKey).toBe("grill");
     });
 
+    it("puts the skills in the order a workspace stored", async () => {
+      await skillsSvc.replaceSkills(db, ws, [
+        { key: "draft", name: null, description: null, instructions: null, enabled: true, position: 0 },
+        { key: "grill", name: null, description: null, instructions: null, enabled: true, position: 1 },
+        { key: "gaps", name: null, description: null, instructions: null, enabled: true, position: 2 },
+      ]);
+      const skills = await skillsSvc.listSkills(db, ws);
+      expect(skills.map((s) => s.key)).toEqual(["draft", "grill", "gaps"]);
+    });
+
+    it("reorders without freezing the wording we ship", async () => {
+      // The reason the columns are nullable. A workspace that only rearranged
+      // its buttons must go on getting later improvements to these prompts.
+      await skillsSvc.replaceSkills(db, ws, [
+        { key: "draft", name: null, description: null, instructions: null, enabled: true, position: 0 },
+        { key: "grill", name: null, description: null, instructions: null, enabled: true, position: 1 },
+      ]);
+      const skills = await skillsSvc.listSkills(db, ws);
+      const grill = skills.find((s) => s.key === "grill")!;
+      const { BUILT_IN_SKILLS } = await import("./ai/skills");
+      expect(grill.instructions).toBe(
+        BUILT_IN_SKILLS.find((b) => b.key === "grill")!.instructions,
+      );
+      expect(grill.customised).toBe(false);
+    });
+
     it("stops reporting a skill as running once it is switched off", async () => {
       await connectStub();
       await ask(asOwner, specId, "", { skillKey: "grill" });
