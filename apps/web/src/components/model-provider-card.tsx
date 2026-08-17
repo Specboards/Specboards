@@ -228,6 +228,10 @@ export function ModelProviderCard({
           kind: "ok",
           message: `Replied "${data.reply}" in ${data.elapsedMs}ms${served}.`,
         });
+        // The server recorded this call against the connection. Reflect it,
+        // or "Last used: Never" sits directly beneath a successful test until
+        // someone reloads, which reads as the test not having counted.
+        setProvider((p) => (p ? { ...p, lastUsedAt: new Date().toISOString() } : p));
       } else {
         setTestResult({
           kind: "error",
