@@ -28,22 +28,45 @@ export function customFieldText(value: CustomFieldValue): string {
   return String(value);
 }
 
+const MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+] as const;
+
 /**
  * Format an ISO `YYYY-MM-DD` date value as a short human date (e.g. "Jul 24,
- * 2026"). Parsed from its calendar parts, not `new Date(string)`, so a
- * date-only value never shifts a day across the local timezone. Non-ISO input
- * is returned unchanged.
+ * 2026"). Non-ISO input is returned unchanged.
+ *
+ * Assembled from the calendar parts rather than formatted by `Intl`, for two
+ * reasons. A date-only value has no instant, so `new Date(string)` would let
+ * it shift a day across a timezone. And boards render on the server before
+ * they render in the browser: `toLocaleDateString(undefined, …)` reads the
+ * locale of whoever runs it, so a server on `en-US` and a viewer on `en-GB`
+ * produce "Jul 24, 2026" and "24 Jul 2026" from the same value. React treats
+ * that disagreement as a corrupted tree and never attaches the page's event
+ * handlers, which turns a formatting difference into a board where nothing is
+ * clickable. Fixed English output cannot disagree with itself.
+ *
+ * A month outside 1-12 is returned unchanged rather than silently rolled over,
+ * which is what `new Date(2026, 12, 1)` would have done to "2026-13-01".
  */
 function formatCardDate(value: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
   if (!m) return value;
-  const date = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
+  const month = MONTHS[Number(m[2]) - 1];
+  const day = Number(m[3]);
+  if (!month || day < 1 || day > 31) return value;
+  return `${month} ${day}, ${m[1]}`;
 }
 
 /** Display text for a custom-field value, formatting `date`-typed values. */

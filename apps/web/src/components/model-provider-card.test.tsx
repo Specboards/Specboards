@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import {
+  commonModels,
   ModelProviderCard,
   modelPickerOptions,
   type ModelProviderView,
@@ -117,5 +118,71 @@ describe("the model picker's options", () => {
 
   it("offers the list as-is when nothing is configured yet", () => {
     expect(modelPickerOptions(["a", "b"], "")).toEqual(["a", "b"]);
+  });
+});
+
+/**
+ * Which models are worth offering first.
+ *
+ * Fixtures are real ids from the live OpenAI listing, because the point of
+ * this filter is the actual shape of a hosted provider's catalogue: 130
+ * entries, a quarter of which cannot hold a conversation at all.
+ */
+describe("the common-model shortlist", () => {
+  it("keeps the models that can answer a chat completion", () => {
+    const kept = commonModels([
+      "gpt-5.6-terra",
+      "gpt-4o-mini",
+      "o3-pro",
+      "claude-sonnet-5",
+      "llama3.1",
+      "gpt-5-search-api",
+      "gpt-4o-mini-search-preview",
+    ]);
+    // Search-preview and search-api are text models with a tool attached, so
+    // they stay. Hiding a usable model is the expensive mistake here.
+    expect(kept).toHaveLength(7);
+  });
+
+  it("drops speech, images, embeddings, moderation and video", () => {
+    const kept = commonModels([
+      "gpt-4o",
+      "whisper-1",
+      "tts-1-hd",
+      "gpt-4o-mini-tts",
+      "gpt-4o-transcribe",
+      "text-embedding-3-large",
+      "omni-moderation-latest",
+      "gpt-image-1",
+      "chatgpt-image-latest",
+      "sora-2-pro",
+      "gpt-realtime-mini",
+      "gpt-audio",
+    ]);
+    expect(kept).toEqual(["gpt-4o"]);
+  });
+
+  it("keeps a name it has never seen rather than hiding it", () => {
+    // The filter is a guess about names. A self-hosted model called something
+    // nobody predicted must still be selectable.
+    expect(commonModels(["my-finetune-v3", "internal-gateway-model"])).toEqual([
+      "my-finetune-v3",
+      "internal-gateway-model",
+    ]);
+  });
+
+  it("shows everything rather than nothing when it recognises none of them", () => {
+    // An endpoint serving only speech models is far likelier to be a catalogue
+    // this filter does not understand than a genuinely unusable connection.
+    expect(commonModels(["whisper-1", "tts-1"])).toEqual(["whisper-1", "tts-1"]);
+  });
+
+  it("does not match a fragment inside a longer word", () => {
+    // "imagen" contains "image"; the separators are what stop this filter
+    // quietly eating models whose names merely resemble a media family.
+    expect(commonModels(["imagenious-7b", "reimagine-large"])).toEqual([
+      "imagenious-7b",
+      "reimagine-large",
+    ]);
   });
 });

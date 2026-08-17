@@ -102,6 +102,35 @@ export function modelPickerOptions(
   return configured && !models.includes(configured) ? [configured, ...models] : models;
 }
 
+/**
+ * Model families that cannot answer a chat completion.
+ *
+ * A hosted provider lists everything it serves, which is speech, images,
+ * embeddings, moderation and video alongside the models this product can
+ * actually use: OpenAI returned 130 entries, roughly a quarter of them
+ * unusable here. Offering `whisper-1` as the workspace's assistant model is
+ * not a neutral act, because the failure it produces arrives much later and
+ * reads as the assistant being broken.
+ *
+ * Matching by name is a heuristic and heuristics are wrong eventually, so this
+ * is a filter over the *display* only. The endpoint's full answer is always
+ * one click away, nothing is dropped from the request, and a name we have
+ * never seen is kept rather than hidden: the cost of wrongly hiding a usable
+ * model is much higher than of showing a few extra.
+ */
+const NOT_CHAT =
+  /(^|[-_])(embedding|embeddings|tts|whisper|transcribe|transcription|moderation|image|dall-e|sora|realtime|audio|rerank|video|speech)([-_]|$)/i;
+
+/**
+ * The subset worth showing first. Falls back to the whole list rather than to
+ * nothing, because an endpoint whose every model looks unusual to this filter
+ * is far likelier to be an unfamiliar gateway than a genuinely empty one.
+ */
+export function commonModels(models: string[]): string[] {
+  const chat = models.filter((id) => !NOT_CHAT.test(id));
+  return chat.length > 0 ? chat : models;
+}
+
 /** A message that reads as what it is, rather than as more helper text. */
 function NoticeLine({ notice }: { notice: Notice }) {
   if (!notice) return null;
@@ -165,9 +194,16 @@ export function ModelProviderCard({
   // asks to type a name. Until then a new connection has no model field at
   // all, which is the point of the ordering.
   const [freeText, setFreeText] = useState(false);
+  // Show the chat-capable subset first. Everything the endpoint listed stays
+  // one click away, because the filter is a name heuristic and the user knows
+  // their own endpoint better than the heuristic does.
+  const [showAll, setShowAll] = useState(false);
 
   const selected = providerFor(kind);
-  const modelOptions = modelPickerOptions(models, model);
+  const shortlist = models ? commonModels(models) : null;
+  const modelOptions = modelPickerOptions(showAll ? models : shortlist, model);
+  /** Only worth offering the toggle when the filter actually hid something. */
+  const hiddenCount = models && shortlist ? models.length - shortlist.length : 0;
   /** A stored key can only be reused against the endpoint it was stored for. */
   const hasUsableStoredKey = Boolean(
     provider?.credentialHint && provider && sameEndpoint(provider.baseUrl, baseUrl),
@@ -200,6 +236,7 @@ export function ModelProviderCard({
   function forgetModels() {
     setModels(null);
     setListNote(null);
+    setShowAll(false);
   }
 
   function chooseProvider(next: ProviderKey) {
@@ -241,11 +278,14 @@ export function ModelProviderCard({
       if (data.ok && data.models && data.models.length > 0) {
         setModels(data.models);
         setFreeText(false);
+        setShowAll(false);
+        // Counts what the picker is about to show, not what the endpoint said,
+        // because "130 models available" beside a list of 96 is its own small
+        // puzzle for the reader to solve.
+        const shown = commonModels(data.models).length;
         setListNote({
           kind: "ok",
-          message: `Key accepted. ${data.models.length} model${
-            data.models.length === 1 ? "" : "s"
-          } available below.`,
+          message: `Key accepted. ${shown} model${shown === 1 ? "" : "s"} available below.`,
         });
         return;
       }
@@ -557,16 +597,29 @@ export function ModelProviderCard({
                       </option>
                     ))}
                   </Select>
-                  <button
-                    type="button"
-                    className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
-                    onClick={() => {
-                      setModels(null);
-                      setFreeText(true);
-                    }}
-                  >
-                    Type a name instead
-                  </button>
+                  <div className="flex flex-wrap items-center gap-3">
+                    {hiddenCount > 0 && (
+                      <button
+                        type="button"
+                        className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                        onClick={() => setShowAll((v) => !v)}
+                      >
+                        {showAll
+                          ? `Show only the ${(models?.length ?? 0) - hiddenCount} models that can hold a conversation`
+                          : `Show all ${models?.length ?? 0}, including ${hiddenCount} for speech, images and embeddings`}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                      onClick={() => {
+                        setModels(null);
+                        setFreeText(true);
+                      }}
+                    >
+                      Type a name instead
+                    </button>
+                  </div>
                 </>
               ) : freeText ? (
                 <>
