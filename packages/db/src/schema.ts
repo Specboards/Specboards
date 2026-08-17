@@ -2340,6 +2340,56 @@ export const modelProviders = pgTable(
   ],
 );
 
+/**
+ * One turn in the assistant conversation about an item.
+ *
+ * There is no `assistant_conversations` parent: an item holds exactly one
+ * thread, because the point of persisting it is that a colleague opening the
+ * card can see how the definition was arrived at, and several threads means
+ * they see one of them without being able to tell whether it is the one that
+ * mattered. Migration 0068 explains what adding a parent would take.
+ *
+ * `system` is not a storable role. The system prompt is rebuilt from the item
+ * on every request (`lib/ai/item-context.ts`) so a thread started before a
+ * prompt change does not keep replaying the old one.
+ */
+export const assistantMessages = pgTable(
+  "assistant_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    /** The item this thread belongs to. Cascades, so deleting an item takes
+     * its conversation with it rather than leaving a copy of its content. */
+    featureId: uuid("feature_id")
+      .notNull()
+      .references(() => features.id, { onDelete: "cascade" }),
+    /** `user` or `assistant`, constrained by a CHECK. */
+    role: text("role").notNull(),
+    content: text("content").notNull(),
+    /** The human this turn belongs to: who typed it, or who asked for it.
+     * Snapshot with no FK, like `notifications.actorId`. */
+    authorId: uuid("author_id").notNull(),
+    /** What the endpoint said answered; null on a user turn. */
+    model: text("model"),
+    /** As reported by the endpoint. Null means it reported nothing, which is
+     * not zero and must not be summed as if it were. */
+    promptTokens: integer("prompt_tokens"),
+    completionTokens: integer("completion_tokens"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("assistant_messages_feature_idx").on(
+      t.workspaceId,
+      t.featureId,
+      t.createdAt,
+    ),
+  ],
+);
+
 export const workspaceRelations = relations(workspaces, ({ many }) => ({
   members: many(members),
   repositories: many(repositories),

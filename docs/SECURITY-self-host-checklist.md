@@ -141,6 +141,21 @@ private TLS in `docs/GUIDE-self-hosted-model.md`.
 - [ ] Tell workspace owners that disconnecting a model destroys our copy of the
       key but does **not** revoke it at the vendor. On a suspected leak, revoke
       at the vendor first, then disconnect here.
+- [ ] Know what a connected model changes about where item content goes. The
+      Assistant panel on an item sends that item's title, level, status, tags,
+      parent title, child titles, linked goal titles and body to the configured
+      endpoint, along with the conversation so far. It sends no other item, and
+      no member name or email. The panel itself lists the fields under "Show
+      what is sent about this item", generated from the same data the request is
+      built from rather than written by hand.
+- [ ] Know that the conversation is stored (`assistant_messages`) and is
+      readable by anyone who can read the item, so it inherits the item's
+      product visibility rather than being private to whoever asked. Treat it as
+      you treat comments.
+- [ ] Grant the **`assistant`** API scope deliberately. It is separate from
+      `features` for exactly this reason: it is the only scope that spends money
+      outside Specboards, and `assistant:write` on a key is an unmetered
+      inference channel at your provider. `assistant:read` only reads threads.
 
 ## 7. Backups
 

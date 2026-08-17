@@ -40,6 +40,10 @@ export const SCOPE_RESOURCES = [
   "features",
   "specs",
   "comments",
+  // Its own resource rather than a path under `features`, precisely so that a
+  // key granted `features:write` cannot also spend the workspace's inference
+  // budget. See the note on the route.
+  "assistant",
   "products",
   "repositories",
   "releases",

@@ -1,5 +1,7 @@
 "use client";
 
+import type { ContextField as AssistantContextField } from "@/lib/ai/item-context";
+import type { AssistantMessageView } from "@/lib/assistant-service";
 import type { ItemDetailData } from "@/lib/item-detail";
 import type { ReleaseItemGroup } from "@/lib/release-items";
 import type {
@@ -409,6 +411,74 @@ export async function listItemEvents(specId: string): Promise<ItemEvent[]> {
     throw new Error(body?.error ?? `Failed to load history (${res.status}).`);
   }
   return body.events;
+}
+
+/**
+ * The assistant thread for an item, plus the context that would be sent about
+ * it. Both come from one response so the panel cannot show a disclosure that
+ * describes a different request from the one it makes.
+ */
+export async function getAssistantThread(specId: string): Promise<{
+  messages: AssistantMessageView[];
+  context: AssistantContextField[];
+  modelConnected: boolean;
+}> {
+  const res = await apiFetch(
+    `/api/v1/assistant/${encodeURIComponent(specId)}`,
+  );
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as {
+    messages?: AssistantMessageView[];
+    context?: AssistantContextField[];
+    modelConnected?: boolean;
+    error?: string;
+  } | null;
+  if (!res.ok || !body?.messages || !body?.context) {
+    throw new Error(
+      body?.error ?? `Failed to load the assistant (${res.status}).`,
+    );
+  }
+  return {
+    messages: body.messages,
+    context: body.context,
+    modelConnected: Boolean(body.modelConnected),
+  };
+}
+
+/**
+ * Ask the assistant about an item.
+ *
+ * A failure at the customer's own model endpoint comes back as a value rather
+ * than a thrown error: it is not a bug to report but a state the panel renders,
+ * and `kind` is what decides whether the right thing to say is "connect a
+ * model", "check your key", or "that endpoint did not answer".
+ */
+export async function askAssistant(
+  specId: string,
+  message: string,
+): Promise<
+  | { ok: true; turns: AssistantMessageView[] }
+  | { ok: false; error: { kind: string; message: string } }
+> {
+  const res = await apiFetch(
+    `/api/v1/assistant/${encodeURIComponent(specId)}`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ message }),
+    },
+  );
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as {
+    turns?: AssistantMessageView[];
+    modelError?: { kind: string; message: string };
+    error?: string;
+  } | null;
+  if (body?.modelError) return { ok: false, error: body.modelError };
+  if (!res.ok || !body?.turns) {
+    throw new Error(body?.error ?? `The assistant failed (${res.status}).`);
+  }
+  return { ok: true, turns: body.turns };
 }
 
 /** Post a comment to a feature; returns the created record. */

@@ -32,6 +32,11 @@ export const SCOPE_GROUPS: ScopeGroup[] = [
       { resource: "features", label: "Work items" },
       { resource: "specs", label: "Specs" },
       { resource: "comments", label: "Comments" },
+      // Named for what granting it costs, because it is the only scope on this
+      // screen that spends money outside Specboards. Deliberately absent from
+      // the "Author specs" preset below: an agent being granted these scopes is
+      // already a model, and does not need a second one billed to the customer.
+      { resource: "assistant", label: "Assistant (spends model credit)" },
       { resource: "statuses", label: "Stages" },
       { resource: "stage-gates", label: "Stage gates" },
       { resource: "properties", label: "Custom properties" },

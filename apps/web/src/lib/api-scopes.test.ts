@@ -156,3 +156,37 @@ describe("the resource vocabulary", () => {
     expect(missing).toEqual([]);
   });
 });
+
+describe("spending the workspace's model credit", () => {
+  const ASK = "/api/v1/assistant/3f0b8c1e-0000-4000-8000-000000000000";
+
+  it("is its own resource, not a corner of features", () => {
+    // The nested URL (/features/{id}/assistant) is the tidier REST shape and
+    // would have derived `features:write`. An integration granted "edit our
+    // items" would then also hold an unmetered spend channel at the customer's
+    // model provider, which nobody agreed to when they ticked that box.
+    expect(requiredScopeFor("POST", ASK)).toEqual({
+      resource: "assistant",
+      action: "write",
+    });
+    expect(requiredScopeFor("GET", ASK)).toEqual({
+      resource: "assistant",
+      action: "read",
+    });
+  });
+
+  it("is not unlocked by any other grant", () => {
+    const required = requiredScopeFor("POST", ASK)!;
+    expect(keyScopesSatisfy(["features:write"], required)).toBe(false);
+    expect(keyScopesSatisfy(["comments:write", "specs:write"], required)).toBe(false);
+    expect(keyScopesSatisfy(["assistant:read"], required)).toBe(false);
+    expect(keyScopesSatisfy(["assistant:write"], required)).toBe(true);
+  });
+
+  it("lets a key read the thread without being able to add to it", () => {
+    // Reading is free; asking costs money. They are worth granting separately.
+    expect(keyScopesSatisfy(["assistant:read"], requiredScopeFor("GET", ASK)!)).toBe(
+      true,
+    );
+  });
+});

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 
+import { AssistantPanel } from "@/components/assistant-panel";
 import { CreateSpecButton } from "@/components/create-spec-button";
 import { DetailSection } from "@/components/detail-section";
 import { FeatureComments } from "@/components/feature-comments";
@@ -180,6 +181,15 @@ export function ItemDetailView({
           />
         ) : null}
       </div>
+
+      {/* Directly under the body, because that is what it is for: help with
+          this definition, not a general chat that happens to be on the page.
+          Collapsed by default so it sits beside the editor rather than
+          competing with it, and because a panel that fetches on open costs
+          nothing to the majority of visits that are not asking anything. */}
+      <DetailSection id="assistant" title="Assistant" defaultCollapsed>
+        <AssistantPanel specId={feature.specId} />
+      </DetailSection>
 
       {/* Why this work exists. Sits above the containment relationships below,
           because a goal is a different kind of link: many-to-many, measured,

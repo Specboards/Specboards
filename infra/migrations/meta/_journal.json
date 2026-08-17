@@ -477,6 +477,13 @@
       "when": 1787000000000,
       "tag": "0067_model_providers",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1787200000000,
+      "tag": "0068_assistant_messages",
+      "breakpoints": true
     }
   ]
 }
