@@ -103,7 +103,16 @@ export function AssistantPanel({ specId }: { specId: string }) {
   /** The answer as it arrives. Null when no turn is in flight. */
   const [streaming, setStreaming] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const streamBoxRef = useRef<HTMLDivElement | null>(null);
   const pending = streaming !== null;
+
+  // Keep the newest text in view inside the capped box. Scrolling the box
+  // rather than the page is the point: the page staying still is what keeps
+  // Stop where the user last saw it.
+  useEffect(() => {
+    const box = streamBoxRef.current;
+    if (box) box.scrollTop = box.scrollHeight;
+  }, [streaming]);
 
   // Abandon an in-flight answer when the panel goes away (the section is
   // collapsed, or the flyout switches items). Without this the request keeps
@@ -256,7 +265,17 @@ export function AssistantPanel({ specId }: { specId: string }) {
                 <span>{streaming ? "answering…" : "thinking…"}</span>
               </div>
               {streaming ? (
-                <div className="prose prose-sm prose-neutral max-w-none dark:prose-invert">
+                // Capped and scrolled internally, so the answer grows *inside*
+                // this box instead of pushing everything below it down the
+                // page. Without that the composer and the Stop button slide
+                // away from under the cursor while the text arrives, which
+                // makes Stop almost impossible to hit on a long answer - found
+                // by trying to hit it. Released to full height once the turn
+                // settles, so reading it back is not confined to a small box.
+                <div
+                  ref={streamBoxRef}
+                  className="max-h-72 overflow-y-auto rounded border border-border/60 p-2 prose prose-sm prose-neutral max-w-none dark:prose-invert"
+                >
                   <ReactMarkdown>{streaming}</ReactMarkdown>
                 </div>
               ) : (
