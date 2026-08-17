@@ -155,7 +155,7 @@ function ProposalReview({
   busy: boolean;
   onResolve: (action: "accept" | "reject", body?: string) => void;
 }) {
-  const [showDiff, setShowDiff] = useState(state.outcome === null);
+  const [showProposed, setShowProposed] = useState(state.outcome === null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(proposed);
 
@@ -181,16 +181,24 @@ function ProposalReview({
         </p>
         <button
           type="button"
-          onClick={() => setShowDiff((v) => !v)}
+          onClick={() => setShowProposed((v) => !v)}
           className="text-muted-foreground underline-offset-2 hover:underline"
         >
-          {showDiff ? "Hide" : "Show"} what was proposed
+          {showProposed ? "Hide" : "Show"} what was proposed
         </button>
-        {/* Diffed against the description as it is *now*, not as it was then,
-            so a settled proposal reopened later shows what it would still do
-            rather than replaying history. That is the honest reading for
-            something that was rejected and might be reconsidered. */}
-        {showDiff ? <SpecDiff before={current} after={proposed} /> : null}
+        {/* The draft itself, not a diff. A diff needs two versions and there is
+            no honest pair left once this is settled: the item has moved on, so
+            diffing against it describes some third change nobody made. Worse,
+            where the reviewer edited before accepting, their additions show up
+            as *removals* against the model's draft, which reads as the accept
+            having deleted them. Found by accepting one and reading it back.
+            A settled proposal is a record of what was offered; what landed is
+            a matter for the item and its history. */}
+        {showProposed ? (
+          <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded border bg-background p-2 font-mono text-2xs">
+            {proposed}
+          </pre>
+        ) : null}
       </div>
     );
   }
