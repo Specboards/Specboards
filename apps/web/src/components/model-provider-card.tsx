@@ -12,6 +12,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 
 export interface ModelProviderView {
   id: string;
@@ -26,6 +27,24 @@ export interface ModelProviderView {
 }
 
 type Status = { kind: "ok" | "error"; message: string } | null;
+
+/**
+ * What the model picker offers, given what the endpoint listed and what is
+ * currently configured.
+ *
+ * The rule worth naming: a configured model that the endpoint does not
+ * enumerate stays in the list. Gateways alias, hosted providers retire names,
+ * and a picker that quietly dropped the configured value would switch the
+ * workspace's model to whatever happened to sort first the next time an admin
+ * opened the form to change something else.
+ */
+export function modelPickerOptions(
+  models: string[] | null,
+  configured: string,
+): string[] {
+  if (!models || models.length === 0) return [];
+  return configured && !models.includes(configured) ? [configured, ...models] : models;
+}
 
 /** Shown under the base URL field so the shape is obvious without docs. */
 const EXAMPLES = [
@@ -63,18 +82,31 @@ export function ModelProviderCard({
   const [testResult, setTestResult] = useState<Status>(null);
   const [pending, startTransition] = useTransition();
   const [testing, setTesting] = useState(false);
+  // null means "not asked yet", which is a different field from an endpoint
+  // that answered with nothing. Both fall back to typing a name.
+  const [models, setModels] = useState<string[] | null>(null);
+  const [listing, setListing] = useState(false);
+  const [listNote, setListNote] = useState<string | null>(null);
 
   function openForm() {
     setBaseUrl(provider?.baseUrl ?? "");
     setModel(provider?.model ?? "");
     setApiKey("");
     setStatus(null);
+    forgetModels();
     setOpen(true);
   }
 
   function cancel() {
     setOpen(false);
     setStatus(null);
+  }
+
+  /** A model list belongs to one endpoint, so it is dropped whenever the
+   * endpoint or its key changes rather than left describing a different one. */
+  function forgetModels() {
+    setModels(null);
+    setListNote(null);
   }
 
   function save() {
@@ -122,6 +154,58 @@ export function ModelProviderCard({
   }
 
   /**
+   * Ask the endpoint which models it serves.
+   *
+   * Sends whatever is in the form rather than what is saved, so the picker
+   * works during first setup. The key goes with it only if one was typed here:
+   * the server will not send a stored credential to a URL it was not stored
+   * for, so changing the endpoint means re-entering the key to list anything.
+   */
+  async function loadModels() {
+    setListing(true);
+    setListNote(null);
+    try {
+      const res = await fetch("/api/v1/model-provider/models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          baseUrl,
+          ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+        }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        models?: string[];
+        error?: string;
+      };
+
+      if (data.ok && data.models && data.models.length > 0) {
+        setModels(data.models);
+        setListNote(
+          `${data.models.length} model${data.models.length === 1 ? "" : "s"} available.`,
+        );
+        return;
+      }
+
+      // Every remaining case, including an endpoint that has no listing route
+      // at all, ends the same way: keep the text field. Most self-hosted
+      // runtimes serve one set of weights and cannot enumerate, and that is a
+      // working configuration rather than a problem to fix.
+      setModels(null);
+      setListNote(
+        data.ok
+          ? "This endpoint listed no models. Type the name it serves."
+          : `${data.error ?? "Could not list the models."} Type the model name instead.`,
+      );
+    } catch {
+      setModels(null);
+      setListNote("Could not list the models. Type the model name instead.");
+    } finally {
+      setListing(false);
+    }
+  }
+
+  /**
    * Runs a real completion. Note this reports `ok: false` on a 200: the request
    * to us succeeded and it is the customer's endpoint that refused, so the
    * message comes from the body rather than the status.
@@ -156,6 +240,8 @@ export function ModelProviderCard({
       setTesting(false);
     }
   }
+
+  const modelOptions = modelPickerOptions(models, model);
 
   return (
     <Card>
@@ -269,7 +355,10 @@ export function ModelProviderCard({
               <Input
                 id="model-base-url"
                 value={baseUrl}
-                onChange={(e) => setBaseUrl(e.target.value)}
+                onChange={(e) => {
+                  setBaseUrl(e.target.value);
+                  forgetModels();
+                }}
                 placeholder="https://api.openai.com/v1"
                 autoComplete="off"
               />
@@ -284,6 +373,7 @@ export function ModelProviderCard({
                       onClick={() => {
                         setBaseUrl(ex.url);
                         setModel(ex.model);
+                        forgetModels();
                       }}
                     >
                       {ex.label}
@@ -297,17 +387,62 @@ export function ModelProviderCard({
               <label className="text-sm font-medium" htmlFor="model-name">
                 Model
               </label>
-              <Input
-                id="model-name"
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-                placeholder="gpt-4o-mini"
-                autoComplete="off"
-              />
-              <p className="text-xs text-muted-foreground">
-                Passed to the endpoint exactly as written. A self-hosted runtime
-                serves whatever it was started with, so we keep no list.
-              </p>
+              {modelOptions.length > 0 ? (
+                <Select
+                  id="model-name"
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                >
+                  {!model && <option value="">Choose a model</option>}
+                  {modelOptions.map((id) => (
+                    <option key={id} value={id}>
+                      {id}
+                    </option>
+                  ))}
+                </Select>
+              ) : (
+                <Input
+                  id="model-name"
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  placeholder="gpt-4o-mini"
+                  autoComplete="off"
+                />
+              )}
+
+              <div className="flex flex-wrap items-center gap-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={loadModels}
+                  disabled={listing || !baseUrl.trim()}
+                >
+                  {listing
+                    ? "Listing…"
+                    : modelOptions.length > 0
+                      ? "Refresh the list"
+                      : "List available models"}
+                </Button>
+                {modelOptions.length > 0 && (
+                  <button
+                    type="button"
+                    className="text-xs underline underline-offset-2 text-muted-foreground hover:text-foreground"
+                    onClick={forgetModels}
+                  >
+                    Type a name instead
+                  </button>
+                )}
+              </div>
+
+              {listNote && <p className="text-xs text-muted-foreground">{listNote}</p>}
+              {modelOptions.length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Passed to the endpoint exactly as written. Many self-hosted
+                  runtimes serve one set of weights and cannot list them, so the
+                  name is typed rather than chosen.
+                </p>
+              )}
             </div>
 
             <div className="space-y-1">

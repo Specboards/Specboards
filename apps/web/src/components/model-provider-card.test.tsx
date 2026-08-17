@@ -1,7 +1,11 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { ModelProviderCard, type ModelProviderView } from "./model-provider-card";
+import {
+  ModelProviderCard,
+  modelPickerOptions,
+  type ModelProviderView,
+} from "./model-provider-card";
 
 /**
  * What the Model card renders before anyone interacts with it.
@@ -79,5 +83,28 @@ describe("with a connection", () => {
     expect(html).not.toContain("Disconnect");
     // Still shows what is configured, which is the point of an owner-only tab.
     expect(html).toContain("gpt-4o-mini");
+  });
+});
+
+describe("the model picker's options", () => {
+  it("offers nothing until an endpoint has listed something", () => {
+    // Both "not asked yet" and "asked, got nothing" fall back to a text field:
+    // a self-hosted runtime serving one set of weights is a working setup.
+    expect(modelPickerOptions(null, "gpt-4o-mini")).toEqual([]);
+    expect(modelPickerOptions([], "gpt-4o-mini")).toEqual([]);
+  });
+
+  it("keeps a configured model the endpoint did not list", () => {
+    // A gateway alias, or a name since retired. Dropping it would switch the
+    // workspace's model to whatever sorted first, without anyone choosing it.
+    expect(modelPickerOptions(["a", "b"], "house-alias")).toEqual(["house-alias", "a", "b"]);
+  });
+
+  it("does not duplicate a configured model that was listed", () => {
+    expect(modelPickerOptions(["a", "b"], "b")).toEqual(["a", "b"]);
+  });
+
+  it("offers the list as-is when nothing is configured yet", () => {
+    expect(modelPickerOptions(["a", "b"], "")).toEqual(["a", "b"]);
   });
 });

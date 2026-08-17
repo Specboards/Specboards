@@ -237,7 +237,7 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
   describe("end to end against a live endpoint", () => {
     let endpoint: Server | undefined;
     let endpointUrl = "";
-    let seen: { auth: string | undefined; body: string } | null = null;
+    let seen: { auth: string | undefined; body: string; url: string } | null = null;
 
     beforeEach(async () => {
       seen = null;
@@ -248,14 +248,23 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
           seen = {
             auth: req.headers.authorization,
             body: Buffer.concat(chunks).toString("utf8"),
+            url: req.url ?? "",
           };
           res.writeHead(200, { "Content-Type": "application/json" });
+          // Answers a model listing on any path ending in /models, so a probe
+          // of a *different* base URL on this same server is still a working
+          // endpoint. That is what makes the credential rule testable.
           res.end(
-            JSON.stringify({
-              model: "local-llama",
-              choices: [{ message: { role: "assistant", content: "ready" } }],
-              usage: { prompt_tokens: 5, completion_tokens: 1, total_tokens: 6 },
-            }),
+            (req.url ?? "").endsWith("/models")
+              ? JSON.stringify({
+                  object: "list",
+                  data: [{ id: "local-llama" }, { id: "local-mistral" }],
+                })
+              : JSON.stringify({
+                  model: "local-llama",
+                  choices: [{ message: { role: "assistant", content: "ready" } }],
+                  usage: { prompt_tokens: 5, completion_tokens: 1, total_tokens: 6 },
+                }),
           );
         });
       });
@@ -305,6 +314,60 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
       expect((await svc.getModelProvider(db, workspace.id))?.lastUsedAt).not.toBeNull();
       // Keyless endpoint: no header at all rather than an empty bearer.
       expect(seen!.auth).toBeUndefined();
+    });
+
+    it("lists the models the stored connection serves", async () => {
+      await svc.saveModelProvider(db, workspace.id, {
+        baseUrl: endpointUrl,
+        model: "local-llama",
+        apiKey: "sk-stored-key-9999",
+      });
+
+      const out = await svc.listWorkspaceModels(db, workspace.id);
+
+      expect(out.ok).toBe(true);
+      expect(out.ok && out.models).toEqual(["local-llama", "local-mistral"]);
+      expect(seen!.url).toBe("/v1/models");
+      // The stored key was decrypted and used, exactly as a completion would.
+      expect(seen!.auth).toBe("Bearer sk-stored-key-9999");
+    });
+
+    it("never sends the stored key to an endpoint it was not stored for", async () => {
+      await svc.saveModelProvider(db, workspace.id, {
+        baseUrl: endpointUrl,
+        model: "local-llama",
+        apiKey: "sk-stored-key-9999",
+      });
+
+      // Same host, different API root: what an admin editing the form has
+      // typed, and not the endpoint the key was entrusted to. Sending it here
+      // would turn a write-only credential into a readable one, since whoever
+      // controls the probed address reads the Authorization header.
+      const out = await svc.listWorkspaceModels(db, workspace.id, {
+        baseUrl: `${endpointUrl}/elsewhere`,
+      });
+
+      expect(out.ok).toBe(true);
+      expect(seen!.auth).toBeUndefined();
+    });
+
+    it("uses a key supplied with the probe, so setup works before saving", async () => {
+      // Nothing is saved at all here: this is the first-run path, where the
+      // picker has to work from what is still sitting in the form.
+      const out = await svc.listWorkspaceModels(db, workspace.id, {
+        baseUrl: endpointUrl,
+        apiKey: "sk-typed-in-the-form-7777",
+      });
+
+      expect(out.ok).toBe(true);
+      expect(seen!.auth).toBe("Bearer sk-typed-in-the-form-7777");
+    });
+
+    it("says 'not configured' when there is no URL saved or supplied", async () => {
+      const out = await svc.listWorkspaceModels(db, workspace.id);
+      expect(out.ok).toBe(false);
+      expect(!out.ok && out.error.kind).toBe("not_configured");
+      expect(seen).toBeNull();
     });
 
     it("refuses the same live endpoint once the deployment is hosted", async () => {

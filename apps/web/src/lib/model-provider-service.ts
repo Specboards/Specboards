@@ -7,7 +7,11 @@ import {
 
 import { assertReachableModelUrl } from "@/lib/ai/egress";
 import { createOpenAiCompatibleClient } from "@/lib/ai/openai-compatible";
-import type { CompletionOutcome, ProviderConfig } from "@/lib/ai/provider";
+import type {
+  CompletionOutcome,
+  ModelListOutcome,
+  ProviderConfig,
+} from "@/lib/ai/provider";
 import { decryptSecret, encryptSecret } from "@/lib/crypto";
 
 /**
@@ -228,6 +232,96 @@ async function resolveConfig(
     apiKey = cred ? decryptSecret(cred.secret) : null;
   }
   return { id: row.id, config: { baseUrl: row.baseUrl, model: row.model, apiKey } };
+}
+
+/**
+ * Compare two base URLs as endpoints rather than as strings, so a trailing
+ * slash or a capitalised host does not read as a different server.
+ */
+function sameEndpoint(a: string, b: string): boolean {
+  const norm = (raw: string) => {
+    const trimmed = raw.trim().replace(/\/+$/, "");
+    try {
+      const u = new URL(trimmed);
+      return `${u.protocol}//${u.host}${u.pathname.replace(/\/+$/, "")}`.toLowerCase();
+    } catch {
+      return trimmed.toLowerCase();
+    }
+  };
+  return norm(a) === norm(b);
+}
+
+export interface ModelListInput {
+  /** Probe this endpoint instead of the stored one, so the picker works while
+   * the connection form is still being filled in. Defaults to the stored URL. */
+  baseUrl?: string;
+  /** A key typed into the form but not saved yet. */
+  apiKey?: string | null;
+}
+
+/** No connection saved and none supplied, so there is nothing to ask. */
+export type WorkspaceModelListOutcome =
+  | ModelListOutcome
+  | { ok: false; error: { kind: "not_configured"; message: string } };
+
+/**
+ * Ask an endpoint which models it serves, so an admin picks from a list rather
+ * than typing a string they have to get exactly right.
+ *
+ * ── Why the stored key is not always used ───────────────────────────────────
+ * This accepts a base URL from the caller, which means it could be asked to
+ * send the workspace's stored credential to an address the caller just typed.
+ * That would make a write-only secret readable by anyone who can reach this
+ * route: point it at a server you control, read the Authorization header.
+ *
+ * So the stored key is only ever sent to the endpoint it was stored for. Probe
+ * a different URL and you get whatever key you supplied with it, or none. The
+ * cost is that changing the endpoint means re-entering the key before the
+ * picker can list anything, which is the correct trade.
+ */
+export async function listWorkspaceModels(
+  db: Database,
+  workspaceId: string,
+  input: ModelListInput = {},
+): Promise<WorkspaceModelListOutcome> {
+  const [row] = await db
+    .select()
+    .from(modelProviders)
+    .where(eq(modelProviders.workspaceId, workspaceId))
+    .limit(1);
+
+  const baseUrl = (input.baseUrl?.trim() || row?.baseUrl || "").trim();
+  if (!baseUrl) {
+    return {
+      ok: false,
+      error: {
+        kind: "not_configured",
+        message: "Enter a base URL before listing the models it serves.",
+      },
+    };
+  }
+
+  const supplied = input.apiKey?.trim() ?? "";
+  let apiKey: string | null = supplied || null;
+  if (!apiKey && row?.credentialId && sameEndpoint(baseUrl, row.baseUrl)) {
+    const [cred] = await db
+      .select({ secret: modelProviderCredentials.secret })
+      .from(modelProviderCredentials)
+      .where(eq(modelProviderCredentials.id, row.credentialId))
+      .limit(1);
+    apiKey = cred ? decryptSecret(cred.secret) : null;
+  }
+
+  // `model` is irrelevant to listing; passing the stored one keeps the config
+  // shape honest rather than inventing an empty string with no meaning.
+  return createOpenAiCompatibleClient({
+    baseUrl,
+    model: row?.model ?? "",
+    apiKey,
+  }).listModels();
+  // `last_used_at` is deliberately not touched here: it answers "is this
+  // connection actually serving the product", and a settings screen listing
+  // models would make every configuration visit look like inference.
 }
 
 /**

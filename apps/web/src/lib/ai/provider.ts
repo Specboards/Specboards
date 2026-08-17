@@ -60,6 +60,11 @@ export type ModelErrorKind =
   | "auth"
   /** Endpoint refused the model id (404, or a 400 naming the model). */
   | "model"
+  /** Reached and authenticated, but it cannot enumerate its models. Not a
+   * fault: a runtime serving one set of weights has nothing to enumerate, so
+   * callers treat this as "ask the user to type the name" rather than an error
+   * to report. */
+  | "unsupported"
   /** Provider rate limit or overload (429/503). */
   | "rate_limit"
   /** Could not connect, DNS failure, TLS failure, or the timeout fired. */
@@ -82,9 +87,27 @@ export type CompletionOutcome =
   | ({ ok: true } & CompletionResult)
   | { ok: false; error: ModelError };
 
+/**
+ * What an endpoint says it serves, as bare ids.
+ *
+ * Ids and nothing else, deliberately. `GET /models` returns a per-vendor grab
+ * bag beside the id (ownership, creation dates, context windows, capability
+ * flags), almost none of it agreed on between servers and none of it needed to
+ * put names in a picker. Carrying it would mean inventing a normalization for
+ * fields no caller reads.
+ *
+ * An empty list is a success, not a failure: an endpoint may legitimately
+ * enumerate nothing while still answering completions.
+ */
+export type ModelListOutcome =
+  | { ok: true; models: string[] }
+  | { ok: false; error: ModelError };
+
 /** Everything an adapter needs to make a call. Never leaves the server. */
 export interface ProviderConfig {
   baseUrl: string;
+  /** The model completions ask for. Discovery ignores it, so probing an
+   * endpoint the user has not chosen a model for yet is legitimate. */
   model: string;
   /** Plaintext; callers decrypt. Null for an endpoint that wants no auth. */
   apiKey: string | null;
@@ -92,4 +115,12 @@ export interface ProviderConfig {
 
 export interface ModelClient {
   complete(req: CompletionRequest): Promise<CompletionOutcome>;
+  /**
+   * What this endpoint says it serves, for a picker instead of a typed string.
+   *
+   * Part of the client interface rather than a helper beside it because it is
+   * as provider-specific as completion is: a future native adapter will have
+   * its own way of enumerating, and callers should not have to know which.
+   */
+  listModels(opts?: { timeoutMs?: number }): Promise<ModelListOutcome>;
 }

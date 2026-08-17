@@ -25,7 +25,7 @@ import { isMultiTenant } from "@/lib/tenancy";
  * Both `specboard` and `specboard-test` run multi-tenant, so the self-hosted
  * path CANNOT be exercised on our own test deployment: any private endpoint is
  * refused there by design. It is covered locally and by the integration tests
- * in `model-egress.int.test.ts` instead. That is a deliberate trade, and worth
+ * in `model-provider.int.test.ts` instead. That is a deliberate trade, and worth
  * knowing before someone reads a refusal on test as a bug.
  *
  * A separate flag from the webhook one rather than a shared "allow private"

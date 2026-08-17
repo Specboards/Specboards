@@ -73,6 +73,11 @@ const call = (apiKey: string | null = "sk-test-key-a91c", model = "test-model") 
     timeoutMs: 5_000,
   });
 
+const list = (apiKey: string | null = "sk-test-key-a91c") =>
+  createOpenAiCompatibleClient({ baseUrl, model: "test-model", apiKey }).listModels({
+    timeoutMs: 5_000,
+  });
+
 describe("endpointUrl", () => {
   it("keeps a path prefix that a naive URL join would discard", () => {
     // `new URL("chat/completions", "https://h/v1")` yields https://h/chat/... ,
@@ -202,6 +207,107 @@ describe("error mapping", () => {
     // though the row was written when it did not.
     process.env.SPECBOARDS_MULTI_TENANT = "true";
     const out = await call();
+    expect(out.ok === false && out.error.kind).toBe("blocked");
+    expect(lastRequest).toBeNull();
+    delete process.env.SPECBOARDS_MULTI_TENANT;
+  });
+});
+
+/**
+ * Model discovery. The cases that matter are the ones where the endpoint
+ * cannot answer: a picker is only worth having if failing to build one leaves
+ * the user typing a name rather than staring at an error.
+ */
+describe("listing models", () => {
+  const LIST_BODY = JSON.stringify({
+    object: "list",
+    data: [
+      { id: "gpt-4o", object: "model" },
+      { id: "gpt-4o-mini", object: "model" },
+      { id: "gpt-4o", object: "model" },
+      { id: "", object: "model" },
+      { object: "model" },
+    ],
+  });
+
+  it("GETs <base>/models with the bearer token", async () => {
+    await serve(200, LIST_BODY);
+    await list();
+    expect(lastRequest?.url).toBe("/v1/models");
+    expect(lastRequest?.headers.authorization).toBe("Bearer sk-test-key-a91c");
+    // A GET carries no body, so it must not claim to.
+    expect(lastRequest?.headers["content-type"]).toBeUndefined();
+  });
+
+  it("returns the ids, deduplicated, sorted, and without the blanks", async () => {
+    await serve(200, LIST_BODY);
+    const out = await list();
+    expect(out.ok).toBe(true);
+    // Entries with no usable id are dropped rather than rendered as empty rows
+    // in a picker.
+    expect(out.ok && out.models).toEqual(["gpt-4o", "gpt-4o-mini"]);
+  });
+
+  it("accepts the bare array some gateways return", async () => {
+    await serve(200, JSON.stringify([{ id: "mixtral" }, "llama3.1"]));
+    const out = await list();
+    expect(out.ok && out.models).toEqual(["llama3.1", "mixtral"]);
+  });
+
+  it("treats an empty list as a success, not a failure", async () => {
+    // The endpoint answered honestly; it just serves nothing it will name.
+    await serve(200, JSON.stringify({ object: "list", data: [] }));
+    const out = await list();
+    expect(out.ok && out.models).toEqual([]);
+  });
+
+  it("calls a 404 unsupported rather than a missing model", async () => {
+    // The single most common case: a runtime that serves completions and has
+    // no listing route at all. On the completion path this same status means
+    // "no such model", which is why the mapping is not shared.
+    await serve(404, "not found", "text/plain");
+    const out = await list();
+    expect(out.ok === false && out.error.kind).toBe("unsupported");
+    expect(out.ok === false && out.error.message).toMatch(/does not list/);
+  });
+
+  it("calls a 405 unsupported too", async () => {
+    await serve(405, "method not allowed", "text/plain");
+    const out = await list();
+    expect(out.ok === false && out.error.kind).toBe("unsupported");
+  });
+
+  it("reports a rejected key as auth, since that is worth fixing", async () => {
+    await serve(401, JSON.stringify({ error: { message: "Invalid API key" } }));
+    const out = await list();
+    expect(out.ok === false && out.error.kind).toBe("auth");
+    expect(out.ok === false && out.error.message).toContain("Invalid API key");
+  });
+
+  it("calls JSON that is not a list unsupported", async () => {
+    await serve(200, JSON.stringify({ hello: "world" }));
+    const out = await list();
+    expect(out.ok === false && out.error.kind).toBe("unsupported");
+  });
+
+  it("reports non-JSON as a protocol error, since the base URL is wrong", async () => {
+    // Not "cannot enumerate": the completion call is about to fail the same
+    // way, and saying so here is what stops the user saving a broken URL.
+    await serve(200, "<html>hello</html>", "text/html");
+    const out = await list();
+    expect(out.ok === false && out.error.kind).toBe("protocol");
+  });
+
+  it("sends no Authorization header when there is no key", async () => {
+    await serve(200, LIST_BODY);
+    await list(null);
+    expect(lastRequest?.headers.authorization).toBeUndefined();
+  });
+
+  it("refuses a blocked address before making any request", async () => {
+    await serve(200, LIST_BODY);
+    process.env.SPECBOARDS_MULTI_TENANT = "true";
+    const out = await list();
     expect(out.ok === false && out.error.kind).toBe("blocked");
     expect(lastRequest).toBeNull();
     delete process.env.SPECBOARDS_MULTI_TENANT;
