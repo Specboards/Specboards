@@ -391,4 +391,120 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
       }
     });
   });
+
+  /**
+   * The same path against a real inference runtime rather than a stub.
+   *
+   * The block above proves the layers connect, using a server written by the
+   * same person as the assertions. What it cannot prove is that a runtime we
+   * did not write agrees with us about the protocol, and "OpenAI-compatible"
+   * is a claim each one makes about itself. This is the on-prem deployment
+   * end to end: a key encrypted into Postgres, read back, decrypted, and
+   * spent against a model on a private address.
+   *
+   * Opt in with a runtime (see `ai/self-hosted.int.test.ts` for the Docker
+   * one-liner):
+   *
+   *   SPECBOARDS_TEST_MODEL_URL=http://127.0.0.1:11434/v1 \
+   *   SPECBOARDS_TEST_MODEL=qwen2.5:0.5b pnpm test:int
+   */
+  describe.skipIf(!process.env.SPECBOARDS_TEST_MODEL_URL)(
+    "end to end against a self-hosted runtime",
+    () => {
+      const RUNTIME_URL = process.env.SPECBOARDS_TEST_MODEL_URL!;
+      const RUNTIME_MODEL = process.env.SPECBOARDS_TEST_MODEL ?? "qwen2.5:0.5b";
+      // A small model on CPU, and the first call also loads the weights.
+      const TIMEOUT_MS = 120_000;
+
+      it(
+        "spends a stored, encrypted key against a model on a private address",
+        async () => {
+          // The runtime takes no key; storing one anyway is the point. It
+          // proves the credential survives the round trip through Postgres
+          // independently of whether the endpoint checks it.
+          await svc.saveModelProvider(db, workspace.id, {
+            baseUrl: RUNTIME_URL,
+            model: RUNTIME_MODEL,
+            apiKey: "sk-onprem-gateway-token",
+          });
+
+          const [stored] = await credentialRows();
+          expect(stored!.secret).not.toContain("sk-onprem");
+          expect(decryptSecret(stored!.secret)).toBe("sk-onprem-gateway-token");
+
+          const out = await svc.completeWithWorkspaceModel(db, workspace.id, {
+            messages: [{ role: "user", content: "Say ready." }],
+            maxTokens: 16,
+            timeoutMs: TIMEOUT_MS,
+          });
+
+          expect(out.ok).toBe(true);
+          expect(out.ok && out.text.length).toBeGreaterThan(0);
+          expect(out.ok && out.model).toBe(RUNTIME_MODEL);
+        },
+        TIMEOUT_MS,
+      );
+
+      it(
+        "records the call, so a live connection is distinguishable from a stale one",
+        async () => {
+          await svc.saveModelProvider(db, workspace.id, {
+            baseUrl: RUNTIME_URL,
+            model: RUNTIME_MODEL,
+          });
+          expect((await svc.getModelProvider(db, workspace.id))!.lastUsedAt).toBeNull();
+
+          await svc.completeWithWorkspaceModel(db, workspace.id, {
+            messages: [{ role: "user", content: "hi" }],
+            maxTokens: 8,
+            timeoutMs: TIMEOUT_MS,
+          });
+
+          expect((await svc.getModelProvider(db, workspace.id))!.lastUsedAt).not.toBeNull();
+        },
+        TIMEOUT_MS,
+      );
+
+      it(
+        "fills the model picker from what the runtime actually serves",
+        async () => {
+          await svc.saveModelProvider(db, workspace.id, {
+            baseUrl: RUNTIME_URL,
+            model: RUNTIME_MODEL,
+          });
+
+          const out = await svc.listWorkspaceModels(db, workspace.id);
+          expect(out.ok).toBe(true);
+          expect(out.ok && out.models).toContain(RUNTIME_MODEL);
+        },
+        TIMEOUT_MS,
+      );
+
+      it(
+        "refuses the same runtime once the deployment is multi-tenant",
+        async () => {
+          // The one conflict the two features have with each other, resolved
+          // by deployment. On the hosted product this exact configuration is
+          // a request-forgery primitive, and it has to stay refused there.
+          await svc.saveModelProvider(db, workspace.id, {
+            baseUrl: RUNTIME_URL,
+            model: RUNTIME_MODEL,
+          });
+
+          process.env.SPECBOARDS_MULTI_TENANT = "true";
+          try {
+            const out = await svc.completeWithWorkspaceModel(db, workspace.id, {
+              messages: [{ role: "user", content: "hi" }],
+              timeoutMs: TIMEOUT_MS,
+            });
+            expect(out.ok).toBe(false);
+            expect(!out.ok && out.error.kind).toBe("blocked");
+          } finally {
+            delete process.env.SPECBOARDS_MULTI_TENANT;
+          }
+        },
+        TIMEOUT_MS,
+      );
+    },
+  );
 });

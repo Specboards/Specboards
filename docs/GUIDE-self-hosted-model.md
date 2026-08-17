@@ -175,6 +175,43 @@ Two things that do need care:
 4. For an air-gapped claim, cut the host's route to the internet and repeat
    step 2. It must still pass.
 
+## What has actually been run
+
+The repository carries two opt-in suites that drive the real thing rather than
+a stub, so "OpenAI-compatible" is not left as a claim each runtime makes about
+itself. Reproduce them with:
+
+```bash
+docker run -d -v ollama:/root/.ollama -p 127.0.0.1:11434:11434 \
+  --name specboards-ollama ollama/ollama
+docker exec specboards-ollama ollama pull qwen2.5:0.5b
+
+cd apps/web
+
+# The adapter against the runtime: completion, the served model name, token
+# usage, the model listing, and what a wrong model id maps to.
+SPECBOARDS_TEST_MODEL_URL=http://127.0.0.1:11434/v1 \
+SPECBOARDS_TEST_MODEL=qwen2.5:0.5b \
+SPECBOARDS_MODEL_ALLOW_PRIVATE=1 \
+  pnpm vitest run --config vitest.int.config.ts src/lib/ai/self-hosted.int.test.ts
+
+# The whole server-side stack: a key encrypted into Postgres, read back,
+# decrypted, and spent against the runtime on a private address.
+DATABASE_URL=postgres://... \
+SPECBOARDS_TEST_MODEL_URL=http://127.0.0.1:11434/v1 \
+SPECBOARDS_TEST_MODEL=qwen2.5:0.5b \
+  pnpm vitest run --config vitest.int.config.ts src/lib/model-provider.int.test.ts
+```
+
+Both passed against Ollama 0.32.14 serving `qwen2.5:0.5b` on 2026-08-17. The
+private-TLS path is covered separately by `src/lib/ai/private-tls.test.ts`,
+which issues a real self-signed certificate at test time and asserts both the
+refusal without `SPECBOARDS_MODEL_CA_CERT` and the success with it.
+
+Not covered by any of these: the browser, and the `extra_hosts` compose recipe
+above. Those were exercised by hand against a hosted provider rather than a
+local runtime.
+
 ## Known limits
 
 - `SPECBOARDS_MODEL_ALLOW_PRIVATE` relaxes the whole target policy for the model
