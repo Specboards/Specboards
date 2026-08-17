@@ -1,7 +1,8 @@
-import { Agent, fetch as undiciFetch } from "undici";
+import { fetch as undiciFetch } from "undici";
 
+import { pinnedAgent } from "@/lib/egress";
 import { signatureHeader } from "@/lib/webhooks/signing";
-import { resolveValidatedTarget, type PinnedAddress } from "@/lib/webhooks/ssrf";
+import { resolveValidatedTarget } from "@/lib/webhooks/ssrf";
 import type { WebhookEnvelope } from "@/lib/webhooks/types";
 
 /**
@@ -23,32 +24,6 @@ export type SendResult =
   | { ok: true; statusCode: number }
   | { ok: false; statusCode: number | null; error: string; blocked?: boolean };
 
-/**
- * An undici dispatcher whose DNS lookup always returns the pre-validated
- * address(es), never re-resolving. This is what closes the DNS-rebinding gap:
- * undici connects to what we already checked, not to a fresh lookup.
- */
-export function pinnedAgent(addresses: PinnedAddress[]): Agent {
-  return new Agent({
-    connect: {
-      timeout: TIMEOUT_MS,
-      lookup(_hostname, options, callback) {
-        if (options && options.all) {
-          callback(null, addresses as never);
-        } else {
-          const first = addresses[0]!;
-          // dns.lookup callback shape when `all` is false.
-          (callback as (e: Error | null, a: string, f: number) => void)(
-            null,
-            first.address,
-            first.family,
-          );
-        }
-      },
-    },
-  });
-}
-
 export async function postSignedEnvelope(
   url: string,
   secret: string,
@@ -63,7 +38,8 @@ export async function postSignedEnvelope(
   const t = Math.floor(Date.now() / 1000);
 
   // No addresses => allow-private mode (self-host / e2e): connect normally.
-  const agent = target.addresses.length > 0 ? pinnedAgent(target.addresses) : undefined;
+  const agent =
+    target.addresses.length > 0 ? pinnedAgent(target.addresses, TIMEOUT_MS) : undefined;
 
   try {
     const res = await undiciFetch(url, {

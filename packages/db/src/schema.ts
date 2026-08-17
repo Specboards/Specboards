@@ -2246,6 +2246,100 @@ export const docPages = pgTable(
   ],
 );
 
+/**
+ * A workspace's inference credential, held apart from the provider row that
+ * uses it (see {@link modelProviders}).
+ *
+ * The separation is deliberate: rotation wants to write a new secret before
+ * retiring the old one, and RLS is row-level, so keeping the secret in its own
+ * table is the only way to let a member resolve the endpoint while the material
+ * stays owner-only. `secret` is an `encryptSecret` blob and never leaves the
+ * server; `hint` is the last few characters, stored so the settings page can
+ * label a key without decrypting anything.
+ */
+export const modelProviderCredentials = pgTable(
+  "model_provider_credentials",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    /** AES-256-GCM blob from `encryptSecret`. Never sent to the browser. */
+    secret: text("secret").notNull(),
+    /** Last few characters only, e.g. "a91c", for a masked display hint. */
+    hint: text("hint").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("model_provider_credentials_ws_idx").on(t.workspaceId),
+    // Backs the composite FK from `model_providers`, which is what stops a
+    // provider row pointing at another workspace's credential.
+    unique("model_provider_credentials_id_ws_uq").on(t.id, t.workspaceId),
+  ],
+);
+
+/**
+ * The model connection a workspace brings itself: one row per workspace, unique
+ * so resolution never has to pick a winner.
+ *
+ * `kind` records the wire protocol rather than the vendor. Only
+ * `openai_compatible` exists today, which covers the hosted providers worth
+ * naming as well as vLLM, Ollama and the gateways on-prem customers run, so a
+ * native per-vendor adapter stays an additive change.
+ *
+ * `credentialId` is nullable because a locally hosted endpoint commonly wants
+ * no key at all; that is a real state, not a missing value.
+ */
+export const modelProviders = pgTable(
+  "model_providers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    /** Wire protocol. Constrained to `openai_compatible` by a CHECK. */
+    kind: text("kind").notNull().default("openai_compatible"),
+    /** Endpoint root, e.g. https://api.openai.com/v1. Egress-checked on write
+     * and again before every call, so tightening the policy takes effect on
+     * rows written while it was looser. */
+    baseUrl: text("base_url").notNull(),
+    /** Passed to the endpoint verbatim; we keep no model catalogue. */
+    model: text("model").notNull(),
+    /** FK declared once, as the composite below: it is strictly stronger than
+     * a plain reference to `id`, so a second overlapping constraint would only
+     * be one more thing to keep in step. */
+    credentialId: uuid("credential_id"),
+    enabled: boolean("enabled").notNull().default(true),
+    /** Set on each successful completion, so a live connection is
+     * distinguishable from one configured and never exercised. */
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("model_providers_ws_uq").on(t.workspaceId),
+    // NOTE: migration 0067 declares this as `ON DELETE SET NULL ("credential_id")`.
+    // The column list matters (without it Postgres also nulls `workspace_id`,
+    // which is NOT NULL, making credential deletion impossible) and Drizzle has
+    // no way to express it, so the SQL is authoritative here. Migrations in this
+    // repo are hand-written, so nothing regenerates this into a mismatch.
+    foreignKey({
+      columns: [t.credentialId, t.workspaceId],
+      foreignColumns: [
+        modelProviderCredentials.id,
+        modelProviderCredentials.workspaceId,
+      ],
+      name: "model_providers_credential_ws_fk",
+    }).onDelete("set null"),
+  ],
+);
+
 export const workspaceRelations = relations(workspaces, ({ many }) => ({
   members: many(members),
   repositories: many(repositories),

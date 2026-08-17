@@ -6,6 +6,7 @@ import { ApiKeysCard } from "@/components/api-keys-card";
 import { ConnectedAgentsCard } from "@/components/connected-agents-card";
 import { IntegrationsTabs } from "@/components/integrations-tabs";
 import { McpCard } from "@/components/mcp-card";
+import { ModelProviderCard } from "@/components/model-provider-card";
 import {
   RepositoriesManager,
   type SetupNotice,
@@ -24,6 +25,7 @@ import { getDb } from "@/lib/db";
 import { isGithubConfigured } from "@/lib/github-app";
 import { loadWorkspaceInstallations, NO_INSTALLATIONS } from "@/lib/github-connect";
 import { listMcpConnections } from "@/lib/mcp/workspace-binding";
+import { getModelProvider } from "@/lib/model-provider-service";
 import { leafLevel } from "@specboards/core";
 
 import { getStore } from "@/lib/store";
@@ -132,6 +134,12 @@ export default async function IntegrationsSettingsPage({
   const agents = isAdmin
     ? await listServiceAccounts(db, access.workspaceId)
     : [];
+  // Same reasoning as agents: the row holds no secret, but it names where this
+  // workspace's inference goes and only an owner can change it, so only an
+  // owner is shown it.
+  const modelProvider = isAdmin
+    ? await getModelProvider(db, access.workspaceId)
+    : null;
 
   // Repository management: any member sees the connected list; only admins get
   // the GitHub setup/connect controls (matching the API authorization).
@@ -184,6 +192,9 @@ export default async function IntegrationsSettingsPage({
           products={products.map((p) => ({ id: p.id, name: p.name }))}
           canManage={isAdmin}
         />
+      }
+      model={
+        <ModelProviderCard initialProvider={modelProvider} canManage={isAdmin} />
       }
       apiKeys={<ApiKeysCard initialKeys={initialKeys} />}
       webhooks={
