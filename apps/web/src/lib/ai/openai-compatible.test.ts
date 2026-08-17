@@ -23,6 +23,19 @@ let server: Server | undefined;
 let baseUrl = "";
 let lastRequest: { url: string; headers: Record<string, string>; body: string } | null =
   null;
+/** How many requests reached the endpoint, so a retry is visible. */
+let requestCount = 0;
+
+/** Publish whatever server has been built and point `baseUrl` at it. */
+function listen(): Promise<void> {
+  return new Promise<void>((resolve) => {
+    server!.listen(0, "127.0.0.1", () => {
+      const { port } = server!.address() as AddressInfo;
+      baseUrl = `http://127.0.0.1:${port}/v1`;
+      resolve();
+    });
+  });
+}
 
 /** Reply with a fixed status/body and record what arrived. */
 function serve(status: number, body: string, contentType = "application/json") {
@@ -30,6 +43,7 @@ function serve(status: number, body: string, contentType = "application/json") {
     const chunks: Buffer[] = [];
     req.on("data", (c: Buffer) => chunks.push(c));
     req.on("end", () => {
+      requestCount += 1;
       lastRequest = {
         url: req.url ?? "",
         headers: req.headers as Record<string, string>,
@@ -39,13 +53,7 @@ function serve(status: number, body: string, contentType = "application/json") {
       res.end(body);
     });
   });
-  return new Promise<void>((resolve) => {
-    server!.listen(0, "127.0.0.1", () => {
-      const { port } = server!.address() as AddressInfo;
-      baseUrl = `http://127.0.0.1:${port}/v1`;
-      resolve();
-    });
-  });
+  return listen();
 }
 
 const OK_BODY = JSON.stringify({
@@ -58,6 +66,7 @@ beforeEach(() => {
   process.env.SPECBOARDS_MODEL_ALLOW_PRIVATE = "1";
   delete process.env.SPECBOARDS_MULTI_TENANT;
   lastRequest = null;
+  requestCount = 0;
 });
 
 afterEach(() => {
@@ -154,6 +163,30 @@ describe("error mapping", () => {
     expect(out.ok === false && out.error.kind).toBe("rate_limit");
   });
 
+  it("separates an empty account from a rate limit, though both are 429", async () => {
+    // Observed against the real provider: an account with no credits answers
+    // 429. Calling that a rate limit would have every caller back off and
+    // retry something that cannot succeed until a human pays a bill.
+    await serve(
+      429,
+      JSON.stringify({
+        error: {
+          message: "You have no credits remaining. Add credits to continue.",
+          type: "insufficient_quota",
+        },
+      }),
+    );
+    const out = await call();
+    expect(out.ok === false && out.error.kind).toBe("quota");
+    expect(out.ok === false && out.error.message).toContain("no credits remaining");
+  });
+
+  it("maps 402 to quota, which is where some gateways put it", async () => {
+    await serve(402, JSON.stringify({ error: { message: "payment required" } }));
+    const out = await call();
+    expect(out.ok === false && out.error.kind).toBe("quota");
+  });
+
   it("calls a 400 a model error only when the body says so", async () => {
     await serve(400, JSON.stringify({ error: { message: "unknown model foo" } }));
     expect((await call()).ok === false).toBe(true);
@@ -210,6 +243,82 @@ describe("error mapping", () => {
     expect(out.ok === false && out.error.kind).toBe("blocked");
     expect(lastRequest).toBeNull();
     delete process.env.SPECBOARDS_MULTI_TENANT;
+  });
+});
+
+/**
+ * The one place the OpenAI-compatible shape actually forked.
+ *
+ * `max_tokens` is what vLLM, Ollama and llama.cpp accept and what OpenAI
+ * accepted for years; OpenAI's newer models reject it and name the
+ * replacement. Found by pointing the settings screen at a real key rather than
+ * by reading a changelog, which is the whole argument for the test call.
+ */
+describe("the max_tokens fork", () => {
+  const sent: string[] = [];
+
+  /** Refuses `max_tokens` exactly as the live endpoint did. */
+  function servePicky() {
+    sent.length = 0;
+    server = createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on("data", (c: Buffer) => chunks.push(c));
+      req.on("end", () => {
+        const body = Buffer.concat(chunks).toString("utf8");
+        sent.push(body);
+        if ((JSON.parse(body) as Record<string, unknown>).max_tokens !== undefined) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              error: {
+                message:
+                  "Unsupported parameter: 'max_tokens' is not supported with this " +
+                  "model. Use 'max_completion_tokens' instead.",
+              },
+            }),
+          );
+          return;
+        }
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(OK_BODY);
+      });
+    });
+    return listen();
+  }
+
+  it("asks again the way the endpoint said it wanted to be asked", async () => {
+    await servePicky();
+    const out = await call();
+
+    expect(out.ok).toBe(true);
+    expect(out.ok && out.text).toBe("ready");
+    expect(sent).toHaveLength(2);
+    // The cap survives the swap: retrying without it would let a test call
+    // bill for a full-length completion.
+    expect(JSON.parse(sent[0]!).max_tokens).toBe(16);
+    expect(JSON.parse(sent[1]!).max_completion_tokens).toBe(16);
+    expect(JSON.parse(sent[1]!).max_tokens).toBeUndefined();
+  });
+
+  it("does not retry a 400 that named something else", async () => {
+    await serve(400, JSON.stringify({ error: { message: "bad temperature" } }));
+    const out = await call();
+    // One request, one answer. A blanket retry-on-400 would double every
+    // failing call, including the ones that fail for a reason we understand.
+    expect(out.ok === false && out.error.kind).toBe("unknown");
+    expect(requestCount).toBe(1);
+  });
+
+  it("sends nothing to retry when no cap was asked for", async () => {
+    await servePicky();
+    const out = await createOpenAiCompatibleClient({
+      baseUrl,
+      model: "test-model",
+      apiKey: null,
+    }).complete({ messages: [{ role: "user", content: "hi" }], timeoutMs: 5_000 });
+
+    expect(out.ok).toBe(true);
+    expect(sent).toHaveLength(1);
   });
 });
 
@@ -275,6 +384,12 @@ describe("listing models", () => {
     await serve(405, "method not allowed", "text/plain");
     const out = await list();
     expect(out.ok === false && out.error.kind).toBe("unsupported");
+  });
+
+  it("separates an empty account from a rate limit here too", async () => {
+    await serve(429, JSON.stringify({ error: { type: "insufficient_quota" } }));
+    const out = await list();
+    expect(out.ok === false && out.error.kind).toBe("quota");
   });
 
   it("reports a rejected key as auth, since that is worth fixing", async () => {

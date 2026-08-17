@@ -36,11 +36,26 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 /** Listing is a small response and someone is watching it happen. */
 const DEFAULT_LIST_TIMEOUT_MS = 10_000;
 
+/**
+ * An empty account, which OpenAI reports as a 429 and therefore as something
+ * that looks exactly like "you are going too fast". Observed live: a workspace
+ * with no credits gets `429 You have no credits remaining`, and treating that
+ * as a rate limit would have the assistant back off and retry a call that can
+ * never succeed until somebody visits a billing page.
+ */
+function isQuotaFailure(body: string): boolean {
+  return /insufficient_quota|no credits remaining|exceeded your current quota|billing/i.test(
+    body,
+  );
+}
+
 /** Map an HTTP status onto the error vocabulary callers branch on. */
 function kindForStatus(status: number, body: string): ModelErrorKind {
   if (status === 401 || status === 403) return "auth";
   if (status === 404) return "model";
-  if (status === 429) return "rate_limit";
+  // Payment Required, which some gateways use where OpenAI overloads 429.
+  if (status === 402) return "quota";
+  if (status === 429) return isQuotaFailure(body) ? "quota" : "rate_limit";
   if (status === 503) return "rate_limit";
   // A 400 is usually a bad model id, but not always, so only claim "model"
   // when the endpoint said so. Everything else stays "unknown" rather than
@@ -58,10 +73,12 @@ function kindForStatus(status: number, body: string): ModelErrorKind {
  * configuration that is already correct, so it maps to `unsupported` and the
  * caller falls back to a typed model name.
  */
-function kindForListStatus(status: number): ModelErrorKind {
+function kindForListStatus(status: number, body: string): ModelErrorKind {
   if (status === 401 || status === 403) return "auth";
   if (status === 404 || status === 405 || status === 501) return "unsupported";
-  if (status === 429 || status === 503) return "rate_limit";
+  if (status === 402) return "quota";
+  if (status === 429) return isQuotaFailure(body) ? "quota" : "rate_limit";
+  if (status === 503) return "rate_limit";
   return "unknown";
 }
 
@@ -112,6 +129,21 @@ function usageFrom(raw: unknown): TokenUsage {
  */
 export function endpointUrl(baseUrl: string, path: string): string {
   return `${baseUrl.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
+}
+
+/**
+ * Whether a 400 is the endpoint telling us it wants `max_completion_tokens`.
+ *
+ * The one place the lingua franca actually forked. `max_tokens` is what vLLM,
+ * Ollama, llama.cpp and every gateway in front of them accept, and what OpenAI
+ * accepted for years; OpenAI's newer models reject it outright and name the
+ * replacement in the error. Keyed on the endpoint naming the parameter rather
+ * than on a model-name pattern, because guessing which models have moved is a
+ * list we would be maintaining forever and getting wrong for gateways that
+ * alias them.
+ */
+function wantsCompletionTokens(body: string): boolean {
+  return /max_completion_tokens/i.test(body);
 }
 
 /** A reply that arrived, or the reason none did. */
@@ -216,16 +248,37 @@ export function createOpenAiCompatibleClient(config: ProviderConfig): ModelClien
     async complete(req: CompletionRequest): Promise<CompletionOutcome> {
       const timeoutMs = req.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
-      const body = JSON.stringify({
-        model: config.model,
-        messages: req.messages.map((m) => ({ role: m.role, content: m.content })),
-        ...(req.maxTokens !== undefined ? { max_tokens: req.maxTokens } : {}),
-        ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
-        stream: false,
-      });
+      const bodyWith = (tokenParam: "max_tokens" | "max_completion_tokens") =>
+        JSON.stringify({
+          model: config.model,
+          messages: req.messages.map((m) => ({ role: m.role, content: m.content })),
+          ...(req.maxTokens !== undefined ? { [tokenParam]: req.maxTokens } : {}),
+          ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
+          stream: false,
+        });
 
-      const res = await send(config, "chat/completions", { method: "POST", body }, timeoutMs);
+      let res = await send(
+        config,
+        "chat/completions",
+        { method: "POST", body: bodyWith("max_tokens") },
+        timeoutMs,
+      );
       if (!res.ok) return res;
+
+      // Ask the way the endpoint just said it wants to be asked. One retry, and
+      // only when it named the parameter itself: an adapter that negotiates
+      // from what the server actually said stays correct as vendors move,
+      // where a hardcoded rule about which models want which parameter would
+      // need editing every time one ships.
+      if (res.status === 400 && req.maxTokens !== undefined && wantsCompletionTokens(res.text)) {
+        res = await send(
+          config,
+          "chat/completions",
+          { method: "POST", body: bodyWith("max_completion_tokens") },
+          timeoutMs,
+        );
+        if (!res.ok) return res;
+      }
 
       if (res.status < 200 || res.status >= 300) {
         const reason = reasonFromBody(res.text);
@@ -291,7 +344,7 @@ export function createOpenAiCompatibleClient(config: ProviderConfig): ModelClien
       if (!res.ok) return res;
 
       if (res.status < 200 || res.status >= 300) {
-        const kind = kindForListStatus(res.status);
+        const kind = kindForListStatus(res.status, res.text);
         const reason = reasonFromBody(res.text);
         return {
           ok: false,

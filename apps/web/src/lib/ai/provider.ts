@@ -65,8 +65,13 @@ export type ModelErrorKind =
    * callers treat this as "ask the user to type the name" rather than an error
    * to report. */
   | "unsupported"
-  /** Provider rate limit or overload (429/503). */
+  /** Provider rate limit or overload (429/503). Retrying later is the fix. */
   | "rate_limit"
+  /** The account is out of money: no credits, or a spend cap reached. Arrives
+   * as a 429 at OpenAI, which makes it look like a rate limit, and it is not:
+   * waiting does nothing and retrying spins forever. Somebody has to go to the
+   * vendor's billing page, so it is a separate conversation with the user. */
+  | "quota"
   /** Could not connect, DNS failure, TLS failure, or the timeout fired. */
   | "unreachable"
   /** Egress policy refused the address before any request was made. */
