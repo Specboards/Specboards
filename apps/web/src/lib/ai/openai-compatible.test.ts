@@ -501,3 +501,31 @@ describe("the reason a connection failed", () => {
     expect(transportReason("not an error at all")).toBe("request failed");
   });
 });
+
+/**
+ * What an air-gapped install can be told.
+ *
+ * `docs/GUIDE-self-hosted-model.md` tells customers with no outbound internet
+ * that the inference path reaches exactly one address, the one they entered.
+ * That is a claim about this adapter, so it is asserted here rather than left
+ * to a future contributor's judgement about whether a telemetry ping or a
+ * vendor model-list fetch is harmless.
+ */
+describe("what a call reaches", () => {
+  it("makes exactly one request, to the configured endpoint", async () => {
+    await serve(200, OK_BODY);
+    const out = await call();
+
+    expect(out.ok).toBe(true);
+    expect(requestCount).toBe(1);
+    expect(lastRequest?.url).toBe("/v1/chat/completions");
+  });
+
+  it("asks the configured endpoint for its models, not a vendor", async () => {
+    await serve(200, JSON.stringify({ data: [{ id: "local-model" }] }));
+    await list();
+
+    expect(requestCount).toBe(1);
+    expect(lastRequest?.url).toBe("/v1/models");
+  });
+});
