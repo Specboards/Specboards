@@ -23,7 +23,7 @@ import {
   createWorkItem,
   suggestBreakdown,
 } from "@/lib/api-client";
-import { statusLabel } from "@/lib/feature-helpers";
+import { pluralLevel, statusLabel } from "@/lib/feature-helpers";
 import type { WorkspaceMember } from "@/lib/workspace";
 
 /**
@@ -94,6 +94,7 @@ export function GenerateChildButton({
 
   const defaultStatus = workflow.statuses[0] ?? "backlog";
   const label = childLevelLabel.toLowerCase();
+  const plural = pluralLevel(label);
   const takenCount = suggestion?.items.filter((i) => i.taken).length ?? 0;
 
   /** Ask the model for a decomposition. Nothing is created by this. */
@@ -153,7 +154,7 @@ export function GenerateChildButton({
       }
       setSuggestion(null);
       toast.success(
-        made === 1 ? `Added one ${label}.` : `Added ${made} ${label} items.`,
+        made === 1 ? `Added one ${label}.` : `Added ${made} ${plural}.`,
       );
     } catch (err) {
       if (err instanceof AuthRequiredError) {
@@ -251,7 +252,7 @@ export function GenerateChildButton({
           <SheetHeader>
             <SheetTitle>Generate {label}</SheetTitle>
             <SheetDescription>
-              New {label} items under “{parentTitle}”.
+              New {plural} under “{parentTitle}”.
               {added > 0
                 ? ` ${added} added.`
                 : ""}
@@ -270,7 +271,7 @@ export function GenerateChildButton({
                 className="gap-1"
               >
                 <Sparkles className="size-3.5" />
-                {asking ? "Thinking…" : `Suggest ${label} items`}
+                {asking ? "Thinking…" : `Suggest ${plural}`}
               </Button>
               <p className="text-2xs text-muted-foreground">
                 Runs on the model this workspace connected. Nothing is created
@@ -291,7 +292,7 @@ export function GenerateChildButton({
                 // told to propose nothing when the breakdown already looks
                 // complete. Reporting it as a failure would be a lie.
                 <p className="text-xs text-muted-foreground">
-                  Nothing suggested. Add {label} items below if you disagree.
+                  Nothing suggested. Add {plural} below if you disagree.
                 </p>
               ) : (
                 <ul className="space-y-1">

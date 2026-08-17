@@ -23,7 +23,7 @@ import { SpecPendingChange } from "@/components/spec-pending-change";
 import { StatusDot } from "@/components/status-dot";
 import { WorkItemDelete } from "@/components/work-item-controls";
 import { Badge } from "@/components/ui/badge";
-import { statusLabel } from "@/lib/feature-helpers";
+import { pluralLevel, statusLabel } from "@/lib/feature-helpers";
 import type { ItemDetailData } from "@/lib/item-detail";
 import { useOrgProductPath } from "@/lib/use-org";
 
@@ -176,7 +176,7 @@ export function ItemDetailView({
         ) : feature.content.trim() === "" ? (
           <div className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">
             {childLabel
-              ? `This ${levelLabel.toLowerCase()} groups work and has no body of its own. Add ${childLabel.toLowerCase()} items beneath it to build it out.`
+              ? `This ${levelLabel.toLowerCase()} groups work and has no body of its own. Add ${pluralLevel(childLabel.toLowerCase())} beneath it to build it out.`
               : "No details yet."}
           </div>
         ) : (
@@ -261,8 +261,8 @@ export function ItemDetailView({
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-xs font-medium text-muted-foreground">
                   {feature.children.length > 0
-                    ? `${childLabel} items · ${feature.childDoneCount}/${feature.childCount} done`
-                    : `No ${childLabel.toLowerCase()} items yet.`}
+                    ? `${pluralLevel(childLabel)} · ${feature.childDoneCount}/${feature.childCount} done`
+                    : `No ${pluralLevel(childLabel.toLowerCase())} yet.`}
                 </p>
                 {canEdit ? (
                   <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">

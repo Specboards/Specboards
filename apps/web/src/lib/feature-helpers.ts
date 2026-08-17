@@ -235,3 +235,26 @@ export function rankBetween(
 ): string {
   return generateKeyBetween(prev, next);
 }
+
+/**
+ * The plural of a configured level label.
+ *
+ * Levels are named by the workspace, and the UI constantly needs the plural:
+ * "3 features", "No work items yet", "Suggest work items". Appending the word
+ * "items" instead is what the code did, and on a level already called "Work
+ * Item" it produces "work item items", which reads as a bug because it is one.
+ *
+ * Deliberately a small English heuristic rather than a plural field on the
+ * level. Asking an admin to type a plural for every level is a form to fill in
+ * for a problem they do not have, and the failure mode here is a slightly wrong
+ * word rather than a broken screen. A label that is already plural is returned
+ * unchanged, so a workspace that named its levels "Stories" is not offered
+ * "Storieses".
+ */
+export function pluralLevel(label: string): string {
+  const trimmed = label.trim();
+  if (!trimmed || /s$/i.test(trimmed)) return trimmed;
+  if (/(ch|sh|x|z)$/i.test(trimmed)) return `${trimmed}es`;
+  if (/[^aeiou]y$/i.test(trimmed)) return `${trimmed.slice(0, -1)}ies`;
+  return `${trimmed}s`;
+}
