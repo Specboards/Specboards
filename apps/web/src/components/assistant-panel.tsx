@@ -369,7 +369,24 @@ function AssistantTurn({
  * accepts it here. The panel never applies anything itself: accepting posts to
  * the item's own write route, which is the same one a hand-made edit takes.
  */
-export function AssistantPanel({ specId }: { specId: string }) {
+export function AssistantPanel({
+  specId,
+  onApplied,
+}: {
+  specId: string;
+  /**
+   * Called with the item's new description after a proposal is accepted and
+   * has actually landed.
+   *
+   * Not optional politeness: the description editor above this panel owns its
+   * content once mounted and never reseeds, so after an accept it is holding
+   * the *old* body. The next character typed into it autosaves that old body
+   * back over the change that was just applied. The host uses this to reseed
+   * it, with the text the write returned rather than a refetch, so there is no
+   * window where the editor holds something stale.
+   */
+  onApplied?: (body: string) => void;
+}) {
   const orgHref = useOrgPath();
   const router = useRouter();
   const [messages, setMessages] = useState<AssistantMessageView[] | null>(null);
@@ -520,6 +537,9 @@ export function AssistantPanel({ specId }: { specId: string }) {
         toast.success("Left as it is.");
         return;
       }
+      // Before any toast or refresh: the editor above is holding the old body
+      // and will write it back on the next keystroke.
+      if (!outcome.pullRequest) onApplied?.(outcome.body);
       if (outcome.pullRequest) {
         toast.success(
           outcome.pullRequest.created

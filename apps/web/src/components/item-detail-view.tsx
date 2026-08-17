@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 
 import { AssistantPanel } from "@/components/assistant-panel";
@@ -76,6 +77,22 @@ export function ItemDetailView({
   } = data;
   const orgHref = useOrgProductPath();
 
+  /**
+   * A description written from outside the editor, which today means an
+   * accepted assistant proposal.
+   *
+   * The DB-native editor deliberately never remounts on its own saves (see
+   * FeatureDetailsEditor), so it keeps whatever body it mounted with. After an
+   * accept that body is stale, and the next keystroke autosaves it back over
+   * the change: a silent revert of the thing the user just approved. Bumping
+   * `rev` remounts it, and seeding from `body` rather than waiting for
+   * `feature.content` to come back around means there is no window where it is
+   * mounted holding the old text.
+   */
+  const [applied, setApplied] = useState<{ body: string; rev: number } | null>(
+    null,
+  );
+
   // Two editable bodies with two different destinations. A DB-native card's
   // body is a database column, so it autosaves. A spec's body is a file in git,
   // so it commits, and the editor for it says so rather than pretending the two
@@ -141,8 +158,9 @@ export function ItemDetailView({
         <SpecPendingChange links={feature.githubLinks} />
         {editableBody ? (
           <FeatureDetailsEditor
+            key={applied ? `applied-${applied.rev}` : "own"}
             specId={feature.specId}
-            initial={feature.content}
+            initial={applied?.body ?? feature.content}
             minHeightClass="min-h-[15rem]"
           />
         ) : canEditSpec ? (
@@ -188,7 +206,15 @@ export function ItemDetailView({
           competing with it, and because a panel that fetches on open costs
           nothing to the majority of visits that are not asking anything. */}
       <DetailSection id="assistant" title="Assistant" defaultCollapsed>
-        <AssistantPanel specId={feature.specId} />
+        <AssistantPanel
+          specId={feature.specId}
+          onApplied={(body) => {
+            setApplied((prev) => ({ body, rev: (prev?.rev ?? 0) + 1 }));
+            // The flyout holds its item in local state, so it has to re-read
+            // for everything else on the card (history, the board behind it).
+            onSpecSaved?.();
+          }}
+        />
       </DetailSection>
 
       {/* Why this work exists. Sits above the containment relationships below,
