@@ -1,10 +1,4 @@
-import {
-  and,
-  asc,
-  eq,
-  workspaceAssistantSkills,
-  type Database,
-} from "@specboards/db";
+import { asc, eq, workspaceAssistantSkills, type Database } from "@specboards/db";
 
 import {
   mergeSkills,
@@ -102,7 +96,7 @@ async function readRows(db: Database, workspaceId: string): Promise<SkillRow[]> 
       position: workspaceAssistantSkills.position,
     })
     .from(workspaceAssistantSkills)
-    .where(and(eq(workspaceAssistantSkills.workspaceId, workspaceId)))
+    .where(eq(workspaceAssistantSkills.workspaceId, workspaceId))
     .orderBy(asc(workspaceAssistantSkills.position));
   return rows;
 }

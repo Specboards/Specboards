@@ -191,11 +191,40 @@ export function assembleItemContext(
     : sawWholeBody
       ? PROPOSAL_INSTRUCTIONS
       : TOO_LONG_TO_PROPOSE;
+  const canPropose = input.canEdit && sawWholeBody;
   return {
-    systemPrompt: renderPrompt(fields, rules, skill ? skillTask(skill) : null),
+    systemPrompt: renderPrompt(
+      fields,
+      rules,
+      skill ? task(skill, canPropose) : null,
+    ),
     fields,
-    canPropose: input.canEdit && sawWholeBody,
+    canPropose,
   };
+}
+
+/**
+ * A running skill's block, with a backstop when it is asking for something this
+ * conversation cannot do.
+ *
+ * A skill is free text a customer wrote, and one of the three we ship says in as
+ * many words "propose it as an edit". Run it on an item the reader cannot write,
+ * or on a description too long to send whole, and the prompt would carry both
+ * "you cannot propose an edit" and "propose an edit" with nothing to break the
+ * tie. The reminder goes *after* the skill rather than before it, because the
+ * instruction nearest the end is the one a small model follows, and here that
+ * has to be ours.
+ */
+function task(skill: SkillDef, canPropose: boolean): string {
+  if (canPropose) return skillTask(skill);
+  return [
+    skillTask(skill),
+    "",
+    "Whatever that task says: you cannot change this item and cannot propose an",
+    "edit in this conversation. Where the task asks you to write or apply one,",
+    "put the wording in your reply for a person to use, and say that you cannot",
+    "apply it yourself.",
+  ].join("\n");
 }
 
 /**

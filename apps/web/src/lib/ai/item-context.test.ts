@@ -250,3 +250,40 @@ describe("a skill in force", () => {
     expect(systemPrompt).not.toContain("Shown on a button");
   });
 });
+
+describe("a skill that asks for more than the reader may do", () => {
+  // A skill is free text a customer wrote, and one of the ones we ship says in
+  // as many words "propose it as an edit". The prompt must not carry both that
+  // and "you cannot propose an edit" with nothing to break the tie.
+  const drafting = {
+    key: "draft",
+    name: "Draft a definition",
+    description: "",
+    instructions: "Write the description in full and propose it as an edit.",
+  };
+
+  it("adds the backstop after the skill for a reader who cannot write", () => {
+    const { systemPrompt } = assembleItemContext(
+      input({ canEdit: false }),
+      drafting,
+    );
+    const asked = systemPrompt.indexOf("propose it as an edit");
+    const backstop = systemPrompt.indexOf("cannot propose an");
+    expect(backstop).toBeGreaterThan(asked);
+  });
+
+  it("adds it when the description was too long to send whole", () => {
+    const { systemPrompt, canPropose } = assembleItemContext(
+      input({ body: "x".repeat(BODY_CHAR_LIMIT + 1) }),
+      drafting,
+    );
+    expect(canPropose).toBe(false);
+    expect(systemPrompt).toContain("cannot propose an");
+  });
+
+  it("leaves the skill alone when proposing is genuinely available", () => {
+    const { systemPrompt, canPropose } = assembleItemContext(input(), drafting);
+    expect(canPropose).toBe(true);
+    expect(systemPrompt).not.toContain("Whatever that task says");
+  });
+});

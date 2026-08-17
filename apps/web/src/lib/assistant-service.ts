@@ -314,6 +314,8 @@ export async function getAssistantPanelData(
     isModelConnected(db, scope.workspaceId),
     listSkills(db, scope.workspaceId),
   ]);
+  const offered = skills.filter((s) => s.enabled);
+  const running = activeSkill(messages);
   return {
     messages,
     context: assembled.fields,
@@ -321,8 +323,12 @@ export async function getAssistantPanelData(
     canEdit,
     canPropose: assembled.canPropose,
     body: feature.content,
-    skills: skills.filter((s) => s.enabled),
-    activeSkillKey: activeSkill(messages),
+    skills: offered,
+    // Only reported as running if it is still something that can be run. A
+    // skill deleted or switched off while a thread was mid-grilling would
+    // otherwise leave the panel holding a key the next turn is refused for, and
+    // every question the person typed would fail until they reloaded.
+    activeSkillKey: offered.some((s) => s.key === running) ? running : null,
   };
 }
 

@@ -1072,6 +1072,26 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
       expect(data.activeSkillKey).toBe("grill");
     });
 
+    it("stops reporting a skill as running once it is switched off", async () => {
+      await connectStub();
+      await ask(asOwner, specId, "", { skillKey: "grill" });
+      await skillsSvc.replaceSkills(db, ws, [
+        {
+          key: "grill",
+          name: "Grill me",
+          description: "",
+          instructions: "x",
+          enabled: false,
+          position: 0,
+        },
+      ]);
+
+      // Otherwise the panel keeps sending a key the next turn is refused for,
+      // and every question the person types fails until they reload.
+      const data = await svc.getAssistantPanelData(db, asOwner, specId);
+      expect(data.activeSkillKey).toBeNull();
+    });
+
     it("keeps a thread readable after the skill it ran is deleted", async () => {
       await connectStub();
       await skillsSvc.replaceSkills(db, ws, [
