@@ -360,6 +360,28 @@ async function buildContext(
   });
 }
 
+/**
+ * A past turn as the model is shown it again.
+ *
+ * A rejected proposal is annotated, because otherwise a rejection is invisible
+ * to every later turn: the model reads its own draft sitting in the history,
+ * has no way to know a person turned it down, and folds it back into the next
+ * proposal. Observed on the first thread that rejected anything, where the very
+ * next proposal quietly reinstated the rejected line. The reviewer does see it
+ * in the diff, so nothing lands unnoticed, but Reject that has to be pressed
+ * repeatedly is Reject that does not mean anything.
+ *
+ * An *accepted* proposal is left alone. Its text is the description now, and
+ * the description is already in the system prompt, so saying so again would be
+ * telling the model something it can read.
+ */
+function replayed(m: AssistantMessageView): string {
+  if (m.role !== "assistant" || m.proposal?.outcome !== "rejected") {
+    return m.content;
+  }
+  return `${m.content}\n\n[This proposed change was reviewed and not accepted. Do not include it in a later proposal unless you are asked for it again.]`;
+}
+
 /** What the caller of a turn observes, in order. */
 export type AssistantEvent =
   /** A fragment of the answer, to append to what is on screen. */
@@ -426,7 +448,7 @@ export async function startAssistantTurn(
     // the next answer has to be coherent with.
     ...history.slice(-HISTORY_TURN_LIMIT).map((m) => ({
       role: m.role,
-      content: m.content,
+      content: replayed(m),
     })),
     { role: "user", content: question },
   ];

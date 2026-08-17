@@ -456,6 +456,19 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
       return outcome.turns![1]!;
     }
 
+    /**
+     * The assistant turns replayed into the last request.
+     *
+     * Assistant turns specifically: the system prompt quotes the proposal
+     * markers in its own instructions, so a search across all messages matches
+     * that and reports nothing about what the history actually carried.
+     */
+    const replayedAssistantTurns = () =>
+      captured
+        .at(-1)!
+        .messages.filter((m) => m.role === "assistant")
+        .map((m) => m.content);
+
     /** The item's description as the database has it right now. */
     async function bodyNow() {
       const [row] = await sql<{ details: string | null }[]>`
@@ -519,6 +532,37 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
       const thread = await svc.listAssistantThread(db, asOwner, specId);
       expect(thread).toHaveLength(2);
       expect(thread[1]!.proposal!.outcome).toBe("rejected");
+    });
+
+    it("tells the next turn that a proposal was turned down", async () => {
+      const turn = await propose();
+      await proposals.rejectProposal(db, asOwner, specId, turn.id);
+      answerFrames = ["Understood."];
+      await ask(asOwner, specId, "Try again.");
+
+      // Without this a rejection is invisible to every later turn: the model
+      // reads its own draft in the history, cannot tell it was turned down, and
+      // folds it straight back into the next proposal. Watched it happen.
+      // Assistant turns only. The system prompt quotes the markers in its own
+      // instructions, so searching every message finds that instead and passes
+      // whatever the history says.
+      const draft = replayedAssistantTurns().find((c) =>
+        c.includes("BEGIN PROPOSED SPEC"),
+      )!;
+      expect(draft).toMatch(/reviewed and not accepted/);
+    });
+
+    it("does not annotate a proposal that was accepted", async () => {
+      // Its text is the description now, and the description is already in the
+      // system prompt. Saying so again is telling the model what it can read.
+      const turn = await propose();
+      await proposals.acceptProposal(db, asOwner, specId, turn.id);
+      answerFrames = ["Understood."];
+      await ask(asOwner, specId, "Anything else?");
+
+      expect(
+        replayedAssistantTurns().some((c) => c.includes("not accepted")),
+      ).toBe(false);
     });
 
     it("refuses to resolve the same proposal twice", async () => {
@@ -619,13 +663,12 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
       // The proposal stays in the replayed history as the assistant wrote it.
       // Stripping it would leave the model unable to answer "why did you write
       // it that way", which is the next thing anyone asks.
-      const replayed = captured.at(-1)!.messages;
-      expect(replayed.some((m) => m.content.includes("BEGIN PROPOSED SPEC"))).toBe(
-        true,
-      );
+      expect(
+        replayedAssistantTurns().some((c) => c.includes("BEGIN PROPOSED SPEC")),
+      ).toBe(true);
       // And the system prompt now carries the accepted text as the description,
       // so the assistant is not still reasoning about the version it replaced.
-      expect(replayed[0]!.content).toContain("Return 429.");
+      expect(captured.at(-1)!.messages[0]!.content).toContain("Return 429.");
     });
   });
 });
@@ -658,6 +701,8 @@ describe.skipIf(!DB_URL || !RUNTIME_URL)(
     const rtSuffix = randomUUID().slice(0, 8);
     const scope = { userId: rtUser, workspaceId: rtWs };
     let rtSpecId: string;
+    /** A second item with an untouched thread; see the note in beforeAll. */
+    let rtProposalSpecId: string;
 
     beforeAll(async () => {
       // Set here as well as at the top of the file: the suite above clears it
@@ -688,6 +733,18 @@ describe.skipIf(!DB_URL || !RUNTIME_URL)(
         scope,
       );
       rtSpecId = item.specId;
+      // A second item, so the proposal test starts from an empty thread.
+      // Sharing one item made it order-dependent: the streaming test above
+      // leaves two turns behind, and a 0.5B model carrying unrelated
+      // conversation is markedly worse at holding a required output format. It
+      // failed five attempts in a row on a used thread and complied first time
+      // on a fresh one. That is worth knowing, and it is a different question
+      // from the one this test asks.
+      const clean = await store.createFeature(
+        { title: "Data retention", level: "epic", productId: rtProduct },
+        scope,
+      );
+      rtProposalSpecId = clean.specId;
 
       await providers.saveModelProvider(db, rtWs, {
         baseUrl: RUNTIME_URL!,
@@ -749,26 +806,48 @@ describe.skipIf(!DB_URL || !RUNTIME_URL)(
         // uniformly implemented part of the OpenAI API and small models emit
         // malformed calls; that argument is only worth anything if a small
         // model can actually produce the block.
+        //
+        // Several attempts, each from an empty thread, because at 0.5B it is
+        // not every time. What was actually measured while writing this: on a
+        // fresh thread it complies; carrying a couple of unrelated turns it
+        // missed five in a row. Both attempts and the wipe below exist because
+        // of that, and the thread has to be cleared *between* attempts or the
+        // retries recreate the very condition they are retrying past.
+        //
+        // A miss is a plain prose answer with the markers left out, which is
+        // the degradation this design was chosen for: a worse answer, not a
+        // malformed call somebody has to interpret. Missing every attempt is
+        // still a real signal and this still fails on it.
         const { parseAnswer } = await import("./ai/proposals");
-        const turn = await svc.startAssistantTurn(
-          db,
-          scope,
-          rtSpecId,
-          "Rewrite the description to add a section called Non-goals. " +
-            "Reply with the proposal block and nothing else.",
-        );
-        let answer = "";
-        for await (const event of turn) {
-          if (event.kind === "delta") answer += event.text;
+        const answers: string[] = [];
+        let proposal: string | null = null;
+
+        for (let attempt = 0; attempt < 5 && proposal === null; attempt++) {
+          await sql`delete from assistant_messages where workspace_id = ${rtWs}`;
+          const turn = await svc.startAssistantTurn(
+            db,
+            scope,
+            rtProposalSpecId,
+            "Rewrite the description to add a section called Non-goals. " +
+              "Reply with the proposal block and nothing else.",
+          );
+          let answer = "";
+          for await (const event of turn) {
+            if (event.kind === "delta") answer += event.text;
+          }
+          answers.push(answer);
+          proposal = parseAnswer(answer).proposal;
         }
 
-        const { proposal } = parseAnswer(answer);
         // Not asserted: what the proposal says. A 0.5B model writes what it
         // likes and the point here is the envelope, not the content.
-        expect(proposal, `model answered:\n${answer}`).not.toBeNull();
+        expect(
+          proposal,
+          `no proposal in ${answers.length} attempts:\n${answers.join("\n---\n")}`,
+        ).not.toBeNull();
         expect(proposal).not.toContain("BEGIN PROPOSED SPEC");
       },
-      120_000,
+      300_000,
     );
   },
 );
