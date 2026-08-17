@@ -159,6 +159,17 @@ describe("the order a workspace arranged", () => {
     expect(moveSkill(list, 0, 1).map((s) => s.key)).toEqual(["b", "a", "c"]);
   });
 
+  it("composes when applied twice, which is what a burst of clicks is", () => {
+    // Moving something three places is three clicks with no render between
+    // them, so each move has to start from the result of the last one. The
+    // editor holds that result in a ref for exactly this reason; getting it
+    // wrong collapsed two clicks into one move.
+    const list = ["a", "b", "c", "d"].map((key) => skill({ key }));
+    const once = moveSkill(list, 3, -1);
+    const twice = moveSkill(once, 2, -1);
+    expect(twice.map((s) => s.key)).toEqual(["a", "d", "b", "c"]);
+  });
+
   it("leaves the list alone at either end", () => {
     const list = [skill({ key: "a" }), skill({ key: "b" })];
     expect(moveSkill(list, 0, -1).map((s) => s.key)).toEqual(["a", "b"]);

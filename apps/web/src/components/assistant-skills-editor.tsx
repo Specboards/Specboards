@@ -182,8 +182,16 @@ export function AssistantSkillsEditor({
    * workspace nothing: a built-in whose wording nobody has touched is stored
    * with null text, so it keeps tracking the code (see `skillRowsToStore`).
    */
-  function onMove(from: number, delta: number) {
-    remember(moveSkill(skills, from, delta));
+  function onMove(key: string, delta: number) {
+    // By key, and composed from the ref rather than from `skills`, because
+    // moving something several places is several clicks and React has not
+    // re-rendered between them. Reading the state list means the second click
+    // recomputes the first click's move and the two collapse into one; keeping
+    // the rendered index means the second click moves whichever skill has since
+    // taken that slot. Both were real: the first is what clicking twice and
+    // watching one move happen looked like.
+    const from = latest.current.findIndex((s) => s.key === key);
+    remember(moveSkill(latest.current, from, delta));
     if (orderTimer.current) clearTimeout(orderTimer.current);
     orderTimer.current = setTimeout(() => {
       orderTimer.current = null;
@@ -223,7 +231,7 @@ export function AssistantSkillsEditor({
                     variant="ghost"
                     className="size-7"
                     disabled={saving || i === 0}
-                    onClick={() => onMove(i, -1)}
+                    onClick={() => onMove(skill.key, -1)}
                     aria-label={`Move ${skill.name} up`}
                   >
                     <ArrowUp className="size-3.5" />
@@ -234,7 +242,7 @@ export function AssistantSkillsEditor({
                     variant="ghost"
                     className="size-7"
                     disabled={saving || i === skills.length - 1}
-                    onClick={() => onMove(i, 1)}
+                    onClick={() => onMove(skill.key, 1)}
                     aria-label={`Move ${skill.name} down`}
                   >
                     <ArrowDown className="size-3.5" />
