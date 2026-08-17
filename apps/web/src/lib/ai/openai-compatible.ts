@@ -146,6 +146,39 @@ function wantsCompletionTokens(body: string): boolean {
   return /max_completion_tokens/i.test(body);
 }
 
+/**
+ * Headers a specific vendor needs on top of the common ones.
+ *
+ * Anthropic is the one case so far. Its chat-completions route accepts a
+ * bearer token, because that route exists to be OpenAI-compatible; `/v1/models`
+ * is its own native API and authenticates with `x-api-key`, so listing models
+ * against a perfectly good Anthropic key returns `401 Invalid bearer token`.
+ * A user reads that as "my key is wrong" and starts rotating credentials that
+ * were never the problem.
+ *
+ * Both headers are sent on every request to that host rather than only on the
+ * listing one: it costs nothing where the bearer already works, and it means
+ * the rule is "this is how we talk to Anthropic" rather than a per-route
+ * exception someone has to remember. Nothing is disclosed by doing so, since
+ * the key is already going to that host in the `Authorization` header.
+ */
+export function vendorHeaders(
+  baseUrl: string,
+  apiKey: string | null,
+): Record<string, string> {
+  if (!apiKey) return {};
+  let host = "";
+  try {
+    host = new URL(baseUrl).hostname.toLowerCase();
+  } catch {
+    return {};
+  }
+  if (host === "api.anthropic.com") {
+    return { "x-api-key": apiKey, "anthropic-version": "2023-06-01" };
+  }
+  return {};
+}
+
 /** A reply that arrived, or the reason none did. */
 type Transport =
   | { ok: true; status: number; text: string }
@@ -186,6 +219,7 @@ async function send(
         // endpoint with no auth gets no header at all rather than an empty
         // one, which some servers reject outright.
         ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}),
+        ...vendorHeaders(config.baseUrl, config.apiKey),
       },
       ...(init.body ? { body: init.body } : {}),
       // Never follow a redirect: the destination has not been through the

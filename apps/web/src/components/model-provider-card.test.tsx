@@ -77,6 +77,17 @@ describe("with a connection", () => {
     expect(render({ ...connected, lastUsedAt: null })).toContain("Never");
   });
 
+  it("renders a timestamp the browser will agree with", () => {
+    // This is the regression that killed the card. `toLocaleString()` renders
+    // in the server's timezone here and the viewer's on hydration; React reads
+    // the difference as a corrupted tree, throws #418, and never attaches the
+    // click handlers, so every button goes dead with no error on screen. The
+    // server's first render must be timezone-independent.
+    const html = render(connected);
+    expect(html).toContain("2026-08-16 12:00 UTC");
+    expect(html).not.toContain(new Date(connected.lastUsedAt!).toLocaleString());
+  });
+
   it("gives a non-owner no management controls", () => {
     const html = render(connected, false);
     expect(html).not.toContain("Send a test call");

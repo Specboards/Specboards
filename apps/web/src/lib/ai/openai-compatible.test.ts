@@ -3,7 +3,11 @@ import type { AddressInfo } from "node:net";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { createOpenAiCompatibleClient, endpointUrl } from "./openai-compatible";
+import {
+  createOpenAiCompatibleClient,
+  endpointUrl,
+  vendorHeaders,
+} from "./openai-compatible";
 
 /**
  * The adapter, driven against a real HTTP server rather than a mocked `fetch`.
@@ -100,6 +104,33 @@ describe("endpointUrl", () => {
     expect(endpointUrl("https://h/v1/", "chat/completions")).toBe(
       "https://h/v1/chat/completions",
     );
+  });
+});
+
+describe("vendor headers", () => {
+  it("authenticates Anthropic the way its own API expects", () => {
+    // Its chat route takes a bearer; /v1/models is the native API and takes
+    // x-api-key, so a good key was being reported as `401 Invalid bearer
+    // token` the moment anyone tried to list models.
+    expect(vendorHeaders("https://api.anthropic.com/v1", "sk-ant-key")).toEqual({
+      "x-api-key": "sk-ant-key",
+      "anthropic-version": "2023-06-01",
+    });
+  });
+
+  it("adds nothing for anyone else, including a lookalike host", () => {
+    expect(vendorHeaders("https://api.openai.com/v1", "sk-key")).toEqual({});
+    // Not a substring match: the key must not be handed to a host that merely
+    // contains the vendor's name.
+    expect(vendorHeaders("https://api.anthropic.com.evil.test/v1", "sk-key")).toEqual({});
+  });
+
+  it("adds nothing when there is no key to send", () => {
+    expect(vendorHeaders("https://api.anthropic.com/v1", null)).toEqual({});
+  });
+
+  it("does not throw on a base URL that is not a URL", () => {
+    expect(vendorHeaders("not a url", "sk-key")).toEqual({});
   });
 });
 

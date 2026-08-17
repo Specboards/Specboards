@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 
 import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
@@ -26,7 +26,62 @@ export interface ModelProviderView {
   updatedAt: string;
 }
 
-type Status = { kind: "ok" | "error"; message: string } | null;
+/** Something to tell the user, and how loudly. */
+type Notice = { kind: "ok" | "error"; message: string } | null;
+
+/**
+ * The providers worth naming, plus the escape hatch that covers everything
+ * else. Naming them is not vendor favouritism: it removes the single most
+ * common setup failure, which is a base URL missing or doubling the version
+ * segment. Anything not on this list still works through "Self-hosted".
+ */
+const PROVIDERS = [
+  {
+    key: "openai",
+    label: "OpenAI",
+    baseUrl: "https://api.openai.com/v1",
+    keyless: false,
+    hint: "Your key from platform.openai.com. Usage is billed to your account.",
+  },
+  {
+    key: "anthropic",
+    label: "Anthropic",
+    baseUrl: "https://api.anthropic.com/v1",
+    keyless: false,
+    hint: "Your key from console.anthropic.com. Usage is billed to your account.",
+  },
+  {
+    key: "custom",
+    label: "Self-hosted or other (OpenAI-compatible)",
+    baseUrl: "",
+    keyless: true,
+    hint: "vLLM, Ollama, LM Studio, or a gateway in front of your own weights.",
+  },
+] as const;
+
+type ProviderKey = (typeof PROVIDERS)[number]["key"];
+
+const providerFor = (key: ProviderKey) => PROVIDERS.find((p) => p.key === key)!;
+
+/** Compare two base URLs as endpoints, not as strings. Mirrors the server. */
+function sameEndpoint(a: string, b: string): boolean {
+  const norm = (raw: string) => {
+    const trimmed = raw.trim().replace(/\/+$/, "");
+    try {
+      const u = new URL(trimmed);
+      return `${u.protocol}//${u.host}${u.pathname.replace(/\/+$/, "")}`.toLowerCase();
+    } catch {
+      return trimmed.toLowerCase();
+    }
+  };
+  return norm(a) === norm(b);
+}
+
+/** Which provider a saved base URL belongs to, so editing opens on it. */
+function providerKindFor(baseUrl: string): ProviderKey {
+  const named = PROVIDERS.find((p) => p.baseUrl && sameEndpoint(p.baseUrl, baseUrl));
+  return named?.key ?? "custom";
+}
 
 /**
  * What the model picker offers, given what the endpoint listed and what is
@@ -46,12 +101,42 @@ export function modelPickerOptions(
   return configured && !models.includes(configured) ? [configured, ...models] : models;
 }
 
-/** Shown under the base URL field so the shape is obvious without docs. */
-const EXAMPLES = [
-  { label: "OpenAI", url: "https://api.openai.com/v1", model: "gpt-4o-mini" },
-  { label: "Anthropic", url: "https://api.anthropic.com/v1", model: "claude-sonnet-5" },
-  { label: "Ollama (self-hosted)", url: "http://localhost:11434/v1", model: "llama3.1" },
-];
+/**
+ * A timestamp that does not break the page.
+ *
+ * `toLocaleString()` renders in the server's timezone during SSR and in the
+ * viewer's on hydration. React sees two different strings, throws away the
+ * tree it was given (error #418), and the card's buttons never receive their
+ * handlers: every control here goes dead, silently, and only once a call has
+ * been made, which is exactly when someone is most likely to press one.
+ *
+ * So the first client render must produce the same text the server did. UTC
+ * is that text; the viewer's own timezone is applied after mount, when React
+ * is no longer comparing.
+ */
+function LocalTime({ iso }: { iso: string }) {
+  const [text, setText] = useState(() => `${iso.slice(0, 16).replace("T", " ")} UTC`);
+  useEffect(() => {
+    setText(new Date(iso).toLocaleString());
+  }, [iso]);
+  return <>{text}</>;
+}
+
+/** A message that reads as what it is, rather than as more helper text. */
+function NoticeLine({ notice }: { notice: Notice }) {
+  if (!notice) return null;
+  if (notice.kind === "ok") {
+    return <p className="text-sm text-muted-foreground">{notice.message}</p>;
+  }
+  return (
+    <p
+      role="alert"
+      className="rounded border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+    >
+      {notice.message}
+    </p>
+  );
+}
 
 /**
  * The workspace's model connection, under Integrations beside repositories and
@@ -59,9 +144,15 @@ const EXAMPLES = [
  *
  * Follows the project convention that adding starts as an affordance: with
  * nothing connected this is a single "Connect a model" button, and the form
- * expands in place only once someone asks for it. Editing an existing
- * connection works the same way, so a configured workspace shows the settings
- * rather than a form sitting open over them.
+ * expands in place only once someone asks for it.
+ *
+ * ── Why the form is ordered the way it is ───────────────────────────────────
+ * Provider, then key, then model. Each step is what makes the next one
+ * answerable: the provider fixes the base URL, the key is what lets us ask the
+ * endpoint what it serves, and only then is there a list to choose a model
+ * from. Offering the model field first invited people to press "list models"
+ * with no key and read a 401 as their configuration being broken, when they
+ * had simply been asked the questions in an order that could not work.
  *
  * The key is write-only from here. It is sent on save and never returned; the
  * server stores a four-character hint, which is all this renders.
@@ -75,25 +166,48 @@ export function ModelProviderCard({
 }) {
   const [provider, setProvider] = useState<ModelProviderView | null>(initialProvider);
   const [open, setOpen] = useState(false);
+  const [kind, setKind] = useState<ProviderKey>(
+    providerKindFor(initialProvider?.baseUrl ?? ""),
+  );
   const [baseUrl, setBaseUrl] = useState(initialProvider?.baseUrl ?? "");
   const [model, setModel] = useState(initialProvider?.model ?? "");
   const [apiKey, setApiKey] = useState("");
-  const [status, setStatus] = useState<Status>(null);
-  const [testResult, setTestResult] = useState<Status>(null);
+  const [status, setStatus] = useState<Notice>(null);
+  const [testResult, setTestResult] = useState<Notice>(null);
   const [pending, startTransition] = useTransition();
   const [testing, setTesting] = useState(false);
-  // null means "not asked yet", which is a different field from an endpoint
-  // that answered with nothing. Both fall back to typing a name.
+  // null means "not asked yet", which is a different thing from an endpoint
+  // that answered with nothing. Both end at a typed model name.
   const [models, setModels] = useState<string[] | null>(null);
   const [listing, setListing] = useState(false);
-  const [listNote, setListNote] = useState<string | null>(null);
+  const [listNote, setListNote] = useState<Notice>(null);
+  // Set once the endpoint has told us it cannot enumerate, or once someone
+  // asks to type a name. Until then a new connection has no model field at
+  // all, which is the point of the ordering.
+  const [freeText, setFreeText] = useState(false);
+
+  const selected = providerFor(kind);
+  const modelOptions = modelPickerOptions(models, model);
+  /** A stored key can only be reused against the endpoint it was stored for. */
+  const hasUsableStoredKey = Boolean(
+    provider?.credentialHint && provider && sameEndpoint(provider.baseUrl, baseUrl),
+  );
+  const canProbe =
+    baseUrl.trim().length > 0 &&
+    (apiKey.trim().length > 0 || hasUsableStoredKey || selected.keyless);
 
   function openForm() {
-    setBaseUrl(provider?.baseUrl ?? "");
+    const startingUrl = provider?.baseUrl ?? "";
+    setKind(providerKindFor(startingUrl));
+    setBaseUrl(startingUrl);
     setModel(provider?.model ?? "");
     setApiKey("");
     setStatus(null);
-    forgetModels();
+    setModels(null);
+    setListNote(null);
+    // An already-saved model was chosen against a key that worked, so editing
+    // one does not have to re-earn the right to see the field.
+    setFreeText(Boolean(provider?.model));
     setOpen(true);
   }
 
@@ -102,11 +216,85 @@ export function ModelProviderCard({
     setStatus(null);
   }
 
-  /** A model list belongs to one endpoint, so it is dropped whenever the
-   * endpoint or its key changes rather than left describing a different one. */
+  /** A model list belongs to one endpoint and one key. */
   function forgetModels() {
     setModels(null);
     setListNote(null);
+  }
+
+  function chooseProvider(next: ProviderKey) {
+    setKind(next);
+    const preset = providerFor(next).baseUrl;
+    setBaseUrl(preset);
+    setModel("");
+    setApiKey("");
+    setFreeText(false);
+    forgetModels();
+  }
+
+  /**
+   * Check the key by asking the endpoint what it serves.
+   *
+   * Listing doubles as the credential check, which is why it is under the key
+   * field rather than the model one: a 401 here says the key is wrong, a list
+   * says it is right, and either answer arrives before anyone has been asked
+   * to choose a model.
+   */
+  async function loadModels() {
+    setListing(true);
+    setListNote(null);
+    try {
+      const res = await fetch("/api/v1/model-provider/models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          baseUrl,
+          ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+        }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        models?: string[];
+        error?: string;
+      };
+
+      if (data.ok && data.models && data.models.length > 0) {
+        setModels(data.models);
+        setFreeText(false);
+        setListNote({
+          kind: "ok",
+          message: `Key accepted. ${data.models.length} model${
+            data.models.length === 1 ? "" : "s"
+          } available below.`,
+        });
+        return;
+      }
+
+      // Everything else ends at a typed model name, including the ordinary
+      // case of an endpoint with no listing route: most self-hosted runtimes
+      // serve one set of weights and have nothing to enumerate.
+      setModels(null);
+      setFreeText(true);
+      setListNote(
+        data.ok
+          ? {
+              kind: "ok",
+              message:
+                "Key accepted, but this endpoint does not list its models. " +
+                "Type the name it serves.",
+            }
+          : {
+              kind: "error",
+              message: data.error ?? "Could not reach the endpoint.",
+            },
+      );
+    } catch {
+      setModels(null);
+      setFreeText(true);
+      setListNote({ kind: "error", message: "Could not reach the endpoint." });
+    } finally {
+      setListing(false);
+    }
   }
 
   function save() {
@@ -154,58 +342,6 @@ export function ModelProviderCard({
   }
 
   /**
-   * Ask the endpoint which models it serves.
-   *
-   * Sends whatever is in the form rather than what is saved, so the picker
-   * works during first setup. The key goes with it only if one was typed here:
-   * the server will not send a stored credential to a URL it was not stored
-   * for, so changing the endpoint means re-entering the key to list anything.
-   */
-  async function loadModels() {
-    setListing(true);
-    setListNote(null);
-    try {
-      const res = await fetch("/api/v1/model-provider/models", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          baseUrl,
-          ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
-        }),
-      });
-      const data = (await res.json().catch(() => ({}))) as {
-        ok?: boolean;
-        models?: string[];
-        error?: string;
-      };
-
-      if (data.ok && data.models && data.models.length > 0) {
-        setModels(data.models);
-        setListNote(
-          `${data.models.length} model${data.models.length === 1 ? "" : "s"} available.`,
-        );
-        return;
-      }
-
-      // Every remaining case, including an endpoint that has no listing route
-      // at all, ends the same way: keep the text field. Most self-hosted
-      // runtimes serve one set of weights and cannot enumerate, and that is a
-      // working configuration rather than a problem to fix.
-      setModels(null);
-      setListNote(
-        data.ok
-          ? "This endpoint listed no models. Type the name it serves."
-          : `${data.error ?? "Could not list the models."} Type the model name instead.`,
-      );
-    } catch {
-      setModels(null);
-      setListNote("Could not list the models. Type the model name instead.");
-    } finally {
-      setListing(false);
-    }
-  }
-
-  /**
    * Runs a real completion. Note this reports `ok: false` on a 200: the request
    * to us succeeded and it is the customer's endpoint that refused, so the
    * message comes from the body rather than the status.
@@ -245,8 +381,6 @@ export function ModelProviderCard({
     }
   }
 
-  const modelOptions = modelPickerOptions(models, model);
-
   return (
     <Card>
       <CardHeader>
@@ -260,17 +394,7 @@ export function ModelProviderCard({
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {status && (
-          <p
-            className={
-              status.kind === "ok"
-                ? "text-sm text-muted-foreground"
-                : "text-sm text-destructive"
-            }
-          >
-            {status.message}
-          </p>
-        )}
+        <NoticeLine notice={status} />
 
         {provider && !open && (
           <div className="space-y-3 rounded border p-3">
@@ -294,28 +418,26 @@ export function ModelProviderCard({
               <div className="flex justify-between gap-4">
                 <span className="text-muted-foreground">Last used</span>
                 <span className="text-xs">
-                  {provider.lastUsedAt
-                    ? new Date(provider.lastUsedAt).toLocaleString()
-                    : "Never"}
+                  {provider.lastUsedAt ? (
+                    <LocalTime iso={provider.lastUsedAt} />
+                  ) : (
+                    "Never"
+                  )}
                 </span>
               </div>
             </div>
 
-            {testResult && (
-              <p
-                className={
-                  testResult.kind === "ok"
-                    ? "text-sm text-muted-foreground"
-                    : "text-sm text-destructive"
-                }
-              >
-                {testResult.message}
-              </p>
-            )}
+            <NoticeLine notice={testResult} />
 
             {canManage && (
               <div className="flex flex-wrap gap-2">
-                <Button type="button" variant="outline" size="sm" onClick={test} disabled={testing}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={test}
+                  disabled={testing}
+                >
                   {testing ? "Testing…" : "Send a test call"}
                 </Button>
                 <Button type="button" variant="outline" size="sm" onClick={openForm}>
@@ -351,128 +473,149 @@ export function ModelProviderCard({
         )}
 
         {open && (
-          <div className="space-y-3 rounded border p-3">
+          <div className="space-y-5 rounded border p-3">
             <div className="space-y-1">
-              <label className="text-sm font-medium" htmlFor="model-base-url">
-                Base URL
+              <label className="text-sm font-medium" htmlFor="model-provider-kind">
+                1. Provider
               </label>
-              <Input
-                id="model-base-url"
-                value={baseUrl}
-                onChange={(e) => {
-                  setBaseUrl(e.target.value);
-                  forgetModels();
-                }}
-                placeholder="https://api.openai.com/v1"
-                autoComplete="off"
-              />
-              <p className="text-xs text-muted-foreground">
-                The API root, ending at the version segment. Examples:{" "}
-                {EXAMPLES.map((ex, i) => (
-                  <span key={ex.label}>
-                    {i > 0 ? ", " : ""}
-                    <button
-                      type="button"
-                      className="underline underline-offset-2 hover:text-foreground"
-                      onClick={() => {
-                        setBaseUrl(ex.url);
-                        setModel(ex.model);
-                        forgetModels();
-                      }}
-                    >
-                      {ex.label}
-                    </button>
-                  </span>
+              <Select
+                id="model-provider-kind"
+                value={kind}
+                onChange={(e) => chooseProvider(e.target.value as ProviderKey)}
+              >
+                {PROVIDERS.map((p) => (
+                  <option key={p.key} value={p.key}>
+                    {p.label}
+                  </option>
                 ))}
-              </p>
+              </Select>
+              <p className="text-xs text-muted-foreground">{selected.hint}</p>
             </div>
 
-            <div className="space-y-1">
-              <label className="text-sm font-medium" htmlFor="model-name">
-                Model
-              </label>
-              {modelOptions.length > 0 ? (
-                <Select
-                  id="model-name"
-                  value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                >
-                  {!model && <option value="">Choose a model</option>}
-                  {modelOptions.map((id) => (
-                    <option key={id} value={id}>
-                      {id}
-                    </option>
-                  ))}
-                </Select>
-              ) : (
+            {kind === "custom" && (
+              <div className="space-y-1">
+                <label className="text-sm font-medium" htmlFor="model-base-url">
+                  Base URL
+                </label>
                 <Input
-                  id="model-name"
-                  value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                  placeholder="gpt-4o-mini"
+                  id="model-base-url"
+                  value={baseUrl}
+                  onChange={(e) => {
+                    setBaseUrl(e.target.value);
+                    forgetModels();
+                  }}
+                  placeholder="http://localhost:11434/v1"
                   autoComplete="off"
                 />
-              )}
-
-              <div className="flex flex-wrap items-center gap-3">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={loadModels}
-                  disabled={listing || !baseUrl.trim()}
-                >
-                  {listing
-                    ? "Listing…"
-                    : modelOptions.length > 0
-                      ? "Refresh the list"
-                      : "List available models"}
-                </Button>
-                {modelOptions.length > 0 && (
-                  <button
-                    type="button"
-                    className="text-xs underline underline-offset-2 text-muted-foreground hover:text-foreground"
-                    onClick={forgetModels}
-                  >
-                    Type a name instead
-                  </button>
-                )}
-              </div>
-
-              {listNote && <p className="text-xs text-muted-foreground">{listNote}</p>}
-              {modelOptions.length === 0 && (
                 <p className="text-xs text-muted-foreground">
-                  Passed to the endpoint exactly as written. Many self-hosted
-                  runtimes serve one set of weights and cannot list them, so the
-                  name is typed rather than chosen.
+                  The API root, ending at the version segment.
                 </p>
-              )}
-            </div>
+              </div>
+            )}
 
             <div className="space-y-1">
               <label className="text-sm font-medium" htmlFor="model-api-key">
-                API key
+                2. API key
               </label>
               <Input
                 id="model-api-key"
                 type="password"
                 value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
+                onChange={(e) => {
+                  setApiKey(e.target.value);
+                  forgetModels();
+                }}
                 placeholder={
-                  provider?.credentialHint
+                  provider?.credentialHint && hasUsableStoredKey
                     ? `Leave blank to keep ••••${provider.credentialHint}`
-                    : "Leave blank if the endpoint needs no key"
+                    : selected.keyless
+                      ? "Leave blank if the endpoint needs no key"
+                      : "Paste your key"
                 }
                 autoComplete="off"
               />
               <p className="text-xs text-muted-foreground">
-                Encrypted at rest and never sent back to the browser. A locally
-                hosted endpoint usually needs none.
+                Encrypted at rest and never sent back to the browser.
               </p>
+
+              <div className="pt-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={loadModels}
+                  disabled={listing || !canProbe}
+                >
+                  {listing
+                    ? "Checking…"
+                    : models
+                      ? "Check again"
+                      : "Check the key and load models"}
+                </Button>
+              </div>
+
+              <div className="pt-1">
+                <NoticeLine notice={listNote} />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-sm font-medium" htmlFor="model-name">
+                3. Model
+              </label>
+              {modelOptions.length > 0 ? (
+                <>
+                  <Select
+                    id="model-name"
+                    value={model}
+                    onChange={(e) => setModel(e.target.value)}
+                  >
+                    {!model && <option value="">Choose a model</option>}
+                    {modelOptions.map((id) => (
+                      <option key={id} value={id}>
+                        {id}
+                      </option>
+                    ))}
+                  </Select>
+                  <button
+                    type="button"
+                    className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                    onClick={() => {
+                      setModels(null);
+                      setFreeText(true);
+                    }}
+                  >
+                    Type a name instead
+                  </button>
+                </>
+              ) : freeText ? (
+                <>
+                  <Input
+                    id="model-name"
+                    value={model}
+                    onChange={(e) => setModel(e.target.value)}
+                    placeholder="gpt-4o-mini"
+                    autoComplete="off"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Passed to the endpoint exactly as written.
+                  </p>
+                </>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Check the key above and the models this endpoint serves will
+                  appear here.
+                </p>
+              )}
             </div>
 
             <div className="flex gap-2">
-              <Button type="button" size="sm" onClick={save} disabled={pending}>
+              <Button
+                type="button"
+                size="sm"
+                onClick={save}
+                disabled={pending || !baseUrl.trim() || !model.trim()}
+              >
                 {pending ? "Saving…" : "Save"}
               </Button>
               <Button type="button" variant="outline" size="sm" onClick={cancel}>
