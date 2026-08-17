@@ -14,6 +14,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import type { ContextField } from "@/lib/ai/item-context";
 import { parseAnswer, proposalStarted } from "@/lib/ai/proposals";
+import type { Skill } from "@/lib/ai/skills";
 import {
   AuthRequiredError,
   askAssistant,
@@ -461,6 +462,15 @@ export function AssistantPanel({
   const [canPropose, setCanPropose] = useState(false);
   /** The description a proposal is diffed against. Moves when one is accepted. */
   const [itemBody, setItemBody] = useState("");
+  /** What this workspace's assistant can be asked to do. */
+  const [skills, setSkills] = useState<Skill[]>([]);
+  /**
+   * The skill in force, owned here rather than recomputed on the server for
+   * each turn: it is the browser that knows the person has just pressed Stop
+   * grilling, and a turn sent while that was still being written to the
+   * database would carry the wrong answer.
+   */
+  const [activeSkillKey, setActiveSkillKey] = useState<string | null>(null);
   /** The proposal currently being applied, so its buttons can say so. */
   const [resolving, setResolving] = useState<string | null>(null);
   const [proposalError, setProposalError] = useState<string | null>(null);
@@ -503,6 +513,8 @@ export function AssistantPanel({
         setCanEdit(res.canEdit);
         setCanPropose(res.canPropose);
         setItemBody(res.body);
+        setSkills(res.skills);
+        setActiveSkillKey(res.activeSkillKey);
       })
       .catch((err) => {
         if (!active) return;
@@ -515,10 +527,39 @@ export function AssistantPanel({
     };
   }, [specId]);
 
-  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+  function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const question = draft.trim();
-    if (!question || pending) return;
+    if (!question) return;
+    // The skill in force rides along, so answering a grilling's question is
+    // still part of the grilling rather than an unrelated aside.
+    void send(question, activeSkillKey);
+  }
+
+  /**
+   * Run a skill.
+   *
+   * The message is left empty: the server fills in the skill's own name, so the
+   * turn recorded in the thread says what was actually run rather than whatever
+   * label this build of the browser happened to be showing.
+   */
+  function onRunSkill(skill: Skill) {
+    const previous = activeSkillKey;
+    setActiveSkillKey(skill.key);
+    // Rolled back if the turn never landed. Nothing was written, so a panel
+    // still saying "Grilling" would be describing a state that vanishes on the
+    // next reload, and the person would be answering questions nobody asked.
+    void send("", skill.key).then((landed) => {
+      if (!landed) setActiveSkillKey(previous);
+    });
+  }
+
+  /** One turn, from either the composer or a skill button. */
+  async function send(
+    question: string,
+    skillKey: string | null,
+  ): Promise<boolean> {
+    if (pending) return false;
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -529,34 +570,37 @@ export function AssistantPanel({
       const outcome = await askAssistant(specId, question, {
         signal: controller.signal,
         onDelta: (text) => setStreaming((prev) => (prev ?? "") + text),
+        skillKey,
       });
 
       if (outcome.ok) {
         setMessages((prev) => [...(prev ?? []), ...outcome.turns]);
         setDraft("");
-        return;
+        return true;
       }
       // Cancelling is not a failure and gets no error panel. The partial
       // answer is dropped rather than left on screen, because the server
       // stored nothing: showing it would imply a turn that does not exist and
       // would vanish on the next reload anyway.
-      if ("cancelled" in outcome) return;
+      if ("cancelled" in outcome) return false;
 
       setFailure(assistantErrorAdvice(outcome.error.kind, outcome.error.message));
       // The draft is deliberately left in the composer. Nothing was persisted,
       // so clearing it would lose the question to a failure the person can
       // often fix and retry in one click.
+      return false;
     } catch (err) {
       if (err instanceof AuthRequiredError) {
         window.location.href = `/sign-in?from=${encodeURIComponent(
           window.location.pathname,
         )}`;
-        return;
+        return false;
       }
       setFailure({
         text: err instanceof Error ? err.message : "The assistant failed.",
         settingsLink: false,
       });
+      return false;
     } finally {
       abortRef.current = null;
       setStreaming(null);
@@ -645,6 +689,10 @@ export function AssistantPanel({
   }
 
   const settingsHref = orgHref("/settings/integrations?tab=model");
+  // A key can outlive the skill it named: the workspace deleted it, or an admin
+  // switched it off while this thread was mid-grilling. Resolving rather than
+  // trusting the key means the chip disappears instead of naming nothing.
+  const running = skills.find((s) => s.key === activeSkillKey) ?? null;
   const { visible, hidden } = threadWindow(messages ?? [], showAll);
   // A proposal arriving mid-stream is rendered as a note rather than as raw
   // Markdown: the marker lines and a half-written spec body scrolling past look
@@ -760,10 +808,51 @@ export function AssistantPanel({
 
       {modelConnected ? (
         <form onSubmit={onSubmit} className="space-y-2">
+          {/* Above the composer, because a skill is a way of starting rather
+              than a thing you do to a question you have already typed. The most
+              valuable thing here is the one nobody thinks to type. */}
+          {skills.length > 0 ? (
+            <div className="flex flex-wrap items-center gap-2">
+              {skills.map((skill) => (
+                <Button
+                  key={skill.key}
+                  type="button"
+                  size="sm"
+                  variant={skill.key === activeSkillKey ? "secondary" : "outline"}
+                  disabled={pending}
+                  title={skill.description || undefined}
+                  onClick={() => onRunSkill(skill)}
+                >
+                  {skill.name}
+                </Button>
+              ))}
+            </div>
+          ) : null}
+
+          {/* What is running, and how to stop it. Without this the stickiness
+              is invisible: someone runs "Grill me", answers a few questions,
+              asks something unrelated three days later and gets interrogated
+              about it with nothing on screen explaining why. */}
+          {running ? (
+            <p className="text-xs text-muted-foreground">
+              Running <span className="font-medium text-foreground">{running.name}</span>
+              , so your replies continue it.{" "}
+              <button
+                type="button"
+                onClick={() => setActiveSkillKey(null)}
+                className="text-link underline-offset-2 hover:underline"
+              >
+                Stop
+              </button>
+            </p>
+          ) : null}
+
           <Textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            placeholder="Ask about this item…"
+            placeholder={
+              running ? `Answer, or ask anything…` : "Ask about this item…"
+            }
             rows={3}
             disabled={pending}
           />

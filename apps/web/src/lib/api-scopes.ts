@@ -44,6 +44,10 @@ export const SCOPE_RESOURCES = [
   // key granted `features:write` cannot also spend the workspace's inference
   // budget. See the note on the route.
   "assistant",
+  // Separate from `assistant` for the same shape of reason `assistant` is
+  // separate from `features`: a key that may ask questions must not also be able
+  // to rewrite the standing instructions every future question is asked under.
+  "assistant-skills",
   "products",
   "repositories",
   "releases",

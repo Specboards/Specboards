@@ -169,6 +169,17 @@ private TLS in `docs/GUIDE-self-hosted-model.md`.
       `POST /api/v1/features/{specId}/proposals` so the two are separate grants.
       If you want an agent that can ask but never apply, give it
       `assistant:write` and `features:read`.
+- [ ] Know that **skills** (Settings, Assistant) are standing instructions sent
+      with every question run under them, so their text leaves your building the
+      same way an item's body does. They are edited by workspace owners only,
+      and a workspace that has changed nothing stores nothing: the starting set
+      ships in the code, so a fresh install has it without any seeding.
+- [ ] Grant the **`assistant-skills`** API scope even more deliberately than
+      `assistant`. A key with `assistant-skills:write` can rewrite what your
+      assistant is told before every answer, including instructions to propose
+      particular changes, and a reviewer reading the resulting diff sees only the
+      change and not the reason for it. An agent that should ask questions needs
+      `assistant:write` and nothing here.
 - [ ] Read the git history for accepted edits if you need to tell them apart.
       They commit as `docs(spec): <name> accepted an assistant edit to <title>`,
       with the accepting person in the `Co-authored-by` trailer. The model is

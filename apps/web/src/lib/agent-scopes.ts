@@ -78,6 +78,11 @@ export const SCOPE_GROUPS: ScopeGroup[] = [
       { resource: "notifications", label: "Notifications" },
       { resource: "org", label: "Organization" },
       { resource: "workspace", label: "Workspace settings" },
+      // Here rather than beside "Assistant" above, because that is the whole
+      // point of it being a separate scope: an agent that may ask the assistant
+      // questions must not thereby be able to rewrite the standing instructions
+      // every future question is asked under, including its own.
+      { resource: "assistant-skills", label: "Assistant skills" },
       { resource: "me", label: "Own profile" },
     ],
   },

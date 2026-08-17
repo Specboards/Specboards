@@ -236,6 +236,9 @@ async function settled(
     authorName: null,
     model: row.model,
     createdAt: row.createdAt.toISOString(),
+    // Answers carry no skill key: it is recorded on the question that asked for
+    // them, which is what `activeSkill` reads.
+    skillKey: null,
     proposal: {
       outcome,
       resolvedByName: who?.name ?? null,

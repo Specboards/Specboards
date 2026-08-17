@@ -68,7 +68,12 @@ export async function GET(req: Request, { params }: Params) {
 }
 
 /**
- * POST /api/v1/assistant/:specId - ask a question. Body: { message }.
+ * POST /api/v1/assistant/:specId - ask a question. Body: { message, skillKey? }.
+ *
+ * `skillKey` names the skill in force (see `lib/ai/skills.ts`); with it and an
+ * empty `message`, the skill's own name becomes the question. Editing skills is
+ * a different resource with a different scope, deliberately: see
+ * `/api/v1/assistant-skills`.
  *
  * Answers with a stream of newline-delimited JSON events, one per line:
  * `{"kind":"delta","text":"…"}` repeatedly, then exactly one
@@ -117,7 +122,14 @@ export async function POST(req: Request, { params }: Params) {
       authz.scope,
       specId,
       typeof body.message === "string" ? body.message : "",
-      { signal: req.signal },
+      {
+        signal: req.signal,
+        // A skill is a saved way of asking, so it rides on the ordinary turn
+        // rather than getting an endpoint of its own. Sent on every turn, not
+        // just the one that launched it: the client owns what is in force, and
+        // an interrogation has to survive the person answering a question.
+        ...(typeof body.skillKey === "string" ? { skillKey: body.skillKey } : {}),
+      },
     );
   } catch (err) {
     if (err instanceof AssistantItemError) {

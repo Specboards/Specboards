@@ -31,6 +31,7 @@
 
 import { breakdownInstructions } from "./breakdown";
 import { PROPOSAL_INSTRUCTIONS } from "./proposals";
+import { skillTask, type SkillDef } from "./skills";
 
 /** One labelled thing that goes into the prompt, and into the disclosure. */
 export interface ContextField {
@@ -168,7 +169,19 @@ const TOO_LONG_TO_PROPOSE = [
  * says "Parent: none" is noise in the prompt and, worse, a line in the
  * disclosure claiming we sent something we did not.
  */
-export function assembleItemContext(input: ItemContextInput): AssembledContext {
+export function assembleItemContext(
+  input: ItemContextInput,
+  /**
+   * The skill in force, if any: a team's own standing instructions for the job
+   * being done right now ("Grill me", "Find the gaps").
+   *
+   * A parameter rather than a field on the input because it is not a fact about
+   * the item, and the disclosure lists facts about the item. It is an
+   * instruction, and it belongs with the other instructions, which is exactly
+   * where {@link renderPrompt} puts it.
+   */
+  skill?: SkillDef | null,
+): AssembledContext {
   const fields = buildFields(input);
 
   // A shortened description cannot be safely rewritten; see TOO_LONG_TO_PROPOSE.
@@ -179,7 +192,7 @@ export function assembleItemContext(input: ItemContextInput): AssembledContext {
       ? PROPOSAL_INSTRUCTIONS
       : TOO_LONG_TO_PROPOSE;
   return {
-    systemPrompt: renderPrompt(fields, rules),
+    systemPrompt: renderPrompt(fields, rules, skill ? skillTask(skill) : null),
     fields,
     canPropose: input.canEdit && sawWholeBody,
   };
@@ -269,7 +282,11 @@ function buildFields(input: ItemContextInput): ContextField[] {
  * it has not seen the end of, and the person reading that answer has no way to
  * tell. Saying so costs a line and turns a wrong answer into a caveated one.
  */
-function renderPrompt(fields: ContextField[], rules: string): string {
+function renderPrompt(
+  fields: ContextField[],
+  rules: string,
+  task: string | null = null,
+): string {
   const rendered = fields.map((f) => {
     const note = f.truncated ? " (shortened; you have not been shown all of it)" : "";
     // Multi-line values read better as a block than as "Label: line1 line2".
@@ -280,5 +297,12 @@ function renderPrompt(fields: ContextField[], rules: string): string {
   // The rules go above the item, not below it: instructions that follow a long
   // document are the ones a small model loses track of first, and the rule it
   // must not lose is the one saying nothing it produces is applied.
-  return `${ROLE}\n\n${rules}\n\n---\n\n${rendered.join("\n\n")}`;
+  //
+  // A running skill sits between the rules and the item, in that order on
+  // purpose: who you are, then what you may and may not do, then the job right
+  // now, then the thing itself. A skill that came first would be read as
+  // permission to do whatever it describes, which is exactly the rule that must
+  // survive contact with a team's own wording.
+  const head = task ? `${ROLE}\n\n${rules}\n\n${task}` : `${ROLE}\n\n${rules}`;
+  return `${head}\n\n---\n\n${rendered.join("\n\n")}`;
 }

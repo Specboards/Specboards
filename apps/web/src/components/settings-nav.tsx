@@ -13,6 +13,7 @@ const ITEMS = [
   { href: "/settings/work-cards", label: "Cards" },
   { href: "/settings/ideas", label: "Ideas" },
   { href: "/settings/hierarchy", label: "Hierarchy" },
+  { href: "/settings/assistant", label: "Assistant" },
   { href: "/settings/branding", label: "Branding" },
   { href: "/settings/integrations", label: "Integrations" },
 ];

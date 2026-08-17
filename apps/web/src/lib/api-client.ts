@@ -1,6 +1,7 @@
 "use client";
 
 import type { ContextField as AssistantContextField } from "@/lib/ai/item-context";
+import type { Skill, SkillRow } from "@/lib/ai/skills";
 import type { AssistantMessageView } from "@/lib/assistant-service";
 import type { ItemDetailData } from "@/lib/item-detail";
 import type { ReleaseItemGroup } from "@/lib/release-items";
@@ -425,6 +426,8 @@ export async function getAssistantThread(specId: string): Promise<{
   canEdit: boolean;
   canPropose: boolean;
   body: string;
+  skills: Skill[];
+  activeSkillKey: string | null;
 }> {
   const res = await apiFetch(
     `/api/v1/assistant/${encodeURIComponent(specId)}`,
@@ -437,6 +440,8 @@ export async function getAssistantThread(specId: string): Promise<{
     canEdit?: boolean;
     canPropose?: boolean;
     body?: string;
+    skills?: Skill[];
+    activeSkillKey?: string | null;
     error?: string;
   } | null;
   if (!res.ok || !body?.messages || !body?.context) {
@@ -451,7 +456,50 @@ export async function getAssistantThread(specId: string): Promise<{
     canEdit: Boolean(body.canEdit),
     canPropose: Boolean(body.canPropose),
     body: body.body ?? "",
+    skills: body.skills ?? [],
+    activeSkillKey: body.activeSkillKey ?? null,
   };
+}
+
+/**
+ * The workspace's assistant skills, built-ins included.
+ *
+ * Its own resource rather than a path under `assistant`, so that an API key
+ * granted permission to ask questions is not thereby granted permission to
+ * rewrite what the assistant is told. See the route.
+ */
+export async function getAssistantSkills(): Promise<Skill[]> {
+  const res = await apiFetch("/api/v1/assistant-skills");
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as {
+    skills?: Skill[];
+    error?: string;
+  } | null;
+  if (!res.ok || !body?.skills) {
+    throw new Error(body?.error ?? `Failed to load skills (${res.status}).`);
+  }
+  return body.skills;
+}
+
+/**
+ * Replace the workspace's skills with this set. Admin-only; 422 on a skill that
+ * would do nothing (no name, no instructions) or a set that is too large.
+ */
+export async function saveAssistantSkills(skills: SkillRow[]): Promise<Skill[]> {
+  const res = await apiFetch("/api/v1/assistant-skills", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ skills }),
+  });
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as {
+    skills?: Skill[];
+    error?: string;
+  } | null;
+  if (!res.ok || !body?.skills) {
+    throw new Error(body?.error ?? `Could not save the skills (${res.status}).`);
+  }
+  return body.skills;
 }
 
 /** One child the assistant suggested, before anybody has agreed to it. */
@@ -576,7 +624,16 @@ export type AssistantStreamEvent =
 export async function askAssistant(
   specId: string,
   message: string,
-  opts: { onDelta?: (text: string) => void; signal?: AbortSignal } = {},
+  opts: {
+    onDelta?: (text: string) => void;
+    signal?: AbortSignal;
+    /**
+     * The skill in force. Sent on every turn, not only the one that launched
+     * it: the browser owns what is running, and a grilling that stopped the
+     * moment its first question was answered would not be a grilling.
+     */
+    skillKey?: string | null;
+  } = {},
 ): Promise<
   | { ok: true; turns: AssistantMessageView[] }
   | { ok: false; error: { kind: string; message: string } }
@@ -587,7 +644,10 @@ export async function askAssistant(
     res = await apiFetch(`/api/v1/assistant/${encodeURIComponent(specId)}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({
+        message,
+        ...(opts.skillKey ? { skillKey: opts.skillKey } : {}),
+      }),
       ...(opts.signal ? { signal: opts.signal } : {}),
     });
   } catch (err) {

@@ -89,7 +89,11 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
     scope: { userId: string; workspaceId: string },
     id: string,
     text: string,
-    opts: { signal?: AbortSignal; onDelta?: (t: string) => void } = {},
+    opts: {
+      signal?: AbortSignal;
+      onDelta?: (t: string) => void;
+      skillKey?: string | null;
+    } = {},
   ) {
     const turn = await svc.startAssistantTurn(db, scope, id, text, opts);
     const deltas: string[] = [];
@@ -928,6 +932,168 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
       // And the system prompt now carries the accepted text as the description,
       // so the assistant is not still reasoning about the version it replaced.
       expect(captured.at(-1)!.messages[0]!.content).toContain("Return 429.");
+    });
+  });
+
+  describe("skills", () => {
+    let skillsSvc: typeof import("./skills-service");
+
+    beforeAll(async () => {
+      skillsSvc = await import("./skills-service");
+    });
+
+    beforeEach(async () => {
+      await sql`delete from workspace_assistant_skills where workspace_id = ${ws}`;
+    });
+
+    it("gives a workspace that has stored nothing the built-in skills", async () => {
+      const skills = await skillsSvc.listSkills(db, ws);
+      expect(skills.map((s) => s.key)).toContain("grill");
+      expect(skills.every((s) => s.builtIn)).toBe(true);
+    });
+
+    it("sends a running skill's instructions with the question", async () => {
+      await connectStub();
+      await ask(asOwner, specId, "", { skillKey: "grill" });
+
+      const system = captured[0]!.messages.find((m) => m.role === "system")!.content;
+      expect(system).toContain("Your current task: Grill me");
+      // And still everything it sent before: a skill adds to the context, it
+      // does not replace it.
+      expect(system).toContain("Throttle the public API");
+    });
+
+    it("records the skill's own name as the question", async () => {
+      await connectStub();
+      const outcome = await ask(asOwner, specId, "", { skillKey: "grill" });
+      // Not a label the caller supplied: the thread has to say what was actually
+      // run, and it is the server that knows.
+      expect(outcome.turns![0]!.content).toBe("Grill me");
+      expect(outcome.turns![0]!.skillKey).toBe("grill");
+    });
+
+    it("keeps the skill in force for the answers that follow", async () => {
+      await connectStub();
+      await ask(asOwner, specId, "", { skillKey: "grill" });
+      // Answering the first question is the moment an interrogation must not
+      // quietly turn back into an ordinary chat.
+      await ask(asOwner, specId, "Product managers, mostly.", {
+        skillKey: "grill",
+      });
+
+      const system = captured.at(-1)!.messages.find((m) => m.role === "system")!
+        .content;
+      expect(system).toContain("Your current task: Grill me");
+      const thread = await svc.listAssistantThread(db, asOwner, specId);
+      expect(svc.activeSkill(thread)).toBe("grill");
+    });
+
+    it("stops running one once a question is asked without it", async () => {
+      await connectStub();
+      await ask(asOwner, specId, "", { skillKey: "grill" });
+      await ask(asOwner, specId, "Unrelated question.");
+
+      const system = captured.at(-1)!.messages.find((m) => m.role === "system")!
+        .content;
+      expect(system).not.toContain("Your current task");
+      expect(svc.activeSkill(await svc.listAssistantThread(db, asOwner, specId)))
+        .toBeNull();
+    });
+
+    it("runs a workspace's own wording once it overrides a built-in", async () => {
+      await connectStub();
+      await skillsSvc.replaceSkills(db, ws, [
+        {
+          key: "grill",
+          name: "Interrogate me",
+          description: "",
+          instructions: "Only ever ask about pricing.",
+          enabled: true,
+          position: 0,
+        },
+      ]);
+      const outcome = await ask(asOwner, specId, "", { skillKey: "grill" });
+
+      const system = captured[0]!.messages.find((m) => m.role === "system")!.content;
+      expect(system).toContain("Only ever ask about pricing.");
+      expect(system).not.toContain("Ask the person questions.");
+      expect(outcome.turns![0]!.content).toBe("Interrogate me");
+    });
+
+    it("refuses a skill that is switched off", async () => {
+      await connectStub();
+      await skillsSvc.replaceSkills(db, ws, [
+        {
+          key: "grill",
+          name: "Grill me",
+          description: "",
+          instructions: "x",
+          enabled: false,
+          position: 0,
+        },
+      ]);
+      await expect(
+        ask(asOwner, specId, "", { skillKey: "grill" }),
+      ).rejects.toBeInstanceOf(svc.AssistantInputError);
+    });
+
+    it("refuses a skill this workspace does not have", async () => {
+      await connectStub();
+      // A key from somebody else's workspace must not resolve here, and a
+      // deleted one must not keep working.
+      await expect(
+        ask(asOwner, specId, "", { skillKey: "no-such-skill" }),
+      ).rejects.toBeInstanceOf(svc.AssistantInputError);
+    });
+
+    it("offers the panel only the skills that are switched on", async () => {
+      await connectStub();
+      await skillsSvc.replaceSkills(db, ws, [
+        {
+          key: "gaps",
+          name: "Find the gaps",
+          description: "",
+          instructions: "x",
+          enabled: false,
+          position: 0,
+        },
+      ]);
+      const data = await svc.getAssistantPanelData(db, asOwner, specId);
+      expect(data.skills.map((s) => s.key)).not.toContain("gaps");
+      expect(data.skills.map((s) => s.key)).toContain("grill");
+    });
+
+    it("tells the panel which skill the thread is already running", async () => {
+      await connectStub();
+      await ask(asOwner, specId, "", { skillKey: "grill" });
+      // So reopening the item picks the grilling back up rather than dropping
+      // the person into a blank composer whose replies are no longer part of it.
+      const data = await svc.getAssistantPanelData(db, asOwner, specId);
+      expect(data.activeSkillKey).toBe("grill");
+    });
+
+    it("keeps a thread readable after the skill it ran is deleted", async () => {
+      await connectStub();
+      await skillsSvc.replaceSkills(db, ws, [
+        {
+          key: "ours",
+          name: "Our way",
+          description: "",
+          instructions: "Do it our way.",
+          enabled: true,
+          position: 0,
+        },
+      ]);
+      await ask(asOwner, specId, "", { skillKey: "ours" });
+      await skillsSvc.replaceSkills(db, ws, []);
+
+      const thread = await svc.listAssistantThread(db, asOwner, specId);
+      expect(thread[0]!.content).toBe("Our way");
+      expect(thread[0]!.skillKey).toBe("ours");
+      // The panel resolves the key to nothing and simply stops showing it as
+      // running, rather than failing to load a conversation.
+      const data = await svc.getAssistantPanelData(db, asOwner, specId);
+      expect(data.skills.some((s) => s.key === "ours")).toBe(false);
     });
   });
 });

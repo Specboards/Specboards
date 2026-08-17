@@ -13,6 +13,8 @@ import {
 
 import { assembleItemContext, type ContextField } from "@/lib/ai/item-context";
 import { parseAnswer } from "@/lib/ai/proposals";
+import type { Skill } from "@/lib/ai/skills";
+import { findEnabledSkill, listSkills } from "@/lib/skills-service";
 import type { ModelErrorKind, ModelMessage, TokenUsage } from "@/lib/ai/provider";
 import { statusLabel } from "@/lib/feature-helpers";
 import { streamWithWorkspaceModel } from "@/lib/model-provider-service";
@@ -75,6 +77,13 @@ export interface AssistantMessageView {
   createdAt: string;
   /** Present only when this turn actually contains a proposal. */
   proposal: ProposalState | null;
+  /**
+   * The skill that was in force for this turn, or null for an ordinary typed
+   * question. Kept as the raw key rather than the resolved skill: a skill can be
+   * reworded or deleted, and an old turn has to keep saying what was actually
+   * run at the time rather than what that key means today.
+   */
+  skillKey: string | null;
 }
 
 export type AssistantSendOutcome =
@@ -114,6 +123,7 @@ function toView(row: {
   proposalResolvedByName?: string | null;
   proposalResolvedAt?: Date | null;
   proposalCommitSha?: string | null;
+  skillKey?: string | null;
 }): AssistantMessageView {
   // Whether there is a proposal is decided by reading the content, never by the
   // outcome column, which is null both for "not decided yet" and for "there was
@@ -128,6 +138,7 @@ function toView(row: {
     authorName: row.authorName,
     model: row.model,
     createdAt: row.createdAt.toISOString(),
+    skillKey: row.skillKey ?? null,
     proposal: hasProposal
       ? {
           outcome:
@@ -196,6 +207,7 @@ async function readThread(
       proposalResolvedAt: assistantMessages.proposalResolvedAt,
       proposalCommitSha: assistantMessages.proposalCommitSha,
       proposalResolvedByName: resolvers.name,
+      skillKey: assistantMessages.skillKey,
     })
     .from(assistantMessages)
     .leftJoin(users, eq(users.id, assistantMessages.authorId))
@@ -245,6 +257,21 @@ export interface AssistantPanelData {
    * shown and the text the accept is guarded against come from one place.
    */
   body: string;
+  /**
+   * The skills this workspace offers, in button order, already merged from the
+   * built-ins and the workspace's own. Disabled ones are filtered out here
+   * rather than in the panel, so "what a member can run" is decided once.
+   */
+  skills: Skill[];
+  /**
+   * The skill the thread is currently running, taken from the most recent
+   * question asked. Null when the last thing asked was an ordinary question.
+   *
+   * Sent so that reopening an item picks a grilling back up where it left off
+   * instead of dropping the person into a blank composer whose answers have
+   * quietly stopped being interrogated.
+   */
+  activeSkillKey: string | null;
 }
 
 /**
@@ -281,10 +308,11 @@ export async function getAssistantPanelData(
 ): Promise<AssistantPanelData> {
   const { feature, featureId } = await resolveAssistantItem(db, scope, specId);
   const canEdit = await canEditItem(scope, feature);
-  const [messages, assembled, modelConnected] = await Promise.all([
+  const [messages, assembled, modelConnected, skills] = await Promise.all([
     readThread(db, scope.workspaceId, featureId),
     buildContext(scope, feature, canEdit),
     isModelConnected(db, scope.workspaceId),
+    listSkills(db, scope.workspaceId),
   ]);
   return {
     messages,
@@ -293,7 +321,28 @@ export async function getAssistantPanelData(
     canEdit,
     canPropose: assembled.canPropose,
     body: feature.content,
+    skills: skills.filter((s) => s.enabled),
+    activeSkillKey: activeSkill(messages),
   };
+}
+
+/**
+ * Which skill a thread is running: whatever the most recent question was asked
+ * under.
+ *
+ * Sticky rather than per-turn, because an interrogation is a conversation. If a
+ * skill applied only to the turn that launched it, answering the assistant's
+ * first question would end the grilling, which is the one moment it must not
+ * end. It stays in force until the person runs a different skill or clears it,
+ * and the panel says which one is running so this is visible rather than
+ * mysterious.
+ */
+export function activeSkill(messages: readonly AssistantMessageView[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const m = messages[i]!;
+    if (m.role === "user") return m.skillKey;
+  }
+  return null;
 }
 
 /**
@@ -329,6 +378,7 @@ async function buildContext(
   scope: WorkspaceScope,
   feature: FeatureDetail,
   canEdit: boolean,
+  skill: Skill | null = null,
 ) {
   const store = await getStore();
   const [workflow, levels, goals] = await Promise.all([
@@ -339,25 +389,28 @@ async function buildContext(
 
   const ownIndex = levels.findIndex((l) => l.key === feature.level);
 
-  return assembleItemContext({
-    canEdit,
-    title: feature.title,
-    levelLabel: levels[ownIndex]?.label ?? feature.level,
-    statusLabel: statusLabel(feature.status, workflow),
-    body: feature.content,
-    parentTitle: feature.parentTitle,
-    // Levels are ordered top to leaf, so the parent's label is the entry above
-    // this one. Resolved from the list rather than assumed, because the set is
-    // configurable and a workspace may have renamed or removed a level.
-    parentLevelLabel:
-      ownIndex > 0 ? (levels[ownIndex - 1]?.label ?? null) : null,
-    children: feature.children.map((c) => ({
-      title: c.title,
-      statusLabel: statusLabel(c.status, workflow),
-    })),
-    goals: goals.map((g) => g.title),
-    tags: feature.tags,
-  });
+  return assembleItemContext(
+    {
+      canEdit,
+      title: feature.title,
+      levelLabel: levels[ownIndex]?.label ?? feature.level,
+      statusLabel: statusLabel(feature.status, workflow),
+      body: feature.content,
+      parentTitle: feature.parentTitle,
+      // Levels are ordered top to leaf, so the parent's label is the entry
+      // above this one. Resolved from the list rather than assumed, because the
+      // set is configurable and a workspace may have renamed or removed a level.
+      parentLevelLabel:
+        ownIndex > 0 ? (levels[ownIndex - 1]?.label ?? null) : null,
+      children: feature.children.map((c) => ({
+        title: c.title,
+        statusLabel: statusLabel(c.status, workflow),
+      })),
+      goals: goals.map((g) => g.title),
+      tags: feature.tags,
+    },
+    skill,
+  );
 }
 
 /**
@@ -427,9 +480,25 @@ export async function startAssistantTurn(
   scope: WorkspaceScope,
   specId: string,
   text: string,
-  opts: { signal?: AbortSignal } = {},
+  opts: { signal?: AbortSignal; skillKey?: string | null } = {},
 ): Promise<AsyncGenerator<AssistantEvent>> {
-  const question = text.trim();
+  // Resolved before anything is validated, because a skill launched with no
+  // typed message supplies the message: pressing "Grill me" is a question, and
+  // the turn it writes has to read as one in the thread.
+  const skill = opts.skillKey
+    ? await findEnabledSkill(db, scope.workspaceId, opts.skillKey)
+    : null;
+  if (opts.skillKey && !skill) {
+    throw new AssistantInputError(
+      "That skill is no longer available in this workspace.",
+    );
+  }
+
+  const typed = text.trim();
+  // The skill's own name, never a label the client chose: the recorded turn is
+  // what the thread and every later replay say happened, so it is written from
+  // what the server resolved rather than from what it was told.
+  const question = typed || skill?.name || "";
   if (!question) throw new AssistantInputError("A message is required.");
   if (question.length > MAX_TURN_CHARS) {
     throw new AssistantInputError(
@@ -439,7 +508,7 @@ export async function startAssistantTurn(
 
   const { feature, featureId } = await resolveAssistantItem(db, scope, specId);
   const canEdit = await canEditItem(scope, feature);
-  const { systemPrompt } = await buildContext(scope, feature, canEdit);
+  const { systemPrompt } = await buildContext(scope, feature, canEdit, skill);
   const history = await readThread(db, scope.workspaceId, featureId);
 
   const messages: ModelMessage[] = [
@@ -507,6 +576,7 @@ export async function startAssistantTurn(
         // makes accepting it safe is being guarded against the document the
         // model was actually shown.
         baseSha: feature.blobSha,
+        skillKey: skill?.key ?? null,
       }),
     };
   }
@@ -521,7 +591,7 @@ async function persistTurns(
   answer: string,
   model: string | null,
   usage: TokenUsage,
-  opts: { baseSha: string | null },
+  opts: { baseSha: string | null; skillKey: string | null },
 ): Promise<AssistantMessageView[]> {
   const now = new Date();
   // Recorded only when the answer actually carries a proposal, so a sha on a
@@ -538,6 +608,10 @@ async function persistTurns(
         role: "user",
         content: question,
         authorId: scope.userId,
+        // Recorded on the question rather than the answer: the skill is what was
+        // asked for, and `activeSkill` reads the last question to decide what is
+        // still in force.
+        skillKey: opts.skillKey,
         createdAt: now,
       },
       {
@@ -581,6 +655,7 @@ async function persistTurns(
       authorName,
       model: row.model,
       createdAt: row.createdAt,
+      skillKey: row.skillKey,
     }),
   );
 }

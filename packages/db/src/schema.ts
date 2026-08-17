@@ -2395,6 +2395,14 @@ export const assistantMessages = pgTable(
      * card, which has no blob.
      */
     proposalBaseSha: text("proposal_base_sha"),
+    /**
+     * The skill that was in force for this turn (a
+     * `workspace_assistant_skills.key` or a built-in key), or null for an
+     * ordinary typed question. Recorded rather than recomputed: skills get
+     * reworded, and a thread that was a grilling has to still read as one
+     * afterwards. A key that no longer resolves is treated as null.
+     */
+    skillKey: text("skill_key"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -2405,6 +2413,50 @@ export const assistantMessages = pgTable(
       t.featureId,
       t.createdAt,
     ),
+  ],
+);
+
+/**
+ * A skill: standing instructions a team gives their assistant, shown as a button
+ * on every item ("Grill me", "Find the gaps").
+ *
+ * Holds only what a workspace has *changed*. The starting set lives in code
+ * (`apps/web/src/lib/ai/skills.ts`), so a fresh install has it with no seeding;
+ * a row whose `key` matches a built-in overrides that built-in wholesale, and
+ * any other key is a skill of the team's own. A workspace with no rows keeps
+ * tracking the code as those prompts improve.
+ *
+ * Read by every member (they see the buttons), written by org admins only: a
+ * skill is attached to every future question anyone asks and to every edit
+ * proposed off the back of one.
+ */
+export const workspaceAssistantSkills = pgTable(
+  "workspace_assistant_skills",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    /** Stable identifier; what makes an override an override. Never re-derived
+     * from the name, which a rename would otherwise silently orphan. */
+    key: text("key").notNull(),
+    name: text("name").notNull(),
+    /** One line under the button. Never sent to the model. */
+    description: text("description").notNull().default(""),
+    instructions: text("instructions").notNull(),
+    /** False hides it from the panel without losing the wording. */
+    enabled: boolean("enabled").notNull().default(true),
+    /** Order among the team's own skills; built-ins are always first. */
+    position: integer("position").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("workspace_assistant_skills_key_idx").on(t.workspaceId, t.key),
   ],
 );
 
