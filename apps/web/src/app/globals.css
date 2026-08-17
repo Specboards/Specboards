@@ -222,3 +222,30 @@
   padding-left: 0.8em;
   color: var(--muted-foreground);
 }
+
+/* The chevron on a native <select>.
+ *
+ * `Select` keeps `appearance-none` so it matches the Input it sits beside,
+ * which also strips the platform's own arrow. Without a replacement the two
+ * become indistinguishable: same border, same height, no sign that one of them
+ * opens. That is a real cost, and it was found the ordinary way, by someone
+ * looking at a model picker and seeing a text field.
+ *
+ * Written here rather than as a Tailwind arbitrary value because a data URI is
+ * full of characters (#, quotes, spaces) that arbitrary-value syntax needs
+ * escaped, and an unreadable class string is a poor trade for one utility.
+ *
+ * Two rules rather than `currentColor`: `background-image` cannot take a CSS
+ * variable inside the SVG, and masking the element would take its background
+ * and border with it. So the stroke is `--muted-foreground` written out for
+ * each theme, matching the placeholder text it sits next to.
+ */
+.select-chevron {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%2359636e' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.5rem center;
+  background-size: 1rem 1rem;
+}
+.dark .select-chevron {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%239198a1' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E");
+}
