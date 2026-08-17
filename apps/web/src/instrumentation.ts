@@ -11,7 +11,11 @@
  *    otherwise (fail closed at deploy time; see lib/rls-guard.ts).
  * 3. Webhook egress policy: refuse a hosted deployment that has the SSRF
  *    escape hatch set (see lib/webhooks/ssrf.ts).
- * 4. Start the in-process webhook outbox drainer. No-op in local file mode,
+ * 4. Model egress policy: the same refusal for the model endpoint's own escape
+ *    hatch (see lib/ai/egress.ts). A separate flag and a separate guard, so
+ *    allowing a self-hosted model cannot silently re-point webhooks at the
+ *    internal network as well.
+ * 5. Start the in-process webhook outbox drainer. No-op in local file mode,
  *    where `startDrainer` finds no database.
  */
 export async function register(): Promise<void> {
@@ -28,6 +32,9 @@ export async function register(): Promise<void> {
 
     const { assertWebhookEgressPolicy } = await import("@/lib/webhooks/ssrf");
     assertWebhookEgressPolicy();
+
+    const { assertModelEgressPolicy } = await import("@/lib/ai/egress");
+    assertModelEgressPolicy();
 
     const { startDrainer } = await import("@/lib/webhooks/drainer");
     startDrainer();

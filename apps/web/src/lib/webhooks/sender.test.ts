@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import { fetch as undiciFetch } from "undici";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { pinnedAgent } from "./sender";
+import { pinnedAgent } from "@/lib/egress";
 
 /**
  * Proves the DNS-rebinding defense: a request whose URL hostname would NOT
@@ -32,7 +32,7 @@ describe("pinnedAgent", () => {
 
     // This hostname is not resolvable (`.invalid` is reserved to never exist),
     // so any success can only come from the pinned 127.0.0.1 lookup.
-    const agent = pinnedAgent([{ address: "127.0.0.1", family: 4 }]);
+    const agent = pinnedAgent([{ address: "127.0.0.1", family: 4 }], 5_000);
     try {
       const res = await undiciFetch(`http://pinned-host.invalid:${port}/`, {
         dispatcher: agent,

@@ -4,11 +4,18 @@ import { useState, type ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
-type TabKey = "mcp" | "agents" | "api-keys" | "webhooks" | "repositories";
+type TabKey =
+  | "mcp"
+  | "agents"
+  | "model"
+  | "api-keys"
+  | "webhooks"
+  | "repositories";
 
 const TAB_KEYS: readonly TabKey[] = [
   "mcp",
   "agents",
+  "model",
   "api-keys",
   "webhooks",
   "repositories",
@@ -17,6 +24,7 @@ const TAB_KEYS: readonly TabKey[] = [
 const LABELS: Record<TabKey, string> = {
   mcp: "MCP",
   agents: "Agents",
+  model: "Model",
   "api-keys": "API keys",
   webhooks: "Webhooks",
   repositories: "Repositories",
@@ -32,6 +40,7 @@ const LABELS: Record<TabKey, string> = {
 export function IntegrationsTabs({
   mcp,
   agents,
+  model,
   apiKeys,
   webhooks,
   repositories,
@@ -39,6 +48,7 @@ export function IntegrationsTabs({
 }: {
   mcp: ReactNode;
   agents: ReactNode;
+  model: ReactNode;
   apiKeys: ReactNode;
   webhooks: ReactNode;
   repositories: ReactNode;
@@ -47,6 +57,7 @@ export function IntegrationsTabs({
   const content: Record<TabKey, ReactNode> = {
     mcp,
     agents,
+    model,
     "api-keys": apiKeys,
     webhooks,
     repositories,

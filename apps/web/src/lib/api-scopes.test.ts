@@ -138,6 +138,11 @@ describe("the resource vocabulary", () => {
       "api-keys", // a key must not mint or revoke keys
       "github", // OAuth / App install flows, driven by a browser redirect
       "workspaces", // first-run org creation from /setup
+      // Same reasoning as api-keys, one step further out: this decides where
+      // the workspace's prompts get sent. A scoped key that could rewrite it
+      // could repoint inference at an endpoint of its choosing and read
+      // everything the assistant is asked, so it is never delegable.
+      "model-provider",
     ]);
 
     const missing = entries
