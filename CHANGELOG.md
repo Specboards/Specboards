@@ -12,10 +12,26 @@ for how and when the version is bumped.
 > notes in Specboards, not here. This file resumes at 0.25.5; backfilling the
 > gap is a deliberate decision that has not been taken yet.
 
-## [Unreleased]
+## [0.26.8] - 2026-08-18
 
 ### Added
 
+- **The assistant, on a release.** Releases carry the same assistant panel an
+  item does: a conversation that stays with the release, and drafts of the
+  customer-facing notes that arrive as proposals you review as a diff and accept
+  or reject. Nothing it writes is saved until somebody accepts it, and accepting
+  goes through the same write the notes editor uses. It is given the work
+  scheduled into the release, including each item's description, because from
+  titles alone a model has to guess what a change meant for a customer and
+  guessing is how an invented release note gets written. What is sent is listed
+  in the panel before anyone spends a token: assignees and the internal planning
+  notes are not part of it. A release too large to send whole is shortened
+  deliberately rather than failing, paying for every item's title first and
+  sharing what is left evenly between the descriptions, and every cut is
+  reported rather than left to be noticed. Two release skills ship, "Draft the
+  notes" and "Tighten these notes"; skills now belong to a surface, so the
+  buttons on an item and the buttons on a release are separate sets a team
+  arranges independently.
 - **MCP tools for the Plan doc areas.** Strategy, Research and Architecture are
   now managed by agents, not just read by people: `list_docs`, `read_doc`,
   `create_doc`, `update_doc` and `delete_doc`. One set of tools covers every way
