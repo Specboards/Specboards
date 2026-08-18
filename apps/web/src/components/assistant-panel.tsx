@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
 
@@ -19,6 +19,9 @@ import type { Skill } from "@/lib/ai/skills";
 import {
   AuthRequiredError,
   askAssistant,
+  askReleaseAssistant,
+  getReleaseAssistantThread,
+  resolveReleaseProposal,
   getAssistantThread,
   resolveProposal,
   SpecConflictError,
@@ -438,14 +441,27 @@ function AssistantTurn({
  * accepts it here. The panel never applies anything itself: accepting posts to
  * the item's own write route, which is the same one a hand-made edit takes.
  */
+/**
+ * What a panel is about.
+ *
+ * A discriminated union rather than two optional ids, so a caller cannot render
+ * a panel about both or about neither. The panel itself is almost entirely
+ * subject-agnostic: streaming, history, skills, the disclosure and the proposal
+ * review are the same job whatever is being discussed, which is why this is a
+ * prop and not a second component.
+ */
+export type AssistantSubject =
+  | { kind: "item"; specId: string }
+  | { kind: "release"; releaseId: string };
+
 export function AssistantPanel({
-  specId,
+  subject,
   onApplied,
 }: {
-  specId: string;
+  subject: AssistantSubject;
   /**
-   * Called with the item's new description after a proposal is accepted and
-   * has actually landed.
+   * Called with the subject's new body after a proposal is accepted and has
+   * actually landed.
    *
    * Not optional politeness: the description editor above this panel owns its
    * content once mounted and never reseeds, so after an accept it is holding
@@ -458,6 +474,41 @@ export function AssistantPanel({
 }) {
   const orgHref = useOrgPath();
   const router = useRouter();
+
+  // The three calls that differ by subject, resolved in one place. Everything
+  // below this line reads the same for an item and for a release.
+  const isItem = subject.kind === "item";
+  const subjectId = isItem ? subject.specId : subject.releaseId;
+  /** What this panel calls the thing it is about, in copy shown to a person. */
+  const noun = isItem ? "item" : "release";
+
+  // Closed over two primitives rather than over `subject`, so each callback is
+  // stable for as long as the subject is. Closing over the prop object would
+  // rebuild them every render, and the load effect below would then either
+  // refetch forever or need its dependency list lied about.
+  const loadThread = useCallback(
+    () =>
+      isItem ? getAssistantThread(subjectId) : getReleaseAssistantThread(subjectId),
+    [isItem, subjectId],
+  );
+  const sendTurn = useCallback(
+    (message: string, opts: Parameters<typeof askAssistant>[2]) =>
+      isItem
+        ? askAssistant(subjectId, message, opts)
+        : askReleaseAssistant(subjectId, message, opts),
+    [isItem, subjectId],
+  );
+  const sendResolution = useCallback(
+    (
+      messageId: string,
+      action: "accept" | "reject",
+      opts: { body?: string },
+    ) =>
+      isItem
+        ? resolveProposal(subjectId, messageId, action, opts)
+        : resolveReleaseProposal(subjectId, messageId, action, opts),
+    [isItem, subjectId],
+  );
   const [messages, setMessages] = useState<AssistantMessageView[] | null>(null);
   const [context, setContext] = useState<ContextField[]>([]);
   /**
@@ -517,7 +568,7 @@ export function AssistantPanel({
     let active = true;
     setMessages(null);
     setLoadError(null);
-    getAssistantThread(specId)
+    loadThread()
       .then((res) => {
         if (!active) return;
         setMessages(res.messages);
@@ -539,7 +590,7 @@ export function AssistantPanel({
     return () => {
       active = false;
     };
-  }, [specId]);
+  }, [loadThread]);
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -581,7 +632,7 @@ export function AssistantPanel({
     setStreaming("");
 
     try {
-      const outcome = await askAssistant(specId, question, {
+      const outcome = await sendTurn(question, {
         signal: controller.signal,
         onDelta: (text) => setStreaming((prev) => (prev ?? "") + text),
         skillKey,
@@ -638,7 +689,7 @@ export function AssistantPanel({
     setResolving(messageId);
     setProposalError(null);
     try {
-      const outcome = await resolveProposal(specId, messageId, action, {
+      const outcome = await sendResolution(messageId, action, {
         ...(body !== undefined ? { body } : {}),
       });
       setMessages((prev) =>
@@ -672,7 +723,7 @@ export function AssistantPanel({
       toast.success(
         outcome.mergedWith
           ? "Applied, and merged with a change made in the meantime."
-          : "Applied to the item.",
+          : `Applied to the ${noun}.`,
       );
       // The description elsewhere on the page is server-rendered, so it keeps
       // showing the old text until this runs.
@@ -865,7 +916,7 @@ export function AssistantPanel({
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             placeholder={
-              running ? `Answer, or ask anything…` : "Ask about this item…"
+              running ? `Answer, or ask anything…` : `Ask about this ${noun}…`
             }
             rows={3}
             disabled={pending}
@@ -938,7 +989,7 @@ export function AssistantPanel({
             aria-expanded={showContext}
             className="text-muted-foreground underline-offset-2 hover:underline"
           >
-            {showContext ? "Hide" : "Show"} what is sent about this item
+            {showContext ? "Hide" : "Show"} what is sent about this {noun}
           </button>
           {showContext ? (
             <div className="mt-2 space-y-2 rounded-md border bg-muted/40 p-3">

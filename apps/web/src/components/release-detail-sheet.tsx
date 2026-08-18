@@ -11,6 +11,8 @@ import {
   CustomFieldInput,
   collectCustomFields,
 } from "@/components/item-properties";
+import { AssistantPanel } from "@/components/assistant-panel";
+import { DetailSection } from "@/components/detail-section";
 import { StatusDot } from "@/components/status-dot";
 import { Badge } from "@/components/ui/badge";
 import { Box, BoxHeader } from "@/components/ui/box";
@@ -333,6 +335,22 @@ export function ReleaseDetailSheet({
               </div>
 
               <ReleaseNotesSection release={current} canEdit onCommit={commit} />
+
+              {/* The assistant, under the notes it writes. Collapsed by
+                  default so it sits beside them rather than competing with
+                  them, and because a panel that fetches on open costs nothing
+                  to the majority of visits that are not asking anything. */}
+              <DetailSection id="release-assistant" title="Assistant" defaultCollapsed>
+                <AssistantPanel
+                  subject={{ kind: "release", releaseId: current.id }}
+                  onApplied={() => {
+                    // The sheet holds its release in local state, so accepted
+                    // notes have to be re-read or the rendering above this
+                    // panel keeps showing the text they replaced.
+                    router.refresh();
+                  }}
+                />
+              </DetailSection>
 
               <ReleaseCustomFields
                 release={current}
@@ -710,11 +728,7 @@ function ReleaseNotesSection({
           >
             Save
           </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setDraftKind(null)}
-          >
+          <Button size="sm" variant="outline" onClick={() => setDraftKind(null)}>
             Cancel
           </Button>
           {mode !== "none" ? (

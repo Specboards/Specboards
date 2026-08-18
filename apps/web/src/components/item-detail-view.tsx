@@ -207,7 +207,7 @@ export function ItemDetailView({
           nothing to the majority of visits that are not asking anything. */}
       <DetailSection id="assistant" title="Assistant" defaultCollapsed>
         <AssistantPanel
-          specId={feature.specId}
+          subject={{ kind: "item", specId: feature.specId }}
           onApplied={(body) => {
             setApplied((prev) => ({ body, rev: (prev?.rev ?? 0) + 1 }));
             // The flyout holds its item in local state, so it has to re-read

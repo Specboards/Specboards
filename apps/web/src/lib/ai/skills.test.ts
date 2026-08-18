@@ -19,6 +19,7 @@ import {
 function row(over: Partial<SkillRow> = {}): SkillRow {
   return {
     key: "ours",
+    surface: "item" as const,
     name: "Our way",
     description: "",
     instructions: "Do it our way.",
@@ -31,6 +32,7 @@ function row(over: Partial<SkillRow> = {}): SkillRow {
 function skill(over: Partial<Skill> = {}): Skill {
   return {
     key: "ours",
+    surface: "item" as const,
     name: "Our way",
     description: "",
     instructions: "Do it our way.",
@@ -48,6 +50,7 @@ function positionOnly(key: string, position: number): SkillRow {
     name: null,
     description: null,
     instructions: null,
+    surface: "item",
     enabled: true,
     position,
   };
@@ -142,7 +145,15 @@ describe("the order a workspace arranged", () => {
       positionOnly("gaps", 2),
       positionOnly("draft", 3),
     ]);
-    expect(skills.map((s) => s.key)).toEqual(["ours", "grill", "gaps", "draft"]);
+    expect(skills.map((s) => s.key)).toEqual([
+      "ours",
+      "grill",
+      "gaps",
+      "draft",
+      // Unrowed built-ins keep code order on the end; see the test below.
+      "release-notes",
+      "tighten",
+    ]);
   });
 
   it("puts a newly shipped built-in last rather than into the middle", () => {
@@ -150,7 +161,13 @@ describe("the order a workspace arranged", () => {
     // appearing at the end, not silently shifting the ones people reach for by
     // position.
     const arranged = mergeSkills([positionOnly("draft", 0), positionOnly("grill", 1)]);
-    expect(arranged.map((s) => s.key)).toEqual(["draft", "grill", "gaps"]);
+    expect(arranged.map((s) => s.key)).toEqual([
+      "draft",
+      "grill",
+      "gaps",
+      "release-notes",
+      "tighten",
+    ]);
   });
 
   it("moves a skill up and down without disturbing the rest", () => {
@@ -346,6 +363,7 @@ describe("what a running skill tells the model", () => {
   it("names the task and then gives the instructions", () => {
     const task = skillTask({
       key: "k",
+      surface: "item" as const,
       name: "Grill me",
       description: "ignored",
       instructions: "Ask hard questions.",
@@ -360,6 +378,7 @@ describe("what a running skill tells the model", () => {
     expect(
       skillTask({
         key: "k",
+        surface: "item" as const,
         name: "n",
         description: "A one-line summary for humans",
         instructions: "i",

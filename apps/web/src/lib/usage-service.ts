@@ -44,12 +44,17 @@ import {
  * 0074): adding a call site should not need a migration, because the friction
  * of one is how a new feature ends up filed under an existing label.
  */
-export type UsageFeature = "assistant_turn" | "breakdown" | "connection_test";
+export type UsageFeature =
+  | "assistant_turn"
+  | "breakdown"
+  | "release_notes_draft"
+  | "connection_test";
 
 /** Human wording for the usage screen. Unknown keys fall back to the key. */
 const FEATURE_LABELS: Record<string, string> = {
   assistant_turn: "Assistant questions",
   breakdown: "Breakdown proposals",
+  release_notes_draft: "Release notes drafts",
   connection_test: "Connection tests",
 };
 

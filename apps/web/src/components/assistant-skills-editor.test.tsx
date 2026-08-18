@@ -27,6 +27,7 @@ function own(key: string, name: string): Skill {
     name,
     description: "",
     instructions: "Do a thing.",
+    surface: "item",
     builtIn: false,
     customised: false,
     enabled: true,
@@ -45,7 +46,7 @@ describe("the skills editor", () => {
   it("disables the moves that would go off either end", () => {
     const markup = render(mergeSkills([]));
     const first = markup.indexOf("Move Grill me up");
-    const last = markup.indexOf("Move Draft a definition down");
+    const last = markup.indexOf("Move Tighten these notes down");
     // The disabled attribute sits just before the label in the same tag.
     expect(markup.slice(0, first)).toMatch(/disabled=""[^<]*$/);
     expect(markup.slice(0, last)).toMatch(/disabled=""[^<]*$/);
@@ -56,8 +57,9 @@ describe("the skills editor", () => {
   });
 
   it("keeps the A to Z control away until there is something to sort", () => {
-    // Sorting three buttons is not organising anything, and a control nobody
-    // needs still has to be read and dismissed by everyone who opens the page.
+    // Sorting the buttons we ship is not organising anything, and a control
+    // nobody needs still has to be read and dismissed by everyone who opens the
+    // page. The built-ins alone must never be enough to summon it.
     expect(render(mergeSkills([]))).not.toContain("Sort A to Z");
   });
 

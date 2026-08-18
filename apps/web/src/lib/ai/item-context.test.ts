@@ -206,6 +206,7 @@ describe("shortening long content", () => {
 describe("a skill in force", () => {
   const skill = {
     key: "grill",
+    surface: "item" as const,
     name: "Grill me",
     description: "Shown on a button; not for the model.",
     instructions: "Ask the awkward question first.",
@@ -257,6 +258,7 @@ describe("a skill that asks for more than the reader may do", () => {
   // and "you cannot propose an edit" with nothing to break the tie.
   const drafting = {
     key: "draft",
+    surface: "item" as const,
     name: "Draft a definition",
     description: "",
     instructions: "Write the description in full and propose it as an edit.",
