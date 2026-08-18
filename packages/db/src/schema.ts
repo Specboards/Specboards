@@ -59,6 +59,15 @@ export const invitationStatus = pgEnum("invitation_status", [
   "expired",
 ]);
 
+/** Where a pre-v1 access request sits in the review queue. `pending` until a
+ * team member decides it in the admin portal: `approved` (the requester was
+ * emailed the sign-up code) or `declined` (no email is sent). */
+export const accessRequestStatus = pgEnum("access_request_status", [
+  "pending",
+  "approved",
+  "declined",
+]);
+
 /** Tenant root. SaaS has many; a self-host install typically has one. */
 export const workspaces = pgTable("workspaces", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -472,6 +481,60 @@ export const operationLimits = pgTable("operation_limits", {
     .notNull()
     .defaultNow(),
 });
+
+/**
+ * A pre-v1 "Request access" submission from the marketing site, and the team's
+ * decision on it. The public `POST /api/access-request` route writes the row
+ * (and still sends the notification / confirmation emails); the internal admin
+ * portal (a separate app, over the org's private network) lists the queue and
+ * marks a row approved or declined, emailing an approved requester the sign-up
+ * code that `access-gate.ts` checks, which is what actually opens the door.
+ * This app has no admin API for that: the portal's Postgres role is granted
+ * UPDATE on this one table, which is why nothing here writes the decision
+ * columns.
+ *
+ * Deployment-global, no tenant dimension (the requester has no workspace yet),
+ * so no `workspaceId`. Unlike `githubApp` this table is RLS-enabled with NO
+ * policies: it holds contact details for people who are not customers, and
+ * deny-all means the tenant-scoped `specboards_app` connection cannot read it
+ * even by accident. This app's writes run on the owner connection (`getDb`).
+ *
+ * At most one `pending` row per email address (partial unique index): a repeat
+ * submission refreshes the open request instead of queueing a duplicate.
+ */
+export const accessRequests = pgTable(
+  "access_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    /** Stored lowercased, like `invitations.email`. */
+    email: text("email").notNull(),
+    company: text("company").notNull(),
+    /** Free text from the form's range picker ("2-10"), blank if not given. */
+    teamSize: text("team_size").notNull().default(""),
+    useCase: text("use_case").notNull(),
+    status: accessRequestStatus("status").notNull().default("pending"),
+    /** Email of the admin who decided it; null while pending. */
+    decidedBy: text("decided_by"),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    /** Set when the approval email actually left Postmark, so a send failure
+     * is visible in the queue rather than silently assumed. */
+    codeSentAt: timestamp("code_sent_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("access_requests_status_idx").on(t.status),
+    index("access_requests_created_at_idx").on(t.createdAt),
+    uniqueIndex("access_requests_pending_email_uq")
+      .on(t.email)
+      .where(sql`${t.status} = 'pending'`),
+  ],
+);
 
 /**
  * GitHub webhook deliveries already processed, keyed by the `x-github-delivery`
