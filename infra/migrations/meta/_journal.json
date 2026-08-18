@@ -512,6 +512,13 @@
       "when": 1787420000000,
       "tag": "0072_access_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1787430000000,
+      "tag": "0073_access_requests_revoke_tenant_grants",
+      "breakpoints": true
     }
   ]
 }
