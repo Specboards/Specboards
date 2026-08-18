@@ -74,30 +74,49 @@ Next.js web app  ── apps/web           MCP server ── apps/mcp
   schema (`parseRepoConfig`), and the configurable work-tracking **levels** model
   (`resolveLevels`/`leafLevel`/`parentLevelKey`/`resolveLevelUpdate`, covering depth, the
   spec-backed leaf, and parent/child level rules). Unit-tested.
-- **`packages/db`**: Drizzle schema (`workspaces`, `members`, `repositories`,
-  `workspace_levels` (per-workspace hierarchy config, default Initiative → Epic →
-  Feature → Work Item, where only the leaf is spec-backed; also carries the
-  per-level available `card_fields` and a `detail_template_id` default),
-  `features` (with a self-referential `parent_id` for the work hierarchy,
-  a `level` column composite-FK'd to `workspace_levels`, a nullable `repo_id` for
-  DB-native items above the leaf (also `ON DELETE set null`, so disconnecting a
-  repo detaches its imported items instead of deleting them), a fractional
-  `rank` for manual board ordering, a nullable `release_id` (`ON DELETE set
-  null`), a `custom_fields` jsonb map of admin-defined property values, and a
-  nullable `details` Markdown body for DB-native items),
-  `workspace_properties` (admin-defined custom card properties: key/label/type/
-  options and the levels each applies to), `releases` (ship vehicles with a
-  status + target date), `detail_templates` (reusable Markdown skeletons that
-  seed a new card's details),
-  `feature_links` (typed dependencies/relations between features),
-  `feature_github_links` (links a feature to a GitHub PR/issue/branch with cached
-  state), `spec_index`, `comments`, `activity_log`, `saved_views` (per-user backlog
-  filters), `board_preferences` (per-user board card-field choices), the
-  deployment-global `github_app` credential row, `access_requests` (pre-release
-  "Request access" intake and its review state; RLS with no policies, so the
-  tenant connection cannot read it), plus the Better Auth
-  `users`/`sessions`/`accounts`/`verifications` tables) + Postgres client. RLS
-  policies in `infra/migrations`.
+- **`packages/db`**: Drizzle schema + Postgres client. RLS policies live in
+  `infra/migrations`, which are hand-written rather than generated, so the SQL
+  is authoritative wherever Drizzle cannot express a constraint.
+
+  The schema is described by area rather than enumerated here. An exhaustive
+  table list in this file went stale within two releases and was misleading in
+  the way that matters most, by reading as complete; `packages/db/src/schema.ts`
+  is the list, and each table carries its own rationale.
+
+  - **The work model.** `workspaces` and `members` are the tenant root.
+    `workspace_levels` holds the per-workspace hierarchy (default Initiative →
+    Epic → Feature → Work Item, only the leaf spec-backed) plus each level's
+    available card fields and default detail template. Every item at every level
+    is a `features` row: self-referential `parent_id` for the hierarchy, `level`
+    composite-FK'd to `workspace_levels`, a nullable `repo_id` (`ON DELETE set
+    null`, so disconnecting a repo detaches its imported items rather than
+    deleting them), a fractional `rank` for manual ordering, a nullable
+    `release_id`, a `custom_fields` jsonb map, and a `details` Markdown body for
+    DB-native items. Around it: `feature_links` (typed dependencies),
+    `feature_github_links` (PR/issue/branch with cached state), `spec_index`
+    (content cache + git path/sha), `comments`, `item_events`, `activity_log`.
+  - **Planning.** `releases` and `cycles` (ship vehicles and sprints, scheduled
+    independently), `goals` / `key_results` / `goal_links` (what work ladders up
+    to), `ideas` and their settings/statuses/votes (intake), `doc_spaces` /
+    `doc_pages` (Strategy, Research, Architecture, backed by Specboards or by a
+    connected repo).
+  - **Configuration.** `workspace_properties`, `workspace_statuses`,
+    `workspace_stage_gates`, `detail_templates`, `product_settings`,
+    `products` / `product_groups` / `product_members` / `product_repositories`,
+    `saved_views` and `board_preferences` (both per user).
+  - **Integrations and inference.** `repositories` and the deployment-global
+    `github_app` credential row, plus the GitHub install/token/webhook tables;
+    `webhook_endpoints` and `webhook_deliveries` with `outbox_events` behind
+    them; `mcp_workspace_bindings` and the OAuth tables for agent connections;
+    `model_providers` and `model_provider_credentials` (split so a member can
+    resolve the endpoint while the secret stays owner-only),
+    `assistant_messages`, `workspace_assistant_skills`, and
+    `model_usage_events` / `workspace_usage_limits` for spend accounting.
+  - **Platform.** Better Auth's `users` / `sessions` / `accounts` /
+    `verifications`, `api_keys`, `invitations`, `notifications`,
+    `rate_limits` / `operation_limits`, `spec_write_audit`, and
+    `access_requests` (pre-release intake; RLS on with no policies and no grant,
+    so the tenant connection cannot read it).
 - **`packages/git`**: GitHub App client + reconciler (`reconcileSpecs`), webhook
   verification/affected-spec resolution, installation-repo listing (via `octokit`).
 - **`packages/ui`**: shared design tokens / components.
@@ -112,9 +131,36 @@ Next.js web app  ── apps/web           MCP server ── apps/mcp
   one nav entry, with a
   per-hierarchy-level switcher), Roadmap (grouped by release), Feature detail
   (spec content for leaf items; an editable rich-text Details body for DB-native
-  items), and `/settings/*` (Profile, Repositories, Company, Hierarchy levels
-  editor, Cards: card fields + custom properties + detail templates, …).
-- **`apps/mcp`**: MCP server exposing status- and dependency-aware specs to agents.
+  items), and `/settings/*` (Profile, Company, Products, Hierarchy, Work cards,
+  Ideas, Branding, Assistant, Repositories, Webhooks, API keys, and Integrations,
+  which is where the MCP endpoint, agent identities and the model connection
+  live).
+- **`apps/mcp`**: standalone stdio MCP server for self-host and offline agent
+  access, exposing a read/update subset over a direct database connection. Note
+  that it is a **separate surface** from the hosted `/api/mcp` endpoint in
+  `apps/web`, with its own smaller tool vocabulary (`list_features`, `read_spec`,
+  `update_status`, `get_relations`) rather than the hosted endpoint's
+  `list_items` / `read_item` / `update_item`. The two are not kept in step, and
+  an agent written against one will not work unchanged against the other.
+- **`apps/cli`**: the `specboards` CLI over `/api/v1` with API-key auth. Licensed
+  Apache-2.0 rather than AGPL so it can be embedded and scripted against freely.
+
+### Assistant and inference
+
+The one interface the product uses to reach a model is `ModelClient`
+(`apps/web/src/lib/ai/provider.ts`), with a single OpenAI-compatible adapter
+behind it. Every call goes through `lib/model-provider-service.ts`, which
+resolves the workspace's connection, decrypts its credential, applies the egress
+policy, checks the spend cap, and writes the usage ledger. That is deliberately
+the only entry point: it is where "whose money is this" is enforced as a
+required argument, so no call site can spend a customer's budget anonymously.
+
+The assistant itself has one hard constraint, enforced structurally rather than
+by convention: **there is no code path from a model's output to a write.** An
+answer may contain a proposed edit, which is inert text inside a stored message
+until a person opens the item, reads the diff and accepts it. Accepting then
+takes the ordinary item write path, with the same product-write permission, the
+same repo write mode, the same conflict guard and the same history.
 
 ## Key flows
 
@@ -201,21 +247,23 @@ deployment shape.
 
 ## Status
 
-**Active build.** Working: web UI (Backlog · Board · Roadmap · Feature detail,
-base shadcn styling), spec parser + status workflow (`packages/core`), Drizzle
-schema/migrations/seed (`packages/db`), DB-backed MCP tools (`apps/mcp`), local
-file mode; full auth (Better Auth: email/password sign-up/in, email
-verification, password reset, account/company settings, optional consumer-domain
-blocking, session-gated writes); GitHub App sync (`packages/git`): one-click
-in-app App setup (manifest flow), repo install + connect picker, push reconcile
-into `features`/`spec_index`, stable-id injection. Interactive board:
-drag-and-drop status change + manual reorder, click-to-edit drawer, per-user
-customizable card fields. Card configuration in Settings → Cards: admin-defined
-custom properties (Notion-style, per-level), releases (grouped on the Roadmap),
-and reusable detail templates assignable per level. New cards capture a
-rich-text Details body (stored as Markdown), editable on the item page. GitHub
-feature linking: attach a PR/issue/branch to a feature, rolled up to parents,
-with live state refresh via the webhook. Still
-stubbed: editing spec content from the UI (PR write-back), spec **deletion**
-handling. See `docs/archive/PLAN.md` for the original build plan, `docs/BACKLOG.md`
-for where the backlog now lives (in Specboards), and `docs/RUNBOOK-github-sync.md` for setup.
+**Active build, pre-release.** A feature-by-feature status list used to live
+here and is deliberately gone: it was a second backlog that nobody updated, and
+by the time anyone read it the two things it still called "stubbed" (editing
+spec content from the UI, and spec deletion) had both shipped. A list that is
+wrong about what works is worse than no list, because it is believed.
+
+Where to look instead:
+
+- **What is built and what is next:** the backlog itself, in Specboards. See
+  [`docs/BACKLOG.md`](docs/BACKLOG.md) for the pointer.
+- **What shipped when:** [`CHANGELOG.md`](CHANGELOG.md), which is kept per
+  release.
+- **How to set up GitHub sync:** [`docs/RUNBOOK-github-sync.md`](docs/RUNBOOK-github-sync.md).
+- **How to self-host safely:** [`docs/SECURITY-self-host-checklist.md`](docs/SECURITY-self-host-checklist.md),
+  and [`docs/GUIDE-self-hosted-model.md`](docs/GUIDE-self-hosted-model.md) for
+  on-prem or air-gapped inference.
+
+This document describes the **shape** of the system, which changes far more
+slowly than its feature set. Anything here that reads as a progress report has
+outlived its usefulness and should be deleted rather than updated.
