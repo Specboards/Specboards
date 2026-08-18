@@ -93,7 +93,9 @@ Next.js web app  ── apps/web           MCP server ── apps/mcp
   `feature_github_links` (links a feature to a GitHub PR/issue/branch with cached
   state), `spec_index`, `comments`, `activity_log`, `saved_views` (per-user backlog
   filters), `board_preferences` (per-user board card-field choices), the
-  deployment-global `github_app` credential row, plus the Better Auth
+  deployment-global `github_app` credential row, `access_requests` (pre-release
+  "Request access" intake and its review state; RLS with no policies, so the
+  tenant connection cannot read it), plus the Better Auth
   `users`/`sessions`/`accounts`/`verifications` tables) + Postgres client. RLS
   policies in `infra/migrations`.
 - **`packages/git`**: GitHub App client + reconciler (`reconcileSpecs`), webhook

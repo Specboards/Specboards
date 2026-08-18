@@ -31,6 +31,28 @@ for how and when the version is bumped.
   work linked to it, which `list_goals` omits), `delete_goal` and
   `delete_key_result`. `read_item` now reports the goals an item ladders up to,
   so the "why does this exist" edge reads from both ends.
+- **Access requests are kept, not just emailed.** `POST /api/access-request`
+  used to send two emails and leave no record, so nothing tracked which requests
+  had been dealt with. Submissions now land in `access_requests`, which is the
+  queue an operator works from. A repeat submission refreshes the request
+  already open for that address rather than queueing a duplicate, and keeps its
+  original place in the line. Persisting is best-effort on purpose: the review
+  inbox reached a human before this table existed and still does, so a storage
+  failure logs, still sends, and says in the notification that this one is not
+  in the queue. Deciding a request is an operator action outside this repo; on
+  the hosted service it lives in the internal admin console, which is granted
+  UPDATE on this one table.
+
+### Security
+
+- **`access_requests` is unreadable from the tenant connection.** The table
+  holds contact details for people who are not customers, so it carries RLS with
+  no policies at all, which denies every row to the non-owner `specboards_app`
+  role. Migration 0073 also revokes that role's table privileges, which
+  `ALTER DEFAULT PRIVILEGES` had granted automatically on table creation
+  (`infra/rls-role.sql` section 3) despite 0072 intending otherwise. Nothing was
+  ever exposed, since RLS denied the rows regardless; this restores the layer
+  underneath, so a future policy on this table cannot silently confer DML.
 
 ## [0.26.0] - 2026-08-07
 
