@@ -139,6 +139,24 @@ By hand, on test before prod:
    URL on a hosted deployment. Both must be refused at save time with a reason,
    not accepted and failed later.
 
+## What the credential is spent on
+
+Every call made with it is recorded in `model_usage_events` (which feature, on
+whose behalf, what it cost, how it ended), and Settings → Integrations → Usage
+reports the month by feature and by person. That ledger is what answers "what is
+this charge" when a workspace queries its provider invoice, so treat it as part
+of the credential's paper trail rather than as analytics.
+
+Spend caps live on the same screen: a monthly workspace total and a per-person
+daily one, enforced before a request is sent. They are uncapped by default. Two
+caveats worth knowing before relying on one:
+
+- The cap counts only what the endpoint reports. A runtime that omits `usage`,
+  or a stream the user cancelled, leaves a row with no token count, shown as
+  *unmeasured*. On a runtime that reports nothing, a cap is never reached.
+- It is a guardrail, not a payment authorization. Concurrent requests can both
+  pass a check neither would pass afterwards, overshooting by about one call.
+
 ## Deployment note
 
 Both `specboard` and `specboard-test` run multi-tenant, so the self-hosted

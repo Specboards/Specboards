@@ -16,7 +16,7 @@ connection has to resolve two separate things on every request:
 
 "Two instances of Specboard" in day-to-day talk (e.g. the Specboard org vs the
 Palouse org) are really two **workspaces (tenants) on the same prod host**, not
-separate deployments. See [ADR 0001](./adr/0001-multi-tenancy-url-and-product-grouping.md) and
+separate deployments. See [ADR 0001](../adr/0001-multi-tenancy-url-and-product-grouping.md) and
 `PLAN-multi-tenant-org-provisioning.md`.
 
 ## Two ways to authenticate
@@ -129,6 +129,6 @@ browser-free binding).
 
 ## Related
 
-- [ADR 0001: multi-tenancy](./adr/0001-multi-tenancy-url-and-product-grouping.md)
+- [ADR 0001: multi-tenancy](../adr/0001-multi-tenancy-url-and-product-grouping.md)
 - `RUNBOOK-github-sync.md` (hosted vs self-host App model)
 - Hosted MCP + OAuth 2.1 sign-in first shipped in v0.12.0.

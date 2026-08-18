@@ -184,6 +184,24 @@ private TLS in `docs/GUIDE-self-hosted-model.md`.
       They commit as `docs(spec): <name> accepted an assistant edit to <title>`,
       with the accepting person in the `Co-authored-by` trailer. The model is
       never named as an author, and the assistant never holds a git credential.
+- [ ] **Set a spend cap** (Settings → Integrations → Usage) before you give the
+      assistant to a team. A monthly workspace cap and a per-person daily one;
+      a request that would cross either is refused before it is sent. Uncapped
+      is the default, because the product must not start refusing to work the
+      day this ships, but uncapped is also an unmetered channel to a bill you
+      pay. The same screen shows the month's spend by feature and by person.
+- [ ] Know that the cap can only count what your endpoint reports. Several
+      self-hosted runtimes omit the `usage` block, and a cancelled stream never
+      reaches the chunk carrying it; those calls are recorded as *unmeasured*
+      rather than as free, and on a runtime that reports nothing a cap will
+      never be reached. Confirm your runtime returns `usage` before relying on
+      one. The cap is also a guardrail rather than a payment authorization:
+      concurrent requests can overshoot it by roughly one call.
+- [ ] Know that the ledger (`model_usage_events`) is append-only from the app,
+      readable by any member, and records the acting user id for every call.
+      That is deliberate, so a charge on your provider invoice can be traced to
+      a person and a feature months later, but it means the table is a record of
+      who used the assistant and when. Treat it as you treat `activity_log`.
 
 ## 7. Backups
 

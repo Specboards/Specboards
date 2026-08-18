@@ -218,8 +218,11 @@ local runtime.
   endpoint, including connection pinning against DNS rebinding. That is a
   coherent trade when the operator, the tenant and the network owner are the
   same party, and it is why the flag cannot be set on a multi-tenant deployment.
-- Streaming responses are not used yet; calls are made with `stream: false`.
 - The connection is per workspace, one endpoint each.
+- Streaming is used for assistant answers (`stream: true`, server-sent events
+  parsed by the adapter); the connection test and breakdown proposals are
+  unstreamed. A runtime that does not implement SSE on `chat/completions` will
+  serve the test call and fail the assistant panel.
 - Usage accounting (Settings → Integrations → Usage) can only report what the
   runtime reports. Several self-hosted runtimes omit the `usage` block, and a
   streamed answer that was cancelled never reaches the chunk carrying it. Those

@@ -145,6 +145,13 @@ pays for usage; keys are encrypted at rest and never returned to the browser.
 
 Configure it in the app at Settings → Integrations → Model connection.
 
+Because you pay for the inference, Settings → Integrations → **Usage** shows
+what Specboards has spent at your endpoint this month, broken down by feature
+and by person, and lets an owner set a monthly cap for the workspace and a daily
+one per person. A request that would cross a cap is refused before it is sent.
+Counted in tokens rather than money: the price of a token is between you and
+your provider.
+
 - Self-hosted, air-gapped, and private TLS, with worked examples:
   [`docs/GUIDE-self-hosted-model.md`](./docs/GUIDE-self-hosted-model.md).
 - Credential storage, rotation, revocation, and the egress policy:
