@@ -119,7 +119,10 @@ Optional environment flags for a hosted deployment:
   with a pending org invitation can create an account. Superseded by
   `SPECBOARDS_SIGNUP_CODE_REQUIRED`; leave unset when the code gate is on.
 - `ACCESS_REQUEST_NOTIFY_EMAIL` - where `POST /api/access-request` submissions
-  are sent for review (default `contact@specboard.ai`).
+  are sent for review (default `contact@specboard.ai`). Submissions are also
+  recorded in the `access_requests` table, which is the queue an operator works
+  from; deciding one (and emailing the requester a sign-up code) is an operator
+  action, done outside the app by a role granted UPDATE on that table.
 - `ACCESS_REQUEST_ALLOWED_ORIGINS` - comma-separated CORS allow-list for that
   endpoint (default: the `specboards.ai` marketing origins + localhost).
 - `POSTMARK_SERVER_TOKEN` / `EMAIL_FROM` - transactional email (verification,
