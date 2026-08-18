@@ -1,16 +1,15 @@
-import { dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-
-import { FlatCompat } from "@eslint/eslintrc";
 import jsxA11y from "eslint-plugin-jsx-a11y";
+import nextVitals from "eslint-config-next/core-web-vitals";
 
 // Flat config. The repo had no ESLint config at all and relied on `next lint`
 // (deprecated in Next 15.5, removed in 16), so this both modernizes linting and
 // adds the jsx-a11y ruleset that guards our WCAG 2.2 AA work.
-const compat = new FlatCompat({
-  baseDirectory: dirname(fileURLToPath(import.meta.url)),
-});
-
+//
+// eslint-config-next 16 ships a native flat-config array, so it is imported and
+// spread directly. Before 16 it was eslintrc-shaped and had to be adapted with
+// FlatCompat from @eslint/eslintrc; that shim is what broke on the 16 bump
+// (the config it produced failed validation, and eslintrc's error formatter
+// then died on a circular structure rather than reporting why).
 export default [
   {
     ignores: [
@@ -23,7 +22,7 @@ export default [
   },
   // next/core-web-vitals already registers the jsx-a11y plugin (under the
   // "jsx-a11y" namespace) with a subset of its rules enabled.
-  ...compat.extends("next/core-web-vitals"),
+  ...nextVitals,
   {
     files: ["**/*.{ts,tsx}"],
     // Apply the full jsx-a11y recommended ruleset on top. We reference the
@@ -50,6 +49,27 @@ export default [
       // in is expected and correct. The rule cannot tell the two apart, so keep
       // it visible as a warning rather than a build-breaking error.
       "jsx-a11y/no-autofocus": ["warn", { ignoreNonDOM: true }],
+    },
+  },
+  {
+    // eslint-config-next 16 brings eslint-plugin-react-hooks 7 (we were on 5),
+    // which grows the recommended set from 2 rules to 16 by adding the React
+    // Compiler checks. Thirteen of those fourteen new rules already pass and
+    // stay at `error`, so the upgrade buys us that coverage for free.
+    //
+    // These three fire on existing code: 34 set-state-in-effect across 30
+    // files, 6 immutability, 1 refs. They flag compiler-readiness rather than
+    // bugs; the largest group is the standard SSR hydration guard
+    // (`useEffect(() => setMounted(true), [])`) that next-themes documents.
+    // Rewriting the effect and ref plumbing of 30 components inside a version
+    // bump would put real behaviour change in a PR nobody would review as
+    // such, so they are warnings here and tracked as their own work. Nothing
+    // that failed the lint gate before this upgrade passes it now.
+    files: ["**/*.{ts,tsx}"],
+    rules: {
+      "react-hooks/set-state-in-effect": "warn",
+      "react-hooks/immutability": "warn",
+      "react-hooks/refs": "warn",
     },
   },
 ];
