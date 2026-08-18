@@ -37,13 +37,21 @@ export async function POST(req: Request) {
   if (!db || !authz.scope) return NO_DB;
 
   const started = Date.now();
-  const outcome = await completeWithWorkspaceModel(db, authz.scope.workspaceId, {
-    messages: [{ role: "user", content: PROMPT }],
-    maxTokens: 16,
-    // Tighter than the adapter default: someone is watching this run, and a
-    // 30s hang on a wrong URL reads as the app being broken.
-    timeoutMs: 15_000,
-  });
+  const outcome = await completeWithWorkspaceModel(
+    db,
+    authz.scope.workspaceId,
+    {
+      messages: [{ role: "user", content: PROMPT }],
+      maxTokens: 16,
+      // Tighter than the adapter default: someone is watching this run, and a
+      // 30s hang on a wrong URL reads as the app being broken.
+      timeoutMs: 15_000,
+    },
+    // Recorded like any other call. It is a handful of tokens, and leaving it
+    // out would mean the ledger did not add up against the invoice for the one
+    // reason nobody would think to check.
+    { userId: authz.scope.userId, feature: "connection_test" },
+  );
   const elapsedMs = Date.now() - started;
 
   if (outcome.ok) {
@@ -56,6 +64,16 @@ export async function POST(req: Request) {
       usage: outcome.usage,
       elapsedMs,
     });
+  }
+
+  // A cap is this workspace's own decision, not a fault at either end, so it is
+  // 409 like "nothing configured" rather than a provider error the admin would
+  // otherwise go and investigate at the vendor.
+  if (outcome.error.kind === "capped") {
+    return Response.json(
+      { ok: false, kind: "capped", error: outcome.error.message },
+      { status: 409 },
+    );
   }
 
   if (outcome.error.kind === "not_configured") {

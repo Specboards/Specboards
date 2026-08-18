@@ -12,6 +12,7 @@ import { SpecDiff } from "@/components/spec-diff";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { formatTokenEstimate } from "@/lib/ai/estimate";
 import type { ContextField } from "@/lib/ai/item-context";
 import { parseAnswer, proposalStarted } from "@/lib/ai/proposals";
 import type { Skill } from "@/lib/ai/skills";
@@ -45,6 +46,12 @@ export function assistantErrorAdvice(
 ): { text: string; settingsLink: boolean } {
   switch (kind) {
     case "not_configured":
+      return { text: message, settingsLink: true };
+    // Not a failure at either end: this workspace decided beforehand how much it
+    // was willing to spend and that decision has now been enforced. The message
+    // already names the cap, what is left of it, and who can raise it, so it is
+    // passed through rather than rewritten, and it links to where that happens.
+    case "capped":
       return { text: message, settingsLink: true };
     case "auth":
       return {
@@ -453,6 +460,12 @@ export function AssistantPanel({
   const router = useRouter();
   const [messages, setMessages] = useState<AssistantMessageView[] | null>(null);
   const [context, setContext] = useState<ContextField[]>([]);
+  /**
+   * About how many tokens the next question sends. Server-computed from the
+   * same pieces the request is built from, so the disclosure of *what* is sent
+   * and the disclosure of what it costs cannot describe different payloads.
+   */
+  const [estimate, setEstimate] = useState(0);
   const [modelConnected, setModelConnected] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -509,6 +522,7 @@ export function AssistantPanel({
         if (!active) return;
         setMessages(res.messages);
         setContext(res.context);
+        setEstimate(res.estimatedPromptTokens);
         setModelConnected(res.modelConnected);
         setCanEdit(res.canEdit);
         setCanPropose(res.canPropose);
@@ -933,6 +947,17 @@ export function AssistantPanel({
                 the endpoint this workspace connected. Nothing else about your
                 workspace is sent: no other items, no member names, no settings.
               </p>
+              {/* The other half of "should I ask this". A customer paying their
+                  own provider is normally told what leaves their workspace and
+                  never what it costs, and the figure grows with the thread,
+                  which is the part nobody expects. */}
+              {estimate > 0 ? (
+                <p className="text-muted-foreground">
+                  That is about {formatTokenEstimate(estimate)} tokens per
+                  question, and it grows as this conversation does. Your provider
+                  bills you for them.
+                </p>
+              ) : null}
               <ul className="space-y-1">
                 {context.map((f) => (
                   <li key={f.label}>

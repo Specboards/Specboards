@@ -220,3 +220,11 @@ local runtime.
   same party, and it is why the flag cannot be set on a multi-tenant deployment.
 - Streaming responses are not used yet; calls are made with `stream: false`.
 - The connection is per workspace, one endpoint each.
+- Usage accounting (Settings → Integrations → Usage) can only report what the
+  runtime reports. Several self-hosted runtimes omit the `usage` block, and a
+  streamed answer that was cancelled never reaches the chunk carrying it. Those
+  calls are recorded with no token count and shown as *unmeasured* rather than
+  as zero, so the monthly total on that screen is a floor. Spend caps are
+  enforced against the same figures, which means on a runtime that reports
+  nothing a cap will never be reached. If caps matter to you, verify your
+  runtime returns `usage` before relying on one.

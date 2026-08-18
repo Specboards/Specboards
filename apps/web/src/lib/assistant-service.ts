@@ -11,6 +11,7 @@ import {
   type Database,
 } from "@specboards/db";
 
+import { estimatePromptTokens } from "@/lib/ai/estimate";
 import { assembleItemContext, type ContextField } from "@/lib/ai/item-context";
 import { parseAnswer } from "@/lib/ai/proposals";
 import type { Skill } from "@/lib/ai/skills";
@@ -86,11 +87,22 @@ export interface AssistantMessageView {
   skillKey: string | null;
 }
 
+/**
+ * Everything a turn can fail with, from the panel's point of view.
+ *
+ * `not_configured` and `capped` are ours rather than the endpoint's, and they
+ * are kept distinct from every {@link ModelErrorKind} for the same reason those
+ * are distinct from each other: each one needs a different action from the
+ * reader. "Connect a model" and "your workspace has spent its budget" are not
+ * the same sentence, and neither is a provider fault.
+ */
+export type AssistantErrorKind = ModelErrorKind | "not_configured" | "capped";
+
 export type AssistantSendOutcome =
   | { ok: true; turns: AssistantMessageView[] }
   | {
       ok: false;
-      error: { kind: ModelErrorKind | "not_configured"; message: string };
+      error: { kind: AssistantErrorKind; message: string };
     };
 
 /**
@@ -272,6 +284,21 @@ export interface AssistantPanelData {
    * quietly stopped being interrogated.
    */
   activeSkillKey: string | null;
+  /**
+   * Roughly what the next question will send, in tokens: this item's context
+   * plus the replayed thread.
+   *
+   * Shown beside the disclosure of *what* is sent, because the two halves of
+   * "should I ask this" are what leaves the workspace and what it costs, and a
+   * customer paying their own provider only ever gets told the first. It grows
+   * as a thread grows, which is the thing nobody expects and the reason a long
+   * grilling is the expensive one.
+   *
+   * An estimate, and labelled as one wherever it is shown; see
+   * `lib/ai/estimate.ts` for why an exact count is not available to a product
+   * whose tokenizer belongs to the customer.
+   */
+  estimatedPromptTokens: number;
 }
 
 /**
@@ -323,6 +350,13 @@ export async function getAssistantPanelData(
     canEdit,
     canPropose: assembled.canPropose,
     body: feature.content,
+    // Built from the same pieces the request is, and windowed the same way, so
+    // the number shown is the number that will actually be sent rather than a
+    // second guess at it that drifts the first time the window changes.
+    estimatedPromptTokens: estimatePromptTokens([
+      { content: assembled.systemPrompt },
+      ...messages.slice(-HISTORY_TURN_LIMIT).map((m) => ({ content: m.content })),
+    ]),
     skills: offered,
     // Only reported as running if it is still something that can be run. A
     // skill deleted or switched off while a thread was mid-grilling would
@@ -449,7 +483,7 @@ export type AssistantEvent =
   | { kind: "done"; turns: AssistantMessageView[] }
   | {
       kind: "error";
-      error: { kind: ModelErrorKind | "not_configured"; message: string };
+      error: { kind: AssistantErrorKind; message: string };
     };
 
 /**
@@ -540,10 +574,22 @@ export async function startAssistantTurn(
     };
     let finished = false;
 
-    for await (const event of streamWithWorkspaceModel(db, scope.workspaceId, {
-      messages,
-      ...(opts.signal ? { signal: opts.signal } : {}),
-    })) {
+    for await (const event of streamWithWorkspaceModel(
+      db,
+      scope.workspaceId,
+      {
+        messages,
+        ...(opts.signal ? { signal: opts.signal } : {}),
+      },
+      // Attribution, not telemetry: this is the record of whose behalf the
+      // workspace's money was spent on, and it is what makes a line on the
+      // provider invoice explicable months later.
+      { userId: scope.userId, feature: "assistant_turn" },
+    )) {
+      if (event.kind === "capped") {
+        yield { kind: "error", error: { kind: "capped", message: event.message } };
+        return;
+      }
       if (event.kind === "not_configured") {
         yield {
           kind: "error",

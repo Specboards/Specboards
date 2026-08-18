@@ -36,7 +36,10 @@ function appUrlFrom(ownerUrl: string): string {
 
 /** Seeded fixture ids (uuids generated per run; rows cleaned up in afterAll). */
 const ws = { a: randomUUID(), b: randomUUID() };
-const user = { alice: randomUUID(), bob: randomUUID() };
+// Carol is a plain member of workspace A, not an owner. She exists because
+// some policies split member from org admin, and alice cannot tell those
+// apart: she is the owner of everything she can see.
+const user = { alice: randomUUID(), bob: randomUUID(), carol: randomUUID() };
 const spec = { a: randomUUID(), b: randomUUID() };
 const suffix = randomUUID().slice(0, 8);
 
@@ -68,10 +71,12 @@ describe.skipIf(!OWNER_URL)("RLS tenant isolation (two-tenant)", () => {
       (${ws.b}, 'Tenant B', ${"rls-int-b-" + suffix})`;
     await owner`insert into users (id, name, email) values
       (${user.alice}, 'Alice', ${`alice-${suffix}@rls.test`}),
-      (${user.bob}, 'Bob', ${`bob-${suffix}@rls.test`})`;
+      (${user.bob}, 'Bob', ${`bob-${suffix}@rls.test`}),
+      (${user.carol}, 'Carol', ${`carol-${suffix}@rls.test`})`;
     await owner`insert into members (workspace_id, user_id, role) values
       (${ws.a}, ${user.alice}, 'owner'),
-      (${ws.b}, ${user.bob}, 'owner')`;
+      (${ws.b}, ${user.bob}, 'owner'),
+      (${ws.a}, ${user.carol}, 'member')`;
     // features.level carries a composite FK to workspace_levels.
     await owner`insert into workspace_levels (workspace_id, key, label, position, is_leaf) values
       (${ws.a}, 'work', 'Work Items', 0, true),
@@ -93,7 +98,7 @@ describe.skipIf(!OWNER_URL)("RLS tenant isolation (two-tenant)", () => {
   afterAll(async () => {
     // Workspace cascade clears members/features/products/repositories.
     await owner`delete from workspaces where id in (${ws.a}, ${ws.b})`;
-    await owner`delete from users where id in (${user.alice}, ${user.bob})`;
+    await owner`delete from users where id in (${user.alice}, ${user.bob}, ${user.carol})`;
     await owner.end({ timeout: 5 });
     await app?.end({ timeout: 5 });
   });
@@ -186,5 +191,111 @@ describe.skipIf(!OWNER_URL)("RLS tenant isolation (two-tenant)", () => {
     ).rejects.toThrow(/row-level security|violates/i);
     const [row] = await owner`select count(*)::int as n from features where workspace_id = ${ws.b}`;
     expect(row?.n).toBe(1);
+  });
+
+  /**
+   * The usage ledger, which is unusual among tenant tables in that an ordinary
+   * member both writes it and reads aggregates off it: the spend cap is checked
+   * inside their own request, before their question is sent. Every integration
+   * test of that logic runs as the owner role, where RLS does not apply, so a
+   * policy that is too tight here would pass every one of them and then refuse
+   * the assistant for every member in production.
+   */
+  it("a member can append to the usage ledger and read their own tenant's back", async () => {
+    await asUser(user.alice, (tx) =>
+      tx`insert into model_usage_events
+           (workspace_id, user_id, feature, outcome, prompt_tokens, completion_tokens)
+         values (${ws.a}, ${user.alice}, 'assistant_turn', 'ok', 10, 5)`,
+    );
+    const rows = await asUser(
+      user.alice,
+      (tx) =>
+        tx`select feature from model_usage_events where workspace_id = ${ws.a}`,
+    );
+    expect(rows.map((r) => r.feature)).toEqual(["assistant_turn"]);
+  });
+
+  it("usage from another tenant is invisible, and cannot be written", async () => {
+    await owner`insert into model_usage_events
+        (workspace_id, user_id, feature, outcome, prompt_tokens)
+      values (${ws.b}, ${user.bob}, 'assistant_turn', 'ok', 99)`;
+
+    const rows = await asUser(
+      user.alice,
+      (tx) => tx`select id from model_usage_events where workspace_id = ${ws.b}`,
+    );
+    expect(rows).toEqual([]);
+
+    await expect(
+      asUser(user.alice, (tx) =>
+        tx`insert into model_usage_events (workspace_id, user_id, feature, outcome)
+           values (${ws.b}, ${user.alice}, 'assistant_turn', 'ok')`,
+      ),
+    ).rejects.toThrow(/row-level security|violates/i);
+  });
+
+  /**
+   * Append-only. There is no UPDATE or DELETE policy on the ledger, and the
+   * migration withholds the privilege from the app role as well; this suite
+   * grants its test role everything, so what it proves is the policy half.
+   *
+   * The absence of a policy is a silent filter rather than an error: the
+   * statement runs and matches nothing. That is the whole reason to assert on
+   * the row afterwards instead of on a rejection, and the reason this is worth
+   * a test at all, because a rewrite that quietly does nothing looks identical
+   * from the caller's side to one that quietly succeeds.
+   */
+  it("the usage ledger cannot be rewritten through the app connection", async () => {
+    await owner`insert into model_usage_events
+        (workspace_id, user_id, feature, outcome, prompt_tokens)
+      values (${ws.a}, ${user.alice}, 'breakdown', 'ok', 1000)`;
+
+    await asUser(user.alice, (tx) =>
+      tx`update model_usage_events set prompt_tokens = 0
+         where workspace_id = ${ws.a} and feature = 'breakdown'`,
+    );
+    await asUser(user.alice, (tx) =>
+      tx`delete from model_usage_events where workspace_id = ${ws.a} and feature = 'breakdown'`,
+    );
+
+    const [row] = await owner`select prompt_tokens from model_usage_events
+      where workspace_id = ${ws.a} and feature = 'breakdown'`;
+    expect(row?.prompt_tokens).toBe(1000);
+  });
+
+  it("a member may read the spend caps but not set them", async () => {
+    await owner`insert into workspace_usage_limits (workspace_id, monthly_token_cap)
+      values (${ws.a}, 500)`;
+
+    // Readable, because the cap check runs in the member's own request and has
+    // to resolve the limit before deciding whether to send anything.
+    const rows = await asUser(
+      user.carol,
+      (tx) =>
+        tx`select monthly_token_cap from workspace_usage_limits where workspace_id = ${ws.a}`,
+    );
+    expect(rows[0]?.monthly_token_cap).toBe(500);
+
+    // Carol is an ordinary member, so raising her own cap is exactly the write
+    // this has to refuse. A policy that does not admit the row filters the
+    // UPDATE to nothing rather than raising, so the assertion is on the cap
+    // afterwards.
+    await asUser(user.carol, (tx) =>
+      tx`update workspace_usage_limits set monthly_token_cap = 999999
+         where workspace_id = ${ws.a}`,
+    );
+    const [after] =
+      await owner`select monthly_token_cap from workspace_usage_limits where workspace_id = ${ws.a}`;
+    expect(after?.monthly_token_cap).toBe(500);
+
+    // The workspace owner can, which is what says the policy gates on the role
+    // rather than refusing everybody and looking correct while doing it.
+    await asUser(user.alice, (tx) =>
+      tx`update workspace_usage_limits set monthly_token_cap = 750
+         where workspace_id = ${ws.a}`,
+    );
+    const [raised] =
+      await owner`select monthly_token_cap from workspace_usage_limits where workspace_id = ${ws.a}`;
+    expect(raised?.monthly_token_cap).toBe(750);
   });
 });
