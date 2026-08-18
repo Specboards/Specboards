@@ -17,14 +17,28 @@
  * - **People.** No assignee, no author, no member list. Same reasoning as on an
  *   item: names are personal data and knowing who built something does not make
  *   the notes better.
- * - **Item descriptions.** Titles, levels and statuses only, for now. Sending
- *   the bodies of every item in a release is a real change in what leaves the
- *   building and it gets its own feature, with its own budget and its own
- *   opt-in, rather than arriving as a side effect of wanting better prose.
  * - **Internal planning notes.** `releases.notes` is where a team writes things
  *   like "slipping because the vendor is late". It is not customer-facing and
  *   this is the one surface whose output is.
  * - **Anything from settings.** No credentials, no repo contents, no URLs.
+ *
+ * ── What IS sent, and why it is a lot ───────────────────────────────────────
+ * Every item's description, not just its title. Customers asked for this
+ * explicitly, and the reason is visible in the output: from titles alone a model
+ * has to guess what "Single sign-on" meant for a customer, and guessing is
+ * exactly how an invented release note gets written.
+ *
+ * It is a real change in what leaves the building, and it is not hidden: one
+ * question about one release now sends that release's work to the customer's
+ * provider in a single request. The disclosure lists it, item by item, before
+ * anyone spends a token, which is the whole reason the disclosure is the input
+ * to the request rather than a description of it.
+ *
+ * The budget below is not a way to soften that. It is a context window: a
+ * forty-item release at full description length does not fit in a small
+ * self-hosted model, and the choice is between shortening deliberately and
+ * failing with a 400 nobody can act on. What it must never do is shorten
+ * silently, so every cut is announced in the prompt and reported to the UI.
  *
  * This module is pure: no database, no network, no environment. That is what
  * makes "here is exactly what leaves the building" a testable claim rather than
@@ -39,6 +53,10 @@ import { skillTask, type SkillDef } from "./skills";
 export interface ReleaseContextItem {
   title: string;
   statusLabel: string;
+  /** The item's Markdown body. Empty for an item nobody has written up, which
+   * is common and is exactly what "Needs a description" in the drafting skill
+   * is there to surface. */
+  description: string;
 }
 
 /** One level's worth of the release's items, in hierarchy order. */
@@ -89,6 +107,15 @@ export interface AssembledReleaseContext {
    * and that is not something a reader can infer from the prose.
    */
   itemsOmitted: number;
+  /** How many items' descriptions were sent, whole or shortened. */
+  descriptionsIncluded: number;
+  /**
+   * How many of those were shortened to fit. Reported rather than left implicit
+   * because it is the one thing a reader cannot tell from the draft: notes
+   * written from the first paragraph of every spec look exactly like notes
+   * written from all of them.
+   */
+  descriptionsShortened: number;
   /**
    * Whether the model was actually invited to propose. False for someone who
    * cannot write the release, and false when the existing notes were too long
@@ -112,7 +139,31 @@ export interface AssembledReleaseContext {
  * hundred items must produce a request that endpoint can actually answer, not a
  * 400 from a context window it blew through.
  */
-export const ITEM_LIST_CHAR_LIMIT = 6_000;
+export const ITEM_LIST_CHAR_LIMIT = 24_000;
+
+/**
+ * Most of one item's description that is ever sent, however small the release.
+ *
+ * Without a per-item cap, a release holding three items would give each of them
+ * eight thousand characters, and a single rambling spec would crowd out the
+ * other two. Nobody writing release notes needs the whole of a design document;
+ * they need what the change was.
+ */
+export const MAX_ITEM_DESCRIPTION_CHARS = 2_000;
+
+/**
+ * Least useful slice of a description.
+ *
+ * Below this the descriptions are dropped for every item rather than shared out,
+ * and the prompt goes back to titles and statuses. Hundred-character fragments
+ * of three hundred specs are worse than no descriptions at all: each one stops
+ * mid-sentence, and a model handed three hundred sentence fragments writes
+ * confident nonsense from them. Titles at least do not pretend to be complete.
+ */
+export const MIN_ITEM_DESCRIPTION_CHARS = 240;
+
+/** Per-description cost beyond its own characters: indent, ellipsis, newline. */
+const DESCRIPTION_OVERHEAD_CHARS = 4;
 
 /**
  * The assistant's standing instructions on a release.
@@ -202,7 +253,9 @@ export function assembleReleaseContext(
     fields.push({ label: "Target date", value: input.targetDate });
   }
 
-  const { value, included, omitted } = renderItems(input.groups);
+  const { value, included, omitted, described, shortened } = renderItems(
+    input.groups,
+  );
   if (included > 0) {
     fields.push({
       label: "Work in this release",
@@ -243,6 +296,8 @@ export function assembleReleaseContext(
     fields,
     itemsIncluded: included,
     itemsOmitted: omitted,
+    descriptionsIncluded: described,
+    descriptionsShortened: shortened,
     canPropose,
   };
 }
@@ -271,27 +326,81 @@ function task(skill: SkillDef, canPropose: boolean): string {
 }
 
 /**
+ * How much of each description survives, decided once for the whole release.
+ *
+ * One share for every item rather than first-come-first-served, because the
+ * alternative reads as a bug: the first few items arrive complete and the rest
+ * are stubs, so whichever epic happens to sort first looks like the important
+ * one. An even share is explicable in a sentence, which is what the disclosure
+ * has to say.
+ *
+ * Returns 0 when the share would be too small to be worth sending, which is the
+ * honest outcome for a release with hundreds of items: see
+ * {@link MIN_ITEM_DESCRIPTION_CHARS}.
+ */
+export function descriptionShare(
+  itemsWithDescriptions: number,
+  budget: number,
+): number {
+  if (itemsWithDescriptions <= 0) return 0;
+  // Each description costs a little more than its own characters: two for the
+  // indent, one for the ellipsis when it is cut, one for the line break. Taken
+  // off before dividing so the share is what actually fits. A multi-line body
+  // costs two more per line again, which cannot be known here, and that is what
+  // the titles-first backstop in `renderItems` is for.
+  const spendable = budget - itemsWithDescriptions * DESCRIPTION_OVERHEAD_CHARS;
+  const share = Math.floor(spendable / itemsWithDescriptions);
+  if (share < MIN_ITEM_DESCRIPTION_CHARS) return 0;
+  return Math.min(share, MAX_ITEM_DESCRIPTION_CHARS);
+}
+
+/**
  * The item list, cut to fit the budget.
  *
- * Cut by whole items rather than by characters. A list that stops in the middle
- * of a title invites the model to complete it, and a completed title is an
- * invented feature: precisely the failure the task instructions above spend
- * their last line on.
+ * Titles are paid for first and descriptions get what is left. That order is the
+ * whole design: a title identifies work that shipped, so losing one loses a
+ * change from the notes entirely, while losing a description costs detail about
+ * a change that is still mentioned. Given a release too big for both, the notes
+ * that name everything thinly beat the notes that describe a third of it well.
  *
- * The cut runs level by level in hierarchy order, so what survives is the top of
- * the release rather than an arbitrary slice of it. A release too big to send
- * whole is better described by its initiatives than by the first eighty work
- * items in alphabetical order.
+ * Items are still cut by whole items rather than by characters, for the reason
+ * they always were: a list that stops mid-title invites the model to complete
+ * it, and a completed title is an invented feature. The cut runs level by level
+ * in hierarchy order, so what survives is the top of the release.
  */
 function renderItems(groups: readonly ReleaseContextGroup[]): {
   value: string;
   included: number;
   omitted: number;
+  /** How many descriptions were sent, whole or shortened. */
+  described: number;
+  /** How many of those were shortened to fit. */
+  shortened: number;
 } {
+  const all = groups.flatMap((g) => g.items);
+
+  // Titles first, so the description budget is what is genuinely left over.
+  const titleCost = groups.reduce(
+    (sum, g) =>
+      sum +
+      (g.items.length > 0 ? g.levelLabel.length + 2 : 0) +
+      g.items.reduce(
+        (n, i) => n + i.title.trim().length + i.statusLabel.trim().length + 6,
+        0,
+      ),
+    0,
+  );
+  const share = descriptionShare(
+    all.filter((i) => i.description.trim()).length,
+    ITEM_LIST_CHAR_LIMIT - titleCost,
+  );
+
   const lines: string[] = [];
   let used = 0;
   let included = 0;
   let omitted = 0;
+  let described = 0;
+  let shortened = 0;
   let full = false;
 
   for (const group of groups) {
@@ -304,7 +413,39 @@ function renderItems(groups: readonly ReleaseContextGroup[]): {
         continue;
       }
       const line = `- ${item.title.trim()} (${item.statusLabel.trim()})`;
-      const cost = line.length + 1 + (headingWritten ? 0 : heading.length + 1);
+
+      const body = item.description.trim();
+      let detail = "";
+      let cut = false;
+      // Both are reassigned below when a description has to be dropped to keep
+      // its title.
+      if (share > 0 && body) {
+        cut = body.length > share;
+        // Indented under its item, and marked when shortened, so the model can
+        // see which descriptions it has only part of rather than reading a
+        // truncated one as complete.
+        const text = cut ? `${body.slice(0, share)}…` : body;
+        detail = text
+          .split("\n")
+          .map((l) => `  ${l}`)
+          .join("\n");
+      }
+
+      const headingCost = headingWritten ? 0 : heading.length + 1;
+      const titleCost = line.length + 1 + headingCost;
+      let cost = titleCost + (detail ? detail.length + 1 : 0);
+
+      // Titles are paid first, and this is where that is actually enforced
+      // rather than estimated. The share above is arithmetic on lengths that do
+      // not quite match what the lines cost once indented, so without this the
+      // overshoot lands on the last item and drops it entirely: a change
+      // vanishes from the notes to buy detail about the ones before it. Drop
+      // the detail instead, and only then the item.
+      if (detail && used + cost > ITEM_LIST_CHAR_LIMIT) {
+        detail = "";
+        cut = false;
+        cost = titleCost;
+      }
       if (used + cost > ITEM_LIST_CHAR_LIMIT) {
         // Everything after this is dropped, including the rest of this group.
         // Continuing to look for a short enough item would produce a list whose
@@ -319,12 +460,17 @@ function renderItems(groups: readonly ReleaseContextGroup[]): {
         headingWritten = true;
       }
       lines.push(line);
+      if (detail) {
+        lines.push(detail);
+        described += 1;
+        if (cut) shortened += 1;
+      }
       used += cost;
       included += 1;
     }
   }
 
-  return { value: lines.join("\n"), included, omitted };
+  return { value: lines.join("\n"), included, omitted, described, shortened };
 }
 
 /**

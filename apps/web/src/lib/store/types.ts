@@ -1362,6 +1362,24 @@ export type BoardKey = (typeof BOARD_KEYS)[number];
  */
 export interface FeatureStore {
   listFeatures(scope?: WorkspaceScope): Promise<FeatureRecord[]>;
+  /**
+   * The Markdown bodies of many items at once, keyed by spec id.
+   *
+   * `listFeatures` deliberately does not carry bodies: it backs the board, which
+   * draws hundreds of cards and needs none of them. This exists for the one
+   * caller that needs the opposite - the release assistant, which is writing
+   * *about* the work and has nothing to say from titles alone - and it is a bulk
+   * read rather than a loop over `getFeature` because a forty-item release would
+   * otherwise be forty round trips.
+   *
+   * Scoped like every other read: an item the caller cannot see is absent from
+   * the map rather than present and empty, so a caller cannot tell "no body"
+   * from "not yours". Ids that do not exist are simply absent too.
+   */
+  listFeatureBodies(
+    specIds: readonly string[],
+    scope?: WorkspaceScope,
+  ): Promise<Map<string, string>>;
   getFeature(
     specId: string,
     scope?: WorkspaceScope,

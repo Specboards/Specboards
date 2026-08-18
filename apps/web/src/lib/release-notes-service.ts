@@ -163,6 +163,15 @@ export async function buildReleaseContext(
       productId: f.productId,
     }));
 
+  // One bulk read rather than a getFeature per item: a forty-item release would
+  // otherwise be forty round trips, several of them reading spec content. The
+  // store applies the same product-visibility check it applies to a single
+  // read, so an item the caller cannot see is simply absent from the map.
+  const bodies = await store.listFeatureBodies(
+    items.map((i) => i.specId),
+    scope,
+  );
+
   // A portfolio release can hold work from several products, each of which may
   // define its own stages. Resolving the union means a status reads as its own
   // product's word for it rather than as whatever the workspace default calls
@@ -183,6 +192,7 @@ export async function buildReleaseContext(
         items: group.items.map((item) => ({
           title: item.title,
           statusLabel: statusLabel(item.status, workflow),
+          description: bodies.get(item.specId) ?? "",
         })),
       })),
       notesBody: release.releaseNotesBody ?? "",
@@ -217,6 +227,10 @@ export interface ReleaseAssistantPanelData {
    * in the prose would ever reveal that. */
   itemsIncluded: number;
   itemsOmitted: number;
+  /** How many items' descriptions were sent, and how many were shortened to
+   * fit. The second is the one a reader cannot infer from the draft. */
+  descriptionsIncluded: number;
+  descriptionsShortened: number;
 }
 
 export async function getReleaseAssistantPanelData(
@@ -257,6 +271,8 @@ export async function getReleaseAssistantPanelData(
     activeSkillKey: offered.some((s) => s.key === running) ? running : null,
     itemsIncluded: assembled.itemsIncluded,
     itemsOmitted: assembled.itemsOmitted,
+    descriptionsIncluded: assembled.descriptionsIncluded,
+    descriptionsShortened: assembled.descriptionsShortened,
   };
 }
 

@@ -754,6 +754,20 @@ export class LocalFileStore implements FeatureStore {
     return this.loadAll();
   }
 
+  async listFeatureBodies(
+    specIds: readonly string[],
+    _scope?: WorkspaceScope,
+  ): Promise<Map<string, string>> {
+    if (specIds.length === 0) return new Map();
+    const wanted = new Set(specIds);
+    const all = await this.loadAll();
+    const out = new Map<string, string>();
+    for (const f of all) {
+      if (wanted.has(f.specId) && f.content) out.set(f.specId, f.content);
+    }
+    return out;
+  }
+
   async getFeature(
     specId: string,
     _scope?: WorkspaceScope,

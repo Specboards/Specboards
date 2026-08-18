@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   assembleReleaseContext,
+  descriptionShare,
   ITEM_LIST_CHAR_LIMIT,
+  MAX_ITEM_DESCRIPTION_CHARS,
   NOTES_CHAR_LIMIT,
   type ReleaseContextGroup,
 } from "./release-context";
@@ -17,11 +19,23 @@ function input(overrides: Partial<Parameters<typeof assembleReleaseContext>[0]> 
     groups: [
       {
         levelLabel: "Epic",
-        items: [{ title: "Single sign-on", statusLabel: "Done" }],
+        items: [
+          {
+            title: "Single sign-on",
+            statusLabel: "Done",
+            description: "Lets an admin connect an identity provider.",
+          },
+        ],
       },
       {
         levelLabel: "Feature",
-        items: [{ title: "SAML metadata upload", statusLabel: "In review" }],
+        items: [
+          {
+            title: "SAML metadata upload",
+            statusLabel: "In review",
+            description: "",
+          },
+        ],
       },
     ] as ReleaseContextGroup[],
     notesBody: "",
@@ -179,6 +193,7 @@ describe("assembleReleaseContext", () => {
         items: Array.from({ length: 5 }, (_, i) => ({
           title: `Epic number ${i}`,
           statusLabel: "Done",
+          description: "",
         })),
       },
       {
@@ -186,6 +201,7 @@ describe("assembleReleaseContext", () => {
         items: Array.from({ length: 400 }, (_, i) => ({
           title: `A work item with a reasonably long title, number ${i}`,
           statusLabel: "Done",
+          description: "",
         })),
       },
     ];
@@ -230,12 +246,113 @@ describe("assembleReleaseContext", () => {
     });
   });
 
-  it("sends no assignees, no descriptions, and no internal notes", () => {
+  it("sends no assignees and no internal planning notes", () => {
     const { systemPrompt } = assembleReleaseContext(input());
-    // The input type has no field for any of these, so this guards the shape of
-    // the module rather than a branch in it: the test fails the day someone
-    // widens the input and forgets what that means.
+    // The input type has no field for either, so this guards the shape of the
+    // module rather than a branch in it: the test fails the day someone widens
+    // the input and forgets what that means. Item descriptions ARE sent, on
+    // purpose, and are covered below.
     expect(systemPrompt).not.toMatch(/assignee|Assigned/i);
     expect(systemPrompt).not.toMatch(/planning notes/i);
+  });
+
+  describe("item descriptions", () => {
+    /** A release of `count` items, each with a description of `chars`. */
+    function sized(count: number, chars: number): ReleaseContextGroup[] {
+      return [
+        {
+          levelLabel: "Feature",
+          items: Array.from({ length: count }, (_, i) => ({
+            title: `Item ${i}`,
+            statusLabel: "Done",
+            description: `d${i} `.padEnd(chars, "x"),
+          })),
+        },
+      ];
+    }
+
+    it("sends them, which is the whole point of asking about a release", () => {
+      const { systemPrompt, descriptionsIncluded } = assembleReleaseContext(input());
+      expect(systemPrompt).toContain("Lets an admin connect an identity provider.");
+      expect(descriptionsIncluded).toBe(1);
+    });
+
+    it("counts an item with no description as undescribed rather than empty", () => {
+      // The SAML item in the fixture has none. Sending a blank line under it
+      // would tell the model there is nothing to say, which is not the same as
+      // nobody having written it up yet.
+      const { descriptionsIncluded } = assembleReleaseContext(input());
+      expect(descriptionsIncluded).toBe(1);
+    });
+
+    it("shares one budget evenly rather than first come first served", () => {
+      // Uneven shares read as a bug: whichever epic sorts first arrives whole
+      // and the rest are stubs, so the ordering looks like a judgement.
+      const assembled = assembleReleaseContext(input({ groups: sized(20, 4_000) }));
+      const list = assembled.fields.find((f) => f.label === "Work in this release")!;
+      const bodies = list.value
+        .split("\n")
+        .filter((l) => l.startsWith("  "))
+        .map((l) => l.length);
+      expect(new Set(bodies).size).toBe(1);
+      expect(assembled.descriptionsShortened).toBe(20);
+    });
+
+    it("never spends more than the per-item cap on a small release", () => {
+      // Three items must not get eight thousand characters each just because
+      // the budget divides that way: one rambling spec would crowd out the rest.
+      const assembled = assembleReleaseContext(input({ groups: sized(2, 20_000) }));
+      const list = assembled.fields.find((f) => f.label === "Work in this release")!;
+      for (const line of list.value.split("\n").filter((l) => l.startsWith("  "))) {
+        expect(line.length).toBeLessThanOrEqual(MAX_ITEM_DESCRIPTION_CHARS + 4);
+      }
+    });
+
+    it("drops every description rather than sending useless fragments", () => {
+      // Hundred-character stubs of three hundred specs are worse than none:
+      // each stops mid-sentence and the model writes confidently from them.
+      const assembled = assembleReleaseContext(input({ groups: sized(400, 3_000) }));
+      expect(assembled.descriptionsIncluded).toBe(0);
+      // The titles survive, because a title names work that shipped and losing
+      // one loses a change from the notes entirely.
+      expect(assembled.itemsIncluded).toBeGreaterThan(300);
+    });
+
+    it("keeps the whole list inside the budget", () => {
+      const { fields } = assembleReleaseContext(input({ groups: sized(30, 5_000) }));
+      const list = fields.find((f) => f.label === "Work in this release");
+      expect(list!.value.length).toBeLessThanOrEqual(ITEM_LIST_CHAR_LIMIT);
+    });
+
+    it("marks a shortened description so it is not read as complete", () => {
+      const { fields } = assembleReleaseContext(input({ groups: sized(20, 4_000) }));
+      const list = fields.find((f) => f.label === "Work in this release")!;
+      expect(list.value).toContain("…");
+    });
+  });
+
+  describe("sharing the description budget", () => {
+    it("gives everything to one item, up to the cap", () => {
+      expect(descriptionShare(1, 100_000)).toBe(MAX_ITEM_DESCRIPTION_CHARS);
+    });
+
+    it("divides evenly between many, less each one's overhead", () => {
+      // 1,000 each, minus the four characters an indented, ellipsised line
+      // costs beyond its own text.
+      expect(descriptionShare(10, 10_000)).toBe(996);
+    });
+
+    it("gives up rather than slicing too thin", () => {
+      expect(descriptionShare(1_000, 10_000)).toBe(0);
+    });
+
+    it("is zero when nothing has a description", () => {
+      expect(descriptionShare(0, 10_000)).toBe(0);
+    });
+
+    it("is zero when the titles already used the budget", () => {
+      // A negative remainder is a real case: titles are paid for first.
+      expect(descriptionShare(5, -100)).toBe(0);
+    });
   });
 });

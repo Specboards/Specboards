@@ -57,6 +57,8 @@ describe.skipIf(!DB_URL)("drafting a release's notes", () => {
   let emptyReleaseId: string;
   /** A portfolio release (no product) holding work from the private product. */
   let portfolioReleaseId: string;
+  /** The item in the product a plain member cannot see. */
+  let secretSpecId: string;
 
   let captured: CapturedRequest[] = [];
   let slow = false;
@@ -205,9 +207,15 @@ describe.skipIf(!DB_URL)("drafting a release's notes", () => {
     // Work in a product the viewer cannot see, scheduled into the portfolio
     // release. The whole point of the visibility assertion below.
     const secret = await store.createFeature(
-      { title: "Acquisition tooling", level: "epic", productId: closedProduct },
+      {
+        title: "Acquisition tooling",
+        level: "epic",
+        productId: closedProduct,
+        details: "Confidential: diligence workflow.",
+      },
       asOwner,
     );
+    secretSpecId = secret.specId;
     await store.updateFeature(
       secret.specId,
       { releaseId: portfolioReleaseId },
@@ -270,7 +278,7 @@ describe.skipIf(!DB_URL)("drafting a release's notes", () => {
     expect(row!.body).toBeNull();
   });
 
-  it("sends the release and its items, and nothing about anyone", async () => {
+  it("sends the release, its items and their descriptions", async () => {
     await connectStub();
     await ask(asOwner, releaseId, "Draft the notes.");
 
@@ -278,12 +286,47 @@ describe.skipIf(!DB_URL)("drafting a release's notes", () => {
     expect(system).toContain("Single sign-on");
     expect(system).toContain("SAML metadata upload");
     expect(system).toContain("Epics"); // the workspace's own level label
-    // Names and addresses are not ours to hand to a third-party endpoint.
+    // The descriptions, which is what customers asked for: from titles alone a
+    // model has to guess what "Single sign-on" meant for a customer, and
+    // guessing is how an invented release note gets written.
+    expect(system).toContain("SAML and OIDC.");
+  });
+
+  it("sends nothing about the people involved", async () => {
+    await connectStub();
+    await ask(asOwner, releaseId, "Draft the notes.");
+    const system = captured[0]!.messages.find((m) => m.role === "system")!.content;
+    // Names and addresses are not ours to hand to a third-party endpoint on our
+    // own initiative, and knowing who built something does not make the notes
+    // better. Still true now that the bodies go too: those are the customer's
+    // own text, and what is in them is their decision.
     expect(system).not.toContain("Ada");
     expect(system).not.toContain("@notes.test");
-    // Titles only in this slice: the descriptions are a later feature, with a
-    // budget and an opt-in of their own.
-    expect(system).not.toContain("SAML and OIDC.");
+  });
+
+  it("sends the internal planning notes to nobody", async () => {
+    await connectStub();
+    await sql`update releases set notes = 'Slipping because the vendor is late.'
+      where id = ${releaseId}`;
+    await ask(asOwner, releaseId, "Draft the notes.");
+    const system = captured[0]!.messages.find((m) => m.role === "system")!.content;
+    // `releases.notes` is where a team writes things they would never publish,
+    // and this is the one surface whose output is customer-facing.
+    expect(system).not.toContain("vendor is late");
+    await sql`update releases set notes = null where id = ${releaseId}`;
+  });
+
+  it("leaves out the body of an item the caller cannot read", async () => {
+    await connectStub();
+    // The private product's item is in the portfolio release. Its title is
+    // already scoped by `listFeatures`; this asserts the bulk body read applies
+    // the same decision, so the drafter is not a way to read spec content out
+    // of a product you cannot open.
+    const bodies = await (await import("./store")).getStore();
+    const map = await bodies.listFeatureBodies([secretSpecId], asViewer);
+    expect(map.has(secretSpecId)).toBe(false);
+    const asOwnerMap = await bodies.listFeatureBodies([secretSpecId], asOwner);
+    expect(asOwnerMap.get(secretSpecId)).toContain("Confidential");
   });
 
   it("asks the endpoint to stream, under a bounded length", async () => {
@@ -546,13 +589,22 @@ describe.skipIf(!DB_URL || !RUNTIME_URL)(
       );
       rtReleaseId = release.id;
 
-      for (const title of [
-        "Single sign-on with SAML",
-        "Bulk CSV export of reports",
-        "Dark mode",
+      for (const [title, details] of [
+        [
+          "Single sign-on with SAML",
+          "Admins upload their identity provider's metadata XML in Settings. After that everyone in the workspace signs in through their company login instead of a password, and leavers lose access when IT disables them centrally.",
+        ],
+        [
+          "Bulk CSV export of reports",
+          "A download button on any report writes every row to CSV, not just the page on screen. Previously people copied out of the table by hand and lost anything past the first fifty rows.",
+        ],
+        [
+          "Dark mode",
+          "Follows the operating system setting, with a manual override in the profile menu.",
+        ],
       ]) {
         const item = await store.createFeature(
-          { title, level: "epic", productId: rtProduct },
+          { title: title!, level: "epic", productId: rtProduct, details: details! },
           rtScope,
         );
         await store.updateFeature(item.specId, { releaseId: rtReleaseId }, rtScope);

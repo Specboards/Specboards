@@ -607,6 +607,38 @@ export class DbStore implements FeatureStore {
     });
   }
 
+  async listFeatureBodies(
+    specIds: readonly string[],
+    scope?: WorkspaceScope,
+  ): Promise<Map<string, string>> {
+    if (specIds.length === 0) return new Map();
+    return this.scoped(scope, async (tx) => {
+      const rows = await tx.query.features.findMany({
+        where: and(
+          eq(features.workspaceId, scope!.workspaceId),
+          inArray(features.specId, [...specIds]),
+        ),
+        with: { index: true },
+      });
+      const [access, productById] = await Promise.all([
+        this.accessIn(tx, scope!),
+        this.productVisibilityIn(tx, scope!.workspaceId),
+      ]);
+      const out = new Map<string, string>();
+      for (const row of rows) {
+        // The same visibility decision `getFeature` makes, made here too rather
+        // than trusted to the caller: this is a bulk read of item *content*, and
+        // a product the caller cannot open must not leak through it.
+        if (!canReadProductId(access, productById, row.productId)) continue;
+        // Spec-backed items read their body from spec_index; DB-native items
+        // keep it inline on features.details. Same resolution as getFeature.
+        const content = row.index?.content ?? row.details ?? "";
+        if (content) out.set(row.specId, content);
+      }
+      return out;
+    });
+  }
+
   async getFeature(
     specId: string,
     scope?: WorkspaceScope,
