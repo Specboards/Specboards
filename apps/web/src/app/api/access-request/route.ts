@@ -1,3 +1,4 @@
+import { recordAccessRequest } from "@/lib/access-requests-service";
 import { readJsonBody } from "@/lib/api/body";
 import { rateLimitKey } from "@/lib/client-ip";
 import { getDb } from "@/lib/db";
@@ -7,12 +8,18 @@ import { QUOTAS, enforceQuota } from "@/lib/rate-limit";
 export const dynamic = "force-dynamic";
 
 /**
- * Public "Request access" intake for the pre-v1 invite-only beta. The marketing
- * site (www.specboards.ai) posts here cross-origin; we email the review inbox
- * (contact@specboard.ai) and send the requester a confirmation, both via the
- * app's existing Postmark service (from no-reply@specboards.ai). No account or
- * DB row is created: the team approves by sending an org invitation, which is
- * what actually unlocks sign-up (see access-gate.ts).
+ * Public "Request access" intake for the pre-v1 beta. The marketing site
+ * (www.specboards.ai) posts here cross-origin; we record the request in
+ * `access_requests`, email the review inbox (contact@specboard.ai), and send
+ * the requester a confirmation, the mail going via the app's existing Postmark
+ * service (from no-reply@specboards.ai).
+ *
+ * The stored row is the admin portal's review queue. Approving it there emails
+ * the requester the sign-up code; that code, not any row here, is what unlocks
+ * sign-up (see access-gate.ts). No account is created at any point.
+ *
+ * Local file mode has no Postgres, so there is nowhere to persist and the
+ * endpoint stays email-only there.
  */
 
 /** Where review notifications land. Override with ACCESS_REQUEST_NOTIFY_EMAIL. */
@@ -169,6 +176,23 @@ export async function POST(req: Request) {
     );
   }
 
+  // Persist the row that becomes the portal's queue. A storage failure is
+  // logged and the request still goes out by email: the review inbox was the
+  // whole mechanism before this table existed and still reaches a human, so
+  // degrading to it beats failing the submission and telling a prospect to go
+  // away. The notification says which of the two happened, because a request
+  // that never made it into the queue is one the team has to work by hand.
+  const db = getDb();
+  let queued = false;
+  if (db) {
+    try {
+      await recordAccessRequest(db, { name, email, company, teamSize, useCase });
+      queued = true;
+    } catch (err) {
+      console.error("[access-request] persist failed", err);
+    }
+  }
+
   // Notify the review inbox with everything the team needs to decide.
   const notify = renderInfoEmail({
     intro: `New Specboards access request from ${name} (${company}).`,
@@ -179,8 +203,9 @@ export async function POST(req: Request) {
       ...(teamSize ? [{ label: "Team size", value: teamSize }] : []),
       { label: "Use case", value: useCase },
     ],
-    footer:
-      "Approve by sending an org invitation to this address from the app.",
+    footer: queued
+      ? "Review it at https://admin.specboards.ai/access-requests. Approving there emails the requester their sign-up code."
+      : "NOTE: this request could not be saved, so it is NOT in the admin portal queue. Follow it up from this email.",
   });
 
   // Confirm to the requester so they know it went through.
