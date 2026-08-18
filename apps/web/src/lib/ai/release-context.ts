@@ -1,0 +1,273 @@
+/**
+ * Turn a release into the context the assistant is given about it.
+ *
+ * The sibling of `item-context.ts`, and it keeps that module's central promise:
+ * the prompt is *derived from* {@link AssembledReleaseContext.fields}, and those
+ * same fields are what the UI discloses. There is no path that puts something in
+ * the request without putting it in the disclosure.
+ *
+ * ── Why this is a separate module and not a flag on item-context ────────────
+ * The two send different facts and ask for entirely different things, and the
+ * standing role is the clearest example: "you are helping someone think about
+ * one specific item" is exactly wrong here and cannot be undone downstream. A
+ * function whose role text, rules and field list all branch on a boolean is one
+ * nobody can read, and the first thing to rot in it would be the disclosure.
+ *
+ * ── What is deliberately NOT sent ───────────────────────────────────────────
+ * - **People.** No assignee, no author, no member list. Same reasoning as on an
+ *   item: names are personal data and knowing who built something does not make
+ *   the notes better.
+ * - **Item descriptions.** Titles, levels and statuses only, for now. Sending
+ *   the bodies of every item in a release is a real change in what leaves the
+ *   building and it gets its own feature, with its own budget and its own
+ *   opt-in, rather than arriving as a side effect of wanting better prose.
+ * - **Internal planning notes.** `releases.notes` is where a team writes things
+ *   like "slipping because the vendor is late". It is not customer-facing and
+ *   this is the one surface whose output is.
+ * - **Anything from settings.** No credentials, no repo contents, no URLs.
+ *
+ * This module is pure: no database, no network, no environment. That is what
+ * makes "here is exactly what leaves the building" a testable claim rather than
+ * a comment.
+ */
+
+import type { ContextField } from "./item-context";
+
+/** One item in the release, as the prompt names it. */
+export interface ReleaseContextItem {
+  title: string;
+  statusLabel: string;
+}
+
+/** One level's worth of the release's items, in hierarchy order. */
+export interface ReleaseContextGroup {
+  /** The workspace's own word for the level ("Epic"), not a key: levels are
+   * configurable and the notes should use the customer's language. */
+  levelLabel: string;
+  items: ReleaseContextItem[];
+}
+
+export interface ReleaseContextInput {
+  name: string;
+  /** The workflow's label for the release's state, for the same reason the
+   * level label is a label. */
+  statusLabel: string;
+  targetDate: string | null;
+  shippedDate: string | null;
+  /** The work scheduled into the release, grouped by level, top level first.
+   * Already filtered to what the caller may read. */
+  groups: ReleaseContextGroup[];
+}
+
+export interface AssembledReleaseContext {
+  /** The system turn. Built from `fields` and nothing else. */
+  systemPrompt: string;
+  /** Exactly what the prompt was built from, in the order it appears in it. */
+  fields: ContextField[];
+  /** How many items made it into the prompt. */
+  itemsIncluded: number;
+  /**
+   * How many were dropped for budget. Non-zero is worth saying out loud in the
+   * UI: notes drafted from two thirds of a release are missing a third of it,
+   * and that is not something a reader can infer from the prose.
+   */
+  itemsOmitted: number;
+}
+
+/**
+ * Character budget for the item list.
+ *
+ * Characters rather than tokens, for the reason `item-context.ts` gives: we
+ * support any endpoint a customer points us at, so counting tokens would mean
+ * shipping a tokenizer per model and still being wrong for the local runtime
+ * nobody told us about.
+ *
+ * Set well below the item-context body limit on purpose. This list is the whole
+ * prompt rather than one field in it, and the customer this has to work for is
+ * the one running a small model on their own hardware: a release with two
+ * hundred items must produce a request that endpoint can actually answer, not a
+ * 400 from a context window it blew through.
+ */
+export const ITEM_LIST_CHAR_LIMIT = 6_000;
+
+/**
+ * The assistant's standing instructions on a release.
+ *
+ * The audience is the difference that matters. Point the item-panel role at a
+ * release and it writes an internal changelog: accurate, addressed to the team,
+ * and useless to publish. Saying who is going to read this, in the first
+ * sentence, is what stops that.
+ */
+const ROLE = [
+  "You are a product assistant inside Specboards, a tool where teams plan",
+  "product work and ship it in releases. You are helping someone write the",
+  "customer-facing release notes for one release, described below.",
+  "",
+  "The audience is the people who use the product, not the team that built it.",
+  "They do not know your internal names for things, they did not read the",
+  "tickets, and they care what changed for them.",
+].join(" ");
+
+/**
+ * What the model is told about its own reach.
+ *
+ * Stated as plainly as on an item, and for the same reason: a model with no rule
+ * about writing will happily answer "I have published the notes for you", and
+ * the person will believe it.
+ */
+const RULES = [
+  "You cannot change anything. You have no tools and no write access. What you",
+  "write appears in an editor for a person to read, change, and save themselves.",
+  "Never claim to have saved or published anything.",
+].join(" ");
+
+/**
+ * The drafting task.
+ *
+ * A constant here, and a built-in skill a team can override in the feature after
+ * this one. Written the way `skills.ts` writes its built-ins: short sentences, no
+ * nested conditions, and the rule that matters most last, where a small model is
+ * least likely to lose it.
+ */
+const DRAFT_TASK = [
+  "Your task right now is to draft this release's notes in Markdown.",
+  "",
+  "Write one line per change, in plain language, about what it means for the",
+  "person using the product. Group related lines under short headings. The",
+  "items below are titles written in the team's shorthand, so turn each one",
+  "into a sentence rather than repeating it.",
+  "",
+  "Rules:",
+  "- Write about the items below and nothing else. Do not add sections the list",
+  "  does not support: no dates, no support contacts, no roadmap, no thanks.",
+  "- Do not repeat the release's name, status or dates back. Start at the",
+  "  changes.",
+  "- Each item shows its status. Only describe finished work as shipped. Put",
+  "  anything unfinished under \"Still in progress\", or leave it out.",
+  "- Leave out changes a customer cannot see: refactors, tests, tooling,",
+  "  dependency bumps.",
+  "- Where a title is too vague to write from, list it under \"Needs a",
+  "  description\" rather than guessing what it did.",
+  "",
+  "Never invent a change that is not in the list below. An invented line is",
+  "worse than a missing one, because somebody will publish it.",
+].join("\n");
+
+/**
+ * Assemble the context for one release.
+ *
+ * Absent values are omitted rather than sent as "none", for the reason the item
+ * assembler gives: a field saying "Shipped: none" is noise in the prompt and,
+ * worse, a line in the disclosure claiming we sent something we did not.
+ */
+export function assembleReleaseContext(
+  input: ReleaseContextInput,
+): AssembledReleaseContext {
+  const fields: ContextField[] = [
+    { label: "Release", value: input.name.trim() },
+    { label: "Status", value: input.statusLabel.trim() },
+  ];
+
+  if (input.shippedDate) {
+    fields.push({ label: "Shipped", value: input.shippedDate });
+  } else if (input.targetDate) {
+    fields.push({ label: "Target date", value: input.targetDate });
+  }
+
+  const { value, included, omitted } = renderItems(input.groups);
+  if (included > 0) {
+    fields.push({
+      label: "Work in this release",
+      value,
+      truncated: omitted > 0,
+    });
+  }
+
+  return {
+    systemPrompt: renderPrompt(fields),
+    fields,
+    itemsIncluded: included,
+    itemsOmitted: omitted,
+  };
+}
+
+/**
+ * The item list, cut to fit the budget.
+ *
+ * Cut by whole items rather than by characters. A list that stops in the middle
+ * of a title invites the model to complete it, and a completed title is an
+ * invented feature: precisely the failure the task instructions above spend
+ * their last line on.
+ *
+ * The cut runs level by level in hierarchy order, so what survives is the top of
+ * the release rather than an arbitrary slice of it. A release too big to send
+ * whole is better described by its initiatives than by the first eighty work
+ * items in alphabetical order.
+ */
+function renderItems(groups: readonly ReleaseContextGroup[]): {
+  value: string;
+  included: number;
+  omitted: number;
+} {
+  const lines: string[] = [];
+  let used = 0;
+  let included = 0;
+  let omitted = 0;
+  let full = false;
+
+  for (const group of groups) {
+    const heading = `${group.levelLabel}:`;
+    let headingWritten = false;
+
+    for (const item of group.items) {
+      if (full) {
+        omitted += 1;
+        continue;
+      }
+      const line = `- ${item.title.trim()} (${item.statusLabel.trim()})`;
+      const cost = line.length + 1 + (headingWritten ? 0 : heading.length + 1);
+      if (used + cost > ITEM_LIST_CHAR_LIMIT) {
+        // Everything after this is dropped, including the rest of this group.
+        // Continuing to look for a short enough item would produce a list whose
+        // gaps are invisible: the reader sees a plausible release with some of
+        // its middle missing.
+        full = true;
+        omitted += 1;
+        continue;
+      }
+      if (!headingWritten) {
+        lines.push(heading);
+        headingWritten = true;
+      }
+      lines.push(line);
+      used += cost;
+      included += 1;
+    }
+  }
+
+  return { value: lines.join("\n"), included, omitted };
+}
+
+/**
+ * Render the fields into the system turn.
+ *
+ * Truncation is announced in the prompt itself, not only in the UI. A model
+ * given two thirds of a release with no indication writes confidently about a
+ * release it has not seen all of, and the person reading that draft has no way
+ * to tell.
+ */
+function renderPrompt(fields: readonly ContextField[]): string {
+  const rendered = fields.map((f) => {
+    const note = f.truncated
+      ? " (shortened; you have not been shown every item in this release)"
+      : "";
+    return f.value.includes("\n")
+      ? `${f.label}${note}:\n${f.value}`
+      : `${f.label}${note}: ${f.value}`;
+  });
+  // Role, then what you may and may not do, then the job, then the thing
+  // itself. The same order as the item prompt, and for the same reason: the
+  // rule that must survive is the one saying nothing here is saved, and
+  // instructions that follow a long document are the first a small model loses.
+  return `${ROLE}\n\n${RULES}\n\n${DRAFT_TASK}\n\n---\n\n${rendered.join("\n\n")}`;
+}

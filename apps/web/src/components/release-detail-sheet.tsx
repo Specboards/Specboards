@@ -27,6 +27,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   AuthRequiredError,
   deleteRelease,
+  draftReleaseNotes,
   getReleaseItems,
   updateRelease,
 } from "@/lib/api-client";
@@ -332,7 +333,12 @@ export function ReleaseDetailSheet({
                 )}
               </div>
 
-              <ReleaseNotesSection release={current} canEdit onCommit={commit} />
+              <ReleaseNotesSection
+                release={current}
+                canEdit
+                onCommit={commit}
+                onAuthError={handleAuthError}
+              />
 
               <ReleaseCustomFields
                 release={current}
@@ -603,16 +609,87 @@ function ReleaseNotesSection({
   release,
   canEdit,
   onCommit,
+  onAuthError,
 }: {
   release: ReleaseRecord;
   canEdit: boolean;
   onCommit: (patch: ReleasePatch) => void;
+  /** Returns true when the error was an expired session and has been handled
+   * (by redirecting to sign-in), so the caller stops reporting it. */
+  onAuthError?: (err: unknown) => boolean;
 }) {
   // Which editor is open, or null when showing the collapsed/read view.
   const [draftKind, setDraftKind] = useState<"in_app" | "external" | null>(null);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   const urlRef = useRef<HTMLInputElement>(null);
   const mode = release.releaseNotesMode;
+
+  /**
+   * Whether the notes body has anything in it.
+   *
+   * Mirrored in state because the textarea is uncontrolled, and because it
+   * decides whether the assistant is offered at all: drafting appends nothing
+   * and replaces nothing, so it is only offered into an empty editor. Editing
+   * notes that already exist is a reviewable change to a document somebody
+   * wrote, which is a different feature with a diff in it.
+   */
+  const [hasBody, setHasBody] = useState(
+    Boolean(release.releaseNotesBody?.trim()),
+  );
+  const [drafting, setDrafting] = useState(false);
+  const [draftNote, setDraftNote] = useState<string | null>(null);
+  /** The running draft's abort handle. A ref rather than state because it is a
+   * handle to cancel with, not something the view renders. */
+  const draftAbort = useRef<AbortController | null>(null);
+
+  // Closing the sheet mid-draft stops it. Without this the stream keeps
+  // producing tokens into a textarea that no longer exists, and the customer is
+  // still billed for every one of them.
+  useEffect(() => () => draftAbort.current?.abort(), []);
+
+  async function draft() {
+    const controller = new AbortController();
+    draftAbort.current = controller;
+    setDrafting(true);
+    setDraftNote(null);
+    try {
+      const result = await draftReleaseNotes(release.id, {
+        signal: controller.signal,
+        onDelta: (text) => {
+          const field = bodyRef.current;
+          if (!field) return;
+          field.value += text;
+          // Follow the text as it arrives. Without this the draft grows below
+          // the fold and the editor looks like it is doing nothing.
+          field.scrollTop = field.scrollHeight;
+          setHasBody(true);
+        },
+      });
+      if (result.ok) {
+        if (result.itemsOmitted > 0) {
+          // Said plainly rather than left for the reader to notice. Notes
+          // drafted from part of a release are missing the rest, and nothing in
+          // the prose itself would ever reveal that.
+          setDraftNote(
+            `Drafted from ${result.itemsIncluded} items. ${result.itemsOmitted} more were left out: this release is too big to send in one request.`,
+          );
+        }
+      } else if ("cancelled" in result) {
+        // Stopping is a decision, not a failure. What arrived stays put.
+        setDraftNote(null);
+      } else {
+        setDraftNote(result.error.message);
+      }
+    } catch (err) {
+      if (onAuthError?.(err)) return;
+      setDraftNote(
+        err instanceof Error ? err.message : "Could not draft release notes.",
+      );
+    } finally {
+      draftAbort.current = null;
+      setDrafting(false);
+    }
+  }
 
   function saveInApp() {
     const value = bodyRef.current?.value.trim() ?? "";
@@ -686,13 +763,45 @@ function ReleaseNotesSection({
         </div>
 
         {draftKind === "in_app" ? (
-          <Textarea
-            ref={bodyRef}
-            autoFocus
-            defaultValue={release.releaseNotesBody ?? ""}
-            rows={8}
-            placeholder="Customer-facing release notes (Markdown)."
-          />
+          <>
+            <Textarea
+              ref={bodyRef}
+              autoFocus
+              defaultValue={release.releaseNotesBody ?? ""}
+              rows={8}
+              placeholder="Customer-facing release notes (Markdown)."
+              // Read-only only while text is streaming in. Typing into a field
+              // that is being appended to puts the caret somewhere the next
+              // fragment then overwrites.
+              readOnly={drafting}
+              onChange={(e) => setHasBody(Boolean(e.target.value.trim()))}
+            />
+            {drafting ? (
+              <div className="flex items-center gap-2">
+                <span className="text-2xs text-muted-foreground">
+                  Drafting from the work in this release…
+                </span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => draftAbort.current?.abort()}
+                >
+                  Stop
+                </Button>
+              </div>
+            ) : !hasBody ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void draft()}
+              >
+                Draft with the assistant
+              </Button>
+            ) : null}
+            {draftNote ? (
+              <p className="text-2xs text-muted-foreground">{draftNote}</p>
+            ) : null}
+          </>
         ) : (
           <Input
             ref={urlRef}
@@ -706,6 +815,7 @@ function ReleaseNotesSection({
         <div className="flex items-center gap-2">
           <Button
             size="sm"
+            disabled={drafting}
             onClick={draftKind === "in_app" ? saveInApp : saveExternal}
           >
             Save
@@ -713,7 +823,13 @@ function ReleaseNotesSection({
           <Button
             size="sm"
             variant="outline"
-            onClick={() => setDraftKind(null)}
+            onClick={() => {
+              // Leaving the editor stops the draft. Otherwise it keeps
+              // streaming into a textarea nobody can see, and the customer is
+              // still paying for the tokens.
+              draftAbort.current?.abort();
+              setDraftKind(null);
+            }}
           >
             Cancel
           </Button>

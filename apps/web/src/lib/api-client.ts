@@ -631,6 +631,51 @@ export async function resolveProposal(
   return payload;
 }
 
+/**
+ * Read an NDJSON body, handing each parsed line to `onEvent`.
+ *
+ * Shared by every streaming call rather than written out per endpoint, because
+ * the part that is easy to get subtly wrong is the same everywhere: a chunk
+ * boundary lands mid-line far more often than it looks like it should, and a
+ * reader that parses whatever a chunk happened to contain works perfectly until
+ * the first answer long enough to be split.
+ *
+ * A line that will not parse is dropped rather than thrown on. The alternative
+ * is failing an answer that is otherwise arriving fine, which trades a missing
+ * fragment for a lost draft.
+ */
+async function readNdjson<T>(
+  body: ReadableStream<Uint8Array>,
+  onEvent: (event: T) => void,
+): Promise<void> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  const consume = (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    try {
+      onEvent(JSON.parse(trimmed) as T);
+    } catch {
+      // Unparseable line; see above.
+    }
+  };
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    // Everything up to the last newline is complete; the tail may be a
+    // fragment of a line that has not finished arriving.
+    const lastBreak = buffer.lastIndexOf("\n");
+    if (lastBreak === -1) continue;
+    for (const line of buffer.slice(0, lastBreak).split("\n")) consume(line);
+    buffer = buffer.slice(lastBreak + 1);
+  }
+  consume(buffer);
+}
+
 /** One line of the assistant's NDJSON stream, as the browser sees it. */
 export type AssistantStreamEvent =
   | { kind: "delta"; text: string }
@@ -692,43 +737,17 @@ export async function askAssistant(
     throw new Error(body?.error ?? `The assistant failed (${res.status}).`);
   }
 
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
   let outcome:
     | { ok: true; turns: AssistantMessageView[] }
     | { ok: false; error: { kind: string; message: string } }
     | null = null;
 
-  const consume = (line: string) => {
-    const trimmed = line.trim();
-    if (!trimmed) return;
-    let event: AssistantStreamEvent;
-    try {
-      event = JSON.parse(trimmed) as AssistantStreamEvent;
-    } catch {
-      // A line we cannot parse is dropped rather than failing an answer that
-      // is otherwise arriving fine.
-      return;
-    }
-    if (event.kind === "delta") opts.onDelta?.(event.text);
-    else if (event.kind === "done") outcome = { ok: true, turns: event.turns };
-    else if (event.kind === "error") outcome = { ok: false, error: event.error };
-  };
-
   try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      // Everything up to the last newline is complete; the tail may be a
-      // fragment of a line that has not finished arriving.
-      const lastBreak = buffer.lastIndexOf("\n");
-      if (lastBreak === -1) continue;
-      for (const line of buffer.slice(0, lastBreak).split("\n")) consume(line);
-      buffer = buffer.slice(lastBreak + 1);
-    }
-    consume(buffer);
+    await readNdjson<AssistantStreamEvent>(res.body, (event) => {
+      if (event.kind === "delta") opts.onDelta?.(event.text);
+      else if (event.kind === "done") outcome = { ok: true, turns: event.turns };
+      else if (event.kind === "error") outcome = { ok: false, error: event.error };
+    });
   } catch (err) {
     if (opts.signal?.aborted) return { ok: false, cancelled: true };
     throw err;
@@ -741,6 +760,86 @@ export async function askAssistant(
       error: {
         kind: "unknown",
         message: "The answer stopped before it finished.",
+      },
+    }
+  );
+}
+
+/** One line of the release-notes draft stream, as the browser sees it. */
+export type DraftStreamEvent =
+  | { kind: "delta"; text: string }
+  | { kind: "done"; itemsIncluded: number; itemsOmitted: number }
+  | { kind: "error"; error: { kind: string; message: string } };
+
+/**
+ * Draft a release's customer-facing notes, rendering them as they arrive.
+ *
+ * `onDelta` is called with each fragment. The resolved value is the outcome: a
+ * summary of what the draft was built from on success, an error to render on
+ * failure, or `cancelled` when the caller stopped it, which is not a failure and
+ * must not be reported as one.
+ *
+ * Nothing is saved by this call. What arrives lands in the editor, and the
+ * person saves it themselves through the ordinary release write path.
+ */
+export async function draftReleaseNotes(
+  releaseId: string,
+  opts: { onDelta?: (text: string) => void; signal?: AbortSignal } = {},
+): Promise<
+  | { ok: true; itemsIncluded: number; itemsOmitted: number }
+  | { ok: false; error: { kind: string; message: string } }
+  | { ok: false; cancelled: true }
+> {
+  let res: Response;
+  try {
+    res = await apiFetch(
+      `/api/v1/assistant/releases/${encodeURIComponent(releaseId)}`,
+      {
+        method: "POST",
+        ...(opts.signal ? { signal: opts.signal } : {}),
+      },
+    );
+  } catch (err) {
+    if (opts.signal?.aborted) return { ok: false, cancelled: true };
+    throw err;
+  }
+  if (res.status === 401) throw new AuthRequiredError();
+
+  // Our own refusals (unknown release, nothing scheduled, no permission) are
+  // decided before any streaming starts and arrive as ordinary JSON.
+  if (!res.ok || !res.body) {
+    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(body?.error ?? `The draft failed (${res.status}).`);
+  }
+
+  let outcome:
+    | { ok: true; itemsIncluded: number; itemsOmitted: number }
+    | { ok: false; error: { kind: string; message: string } }
+    | null = null;
+
+  try {
+    await readNdjson<DraftStreamEvent>(res.body, (event) => {
+      if (event.kind === "delta") opts.onDelta?.(event.text);
+      else if (event.kind === "done") {
+        outcome = {
+          ok: true,
+          itemsIncluded: event.itemsIncluded,
+          itemsOmitted: event.itemsOmitted,
+        };
+      } else if (event.kind === "error") outcome = { ok: false, error: event.error };
+    });
+  } catch (err) {
+    if (opts.signal?.aborted) return { ok: false, cancelled: true };
+    throw err;
+  }
+
+  if (opts.signal?.aborted) return { ok: false, cancelled: true };
+  return (
+    outcome ?? {
+      ok: false,
+      error: {
+        kind: "unknown",
+        message: "The draft stopped before it finished.",
       },
     }
   );
