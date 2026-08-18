@@ -14,8 +14,14 @@ import {
   type AssistantMessageView,
 } from "@/lib/assistant-service";
 import { patchFeature } from "@/lib/features-service";
+import { canEditRelease } from "@/lib/release-notes-service";
+import { getStore } from "@/lib/store";
 import { updateSpecContent } from "@/lib/spec-content";
-import type { FeatureDetail, WorkspaceScope } from "@/lib/store/types";
+import type {
+  FeatureDetail,
+  ReleaseRecord,
+  WorkspaceScope,
+} from "@/lib/store/types";
 
 /**
  * Accepting or rejecting an edit the assistant proposed.
@@ -178,7 +184,7 @@ async function claim(
 }
 
 /** Put a claim back when the write it was taken for did not happen. */
-async function release(db: Database, messageId: string): Promise<void> {
+async function releaseClaim(db: Database, messageId: string): Promise<void> {
   await db
     .update(assistantMessages)
     .set({
@@ -245,6 +251,154 @@ async function settled(
       resolvedAt: resolvedAt.toISOString(),
       commitSha,
     },
+  };
+}
+
+/**
+ * The same load, for a proposal against a release's notes.
+ *
+ * A sibling rather than a branch, because the two differ in every line that
+ * matters: which subject is resolved, which permission decides it, and which
+ * column the message hangs off. What they share is everything after the
+ * decision, and that is shared for real: {@link claim}, {@link release} and
+ * {@link settled} take a message id and know nothing about subjects.
+ */
+async function loadReleaseProposal(
+  db: Database,
+  scope: WorkspaceScope,
+  releaseId: string,
+  messageId: string,
+): Promise<{ release: ReleaseRecord; proposed: string }> {
+  const store = await getStore();
+  const releases = await store.listReleases(scope);
+  const release = releases.find((r) => r.id === releaseId);
+  if (!release) throw new ProposalNotFoundError("That release is no longer here.");
+
+  if (!(await canEditRelease(scope, release.productId))) {
+    throw new ProposalForbiddenError(
+      "Your role does not permit changing this release.",
+    );
+  }
+
+  const [row] = await db
+    .select({
+      content: assistantMessages.content,
+      role: assistantMessages.role,
+      outcome: assistantMessages.proposalOutcome,
+      resolvedBy: assistantMessages.proposalResolvedBy,
+    })
+    .from(assistantMessages)
+    .where(
+      and(
+        eq(assistantMessages.id, messageId),
+        eq(assistantMessages.workspaceId, scope.workspaceId),
+        // By the release the URL named as well as by id, so a message id from
+        // another thread cannot be resolved through a release the caller
+        // happens to have write access to.
+        eq(assistantMessages.releaseId, releaseId),
+      ),
+    )
+    .limit(1);
+  if (!row || row.role !== "assistant") {
+    throw new ProposalNotFoundError("That proposal is no longer here.");
+  }
+  if (row.outcome) {
+    const [who] = row.resolvedBy
+      ? await db
+          .select({ name: users.name })
+          .from(users)
+          .where(eq(users.id, row.resolvedBy))
+          .limit(1)
+      : [];
+    throw new ProposalSettledError(
+      `${who?.name ?? "Someone"} already ${row.outcome} this proposal.`,
+    );
+  }
+
+  const { proposal } = parseAnswer(row.content);
+  if (!proposal) {
+    throw new ProposalInvalidError("That message does not contain a proposal.");
+  }
+  return { release, proposed: proposal };
+}
+
+/** Turn down a proposed change to a release's notes. Nothing is written. */
+export async function rejectReleaseProposal(
+  db: Database,
+  scope: WorkspaceScope,
+  releaseId: string,
+  messageId: string,
+): Promise<ProposalResult> {
+  const { release } = await loadReleaseProposal(db, scope, releaseId, messageId);
+  const { resolvedAt } = await claim(db, scope, messageId, "rejected");
+  return {
+    message: await settled(db, scope, messageId, "rejected", resolvedAt, null),
+    body: release.releaseNotesBody ?? "",
+  };
+}
+
+/**
+ * Apply a proposal to a release's notes.
+ *
+ * The write is `updateRelease`, which is the same call the editor makes when a
+ * person types the notes themselves: same authorization, same validation, same
+ * audit. There is no faster route from a model's output to the column, for the
+ * reason this module opens with.
+ *
+ * ── What is not guarded ─────────────────────────────────────────────────────
+ * There is no conflict check against the notes as they stand now. A spec is
+ * guarded by its blob sha, because git gives us one and a spec is routinely
+ * edited by several people through several tools. A release's notes are a
+ * column edited in one place by whoever is looking at the flyout, and there is
+ * no version to guard against without inventing one. The exposure is the same
+ * as a DB-native card's description, which has always taken the last write, and
+ * the reviewer is looking at the diff when they click. Worth revisiting if
+ * notes ever become something two people write at once.
+ *
+ * Accepting also switches the notes on. A workspace with `releaseNotesMode` of
+ * `none` that accepts a draft plainly means to have notes now, and leaving the
+ * mode alone would apply the text and show nothing, which reads as the accept
+ * having failed.
+ */
+export async function acceptReleaseProposal(
+  db: Database,
+  scope: WorkspaceScope,
+  releaseId: string,
+  messageId: string,
+  opts: { body?: string } = {},
+): Promise<ProposalResult> {
+  const { release, proposed } = await loadReleaseProposal(
+    db,
+    scope,
+    releaseId,
+    messageId,
+  );
+  const body = (opts.body ?? proposed).trim();
+  if (!body) {
+    throw new ProposalInvalidError(
+      "An accepted proposal cannot be empty. Edit the notes directly to clear them.",
+    );
+  }
+
+  const { resolvedAt } = await claim(db, scope, messageId, "accepted");
+
+  const store = await getStore();
+  try {
+    await store.updateRelease(
+      release.id,
+      { releaseNotesMode: "in_app", releaseNotesBody: body },
+      scope,
+    );
+  } catch (err) {
+    // A refusal at the store leaves a proposal somebody can still act on,
+    // rather than one marked accepted with nothing to show for it.
+    await releaseClaim(db, messageId);
+    throw err;
+  }
+
+  return {
+    message: await settled(db, scope, messageId, "accepted", resolvedAt, null),
+    body,
   };
 }
 
@@ -316,7 +470,7 @@ export async function acceptProposal(
     try {
       await patchFeature(specId, { details: body }, scope);
     } catch (err) {
-      await release(db, messageId);
+      await releaseClaim(db, messageId);
       throw err;
     }
     return {
@@ -341,7 +495,7 @@ export async function acceptProposal(
   } catch (err) {
     // Most importantly a conflict: the reviewer has to be able to come back to
     // this proposal once the collision is sorted out.
-    await release(db, messageId);
+    await releaseClaim(db, messageId);
     throw err;
   }
 

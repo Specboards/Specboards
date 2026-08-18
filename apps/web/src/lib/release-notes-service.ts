@@ -1,13 +1,27 @@
 import { canWriteProduct } from "@specboards/core";
 import type { Database } from "@specboards/db";
 
+import { estimatePromptTokens } from "@/lib/ai/estimate";
+import type { ContextField } from "@/lib/ai/item-context";
 import {
   assembleReleaseContext,
   type AssembledReleaseContext,
 } from "@/lib/ai/release-context";
-import type { ModelErrorKind, ModelMessage } from "@/lib/ai/provider";
+import { parseAnswer } from "@/lib/ai/proposals";
+import { skillsForSurface, type Skill } from "@/lib/ai/skills";
+import type { ModelErrorKind, ModelMessage, TokenUsage } from "@/lib/ai/provider";
+import {
+  activeSkill,
+  isModelConnected,
+  persistTurns,
+  readThread,
+  HISTORY_TURN_LIMIT,
+  MAX_TURN_CHARS,
+  type AssistantMessageView,
+} from "@/lib/assistant-service";
 import { statusLabel } from "@/lib/feature-helpers";
 import { streamWithWorkspaceModel } from "@/lib/model-provider-service";
+import { findEnabledSkill, listSkills } from "@/lib/skills-service";
 import { groupReleaseItemsByLevel, type ReleaseItem } from "@/lib/release-items";
 import { releaseStatusLabel } from "@/lib/release-status";
 import { resolveWorkflowForProducts } from "@/lib/repo-config";
@@ -15,28 +29,39 @@ import { getStore } from "@/lib/store";
 import type { WorkspaceScope } from "@/lib/store/types";
 
 /**
- * Drafting a release's customer-facing notes from the work scheduled into it.
+ * The assistant conversation about a release, and the notes it can propose.
  *
- * ── Why this writes nothing ─────────────────────────────────────────────────
- * The draft is streamed to the browser and lands in the notes editor exactly
- * where a person's own typing would. Nothing is persisted here, and there is no
- * code path from this module to a write. A generated document that saves itself
- * into a customer-facing field is the one place this product must not be clever:
- * the failure mode is not a bad paragraph, it is a bad paragraph nobody read
- * before it was published.
+ * The sibling of `assistant-service.ts`, which does the same job for an item.
+ * Everything that is genuinely the same is shared rather than copied: the thread
+ * is read and written by that module (see its `ThreadSubject`), the streaming
+ * protocol, the history cap, the skill mechanism, the proposal parser and the
+ * spend accounting are all the ones the item panel already uses. What lives here
+ * is what is actually different: which subject is resolved, which permission
+ * decides it, and what a proposal is a proposal *to*.
  *
- * That is also why there is no thread. A one-shot draft has nothing to persist,
- * so it needs no schema of its own, and this whole feature ships without a
- * migration. The conversation about a release is the next feature, and it is
- * deliberately the one that pays the migration cost.
+ * ── Why nothing here writes to the release ──────────────────────────────────
+ * This module has no path that changes a release. An answer may *contain* a
+ * proposed set of notes, which is inert text until a person accepts it, and
+ * applying one lives in `assistant-proposals.ts` beside the item equivalent,
+ * going through the same `updateRelease` a person typing into the editor uses.
+ * There is no code path from a model's output to a write. That matters more here
+ * than on an item: these notes are the customer-facing document, and the failure
+ * mode is not a bad paragraph but a bad paragraph nobody read before it shipped.
  *
  * ── Where authorization comes from ──────────────────────────────────────────
  * The release is resolved through the store, which applies product visibility,
  * and the item list is `listFeatures(scope)` filtered to the release, so a
  * portfolio release spanning products a caller cannot open contributes nothing
- * from those products. The list drafted from is therefore the same list the
- * flyout shows that person, which is worth more than it sounds: the disclosure
- * and the screen cannot disagree.
+ * from those products. The list the assistant is given is therefore the same
+ * list the flyout shows that person, which is worth more than it sounds: the
+ * disclosure and the screen cannot disagree.
+ *
+ * ── Why asking needs write access, unlike an item ───────────────────────────
+ * On an item, anyone who can read it can ask about it: a question is its own
+ * end, and understanding a definition is ordinary product work. A release
+ * assistant exists to produce one document, and someone who cannot save that
+ * document is spending the workspace's money at their provider on something with
+ * nowhere to go. So this one is gated on being able to write the release.
  */
 
 /** The release does not exist, or the caller cannot see it. Routes map to 404. */
@@ -46,42 +71,36 @@ export class ReleaseNotesInputError extends Error {}
 /** The caller may read this release but not change it. Routes map to 403. */
 export class ReleaseNotesForbiddenError extends Error {}
 
-/** Everything the draft endpoint can fail with, as the browser sees it. */
-export type DraftErrorKind = ModelErrorKind | "not_configured" | "capped";
 
-/** What the caller of a draft observes, in order. */
-export type DraftEvent =
-  /** A fragment of the draft, to append to what is in the editor. */
+/** Everything a turn can fail with, from the panel's point of view. */
+export type ReleaseAssistantErrorKind = ModelErrorKind | "not_configured" | "capped";
+
+/** What the caller of a turn observes, in order. */
+export type ReleaseAssistantEvent =
   | { kind: "delta"; text: string }
-  /** The draft finished. `context` is what was sent, for the disclosure. */
+  | { kind: "done"; turns: AssistantMessageView[] }
   | {
-      kind: "done";
-      itemsIncluded: number;
-      itemsOmitted: number;
-    }
-  | { kind: "error"; error: { kind: DraftErrorKind; message: string } };
+      kind: "error";
+      error: { kind: ReleaseAssistantErrorKind; message: string };
+    };
 
 /**
- * Upper bound on the generated draft.
+ * Upper bound on a generated answer.
  *
  * Release notes that run past this are not release notes, and the bound is what
  * turns "the model decided to write an essay" from a surprise on the invoice
- * into a draft that stops. It also feeds the spend check: the cap is asked about
+ * into an answer that stops. It also feeds the spend check, which is asked about
  * prompt plus this, so a call is admitted on what it could cost rather than on
  * what it probably will.
  */
-export const DRAFT_MAX_TOKENS = 2_000;
+export const ANSWER_MAX_TOKENS = 2_000;
 
 /**
  * Whether this scope may change this release.
  *
- * The same shape of check the release write path makes, asked early, and for a
- * reason beyond tidiness: drafting spends the workspace's money at their
- * provider. Offering it to somebody who could not save the result would be
- * spending on a draft with nowhere to go.
- *
- * Advisory, like `canEditItem`: it decides what to offer, and the release
- * mutation still decides what happens.
+ * Advisory in the same way `canEditItem` is: it decides what to offer and what
+ * to tell the model, and `updateRelease` still decides what actually happens. A
+ * disagreement costs a refused click, not a bad write.
  */
 export async function canEditRelease(
   scope: WorkspaceScope,
@@ -90,26 +109,16 @@ export async function canEditRelease(
   const store = await getStore();
   const access = await store.getProductAccess(scope);
   // A portfolio release belongs to no product, so there is no per-product grant
-  // that could authorize it; org admin is the only answer. Same rule as an item
-  // with no product.
+  // that could authorize it; org admin is the only answer. The same rule an
+  // item with no product follows.
   return productId === null
     ? access.isOrgAdmin
     : access.isOrgAdmin || canWriteProduct(access, productId);
 }
 
-/**
- * Everything the prompt is built from, resolved and assembled.
- *
- * Separate from the streaming below so the disclosure can be read without
- * spending anything: "here is what asking would send" is a question the UI needs
- * to answer before, not after.
- */
-export async function buildReleaseContext(
-  scope: WorkspaceScope,
-  releaseId: string,
-): Promise<AssembledReleaseContext> {
+/** The release, checked for visibility and for write access. */
+async function resolveRelease(scope: WorkspaceScope, releaseId: string) {
   const store = await getStore();
-
   // Resolved through the store's own listing, so an id the caller cannot see is
   // indistinguishable from one that does not exist.
   const releases = await store.listReleases(scope);
@@ -121,6 +130,23 @@ export async function buildReleaseContext(
       "You do not have permission to write this release's notes.",
     );
   }
+  return release;
+}
+
+/**
+ * Everything the prompt is built from, resolved and assembled.
+ *
+ * Separate from the streaming below so the disclosure can be read without
+ * spending anything: "here is what asking would send" is a question the panel
+ * needs to answer before, not after.
+ */
+export async function buildReleaseContext(
+  scope: WorkspaceScope,
+  releaseId: string,
+  skill: Skill | null = null,
+): Promise<AssembledReleaseContext> {
+  const release = await resolveRelease(scope, releaseId);
+  const store = await getStore();
 
   const [features, levels] = await Promise.all([
     store.listFeatures(scope),
@@ -137,16 +163,6 @@ export async function buildReleaseContext(
       productId: f.productId,
     }));
 
-  if (items.length === 0) {
-    // Refused here rather than sent, because the honest answer costs nothing.
-    // Asking a model to observe that a release is empty spends the customer's
-    // money to be told something we already know, and invites it to fill the
-    // silence.
-    throw new ReleaseNotesInputError(
-      "Nothing is scheduled into this release yet, so there is nothing to write notes from.",
-    );
-  }
-
   // A portfolio release can hold work from several products, each of which may
   // define its own stages. Resolving the union means a status reads as its own
   // product's word for it rather than as whatever the workspace default calls
@@ -156,51 +172,189 @@ export async function buildReleaseContext(
   ];
   const workflow = await resolveWorkflowForProducts(scope, productIds);
 
-  return assembleReleaseContext({
-    name: release.name,
-    statusLabel: releaseStatusLabel(release.status),
-    targetDate: release.targetDate,
-    shippedDate: release.shippedDate,
-    groups: groupReleaseItemsByLevel(items, levels).map((group) => ({
-      levelLabel: group.levelLabel,
-      items: group.items.map((item) => ({
-        title: item.title,
-        statusLabel: statusLabel(item.status, workflow),
+  return assembleReleaseContext(
+    {
+      name: release.name,
+      statusLabel: releaseStatusLabel(release.status),
+      targetDate: release.targetDate,
+      shippedDate: release.shippedDate,
+      groups: groupReleaseItemsByLevel(items, levels).map((group) => ({
+        levelLabel: group.levelLabel,
+        items: group.items.map((item) => ({
+          title: item.title,
+          statusLabel: statusLabel(item.status, workflow),
+        })),
       })),
-    })),
-  });
+      notesBody: release.releaseNotesBody ?? "",
+      // Resolved above: nobody reaches here without it.
+      canEdit: true,
+    },
+    skill,
+  );
 }
 
-/**
- * Begin a draft: authorize, assemble, and return the stream of what happens.
- *
- * Eager setup, lazy tokens, for the reason `startAssistantTurn` documents: a
- * generator runs nothing until it is first pulled, which would put "no such
- * release" inside a response body whose 200 was already committed. Everything
- * knowable before the endpoint is called happens here and throws here, so the
- * route can still answer 404, 403 or 422 properly.
- */
-export async function startReleaseNotesDraft(
+/** Everything the panel needs to render, in one release resolution. */
+export interface ReleaseAssistantPanelData {
+  messages: AssistantMessageView[];
+  context: ContextField[];
+  modelConnected: boolean;
+  canEdit: boolean;
+  canPropose: boolean;
+  /** The notes as they stand, which is what a proposal is diffed against. Sent
+   * from here rather than read off the page so the diff shown and the text the
+   * accept is guarded against come from one place. */
+  body: string;
+  /** The release's skills, in button order, disabled ones already dropped. */
+  skills: Skill[];
+  activeSkillKey: string | null;
+  /** Roughly what the next question sends, in tokens: this release's context
+   * plus the replayed thread. An estimate, and labelled as one wherever it is
+   * shown; see `lib/ai/estimate.ts`. */
+  estimatedPromptTokens: number;
+  /** How many of the release's items reached the prompt, and how many were
+   * dropped for budget. Non-zero omissions are worth saying out loud: notes
+   * written from two thirds of a release are missing a third of it, and nothing
+   * in the prose would ever reveal that. */
+  itemsIncluded: number;
+  itemsOmitted: number;
+}
+
+export async function getReleaseAssistantPanelData(
   db: Database,
   scope: WorkspaceScope,
   releaseId: string,
-  opts: { signal?: AbortSignal } = {},
-): Promise<AsyncGenerator<DraftEvent>> {
-  const context = await buildReleaseContext(scope, releaseId);
+): Promise<ReleaseAssistantPanelData> {
+  const release = await resolveRelease(scope, releaseId);
+  const [messages, assembled, modelConnected, allSkills] = await Promise.all([
+    readThread(db, scope.workspaceId, { kind: "release", releaseId }),
+    buildReleaseContext(scope, releaseId),
+    isModelConnected(db, scope.workspaceId),
+    listSkills(db, scope.workspaceId),
+  ]);
+
+  // Only this surface's skills. An item's "Grill me" on a release would produce
+  // a confident interrogation of the wrong thing.
+  const offered = skillsForSurface(allSkills, "release").filter((s) => s.enabled);
+  const running = activeSkill(messages);
+
+  return {
+    messages,
+    context: assembled.fields,
+    modelConnected,
+    canEdit: true,
+    canPropose: assembled.canPropose,
+    body: release.releaseNotesBody ?? "",
+    // Built from the same pieces the request is, and windowed the same way, so
+    // the number shown is the number that will actually be sent.
+    estimatedPromptTokens: estimatePromptTokens([
+      { content: assembled.systemPrompt },
+      ...messages.slice(-HISTORY_TURN_LIMIT).map((m) => ({ content: m.content })),
+    ]),
+    skills: offered,
+    // Only reported as running if it is still something that can be run. A
+    // skill switched off mid-thread would otherwise leave the panel holding a
+    // key that every later turn is refused for.
+    activeSkillKey: offered.some((s) => s.key === running) ? running : null,
+    itemsIncluded: assembled.itemsIncluded,
+    itemsOmitted: assembled.itemsOmitted,
+  };
+}
+
+/**
+ * A past turn as the model is shown it again.
+ *
+ * A rejected proposal is annotated for the reason the item thread annotates one:
+ * otherwise the model reads its own rejected draft sitting in the history, has
+ * no way to know a person turned it down, and folds it straight back into the
+ * next proposal. Reject that has to be pressed repeatedly is Reject that does
+ * not mean anything.
+ */
+function replayed(m: AssistantMessageView): string {
+  if (m.role !== "assistant" || m.proposal?.outcome !== "rejected") {
+    return m.content;
+  }
+  return `${m.content}\n\n[This proposed change was reviewed and not accepted. Do not include it in a later proposal unless you are asked for it again.]`;
+}
+
+/**
+ * Begin a turn: authorize, validate, and return the stream of what happens.
+ *
+ * Eager setup, lazy tokens, for the reason `startAssistantTurn` documents at
+ * length: a generator runs nothing until it is first pulled, which would put
+ * "no such release" inside a response body whose 200 was already committed.
+ * Everything knowable before the endpoint is called happens here and throws
+ * here, so the route can still answer 404, 403 or 422 properly.
+ *
+ * Cancelling keeps nothing, also for the reason that module gives: a
+ * half-sentence in a thread is replayed as context into every later question and
+ * drags the answers with it, and an aborted stream never reaches the chunk
+ * carrying the usage numbers, so a row written for it would claim a cost we
+ * cannot know.
+ */
+export async function startReleaseTurn(
+  db: Database,
+  scope: WorkspaceScope,
+  releaseId: string,
+  text: string,
+  opts: { signal?: AbortSignal; skillKey?: string | null } = {},
+): Promise<AsyncGenerator<ReleaseAssistantEvent>> {
+  // Resolved before anything is validated, because a skill launched with no
+  // typed message supplies the message: pressing "Draft the notes" is a
+  // question, and the turn it writes has to read as one in the thread.
+  const skill = opts.skillKey
+    ? await findEnabledSkill(db, scope.workspaceId, opts.skillKey)
+    : null;
+  if (opts.skillKey && !skill) {
+    throw new ReleaseNotesInputError(
+      "That skill is no longer available in this workspace.",
+    );
+  }
+  if (skill && skill.surface !== "release") {
+    // A key from the item panel, sent at a release. Refused rather than run: the
+    // instructions are written about a different subject entirely, and running
+    // them here produces a confident answer about something that is not on the
+    // screen.
+    throw new ReleaseNotesInputError("That skill does not apply to a release.");
+  }
+
+  const typed = text.trim();
+  // The skill's own name, never a label the client chose: the recorded turn is
+  // what the thread and every later replay say happened.
+  const question = typed || skill?.name || "";
+  if (!question) throw new ReleaseNotesInputError("A message is required.");
+  if (question.length > MAX_TURN_CHARS) {
+    throw new ReleaseNotesInputError(
+      `A message can be at most ${MAX_TURN_CHARS.toLocaleString()} characters.`,
+    );
+  }
+
+  const context = await buildReleaseContext(scope, releaseId, skill);
+  const history = await readThread(db, scope.workspaceId, {
+    kind: "release",
+    releaseId,
+  });
 
   const messages: ModelMessage[] = [
     { role: "system", content: context.systemPrompt },
-    // A user turn as well as the system turn, rather than the system turn
-    // alone. Several small local runtimes answer a system-only conversation
-    // with a greeting, or with nothing at all: the shape they are trained on is
-    // "somebody asked for something", and this is the cheapest way to give them
-    // one.
-    { role: "user", content: "Draft the release notes for this release." },
+    // Oldest turns are dropped rather than newest: the recent exchange is what
+    // the next answer has to be coherent with.
+    ...history.slice(-HISTORY_TURN_LIMIT).map((m) => ({
+      role: m.role,
+      content: replayed(m),
+    })),
+    { role: "user", content: question },
   ];
 
   return run();
 
-  async function* run(): AsyncGenerator<DraftEvent> {
+  async function* run(): AsyncGenerator<ReleaseAssistantEvent> {
+    let answer = "";
+    let model: string | null = null;
+    let usage: TokenUsage = {
+      promptTokens: null,
+      completionTokens: null,
+      totalTokens: null,
+    };
     let finished = false;
 
     for await (const event of streamWithWorkspaceModel(
@@ -208,13 +362,13 @@ export async function startReleaseNotesDraft(
       scope.workspaceId,
       {
         messages,
-        maxTokens: DRAFT_MAX_TOKENS,
+        maxTokens: ANSWER_MAX_TOKENS,
         ...(opts.signal ? { signal: opts.signal } : {}),
       },
       // Attribution, not telemetry: the record of whose behalf the workspace's
       // money was spent on. Its own feature label rather than `assistant_turn`,
-      // so a workspace reading its usage can tell drafting notes apart from
-      // asking questions about items, and can see which one is costing them.
+      // so a workspace reading its usage can tell writing release notes apart
+      // from asking questions about items, and can see which one costs them.
       { userId: scope.userId, feature: "release_notes_draft" },
     )) {
       if (event.kind === "capped") {
@@ -237,23 +391,42 @@ export async function startReleaseNotesDraft(
         return;
       }
       if (event.kind === "delta") {
+        answer += event.text;
         yield { kind: "delta", text: event.text };
         continue;
       }
+      model = event.model;
+      usage = event.usage;
       finished = true;
     }
 
-    // The stream ended with no terminal event, which is how the adapter reports
-    // a cancel. The text already delivered stays in the editor: the person
-    // stopped it themselves and can see exactly what they got, which is not the
-    // same situation as a thread, where a half-sentence would be replayed into
-    // every later question.
+    // The stream ended without a terminal event, which is how the adapter
+    // reports a cancel. Nothing is written; see the note above.
     if (!finished) return;
 
     yield {
       kind: "done",
-      itemsIncluded: context.itemsIncluded,
-      itemsOmitted: context.itemsOmitted,
+      turns: await persistTurns(
+        db,
+        scope,
+        { kind: "release", releaseId },
+        question,
+        answer,
+        model,
+        usage,
+        {
+          // A release's notes are a database column with no version to guard
+          // against, unlike a git-backed spec. Recorded as null rather than
+          // invented: see the note on `acceptReleaseProposal`.
+          baseSha: null,
+          skillKey: skill?.key ?? null,
+        },
+      ),
     };
   }
+}
+
+/** Whether an answer carried a proposal, for callers that only have the text. */
+export function answerHasProposal(answer: string): boolean {
+  return parseAnswer(answer).proposal !== null;
 }

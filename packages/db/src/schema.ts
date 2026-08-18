@@ -2423,11 +2423,24 @@ export const assistantMessages = pgTable(
     workspaceId: uuid("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
-    /** The item this thread belongs to. Cascades, so deleting an item takes
-     * its conversation with it rather than leaving a copy of its content. */
-    featureId: uuid("feature_id")
-      .notNull()
-      .references(() => features.id, { onDelete: "cascade" }),
+    /**
+     * The item this thread belongs to, or null when the thread is about a
+     * release. Cascades, so deleting an item takes its conversation with it
+     * rather than leaving a copy of its content.
+     *
+     * Exactly one of this and {@link releaseId} is set, enforced by a CHECK
+     * (`num_nonnulls(...) = 1`, migration 0075). There is deliberately no
+     * `subject_type` column: it would be a second source of truth for a fact
+     * these two already carry, and the two could disagree.
+     */
+    featureId: uuid("feature_id").references(() => features.id, {
+      onDelete: "cascade",
+    }),
+    /** The release this thread belongs to, or null when it is about an item.
+     * Cascades for the same reason `featureId` does. */
+    releaseId: uuid("release_id").references(() => releases.id, {
+      onDelete: "cascade",
+    }),
     /** `user` or `assistant`, constrained by a CHECK. */
     role: text("role").notNull(),
     content: text("content").notNull(),
@@ -2476,6 +2489,11 @@ export const assistantMessages = pgTable(
       t.featureId,
       t.createdAt,
     ),
+    index("assistant_messages_release_idx").on(
+      t.workspaceId,
+      t.releaseId,
+      t.createdAt,
+    ),
   ],
 );
 
@@ -2515,7 +2533,16 @@ export const workspaceAssistantSkills = pgTable(
     instructions: text("instructions"),
     /** False hides it from the panel without losing the wording. */
     enabled: boolean("enabled").notNull().default(true),
-    /** Where this skill sits in the row of buttons, ascending. */
+    /**
+     * Which assistant this skill is a button on: `item` or `release`,
+     * constrained by a CHECK. "Grill me" on a release is nonsense, and a
+     * release-notes skill on a work item produces a confident answer about the
+     * wrong thing. Defaults to `item`, which is what every skill written before
+     * releases had an assistant is.
+     */
+    surface: text("surface").notNull().default("item"),
+    /** Where this skill sits in the row of buttons, ascending. Scoped to its
+     * surface: the two lists are ordered independently. */
     position: integer("position").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
@@ -2526,6 +2553,11 @@ export const workspaceAssistantSkills = pgTable(
   },
   (t) => [
     uniqueIndex("workspace_assistant_skills_key_idx").on(t.workspaceId, t.key),
+    index("workspace_assistant_skills_surface_idx").on(
+      t.workspaceId,
+      t.surface,
+      t.position,
+    ),
   ],
 );
 

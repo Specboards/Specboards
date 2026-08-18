@@ -137,28 +137,50 @@ export function proposalStarted(partial: string): boolean {
  * "I've updated the spec", and the person reads that as done and never clicks
  * accept. That is the failure that makes the whole feature untrustworthy.
  */
-export const PROPOSAL_INSTRUCTIONS = [
-  "You can propose a change to this item's description. Do it when you are",
-  "asked to write, rewrite, add to, tidy or fill in part of it. Do not do it",
-  "when you were asked a question: answer the question instead.",
-  "",
-  "To propose, end your reply with exactly this, on its own lines:",
-  "",
-  PROPOSAL_OPEN,
-  "the complete new description, in Markdown",
-  PROPOSAL_CLOSE,
-  "",
-  "Rules for that block:",
-  "- It must contain the WHOLE description as you want it to end up, not just",
-  "  the part you changed. Anything you leave out is being deleted.",
-  "- Keep every part you were not asked to change exactly as it is, word for",
-  "  word. The person is shown a line-by-line diff, and rephrasing something",
-  "  nobody asked you to touch wastes their attention on your paraphrase.",
-  "- No YAML frontmatter, no surrounding code fence, no commentary inside it.",
-  "- Before the block, say in one or two sentences what you changed and why.",
-  "  Do not repeat the description itself there.",
-  "",
-  "Proposing is not editing. Your proposal is shown to a person as a diff and",
-  "changes nothing unless they accept it. Never say you have made, applied or",
-  "saved a change.",
-].join("\n");
+export function proposalInstructions(owner: string, noun: string): string {
+  return [
+    `You can propose a change to ${owner} ${noun}. Do it when you are`,
+    "asked to write, rewrite, add to, tidy or fill in part of it. Do not do it",
+    "when you were asked a question: answer the question instead.",
+    "",
+    "To propose, end your reply with exactly this, on its own lines:",
+    "",
+    PROPOSAL_OPEN,
+    `the complete new ${noun}, in Markdown`,
+    PROPOSAL_CLOSE,
+    "",
+    "Rules for that block:",
+    `- It must contain the WHOLE ${noun} as you want it to end up, not just`,
+    "  the part you changed. Anything you leave out is being deleted.",
+    "- Keep every part you were not asked to change exactly as it is, word for",
+    "  word. The person is shown a line-by-line diff, and rephrasing something",
+    "  nobody asked you to touch wastes their attention on your paraphrase.",
+    "- No YAML frontmatter, no surrounding code fence, no commentary inside it.",
+    "- Before the block, say in one or two sentences what you changed and why.",
+    "  Do not repeat it there.",
+    "",
+    "Proposing is not editing. Your proposal is shown to a person as a diff and",
+    "changes nothing unless they accept it. Never say you have made, applied or",
+    "saved a change.",
+  ].join("\n");
+}
+
+/**
+ * `owner` and `noun` are separate because the sentences need them separately:
+ * "a change to this item's description" wants the possessive and "the WHOLE
+ * description" must not have it. One combined string produced "the WHOLE this
+ * item's description", which is the kind of prompt wording that makes a small
+ * model stop following the rule it appears in.
+ */
+
+/**
+ * The instructions for an item's description, which is what this started as.
+ *
+ * The markers themselves stay the literal strings above on every surface, even
+ * where the word "SPEC" is not quite the right noun. They are a wire format
+ * rather than prose: one pair of markers means one parser, and one parser is
+ * what lets the browser and the server never disagree about whether a message
+ * contains a proposal. A per-surface marker would double that parser and buy a
+ * word nobody reads.
+ */
+export const PROPOSAL_INSTRUCTIONS = proposalInstructions("this item's", "description");

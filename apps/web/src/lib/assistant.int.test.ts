@@ -1005,6 +1005,7 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
       await skillsSvc.replaceSkills(db, ws, [
         {
           key: "grill",
+          surface: "item" as const,
           name: "Interrogate me",
           description: "",
           instructions: "Only ever ask about pricing.",
@@ -1025,6 +1026,7 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
       await skillsSvc.replaceSkills(db, ws, [
         {
           key: "grill",
+          surface: "item" as const,
           name: "Grill me",
           description: "",
           instructions: "x",
@@ -1051,6 +1053,7 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
       await skillsSvc.replaceSkills(db, ws, [
         {
           key: "gaps",
+          surface: "item" as const,
           name: "Find the gaps",
           description: "",
           instructions: "x",
@@ -1074,20 +1077,24 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
 
     it("puts the skills in the order a workspace stored", async () => {
       await skillsSvc.replaceSkills(db, ws, [
-        { key: "draft", name: null, description: null, instructions: null, enabled: true, position: 0 },
-        { key: "grill", name: null, description: null, instructions: null, enabled: true, position: 1 },
-        { key: "gaps", name: null, description: null, instructions: null, enabled: true, position: 2 },
+        { key: "draft", name: null, description: null, instructions: null, surface: "item" as const, enabled: true, position: 0 },
+        { key: "grill", name: null, description: null, instructions: null, surface: "item" as const, enabled: true, position: 1 },
+        { key: "gaps", name: null, description: null, instructions: null, surface: "item" as const, enabled: true, position: 2 },
       ]);
       const skills = await skillsSvc.listSkills(db, ws);
-      expect(skills.map((s) => s.key)).toEqual(["draft", "grill", "gaps"]);
+      // Filtered to this surface: the list now spans both panels, and the
+      // release skills sit on the end in code order because no row places them.
+      expect(
+        skills.filter((s) => s.surface === "item").map((s) => s.key),
+      ).toEqual(["draft", "grill", "gaps"]);
     });
 
     it("reorders without freezing the wording we ship", async () => {
       // The reason the columns are nullable. A workspace that only rearranged
       // its buttons must go on getting later improvements to these prompts.
       await skillsSvc.replaceSkills(db, ws, [
-        { key: "draft", name: null, description: null, instructions: null, enabled: true, position: 0 },
-        { key: "grill", name: null, description: null, instructions: null, enabled: true, position: 1 },
+        { key: "draft", name: null, description: null, instructions: null, surface: "item" as const, enabled: true, position: 0 },
+        { key: "grill", name: null, description: null, instructions: null, surface: "item" as const, enabled: true, position: 1 },
       ]);
       const skills = await skillsSvc.listSkills(db, ws);
       const grill = skills.find((s) => s.key === "grill")!;
@@ -1104,6 +1111,7 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
       await skillsSvc.replaceSkills(db, ws, [
         {
           key: "grill",
+          surface: "item" as const,
           name: "Grill me",
           description: "",
           instructions: "x",
@@ -1123,6 +1131,7 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
       await skillsSvc.replaceSkills(db, ws, [
         {
           key: "ours",
+          surface: "item" as const,
           name: "Our way",
           description: "",
           instructions: "Do it our way.",

@@ -73,6 +73,7 @@ export async function replaceSkills(
           name: r.name,
           description: r.description,
           instructions: r.instructions,
+          surface: r.surface,
           enabled: r.enabled,
           // Positions are assigned from the submitted order rather than taken
           // from the input, so a client that sends duplicates or gaps cannot
@@ -92,11 +93,21 @@ async function readRows(db: Database, workspaceId: string): Promise<SkillRow[]> 
       name: workspaceAssistantSkills.name,
       description: workspaceAssistantSkills.description,
       instructions: workspaceAssistantSkills.instructions,
+      surface: workspaceAssistantSkills.surface,
       enabled: workspaceAssistantSkills.enabled,
       position: workspaceAssistantSkills.position,
     })
     .from(workspaceAssistantSkills)
     .where(eq(workspaceAssistantSkills.workspaceId, workspaceId))
     .orderBy(asc(workspaceAssistantSkills.position));
-  return rows;
+
+  // The column is `text` with a CHECK, so the database guarantees the value and
+  // the type does not. Narrowed here rather than asserted: a row that somehow
+  // holds an unknown surface falls back to the item panel, which is where every
+  // skill lived before releases had an assistant, instead of resolving to a
+  // button that renders nowhere and looks like the save silently failed.
+  return rows.map((r) => ({
+    ...r,
+    surface: r.surface === "release" ? ("release" as const) : ("item" as const),
+  }));
 }

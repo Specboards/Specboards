@@ -1,12 +1,13 @@
+import { readJsonBody } from "@/lib/api/body";
 import { authorizeWrite } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
 import {
-  buildReleaseContext,
+  getReleaseAssistantPanelData,
   ReleaseNotesForbiddenError,
   ReleaseNotesInputError,
   ReleaseNotFoundError,
-  startReleaseNotesDraft,
-  type DraftEvent,
+  startReleaseTurn,
+  type ReleaseAssistantEvent,
 } from "@/lib/release-notes-service";
 
 export const dynamic = "force-dynamic";
@@ -14,7 +15,7 @@ export const dynamic = "force-dynamic";
 type Params = { params: Promise<{ releaseId: string }> };
 
 /**
- * Drafting a release's customer-facing notes.
+ * The assistant conversation about a release.
  *
  * ── Why this lives under `/assistant` and not under `/releases` ─────────────
  * API key scopes are derived from the first path segment under `/api/v1`
@@ -22,35 +23,37 @@ type Params = { params: Promise<{ releaseId: string }> };
  * `releases:write` - "let this integration manage our versions" - could also
  * spend the customer's money at their model provider, without that ever having
  * been granted or even mentioned. Under `assistant` it needs `assistant:write`,
- * which is already exactly the grant that means "may spend inference budget",
- * so this adds a spend channel to a scope somebody opted into rather than
- * quietly adding one to a scope about dates and versions.
+ * which is already exactly the grant that means "may spend inference budget".
  *
- * Gated on write access rather than read: a draft is only useful to somebody who
- * can save it, and drafting costs money at the customer's provider. Offering it
- * to a viewer would be spending on a document with nowhere to go. That is a
- * different rule from the item assistant, where a reader may ask questions,
- * because asking a question is its own end and a draft is not.
+ * Accepting a proposal is the mirror image and lives under
+ * `/api/v1/releases/:id/proposals` for the mirror reason: accepting is a change
+ * to the release, so it needs the grant that lets a caller edit the release by
+ * hand. Drafting and approving stay two separate decisions.
+ *
+ * ── Why both verbs need write access ────────────────────────────────────────
+ * Unlike the item assistant, where any reader may ask a question, this one is
+ * gated on being able to change the release. A release assistant exists to
+ * produce one document, and somebody who cannot save that document would be
+ * spending the workspace's money on something with nowhere to go.
  *
  * ── The protocol ────────────────────────────────────────────────────────────
- * The same NDJSON stream the assistant route uses, for the same reasons written
- * up there: `{"kind":"delta","text":"…"}` repeatedly, then exactly one `done` or
- * `error`. A model failure is a line in a 200 because by the time we know, the
- * status is long gone; our own refusals (unknown release, empty release, no
- * permission) are decided before streaming starts and stay ordinary JSON with a
- * status, which is why {@link startReleaseNotesDraft} does its checks eagerly.
+ * The same NDJSON stream the item assistant uses, for the reasons written up on
+ * that route: `{"kind":"delta","text":"…"}` repeatedly, then exactly one `done`
+ * or `error`. A model failure is a line in a 200, because by the time we know,
+ * the status is long gone. Our own refusals are decided before streaming starts
+ * and stay ordinary JSON with a status, which is why {@link startReleaseTurn}
+ * does its checks eagerly.
  */
 
 /** Needs a database + running server; unavailable in local file mode. */
 const NO_DB = Response.json(
   {
-    error:
-      "Drafting release notes requires a database (unavailable in local file mode).",
+    error: "The assistant requires a database (unavailable in local file mode).",
   },
   { status: 501 },
 );
 
-/** Map the service's eager refusals onto statuses. Shared by both methods. */
+/** Map the service's eager refusals onto statuses. Shared by both verbs. */
 function refusal(err: unknown): Response | null {
   if (err instanceof ReleaseNotFoundError) {
     return Response.json({ error: err.message }, { status: 404 });
@@ -65,16 +68,12 @@ function refusal(err: unknown): Response | null {
 }
 
 /**
- * GET /api/v1/assistant/releases/:releaseId - what drafting would send.
+ * GET /api/v1/assistant/releases/:releaseId - the thread, oldest first, plus
+ * what would be sent about this release.
  *
- * The disclosure, readable before anyone spends a token. It returns the same
- * `fields` the prompt is built from rather than a description of them, so the
- * two cannot drift apart.
- *
- * A GET that resolves through the write-gated service is deliberate: this
- * describes a spend that only an editor can trigger, so a viewer gets the same
- * 403 here as they would there rather than a preview of a button they will
- * never have.
+ * `context` is returned alongside so the panel can disclose it before anyone
+ * spends a token, rather than describing it from a second source that can fall
+ * out of step with the request.
  */
 export async function GET(req: Request, { params }: Params) {
   const authz = await authorizeWrite(req);
@@ -84,12 +83,9 @@ export async function GET(req: Request, { params }: Params) {
 
   const { releaseId } = await params;
   try {
-    const context = await buildReleaseContext(authz.scope, releaseId);
-    return Response.json({
-      fields: context.fields,
-      itemsIncluded: context.itemsIncluded,
-      itemsOmitted: context.itemsOmitted,
-    });
+    return Response.json(
+      await getReleaseAssistantPanelData(db, authz.scope, releaseId),
+    );
   } catch (err) {
     const refused = refusal(err);
     if (refused) return refused;
@@ -98,20 +94,15 @@ export async function GET(req: Request, { params }: Params) {
 }
 
 /**
- * POST /api/v1/assistant/releases/:releaseId - draft the notes.
+ * POST /api/v1/assistant/releases/:releaseId - ask. Body: `{ message, skillKey? }`.
  *
- * Takes no body. There is exactly one thing to ask for here, and an endpoint
- * that accepts free text would be the release assistant of the next feature
- * wearing this one's clothes: a thread, minus the history that makes a thread
- * worth having.
+ * With a `skillKey` and an empty `message`, the skill's own name becomes the
+ * question, which is what pressing "Draft the notes" is. Only release skills are
+ * accepted: an item skill pointed at a release produces a confident answer about
+ * something that is not on the screen.
  *
- * Nothing is saved. The draft is streamed to the editor and the person saves it
- * through the ordinary release write path, or does not.
- *
- * ── Cancelling ──────────────────────────────────────────────────────────────
- * The browser aborts its fetch; `req.signal` fires; the abort reaches the
- * upstream request and closes the connection to the provider. The stream ends
- * with no terminal event, and whatever arrived is already in the editor.
+ * Nothing is saved to the release. An answer may carry a proposal, which is
+ * inert text until somebody accepts it through the proposals route.
  */
 export async function POST(req: Request, { params }: Params) {
   const authz = await authorizeWrite(req);
@@ -120,12 +111,25 @@ export async function POST(req: Request, { params }: Params) {
   if (!db || !authz.scope) return NO_DB;
 
   const { releaseId } = await params;
+  const parsed = await readJsonBody(req);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.body as Record<string, unknown>;
 
-  let draft: AsyncGenerator<DraftEvent>;
+  let turn: AsyncGenerator<ReleaseAssistantEvent>;
   try {
-    draft = await startReleaseNotesDraft(db, authz.scope, releaseId, {
-      signal: req.signal,
-    });
+    turn = await startReleaseTurn(
+      db,
+      authz.scope,
+      releaseId,
+      typeof body.message === "string" ? body.message : "",
+      {
+        signal: req.signal,
+        // Sent on every turn, not just the one that launched it: the client
+        // owns what is in force, and a drafting session has to survive the
+        // person answering a question about it.
+        ...(typeof body.skillKey === "string" ? { skillKey: body.skillKey } : {}),
+      },
+    );
   } catch (err) {
     const refused = refusal(err);
     if (refused) return refused;
@@ -135,9 +139,9 @@ export async function POST(req: Request, { params }: Params) {
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
-      const write = (event: DraftEvent) => {
+      const write = (event: ReleaseAssistantEvent) => {
         // Enqueueing to a stream whose consumer has gone throws. That is the
-        // normal end of a cancelled draft, not a fault worth logging.
+        // normal end of a cancelled turn, not a fault worth logging.
         try {
           controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
         } catch {
@@ -145,7 +149,7 @@ export async function POST(req: Request, { params }: Params) {
         }
       };
       try {
-        for await (const event of draft) write(event);
+        for await (const event of turn) write(event);
       } catch (err) {
         // An unexpected throw mid-stream: the status is already sent, so the
         // only way left to say anything is another event.
@@ -157,7 +161,7 @@ export async function POST(req: Request, { params }: Params) {
               message:
                 err instanceof Error
                   ? err.message
-                  : "The draft stopped unexpectedly.",
+                  : "The assistant stopped unexpectedly.",
             },
           });
         }
@@ -170,10 +174,10 @@ export async function POST(req: Request, { params }: Params) {
       }
     },
     cancel() {
-      // The reader went away (the sheet closed, the tab closed). Ending the
+      // The reader went away (the flyout closed, the tab closed). Ending the
       // generator releases the upstream connection rather than leaving it
       // producing tokens nobody will read, which the customer still pays for.
-      void draft.return(undefined);
+      void turn.return(undefined);
     },
   });
 
@@ -183,8 +187,7 @@ export async function POST(req: Request, { params }: Params) {
       "Content-Type": "application/x-ndjson; charset=utf-8",
       "Cache-Control": "no-store, no-transform",
       // Tells an nginx-family proxy not to sit on the body until it is
-      // complete, which would deliver the whole draft at once and make the
-      // streaming pointless.
+      // complete, which would deliver the whole answer at once.
       "X-Accel-Buffering": "no",
     },
   });

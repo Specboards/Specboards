@@ -32,6 +32,8 @@
  */
 
 import type { ContextField } from "./item-context";
+import { proposalInstructions } from "./proposals";
+import { skillTask, type SkillDef } from "./skills";
 
 /** One item in the release, as the prompt names it. */
 export interface ReleaseContextItem {
@@ -57,6 +59,21 @@ export interface ReleaseContextInput {
   /** The work scheduled into the release, grouped by level, top level first.
    * Already filtered to what the caller may read. */
   groups: ReleaseContextGroup[];
+  /**
+   * The customer-facing notes as they stand, which is what a proposal replaces.
+   * Empty when nobody has written any yet, which is the ordinary starting case
+   * and the one the drafting skill exists for.
+   */
+  notesBody: string;
+  /**
+   * Whether this person may change the release. False turns off the proposal
+   * instructions entirely, so a reader is never offered an edit they would be
+   * refused when they clicked accept. Told to the model rather than only hidden
+   * in the UI: a model that has been told it can propose will keep offering to,
+   * and "shall I write those up for you?" from something that cannot is worse
+   * than never mentioning it.
+   */
+  canEdit: boolean;
 }
 
 export interface AssembledReleaseContext {
@@ -72,6 +89,13 @@ export interface AssembledReleaseContext {
    * and that is not something a reader can infer from the prose.
    */
   itemsOmitted: number;
+  /**
+   * Whether the model was actually invited to propose. False for someone who
+   * cannot write the release, and false when the existing notes were too long
+   * to send whole, which is the case worth naming: a whole-body replacement
+   * drafted from a shortened document deletes everything past the cut.
+   */
+  canPropose: boolean;
 }
 
 /**
@@ -115,43 +139,40 @@ const ROLE = [
  * about writing will happily answer "I have published the notes for you", and
  * the person will believe it.
  */
-const RULES = [
-  "You cannot change anything. You have no tools and no write access. What you",
-  "write appears in an editor for a person to read, change, and save themselves.",
-  "Never claim to have saved or published anything.",
+const READ_ONLY = [
+  "You cannot change anything. You have no tools and no write access: nothing",
+  "you say is saved unless a person does it themselves. Do not claim to have",
+  "saved or published anything.",
+].join(" ");
+
+/** How the model is invited to propose the notes themselves. */
+const PROPOSAL_RULES = proposalInstructions("this release's", "notes");
+
+/**
+ * What a model is told when the existing notes were too long to send whole.
+ *
+ * The same trap as on an item, and the same answer. A proposal is a whole
+ * replacement document, so a model shown the first few thousand characters of
+ * the notes and asked to tighten them proposes those characters back, and
+ * accepting deletes the rest. The offer is withdrawn rather than qualified,
+ * because a model that has been told it may propose will propose.
+ */
+const TOO_LONG_TO_PROPOSE = [
+  "You cannot propose a change to these notes, because you have not been shown",
+  "all of them: they were too long to send. Suggest wording in your reply for",
+  "the person to apply themselves, and say why you cannot propose it directly",
+  "if they ask for an edit. Do not claim to have made a change.",
 ].join(" ");
 
 /**
- * The drafting task.
+ * Longest existing notes body sent whole.
  *
- * A constant here, and a built-in skill a team can override in the feature after
- * this one. Written the way `skills.ts` writes its built-ins: short sentences, no
- * nested conditions, and the rule that matters most last, where a small model is
- * least likely to lose it.
+ * Past this the notes are shortened and proposing is withdrawn. Set below the
+ * item body limit because the item list has to fit alongside it: a release with
+ * both a long document and a hundred items is exactly the request that would
+ * otherwise blow a small model's window.
  */
-const DRAFT_TASK = [
-  "Your task right now is to draft this release's notes in Markdown.",
-  "",
-  "Write one line per change, in plain language, about what it means for the",
-  "person using the product. Group related lines under short headings. The",
-  "items below are titles written in the team's shorthand, so turn each one",
-  "into a sentence rather than repeating it.",
-  "",
-  "Rules:",
-  "- Write about the items below and nothing else. Do not add sections the list",
-  "  does not support: no dates, no support contacts, no roadmap, no thanks.",
-  "- Do not repeat the release's name, status or dates back. Start at the",
-  "  changes.",
-  "- Each item shows its status. Only describe finished work as shipped. Put",
-  "  anything unfinished under \"Still in progress\", or leave it out.",
-  "- Leave out changes a customer cannot see: refactors, tests, tooling,",
-  "  dependency bumps.",
-  "- Where a title is too vague to write from, list it under \"Needs a",
-  "  description\" rather than guessing what it did.",
-  "",
-  "Never invent a change that is not in the list below. An invented line is",
-  "worse than a missing one, because somebody will publish it.",
-].join("\n");
+export const NOTES_CHAR_LIMIT = 6_000;
 
 /**
  * Assemble the context for one release.
@@ -162,6 +183,13 @@ const DRAFT_TASK = [
  */
 export function assembleReleaseContext(
   input: ReleaseContextInput,
+  /**
+   * The skill in force, if any. A parameter rather than a field on the input
+   * because it is not a fact about the release, and the disclosure lists facts
+   * about the release. It is an instruction, and it belongs with the other
+   * instructions.
+   */
+  skill?: SkillDef | null,
 ): AssembledReleaseContext {
   const fields: ContextField[] = [
     { label: "Release", value: input.name.trim() },
@@ -183,12 +211,63 @@ export function assembleReleaseContext(
     });
   }
 
+  // Last, so the document being edited sits nearest the answer. Omitted when
+  // empty rather than sent as a blank field: "there are no notes yet" is what
+  // the absence of this says, and a field saying so is a line in the disclosure
+  // claiming we sent something we did not.
+  const notes = input.notesBody.trim();
+  let sawWholeNotes = true;
+  if (notes) {
+    const cut = notes.length > NOTES_CHAR_LIMIT;
+    sawWholeNotes = !cut;
+    fields.push({
+      label: "Current release notes",
+      value: cut ? notes.slice(0, NOTES_CHAR_LIMIT) : notes,
+      truncated: cut,
+    });
+  }
+
+  const canPropose = input.canEdit && sawWholeNotes;
+  const rules = !input.canEdit
+    ? READ_ONLY
+    : sawWholeNotes
+      ? PROPOSAL_RULES
+      : TOO_LONG_TO_PROPOSE;
+
   return {
-    systemPrompt: renderPrompt(fields),
+    systemPrompt: renderPrompt(
+      fields,
+      rules,
+      skill ? task(skill, canPropose) : null,
+    ),
     fields,
     itemsIncluded: included,
     itemsOmitted: omitted,
+    canPropose,
   };
+}
+
+/**
+ * A running skill's block, with a backstop when it asks for something this
+ * conversation cannot do.
+ *
+ * A skill is free text a customer wrote, and the one we ship says in as many
+ * words "propose them as the release notes". Run it on a release the reader
+ * cannot write, or against notes too long to send whole, and the prompt would
+ * carry both "you cannot propose" and "propose" with nothing to break the tie.
+ * The reminder goes after the skill, because the instruction nearest the end is
+ * the one a small model follows, and here that has to be ours.
+ */
+function task(skill: SkillDef, canPropose: boolean): string {
+  if (canPropose) return skillTask(skill);
+  return [
+    skillTask(skill),
+    "",
+    "Whatever that task says: you cannot change this release and cannot propose",
+    "a change to its notes in this conversation. Where the task asks you to write",
+    "or apply one, put the wording in your reply for a person to use, and say",
+    "that you cannot apply it yourself.",
+  ].join("\n");
 }
 
 /**
@@ -256,7 +335,11 @@ function renderItems(groups: readonly ReleaseContextGroup[]): {
  * release it has not seen all of, and the person reading that draft has no way
  * to tell.
  */
-function renderPrompt(fields: readonly ContextField[]): string {
+function renderPrompt(
+  fields: readonly ContextField[],
+  rules: string,
+  task: string | null = null,
+): string {
   const rendered = fields.map((f) => {
     const note = f.truncated
       ? " (shortened; you have not been shown every item in this release)"
@@ -269,5 +352,6 @@ function renderPrompt(fields: readonly ContextField[]): string {
   // itself. The same order as the item prompt, and for the same reason: the
   // rule that must survive is the one saying nothing here is saved, and
   // instructions that follow a long document are the first a small model loses.
-  return `${ROLE}\n\n${RULES}\n\n${DRAFT_TASK}\n\n---\n\n${rendered.join("\n\n")}`;
+  const head = task ? `${ROLE}\n\n${rules}\n\n${task}` : `${ROLE}\n\n${rules}`;
+  return `${head}\n\n---\n\n${rendered.join("\n\n")}`;
 }

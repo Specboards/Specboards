@@ -14,13 +14,17 @@ import {
   skillKeyFrom,
   skillRowsToStore,
   skillsSortedByName,
+  SKILL_SURFACES,
+  SKILL_SURFACE_LABELS,
   type Skill,
+  type SkillSurface,
 } from "@/lib/ai/skills";
 import { saveAssistantSkills } from "@/lib/api-client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 
 /**
@@ -55,8 +59,14 @@ export const ORDER_SAVE_DELAY_MS = 700;
  * Sorting three buttons is not organising anything, and a control that does
  * almost nothing still has to be read and dismissed by everyone who opens the
  * page. It appears once a team has enough of their own to have lost track.
+ *
+ * Derived from the built-in count rather than written as a number, because the
+ * number was one: shipping the two release skills pushed the total to exactly
+ * the old threshold, and the control appeared on a page where nobody had added
+ * anything. What the rule means is "a couple more than we ship", so that is
+ * what it now says.
  */
-export const SORT_CONTROL_THRESHOLD = 5;
+export const SORT_CONTROL_THRESHOLD = BUILT_IN_SKILLS.length + 2;
 
 export function AssistantSkillsEditor({
   initial,
@@ -133,7 +143,12 @@ export function AssistantSkillsEditor({
       ? skills.map((s) => (s.key === draft.key ? { ...s, ...draft } : s))
       : [
           ...skills,
-          { ...draft, builtIn: false, customised: false, enabled: true },
+          {
+            ...draft,
+            builtIn: false,
+            customised: false,
+            enabled: true,
+          } satisfies Skill,
         ];
     void persist(next, existing ? "Skill saved." : `"${draft.name}" added.`);
   }
@@ -252,6 +267,13 @@ export function AssistantSkillsEditor({
               <div className="min-w-0 flex-1 space-y-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-sm font-medium">{skill.name}</span>
+                  {/* Which assistant this button is on. Shown on every row
+                      rather than only on release skills: a list where the
+                      absence of a badge is what tells you something is an
+                      item skill takes a moment to work out every time. */}
+                  <Badge variant="secondary" size="sm">
+                    {SKILL_SURFACE_LABELS[skill.surface]}
+                  </Badge>
                   {skill.builtIn ? (
                     <Badge variant="outline" size="sm">
                       {skill.customised ? "Built in, edited" : "Built in"}
@@ -331,6 +353,7 @@ export function AssistantSkillsEditor({
               name: "",
               description: "",
               instructions: "",
+              surface: "item",
             }}
             busy={saving}
             onCancel={() => setEditing(null)}
@@ -390,6 +413,9 @@ interface SkillDraft {
   name: string;
   description: string;
   instructions: string;
+  /** Which assistant this button appears on. Fixed for a built-in: its surface
+   * is a fact about what its instructions are for, not a preference. */
+  surface: SkillSurface;
 }
 
 function SkillForm({
@@ -406,12 +432,16 @@ function SkillForm({
   const [name, setName] = useState(initial.name);
   const [description, setDescription] = useState(initial.description);
   const [instructions, setInstructions] = useState(initial.instructions);
+  const [surface, setSurface] = useState<SkillSurface>(initial.surface);
 
   const usable = name.trim() !== "" && instructions.trim() !== "";
+  // A built-in's surface is resolved from code on the way in and on the way
+  // out, so offering to change it here would be a control that does nothing.
+  const builtIn = BUILT_IN_SKILLS.some((b) => b.key === initial.key);
 
   return (
     <div className="space-y-3">
-      <FormField label="Name" hint="The button people press on an item.">
+      <FormField label="Name" hint="The button people press.">
         <Input
           value={name}
           maxLength={MAX_SKILL_NAME_CHARS}
@@ -419,6 +449,23 @@ function SkillForm({
           placeholder="Grill me"
         />
       </FormField>
+      {builtIn ? null : (
+        <FormField
+          label="Where it appears"
+          hint="Which assistant shows this button. A skill written for one reads as nonsense on the other."
+        >
+          <Select
+            value={surface}
+            onChange={(e) => setSurface(e.target.value as SkillSurface)}
+          >
+            {SKILL_SURFACES.map((s) => (
+              <option key={s} value={s}>
+                {SKILL_SURFACE_LABELS[s]}
+              </option>
+            ))}
+          </Select>
+        </FormField>
+      )}
       <FormField
         label="Description"
         hint="One line, shown on hover. Not sent to the model."
@@ -453,6 +500,7 @@ function SkillForm({
               name: name.trim(),
               description: description.trim(),
               instructions: instructions.trim(),
+              surface,
             })
           }
         >

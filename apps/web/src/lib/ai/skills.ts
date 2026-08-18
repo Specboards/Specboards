@@ -27,6 +27,25 @@
  * exactly what is sent" has to be a testable claim rather than a comment.
  */
 
+/**
+ * Which assistant a skill is a button on.
+ *
+ * Added when releases grew an assistant of their own. "Grill me" on a release is
+ * nonsense, and a release-notes skill on a work item is worse than nonsense: a
+ * team that presses it gets a confident answer about the wrong thing. The two
+ * lists are ordered independently, so rearranging one leaves the other alone.
+ */
+export type SkillSurface = "item" | "release";
+
+/** Every surface, in the order the settings page groups them. */
+export const SKILL_SURFACES: readonly SkillSurface[] = ["item", "release"];
+
+/** Human wording for a surface, for the settings page. */
+export const SKILL_SURFACE_LABELS: Record<SkillSurface, string> = {
+  item: "Items and specs",
+  release: "Releases",
+};
+
 /** A skill as it is defined, whether in code or in a row. */
 export interface SkillDef {
   /**
@@ -41,6 +60,12 @@ export interface SkillDef {
   description: string;
   /** What the model is told while this skill is in force. */
   instructions: string;
+  /**
+   * Which assistant shows this button. Part of the definition rather than
+   * something a caller filters on afterwards, so a skill can never be offered on
+   * a surface its instructions make no sense on.
+   */
+  surface: SkillSurface;
 }
 
 /** A skill as the app resolves it: a definition plus where it came from. */
@@ -75,6 +100,13 @@ export interface SkillRow {
   description: string | null;
   instructions: string | null;
   enabled: boolean;
+  /**
+   * Not nullable, unlike the text above. A surface is where the button is, not
+   * what it says: "whatever the built-in says" is meaningless for a skill a team
+   * invented, and a row that resolved its surface from the code would make a
+   * team's own skill impossible to place.
+   */
+  surface: SkillSurface;
   position: number;
 }
 
@@ -107,6 +139,7 @@ export const MAX_SKILLS = 24;
 export const BUILT_IN_SKILLS: readonly SkillDef[] = [
   {
     key: "grill",
+    surface: "item",
     name: "Grill me",
     description:
       "Asks the awkward questions, one at a time, until the definition stops being vague.",
@@ -136,6 +169,7 @@ export const BUILT_IN_SKILLS: readonly SkillDef[] = [
   },
   {
     key: "gaps",
+    surface: "item",
     name: "Find the gaps",
     description:
       "Lists what a competent engineer or agent would still have to guess.",
@@ -156,6 +190,7 @@ export const BUILT_IN_SKILLS: readonly SkillDef[] = [
   },
   {
     key: "draft",
+    surface: "item",
     name: "Draft a definition",
     description:
       "Writes the description out in full, following the shape this item already uses.",
@@ -173,6 +208,58 @@ export const BUILT_IN_SKILLS: readonly SkillDef[] = [
       "",
       "Do not pad it to look thorough. A short description that is entirely true beats a",
       "long one a reader has to fact-check.",
+    ].join("\n"),
+  },
+  {
+    key: "release-notes",
+    surface: "release",
+    name: "Draft the notes",
+    description:
+      "Writes customer-facing release notes from the work scheduled into this release.",
+    instructions: [
+      "Your task right now is to draft this release's notes, and propose them as the",
+      "release notes.",
+      "",
+      "Write one line per change, in plain language, about what it means for the person",
+      "using the product. Group related lines under short headings. The items you have",
+      "been given are titles written in the team's shorthand, so turn each one into a",
+      "sentence rather than repeating it.",
+      "",
+      "Rules:",
+      "- Write about the items you were given and nothing else. Do not add sections the",
+      "  list does not support: no dates, no support contacts, no roadmap, no thanks.",
+      "- Do not repeat the release's name, status or dates back. Start at the changes.",
+      "- Each item shows its status. Only describe finished work as shipped. Put anything",
+      "  unfinished under \"Still in progress\", or leave it out.",
+      "- Leave out changes a customer cannot see: refactors, tests, tooling, dependency",
+      "  bumps.",
+      "- Where a title is too vague to write from, list it under \"Needs a description\"",
+      "  rather than guessing what it did.",
+      "",
+      "Never invent a change that is not in the list you were given. An invented line is",
+      "worse than a missing one, because somebody will publish it.",
+    ].join("\n"),
+  },
+  {
+    key: "tighten",
+    surface: "release",
+    name: "Tighten these notes",
+    description:
+      "Cuts the existing notes down without changing what they say.",
+    instructions: [
+      "Your task right now is to tighten the release notes that already exist, and",
+      "propose the result.",
+      "",
+      "Keep every change they mention. You are cutting words, not content: if a line",
+      "disappears, a customer stops being told about something that shipped.",
+      "",
+      "What to cut: throat-clearing openings, \"we are excited to announce\", repeated",
+      "subjects, adjectives that carry no information, and any sentence that describes",
+      "the release rather than a change in it.",
+      "",
+      "Keep the team's voice. This is their document and their house style, and a",
+      "rewrite that reads like somebody else wrote it will be rejected wholesale even",
+      "where the cuts were right.",
     ].join("\n"),
   },
 ];
@@ -208,6 +295,12 @@ export function mergeSkills(rows: readonly SkillRow[]): Skill[] {
         name: row?.name ?? def.name,
         description: row?.description ?? def.description,
         instructions: row?.instructions ?? def.instructions,
+        // Always the code's, never the row's. A built-in's surface is a fact
+        // about what its instructions are for, not a preference: "Grill me"
+        // moved onto releases would produce confident nonsense, and letting a
+        // stored row say otherwise would make that a thing a stray write could
+        // do silently.
+        surface: def.surface,
         builtIn: true,
         customised: Boolean(
           row && (row.name !== null || row.description !== null || row.instructions !== null),
@@ -231,6 +324,7 @@ export function mergeSkills(rows: readonly SkillRow[]): Skill[] {
         name: r.name ?? "",
         description: r.description ?? "",
         instructions: r.instructions ?? "",
+        surface: r.surface,
         builtIn: false,
         customised: false,
         enabled: r.enabled,
@@ -267,10 +361,23 @@ export function skillRowsToStore(skills: readonly Skill[]): SkillRow[] {
         def && skill.description === def.description ? null : skill.description,
       instructions:
         def && skill.instructions === def.instructions ? null : skill.instructions,
+      // A built-in's surface is resolved from the code on the way back in, so
+      // what is stored here is only ever read for a skill the team invented.
+      // Written anyway rather than left to a default, because the column is not
+      // nullable and a row that lied about its surface would hide the button.
+      surface: def?.surface ?? skill.surface,
       enabled: skill.enabled,
       position,
     };
   });
+}
+
+/** Only the skills belonging to one surface, in their existing order. */
+export function skillsForSurface(
+  skills: readonly Skill[],
+  surface: SkillSurface,
+): Skill[] {
+  return skills.filter((s) => s.surface === surface);
 }
 
 /** The same skills, ordered by name. Case-insensitive so "grill" sorts with
@@ -382,11 +489,34 @@ export function parseSkill(raw: unknown, taken: readonly string[]): SkillRow {
   }
   const description = submitted === def?.description ? null : submitted;
 
+  // A built-in's surface is whatever the code says, whatever was submitted: see
+  // `mergeSkills`. For a skill the team invented, an unrecognised surface is
+  // refused rather than defaulted, because defaulting it would put the button
+  // somewhere the person did not choose and give them nothing to correct.
+  let surface: SkillSurface;
+  if (def) {
+    surface = def.surface;
+  } else if (input.surface === undefined || input.surface === null) {
+    // Omitted is the item panel, which is where every skill lived before
+    // releases had an assistant. Keeps an older client working.
+    surface = "item";
+  } else if (
+    typeof input.surface === "string" &&
+    (SKILL_SURFACES as readonly string[]).includes(input.surface)
+  ) {
+    surface = input.surface as SkillSurface;
+  } else {
+    throw new SkillInputError(
+      `"${label}" has an unknown surface. Use one of: ${SKILL_SURFACES.join(", ")}.`,
+    );
+  }
+
   return {
     key: wellFormed ? sent : skillKeyFrom(label, taken),
     name,
     description,
     instructions,
+    surface,
     enabled: input.enabled !== false,
     position: 0,
   };

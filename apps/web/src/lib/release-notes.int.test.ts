@@ -48,6 +48,7 @@ describe.skipIf(!DB_URL)("drafting a release's notes", () => {
   let db: import("@specboards/db").Database;
   let svc: typeof import("./release-notes-service");
   let providers: typeof import("./model-provider-service");
+  let proposals: typeof import("./assistant-proposals");
   let server: Server;
   let endpoint: string;
   /** A release with work in it, in a product everyone can read. */
@@ -61,29 +62,40 @@ describe.skipIf(!DB_URL)("drafting a release's notes", () => {
   let slow = false;
   let disconnected = false;
   let answerFrames = ["## Highlights\n", "- Single sign-on is here.\n"];
+  /** Set by tests that need the thread cleared between turns. */
+  const wipeThread = async () =>
+    sql`delete from assistant_messages where workspace_id = ${ws}`;
 
-  /** Run a draft to completion, collecting what a caller would observe. */
-  async function draft(
+  /**
+   * Run a turn to completion, collecting what a caller would observe.
+   *
+   * The production path is a stream, so the tests drive the stream. Draining it
+   * here rather than keeping a second non-streaming entry point means there is
+   * one implementation of "what gets persisted" instead of two that have to be
+   * kept in agreement.
+   */
+  async function ask(
     scope: { userId: string; workspaceId: string },
     id: string,
-    opts: { signal?: AbortSignal; onDelta?: (t: string) => void } = {},
+    text: string,
+    opts: {
+      signal?: AbortSignal;
+      onDelta?: (t: string) => void;
+      skillKey?: string | null;
+    } = {},
   ) {
-    const stream = await svc.startReleaseNotesDraft(db, scope, id, opts);
+    const turn = await svc.startReleaseTurn(db, scope, id, text, opts);
     const deltas: string[] = [];
-    let done: { itemsIncluded: number; itemsOmitted: number } | null = null;
+    let turns: import("./assistant-service").AssistantMessageView[] | null = null;
     let error: { kind: string; message: string } | null = null;
-    for await (const event of stream) {
+    for await (const event of turn) {
       if (event.kind === "delta") {
         deltas.push(event.text);
         opts.onDelta?.(event.text);
-      } else if (event.kind === "done") {
-        done = {
-          itemsIncluded: event.itemsIncluded,
-          itemsOmitted: event.itemsOmitted,
-        };
-      } else error = event.error;
+      } else if (event.kind === "done") turns = event.turns;
+      else error = event.error;
     }
-    return { deltas, text: deltas.join(""), done, error };
+    return { deltas, text: deltas.join(""), turns, error };
   }
 
   beforeAll(async () => {
@@ -91,6 +103,7 @@ describe.skipIf(!DB_URL)("drafting a release's notes", () => {
     db = createDb(DB_URL!);
     svc = await import("./release-notes-service");
     providers = await import("./model-provider-service");
+    proposals = await import("./assistant-proposals");
 
     // A streaming stub, in frames, so reassembly is a real assertion.
     server = createServer((req, res) => {
@@ -210,6 +223,9 @@ describe.skipIf(!DB_URL)("drafting a release's notes", () => {
     await sql`delete from model_providers where workspace_id = ${ws}`;
     await sql`delete from model_provider_credentials where workspace_id = ${ws}`;
     await sql`delete from model_usage_events where workspace_id = ${ws}`;
+    await sql`delete from assistant_messages where workspace_id = ${ws}`;
+    await sql`update releases set release_notes_mode = 'none', release_notes_body = null
+      where workspace_id = ${ws}`;
   });
 
   afterAll(async () => {
@@ -230,18 +246,20 @@ describe.skipIf(!DB_URL)("drafting a release's notes", () => {
 
   it("streams a draft built from the work in the release", async () => {
     await connectStub();
-    const outcome = await draft(asOwner, releaseId);
+    const outcome = await ask(asOwner, releaseId, "Draft the notes.");
 
     expect(outcome.error).toBeNull();
     // Delivered in pieces, and reassembled into the draft the editor holds.
     expect(outcome.deltas.length).toBeGreaterThan(1);
     expect(outcome.text).toBe("## Highlights\n- Single sign-on is here.\n");
-    expect(outcome.done).toEqual({ itemsIncluded: 2, itemsOmitted: 0 });
+    expect(outcome.turns).toHaveLength(2);
+    expect(outcome.turns![0]!.role).toBe("user");
+    expect(outcome.turns![1]!.content).toBe(outcome.text);
   });
 
   it("persists nothing", async () => {
     await connectStub();
-    await draft(asOwner, releaseId);
+    await ask(asOwner, releaseId, "Draft the notes.");
 
     // The hard constraint of this feature. The draft lands in an editor and a
     // person saves it, or does not.
@@ -254,7 +272,7 @@ describe.skipIf(!DB_URL)("drafting a release's notes", () => {
 
   it("sends the release and its items, and nothing about anyone", async () => {
     await connectStub();
-    await draft(asOwner, releaseId);
+    await ask(asOwner, releaseId, "Draft the notes.");
 
     const system = captured[0]!.messages.find((m) => m.role === "system")!.content;
     expect(system).toContain("Single sign-on");
@@ -270,24 +288,15 @@ describe.skipIf(!DB_URL)("drafting a release's notes", () => {
 
   it("asks the endpoint to stream, under a bounded length", async () => {
     await connectStub();
-    await draft(asOwner, releaseId);
+    await ask(asOwner, releaseId, "Draft the notes.");
     expect(captured[0]!.stream).toBe(true);
     // Bounded, so a model that decides to write an essay stops.
-    expect(captured[0]!.max_tokens).toBe(svc.DRAFT_MAX_TOKENS);
-  });
-
-  it("refuses an empty release without spending anything", async () => {
-    await connectStub();
-    await expect(draft(asOwner, emptyReleaseId)).rejects.toThrow(
-      /nothing to write notes from/i,
-    );
-    // The point of refusing here rather than asking: no request was made.
-    expect(captured).toHaveLength(0);
+    expect(captured[0]!.max_tokens).toBe(svc.ANSWER_MAX_TOKENS);
   });
 
   it("hides a release the caller cannot see behind a not-found", async () => {
     await connectStub();
-    await expect(draft(asOwner, randomUUID())).rejects.toThrow(/not found/i);
+    await expect(ask(asOwner, randomUUID(), "Hello?")).rejects.toThrow(/not found/i);
   });
 
   it("refuses a member with no write access to the product", async () => {
@@ -295,33 +304,33 @@ describe.skipIf(!DB_URL)("drafting a release's notes", () => {
     // A workspace member with no grant on this product. Drafting spends money,
     // so it is gated on being able to save the result, not on being able to
     // read the release.
-    await expect(draft(asViewer, releaseId)).rejects.toThrow(/permission/i);
+    await expect(ask(asViewer, releaseId, "Hello?")).rejects.toThrow(/permission/i);
     expect(captured).toHaveLength(0);
   });
 
   it("leaves out work the caller cannot read on a portfolio release", async () => {
     await connectStub();
     // The owner can see it, so the release is draftable and names the item.
-    const outcome = await draft(asOwner, portfolioReleaseId);
-    expect(outcome.done!.itemsIncluded).toBe(1);
+    const outcome = await ask(asOwner, portfolioReleaseId, "Draft the notes.");
+    expect(outcome.error).toBeNull();
     expect(captured[0]!.messages[0]!.content).toContain("Acquisition tooling");
 
     // The viewer cannot, so from where they stand the release holds nothing,
     // and the drafter is not a way to read titles out of a product they cannot
     // open. (They are refused for want of write access first; this asserts the
     // item list itself is scoped, by asking as a member of no product.)
-    await expect(draft(asViewer, portfolioReleaseId)).rejects.toThrow();
+    await expect(ask(asViewer, portfolioReleaseId, "Hello?")).rejects.toThrow();
   });
 
   it("says a model is not connected rather than failing", async () => {
-    const outcome = await draft(asOwner, releaseId);
+    const outcome = await ask(asOwner, releaseId, "Draft the notes.");
     expect(outcome.error?.kind).toBe("not_configured");
     expect(outcome.error?.message).toMatch(/no model is connected/i);
   });
 
   it("records what the draft cost, attributed to its own feature", async () => {
     await connectStub();
-    await draft(asOwner, releaseId);
+    await ask(asOwner, releaseId, "Draft the notes.");
 
     const [row] = await sql<
       {
@@ -342,20 +351,151 @@ describe.skipIf(!DB_URL)("drafting a release's notes", () => {
     expect(row!.outcome).toBe("ok");
   });
 
+  describe("proposals", () => {
+    const withProposal = [
+      "Tightened the opening.\n",
+      "<<<BEGIN PROPOSED SPEC>>>\n",
+      "## Highlights\n\nSingle sign-on is here.\n",
+      "<<<END PROPOSED SPEC>>>\n",
+    ];
+
+    it("applies an accepted proposal to the release's notes", async () => {
+      await connectStub();
+      answerFrames = withProposal;
+      const outcome = await ask(asOwner, releaseId, "Draft the notes.");
+      const messageId = outcome.turns![1]!.id;
+      expect(outcome.turns![1]!.proposal).not.toBeNull();
+
+      // Nothing has landed yet: a proposal is inert text until somebody says so.
+      const [before] = await sql<{ body: string | null }[]>`
+        select release_notes_body as body from releases where id = ${releaseId}`;
+      expect(before!.body).toBeNull();
+
+      const result = await proposals.acceptReleaseProposal(
+        db,
+        asOwner,
+        releaseId,
+        messageId,
+      );
+      expect(result.body).toBe("## Highlights\n\nSingle sign-on is here.");
+
+      const [after] = await sql<{ body: string; mode: string }[]>`
+        select release_notes_body as body, release_notes_mode as mode
+        from releases where id = ${releaseId}`;
+      expect(after!.body).toBe("## Highlights\n\nSingle sign-on is here.");
+      // Accepting switches the notes on. Applying the text and showing nothing
+      // would read as the accept having failed.
+      expect(after!.mode).toBe("in_app");
+    });
+
+    it("takes the reviewer's own wording when they edited before accepting", async () => {
+      await connectStub();
+      answerFrames = withProposal;
+      const outcome = await ask(asOwner, releaseId, "Draft the notes.");
+      await proposals.acceptReleaseProposal(
+        db,
+        asOwner,
+        releaseId,
+        outcome.turns![1]!.id,
+        { body: "## What changed\n\nYou can now use SSO." },
+      );
+      const [row] = await sql<{ body: string }[]>`
+        select release_notes_body as body from releases where id = ${releaseId}`;
+      expect(row!.body).toBe("## What changed\n\nYou can now use SSO.");
+    });
+
+    it("writes nothing when a proposal is turned down", async () => {
+      await connectStub();
+      answerFrames = withProposal;
+      const outcome = await ask(asOwner, releaseId, "Draft the notes.");
+      await proposals.rejectReleaseProposal(
+        db,
+        asOwner,
+        releaseId,
+        outcome.turns![1]!.id,
+      );
+      const [row] = await sql<{ body: string | null }[]>`
+        select release_notes_body as body from releases where id = ${releaseId}`;
+      expect(row!.body).toBeNull();
+    });
+
+    it("lets only the first of two clicks decide", async () => {
+      await connectStub();
+      answerFrames = withProposal;
+      const outcome = await ask(asOwner, releaseId, "Draft the notes.");
+      const messageId = outcome.turns![1]!.id;
+      await proposals.acceptReleaseProposal(db, asOwner, releaseId, messageId);
+      // Two people with the flyout open, or one person double-clicking.
+      await expect(
+        proposals.acceptReleaseProposal(db, asOwner, releaseId, messageId),
+      ).rejects.toThrow(/already/i);
+    });
+
+    it("refuses a message id from another release's thread", async () => {
+      await connectStub();
+      answerFrames = withProposal;
+      const outcome = await ask(asOwner, releaseId, "Draft the notes.");
+      // Resolved by release as well as by id, so a thread cannot be reached
+      // through a different release the caller happens to be able to write.
+      await expect(
+        proposals.acceptReleaseProposal(
+          db,
+          asOwner,
+          emptyReleaseId,
+          outcome.turns![1]!.id,
+        ),
+      ).rejects.toThrow(/no longer here/i);
+    });
+  });
+
+  it("replays the conversation so far on the next question", async () => {
+    await connectStub();
+    await ask(asOwner, releaseId, "First question.");
+    await ask(asOwner, releaseId, "Second question.");
+    const second = captured[1]!.messages;
+    expect(second.map((m) => m.role)).toEqual([
+      "system",
+      "user",
+      "assistant",
+      "user",
+    ]);
+  });
+
+  it("refuses a skill written for the item panel", async () => {
+    await connectStub();
+    // Its instructions are about a different subject entirely, and running them
+    // here produces a confident answer about something not on the screen.
+    await expect(
+      ask(asOwner, releaseId, "", { skillKey: "grill" }),
+    ).rejects.toThrow(/does not apply to a release/i);
+    expect(captured).toHaveLength(0);
+  });
+
+  it("records the release skill it ran on the question", async () => {
+    await connectStub();
+    const outcome = await ask(asOwner, releaseId, "", {
+      skillKey: "release-notes",
+    });
+    // The skill's own name becomes the question, so the thread reads as one.
+    expect(outcome.turns![0]!.content).toBe("Draft the notes");
+    expect(outcome.turns![0]!.skillKey).toBe("release-notes");
+    expect(captured[0]!.messages[0]!.content).toContain("Your current task");
+  });
+
   it("stops at the provider when the reader goes away", async () => {
     await connectStub();
     slow = true;
     const controller = new AbortController();
 
-    const outcome = await draft(asOwner, releaseId, {
+    const outcome = await ask(asOwner, releaseId, "Draft the notes.", {
       signal: controller.signal,
       onDelta: () => controller.abort(),
     });
 
-    // Whatever arrived is kept: the person stopped it themselves and can see
-    // exactly what they got. What must not happen is the connection staying
-    // open, generating tokens they still pay for.
-    expect(outcome.done).toBeNull();
+    // Nothing is persisted: a half-sentence in a thread is replayed as context
+    // into every later question and drags the answers with it. What must not
+    // happen is the connection staying open, billing tokens nobody reads.
+    expect(outcome.turns).toBeNull();
     expect(disconnected).toBe(true);
   });
 });
@@ -435,13 +575,13 @@ describe.skipIf(!DB_URL || !RUNTIME_URL)(
     it(
       "streams real release notes from a real model",
       async () => {
-        const stream = await svc.startReleaseNotesDraft(db, rtScope, rtReleaseId);
+        const stream = await svc.startReleaseTurn(db, rtScope, rtReleaseId, "Draft the release notes.");
         const deltas: string[] = [];
-        let done: { itemsIncluded: number } | null = null;
+        let turns: import("./assistant-service").AssistantMessageView[] | null = null;
         let error: unknown = null;
         for await (const event of stream) {
           if (event.kind === "delta") deltas.push(event.text);
-          else if (event.kind === "done") done = event;
+          else if (event.kind === "done") turns = event.turns;
           else error = event.error;
         }
 
@@ -449,7 +589,7 @@ describe.skipIf(!DB_URL || !RUNTIME_URL)(
         // The claim streaming actually makes: a real runtime hands the draft
         // over in pieces. A stub can be made to do either.
         expect(deltas.length).toBeGreaterThan(1);
-        expect(done?.itemsIncluded).toBe(3);
+        expect(turns).toHaveLength(2);
 
         const notes = deltas.join("");
         expect(notes.length).toBeGreaterThan(0);

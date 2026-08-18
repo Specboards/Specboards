@@ -765,28 +765,79 @@ export async function askAssistant(
   );
 }
 
-/** One line of the release-notes draft stream, as the browser sees it. */
-export type DraftStreamEvent =
-  | { kind: "delta"; text: string }
-  | { kind: "done"; itemsIncluded: number; itemsOmitted: number }
-  | { kind: "error"; error: { kind: string; message: string } };
+/**
+ * The assistant thread for a release, plus the context that would be sent about
+ * it. The release twin of {@link getAssistantThread}, and the same contract:
+ * both halves come from one response so the panel cannot show a disclosure that
+ * describes a different request from the one it makes.
+ */
+export async function getReleaseAssistantThread(releaseId: string): Promise<{
+  messages: AssistantMessageView[];
+  context: AssistantContextField[];
+  modelConnected: boolean;
+  canEdit: boolean;
+  canPropose: boolean;
+  body: string;
+  skills: Skill[];
+  activeSkillKey: string | null;
+  estimatedPromptTokens: number;
+  itemsIncluded: number;
+  itemsOmitted: number;
+}> {
+  const res = await apiFetch(
+    `/api/v1/assistant/releases/${encodeURIComponent(releaseId)}`,
+  );
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as {
+    messages?: AssistantMessageView[];
+    context?: AssistantContextField[];
+    modelConnected?: boolean;
+    canEdit?: boolean;
+    canPropose?: boolean;
+    body?: string;
+    skills?: Skill[];
+    activeSkillKey?: string | null;
+    estimatedPromptTokens?: number;
+    itemsIncluded?: number;
+    itemsOmitted?: number;
+    error?: string;
+  } | null;
+  if (!res.ok || !body?.messages || !body?.context) {
+    throw new Error(
+      body?.error ?? `Could not load the assistant (${res.status}).`,
+    );
+  }
+  return {
+    messages: body.messages,
+    context: body.context,
+    modelConnected: body.modelConnected ?? false,
+    canEdit: body.canEdit ?? false,
+    canPropose: body.canPropose ?? false,
+    body: body.body ?? "",
+    skills: body.skills ?? [],
+    activeSkillKey: body.activeSkillKey ?? null,
+    estimatedPromptTokens: body.estimatedPromptTokens ?? 0,
+    itemsIncluded: body.itemsIncluded ?? 0,
+    itemsOmitted: body.itemsOmitted ?? 0,
+  };
+}
 
 /**
- * Draft a release's customer-facing notes, rendering them as they arrive.
+ * Ask the assistant about a release, rendering the answer as it arrives.
  *
- * `onDelta` is called with each fragment. The resolved value is the outcome: a
- * summary of what the draft was built from on success, an error to render on
- * failure, or `cancelled` when the caller stopped it, which is not a failure and
- * must not be reported as one.
- *
- * Nothing is saved by this call. What arrives lands in the editor, and the
- * person saves it themselves through the ordinary release write path.
+ * The release twin of {@link askAssistant}; see that function for why a failure
+ * at the customer's own endpoint comes back as a value rather than a throw.
  */
-export async function draftReleaseNotes(
+export async function askReleaseAssistant(
   releaseId: string,
-  opts: { onDelta?: (text: string) => void; signal?: AbortSignal } = {},
+  message: string,
+  opts: {
+    onDelta?: (text: string) => void;
+    signal?: AbortSignal;
+    skillKey?: string | null;
+  } = {},
 ): Promise<
-  | { ok: true; itemsIncluded: number; itemsOmitted: number }
+  | { ok: true; turns: AssistantMessageView[] }
   | { ok: false; error: { kind: string; message: string } }
   | { ok: false; cancelled: true }
 > {
@@ -796,6 +847,11 @@ export async function draftReleaseNotes(
       `/api/v1/assistant/releases/${encodeURIComponent(releaseId)}`,
       {
         method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          message,
+          ...(opts.skillKey ? { skillKey: opts.skillKey } : {}),
+        }),
         ...(opts.signal ? { signal: opts.signal } : {}),
       },
     );
@@ -805,28 +861,23 @@ export async function draftReleaseNotes(
   }
   if (res.status === 401) throw new AuthRequiredError();
 
-  // Our own refusals (unknown release, nothing scheduled, no permission) are
+  // Our own refusals (unknown release, no permission, unusable message) are
   // decided before any streaming starts and arrive as ordinary JSON.
   if (!res.ok || !res.body) {
     const body = (await res.json().catch(() => null)) as { error?: string } | null;
-    throw new Error(body?.error ?? `The draft failed (${res.status}).`);
+    throw new Error(body?.error ?? `The assistant failed (${res.status}).`);
   }
 
   let outcome:
-    | { ok: true; itemsIncluded: number; itemsOmitted: number }
+    | { ok: true; turns: AssistantMessageView[] }
     | { ok: false; error: { kind: string; message: string } }
     | null = null;
 
   try {
-    await readNdjson<DraftStreamEvent>(res.body, (event) => {
+    await readNdjson<AssistantStreamEvent>(res.body, (event) => {
       if (event.kind === "delta") opts.onDelta?.(event.text);
-      else if (event.kind === "done") {
-        outcome = {
-          ok: true,
-          itemsIncluded: event.itemsIncluded,
-          itemsOmitted: event.itemsOmitted,
-        };
-      } else if (event.kind === "error") outcome = { ok: false, error: event.error };
+      else if (event.kind === "done") outcome = { ok: true, turns: event.turns };
+      else if (event.kind === "error") outcome = { ok: false, error: event.error };
     });
   } catch (err) {
     if (opts.signal?.aborted) return { ok: false, cancelled: true };
@@ -839,10 +890,44 @@ export async function draftReleaseNotes(
       ok: false,
       error: {
         kind: "unknown",
-        message: "The draft stopped before it finished.",
+        message: "The answer stopped before it finished.",
       },
     }
   );
+}
+
+/**
+ * Accept or reject proposed release notes.
+ *
+ * Under `/releases` rather than `/assistant`, so an API key needs the grant that
+ * lets it edit the release by hand. Drafting and publishing stay two decisions.
+ */
+export async function resolveReleaseProposal(
+  releaseId: string,
+  messageId: string,
+  action: "accept" | "reject",
+  opts: { body?: string } = {},
+): Promise<ProposalOutcome> {
+  const res = await apiFetch(
+    `/api/v1/releases/${encodeURIComponent(releaseId)}/proposals`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        messageId,
+        action,
+        ...(opts.body !== undefined ? { body: opts.body } : {}),
+      }),
+    },
+  );
+  if (res.status === 401) throw new AuthRequiredError();
+  const payload = (await res.json().catch(() => null)) as
+    | (ProposalOutcome & { error?: string })
+    | null;
+  if (!res.ok || !payload?.message) {
+    throw new Error(payload?.error ?? `That did not go through (${res.status}).`);
+  }
+  return payload;
 }
 
 /** Post a comment to a feature; returns the created record. */

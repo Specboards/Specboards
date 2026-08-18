@@ -195,16 +195,52 @@ export async function resolveAssistantItem(
 }
 
 /**
+ * What a thread hangs off: an item, or a release.
+ *
+ * Exactly one field is set, which is also what the database enforces
+ * (`num_nonnulls(feature_id, release_id) = 1`, migration 0075). Modelled as a
+ * discriminated union rather than two nullable ids so a caller cannot express a
+ * thread about both or about neither, and there is deliberately no
+ * `subject_type` string anywhere: the presence of an id *is* the type, in the
+ * row and in the code, so the two cannot drift.
+ *
+ * Everything below this line is subject-agnostic and stays that way. Reading a
+ * thread, replaying it, capping its history, writing a pair, attributing it and
+ * estimating what it costs are all the same job whatever it is about, and the
+ * moment they are not is the moment two copies of them start disagreeing.
+ */
+export type ThreadSubject =
+  | { kind: "item"; featureId: string }
+  | { kind: "release"; releaseId: string };
+
+/** The `where` clause selecting one subject's thread. */
+function subjectWhere(workspaceId: string, subject: ThreadSubject) {
+  return and(
+    eq(assistantMessages.workspaceId, workspaceId),
+    subject.kind === "item"
+      ? eq(assistantMessages.featureId, subject.featureId)
+      : eq(assistantMessages.releaseId, subject.releaseId),
+  );
+}
+
+/** The subject's columns, as an insert writes them. */
+function subjectColumns(subject: ThreadSubject) {
+  return subject.kind === "item"
+    ? { featureId: subject.featureId, releaseId: null }
+    : { featureId: null, releaseId: subject.releaseId };
+}
+
+/**
  * Who accepted or rejected a proposal, joined separately from who asked. Two
  * aliases of `users` rather than one, because they are routinely different
  * people: that is the whole shape of a review.
  */
 const resolvers = alias(users, "proposal_resolvers");
 
-async function readThread(
+export async function readThread(
   db: Database,
   workspaceId: string,
-  featureId: string,
+  subject: ThreadSubject,
 ): Promise<AssistantMessageView[]> {
   const rows = await db
     .select({
@@ -224,12 +260,7 @@ async function readThread(
     .from(assistantMessages)
     .leftJoin(users, eq(users.id, assistantMessages.authorId))
     .leftJoin(resolvers, eq(resolvers.id, assistantMessages.proposalResolvedBy))
-    .where(
-      and(
-        eq(assistantMessages.workspaceId, workspaceId),
-        eq(assistantMessages.featureId, featureId),
-      ),
-    )
+    .where(subjectWhere(workspaceId, subject))
     .orderBy(asc(assistantMessages.createdAt));
   return rows.map(toView);
 }
@@ -241,7 +272,7 @@ export async function listAssistantThread(
   specId: string,
 ): Promise<AssistantMessageView[]> {
   const { featureId } = await resolveAssistantItem(db, scope, specId);
-  return readThread(db, scope.workspaceId, featureId);
+  return readThread(db, scope.workspaceId, { kind: "item", featureId });
 }
 
 /** Everything the panel needs to render, in one item resolution. */
@@ -336,7 +367,7 @@ export async function getAssistantPanelData(
   const { feature, featureId } = await resolveAssistantItem(db, scope, specId);
   const canEdit = await canEditItem(scope, feature);
   const [messages, assembled, modelConnected, skills] = await Promise.all([
-    readThread(db, scope.workspaceId, featureId),
+    readThread(db, scope.workspaceId, { kind: "item", featureId }),
     buildContext(scope, feature, canEdit),
     isModelConnected(db, scope.workspaceId),
     listSkills(db, scope.workspaceId),
@@ -549,7 +580,10 @@ export async function startAssistantTurn(
   const { feature, featureId } = await resolveAssistantItem(db, scope, specId);
   const canEdit = await canEditItem(scope, feature);
   const { systemPrompt } = await buildContext(scope, feature, canEdit, skill);
-  const history = await readThread(db, scope.workspaceId, featureId);
+  const history = await readThread(db, scope.workspaceId, {
+    kind: "item",
+    featureId,
+  });
 
   const messages: ModelMessage[] = [
     { role: "system", content: systemPrompt },
@@ -622,23 +656,32 @@ export async function startAssistantTurn(
 
     yield {
       kind: "done",
-      turns: await persistTurns(db, scope, featureId, question, answer, model, usage, {
-        // The version the draft was written against, recorded now rather than
-        // read at accept time. A proposal can sit on a card for a day, and what
-        // makes accepting it safe is being guarded against the document the
-        // model was actually shown.
-        baseSha: feature.blobSha,
-        skillKey: skill?.key ?? null,
-      }),
+      turns: await persistTurns(
+        db,
+        scope,
+        { kind: "item", featureId },
+        question,
+        answer,
+        model,
+        usage,
+        {
+          // The version the draft was written against, recorded now rather than
+          // read at accept time. A proposal can sit on a card for a day, and
+          // what makes accepting it safe is being guarded against the document
+          // the model was actually shown.
+          baseSha: feature.blobSha,
+          skillKey: skill?.key ?? null,
+        },
+      ),
     };
   }
 }
 
 /** Write the pair and return them as the browser will see them. */
-async function persistTurns(
+export async function persistTurns(
   db: Database,
   scope: WorkspaceScope,
-  featureId: string,
+  subject: ThreadSubject,
   question: string,
   answer: string,
   model: string | null,
@@ -656,7 +699,7 @@ async function persistTurns(
     .values([
       {
         workspaceId: scope.workspaceId,
-        featureId,
+        ...subjectColumns(subject),
         role: "user",
         content: question,
         authorId: scope.userId,
@@ -668,7 +711,7 @@ async function persistTurns(
       },
       {
         workspaceId: scope.workspaceId,
-        featureId,
+        ...subjectColumns(subject),
         role: "assistant",
         content: answer,
         // The person who asked, so every row in the thread names someone

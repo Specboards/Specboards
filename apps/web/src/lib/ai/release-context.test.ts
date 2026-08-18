@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   assembleReleaseContext,
   ITEM_LIST_CHAR_LIMIT,
+  NOTES_CHAR_LIMIT,
   type ReleaseContextGroup,
 } from "./release-context";
 
@@ -23,6 +24,8 @@ function input(overrides: Partial<Parameters<typeof assembleReleaseContext>[0]> 
         items: [{ title: "SAML metadata upload", statusLabel: "In review" }],
       },
     ] as ReleaseContextGroup[],
+    notesBody: "",
+    canEdit: true,
     ...overrides,
   };
 }
@@ -43,11 +46,91 @@ describe("assembleReleaseContext", () => {
     ]);
   });
 
-  it("names the audience and forbids claiming a save", () => {
+  it("names the audience", () => {
     const { systemPrompt } = assembleReleaseContext(input());
     expect(systemPrompt).toContain("customer-facing release notes");
-    expect(systemPrompt).toContain("You cannot change anything.");
-    expect(systemPrompt).toContain("Never claim to have saved");
+  });
+
+  describe("what the model is told it may do", () => {
+    it("invites a proposal from someone who can write the release", () => {
+      const assembled = assembleReleaseContext(input({ canEdit: true }));
+      expect(assembled.canPropose).toBe(true);
+      expect(assembled.systemPrompt).toContain("BEGIN PROPOSED SPEC");
+      expect(assembled.systemPrompt).toContain("this release's notes");
+      // The rule that makes the whole feature trustworthy.
+      expect(assembled.systemPrompt).toContain("Proposing is not editing.");
+    });
+
+    it("tells a reader plainly that nothing they see is saved", () => {
+      const assembled = assembleReleaseContext(input({ canEdit: false }));
+      expect(assembled.canPropose).toBe(false);
+      expect(assembled.systemPrompt).toContain("You cannot change anything.");
+      // Not merely withheld from the prompt: a model with no rule about writing
+      // answers "I have published those for you" and the person believes it.
+      expect(assembled.systemPrompt).not.toContain("BEGIN PROPOSED SPEC");
+    });
+
+    it("withdraws the offer when the notes were too long to send whole", () => {
+      const assembled = assembleReleaseContext(
+        input({ canEdit: true, notesBody: "x".repeat(NOTES_CHAR_LIMIT + 1) }),
+      );
+      // Withdrawn rather than qualified: a proposal is a whole replacement, so
+      // one drafted from a shortened document deletes everything past the cut.
+      expect(assembled.canPropose).toBe(false);
+      expect(assembled.systemPrompt).not.toContain("BEGIN PROPOSED SPEC");
+      expect(assembled.systemPrompt).toContain("too long to send");
+      expect(
+        assembled.fields.find((f) => f.label === "Current release notes")?.truncated,
+      ).toBe(true);
+    });
+  });
+
+  describe("the notes being edited", () => {
+    it("sends them last, so the document sits nearest the answer", () => {
+      const { fields } = assembleReleaseContext(
+        input({ notesBody: "## What is new\nSSO." }),
+      );
+      expect(fields.at(-1)?.label).toBe("Current release notes");
+      expect(fields.at(-1)?.value).toBe("## What is new\nSSO.");
+    });
+
+    it("omits the field entirely when nobody has written any", () => {
+      const { fields } = assembleReleaseContext(input({ notesBody: "" }));
+      expect(fields.some((f) => f.label === "Current release notes")).toBe(false);
+    });
+  });
+
+  describe("a running skill", () => {
+    const skill = {
+      key: "release-notes",
+      surface: "release" as const,
+      name: "Draft the notes",
+      description: "",
+      instructions: "Write them in the house style.",
+    };
+
+    it("puts the task after the rules and before the release", () => {
+      const { systemPrompt } = assembleReleaseContext(input(), skill);
+      const rules = systemPrompt.indexOf("Proposing is not editing.");
+      const task = systemPrompt.indexOf("Write them in the house style.");
+      const release = systemPrompt.indexOf("Release: v1.4.0");
+      // Who you are, then what you may do, then the job, then the thing itself.
+      expect(rules).toBeLessThan(task);
+      expect(task).toBeLessThan(release);
+    });
+
+    it("overrides a skill that asks for something this conversation cannot do", () => {
+      const { systemPrompt } = assembleReleaseContext(
+        input({ canEdit: false }),
+        skill,
+      );
+      // A skill is free text a customer wrote, and ours says "propose them".
+      // Ours has to be the instruction nearest the end, which is the one a small
+      // model follows.
+      const task = systemPrompt.indexOf("Write them in the house style.");
+      const override = systemPrompt.indexOf("cannot propose");
+      expect(override).toBeGreaterThan(task);
+    });
   });
 
   it("counts every item it included", () => {
