@@ -3,6 +3,7 @@ import { AssistantItemError } from "@/lib/assistant-service";
 import {
   BreakdownForbiddenError,
   BreakdownLevelError,
+  estimateBreakdown,
   proposeBreakdown,
 } from "@/lib/breakdown-service";
 import { getDb } from "@/lib/db";
@@ -32,6 +33,37 @@ const NO_DB = Response.json(
   { error: "The assistant requires a database (unavailable in local file mode)." },
   { status: 501 },
 );
+
+/**
+ * GET /api/v1/assistant/:specId/breakdown - roughly what the POST would send,
+ * in tokens. Spends nothing.
+ *
+ * A GET on the same path as the operation it describes, rather than a
+ * `?estimate=1` on the POST or a resource of its own: the thing being estimated
+ * is precisely this endpoint's request, and keeping them on one path is what
+ * stops the estimate quietly describing a payload the POST no longer builds.
+ * Same authorization, because the estimate is derived from the item's content
+ * and its size is a fact about that content.
+ */
+export async function GET(req: Request, { params }: Params) {
+  const authz = await authorizeWrite(req);
+  if (!authz.ok) return authz.response;
+  const db = getDb();
+  if (!db || !authz.scope) return NO_DB;
+
+  const { specId } = await params;
+  try {
+    const estimate = await estimateBreakdown(db, authz.scope, specId);
+    // Null means there is no level below this one, so there is nothing to
+    // estimate. Not an error: the caller is a button deciding what to show.
+    return Response.json(estimate ?? { estimatedPromptTokens: null });
+  } catch (err) {
+    if (err instanceof AssistantItemError) {
+      return Response.json({ error: err.message }, { status: 404 });
+    }
+    throw err;
+  }
+}
 
 export async function POST(req: Request, { params }: Params) {
   const authz = await authorizeWrite(req);

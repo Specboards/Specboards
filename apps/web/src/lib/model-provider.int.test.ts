@@ -32,6 +32,13 @@ const suffix = randomUUID().slice(0, 8);
 const workspace = { id: randomUUID(), slug: `model-${suffix}` };
 const ownerId = randomUUID();
 
+/**
+ * Whose spend a call is recorded against. Required on every inference entry
+ * point, so these tests carry one too; what it does with it is
+ * `usage.int.test.ts`'s subject, not this file's.
+ */
+const ATTRIBUTION = { userId: ownerId, feature: "connection_test" } as const;
+
 describe.skipIf(!DB_URL)("model provider connection", () => {
   let sql: postgres.Sql;
   let db: import("@specboards/db").Database;
@@ -216,7 +223,7 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
   it("says 'not configured' rather than failing when nothing is connected", async () => {
     const out = await svc.completeWithWorkspaceModel(db, workspace.id, {
       messages: [{ role: "user", content: "hi" }],
-    });
+    }, ATTRIBUTION);
     // A setup prompt, not an error to report: the distinction is what lets the
     // assistant offer to connect a model instead of showing a stack trace.
     expect(out.ok).toBe(false);
@@ -287,7 +294,7 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
       const out = await svc.completeWithWorkspaceModel(db, workspace.id, {
         messages: [{ role: "user", content: "Reply with the single word: ready" }],
         maxTokens: 16,
-      });
+      }, ATTRIBUTION);
 
       expect(out.ok).toBe(true);
       expect(out.ok && out.text).toBe("ready");
@@ -309,7 +316,7 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
 
       await svc.completeWithWorkspaceModel(db, workspace.id, {
         messages: [{ role: "user", content: "hi" }],
-      });
+      }, ATTRIBUTION);
 
       expect((await svc.getModelProvider(db, workspace.id))?.lastUsedAt).not.toBeNull();
       // Keyless endpoint: no header at all rather than an empty bearer.
@@ -380,7 +387,7 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
       try {
         const out = await svc.completeWithWorkspaceModel(db, workspace.id, {
           messages: [{ role: "user", content: "hi" }],
-        });
+        }, ATTRIBUTION);
         // The row was written while private targets were allowed. Re-checking
         // per call is what stops it outliving the policy that permitted it.
         expect(out.ok).toBe(false);
@@ -436,7 +443,7 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
             messages: [{ role: "user", content: "Say ready." }],
             maxTokens: 16,
             timeoutMs: TIMEOUT_MS,
-          });
+          }, ATTRIBUTION);
 
           expect(out.ok).toBe(true);
           expect(out.ok && out.text.length).toBeGreaterThan(0);
@@ -458,7 +465,7 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
             messages: [{ role: "user", content: "hi" }],
             maxTokens: 8,
             timeoutMs: TIMEOUT_MS,
-          });
+          }, ATTRIBUTION);
 
           expect((await svc.getModelProvider(db, workspace.id))!.lastUsedAt).not.toBeNull();
         },
@@ -496,7 +503,7 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
             const out = await svc.completeWithWorkspaceModel(db, workspace.id, {
               messages: [{ role: "user", content: "hi" }],
               timeoutMs: TIMEOUT_MS,
-            });
+            }, ATTRIBUTION);
             expect(out.ok).toBe(false);
             expect(!out.ok && out.error.kind).toBe("blocked");
           } finally {

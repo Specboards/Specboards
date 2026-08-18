@@ -428,6 +428,8 @@ export async function getAssistantThread(specId: string): Promise<{
   body: string;
   skills: Skill[];
   activeSkillKey: string | null;
+  /** About how many tokens the next question sends. See `lib/ai/estimate.ts`. */
+  estimatedPromptTokens: number;
 }> {
   const res = await apiFetch(
     `/api/v1/assistant/${encodeURIComponent(specId)}`,
@@ -442,6 +444,7 @@ export async function getAssistantThread(specId: string): Promise<{
     body?: string;
     skills?: Skill[];
     activeSkillKey?: string | null;
+    estimatedPromptTokens?: number;
     error?: string;
   } | null;
   if (!res.ok || !body?.messages || !body?.context) {
@@ -458,6 +461,7 @@ export async function getAssistantThread(specId: string): Promise<{
     body: body.body ?? "",
     skills: body.skills ?? [],
     activeSkillKey: body.activeSkillKey ?? null,
+    estimatedPromptTokens: body.estimatedPromptTokens ?? 0,
   };
 }
 
@@ -549,6 +553,31 @@ export async function suggestBreakdown(
   }
   if (!body) throw new Error("The assistant returned nothing.");
   return body;
+}
+
+/**
+ * Roughly what a breakdown would send, in tokens, without sending it.
+ *
+ * Returns null when there is nothing to estimate: no level below this item, or
+ * the request did not work. A missing estimate is a line the UI leaves out, not
+ * a failure worth interrupting somebody over, so this swallows rather than
+ * throws.
+ */
+export async function estimateBreakdown(specId: string): Promise<number | null> {
+  try {
+    const res = await apiFetch(
+      `/api/v1/assistant/${encodeURIComponent(specId)}/breakdown`,
+    );
+    if (!res.ok) return null;
+    const body = (await res.json().catch(() => null)) as {
+      estimatedPromptTokens?: number | null;
+    } | null;
+    return typeof body?.estimatedPromptTokens === "number"
+      ? body.estimatedPromptTokens
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 /** What came back from accepting or rejecting a proposed edit. */

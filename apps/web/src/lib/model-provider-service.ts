@@ -6,6 +6,7 @@ import {
 } from "@specboards/db";
 
 import { assertReachableModelUrl } from "@/lib/ai/egress";
+import { estimatePromptTokens } from "@/lib/ai/estimate";
 import { createOpenAiCompatibleClient } from "@/lib/ai/openai-compatible";
 import type {
   CompletionOutcome,
@@ -15,6 +16,11 @@ import type {
   StreamRequest,
 } from "@/lib/ai/provider";
 import { decryptSecret, encryptSecret } from "@/lib/crypto";
+import {
+  checkUsageAllowance,
+  recordUsage,
+  type UsageAttribution,
+} from "@/lib/usage-service";
 
 /**
  * The workspace's model connection: read it, write it, and call through it.
@@ -327,60 +333,153 @@ export async function listWorkspaceModels(
 }
 
 /**
- * Run one completion against the workspace's configured model.
+ * What a call would cost at most, for the cap check.
  *
- * The single entry point for inference. Returns the adapter's outcome verbatim
- * so callers can branch on `error.kind`, plus a distinct `not_configured`
- * outcome, because "no model connected" is a setup prompt rather than a failure
- * to report.
+ * Prompt estimate plus the ceiling the caller put on generation, because the
+ * cap has to hold against the worst case rather than the typical one: a
+ * guardrail that admits a call on an average and is then handed a maximum is
+ * not a guardrail. `maxTokens` is a fact the caller supplied, not a guess; when
+ * there is none there is genuinely no bound to add, and the estimate is the
+ * prompt alone.
  */
+function budgetFor(req: {
+  messages: readonly { content: string }[];
+  maxTokens?: number;
+}): number {
+  return estimatePromptTokens(req.messages) + (req.maxTokens ?? 0);
+}
+
+/** Refused by this workspace's own spend cap, before anything was sent. */
+export interface CappedOutcome {
+  kind: "capped";
+  message: string;
+}
+
 /**
  * Stream one completion against the workspace's configured model.
  *
  * The streaming twin of {@link completeWithWorkspaceModel}, and the same
- * contract: no exceptions, `not_configured` as a distinct outcome, and the
- * adapter's events passed through untouched.
+ * contract: no exceptions, `not_configured` and `capped` as distinct outcomes,
+ * and the adapter's events passed through untouched.
  *
  * `last_used_at` is stamped on the first delta rather than at the end. What it
  * answers is "is this connection actually serving the product", and by the time
  * a token has arrived that is already true. Waiting for the stream to finish
  * would leave a cancelled answer looking like the connection was never used,
  * which is the opposite of what happened.
+ *
+ * ── Why the ledger write is in a `finally` ──────────────────────────────────
+ * A stream has three endings and all three cost money: it finishes, it fails
+ * part way, or the reader goes away and the generator is closed from outside.
+ * Only the first two arrive as events. Recording on the terminal event alone
+ * would mean a cancelled answer left no trace, and a cancelled answer is
+ * precisely the one somebody later fails to recognise on their invoice: tokens
+ * were generated and billed, and nothing in the product ever mentioned them.
+ * The `finally` runs on all three.
  */
 export async function* streamWithWorkspaceModel(
   db: Database,
   workspaceId: string,
   req: StreamRequest,
-): AsyncGenerator<StreamEvent | { kind: "not_configured" }> {
+  attribution: UsageAttribution,
+): AsyncGenerator<StreamEvent | { kind: "not_configured" } | CappedOutcome> {
   const resolved = await resolveConfig(db, workspaceId);
   if (!resolved) {
     yield { kind: "not_configured" };
     return;
   }
 
+  const allowance = await checkUsageAllowance(
+    db,
+    workspaceId,
+    attribution,
+    budgetFor(req),
+  );
+  if (!allowance.allowed) {
+    // Not recorded in the ledger: nothing was sent, so nothing was spent, and a
+    // ledger that contains calls which never happened cannot be reconciled
+    // against an invoice.
+    yield { kind: "capped", message: allowance.message };
+    return;
+  }
+
   let stamped = false;
-  for await (const event of createOpenAiCompatibleClient(resolved.config).stream(req)) {
-    if (!stamped && (event.kind === "delta" || event.kind === "done")) {
-      stamped = true;
-      // Best effort, and deliberately not awaited into the critical path: a
-      // token in flight must not wait on a bookkeeping write.
-      void db
-        .update(modelProviders)
-        .set({ lastUsedAt: new Date() })
-        .where(eq(modelProviders.id, resolved.id))
-        .catch(() => {});
+  // Assume the worst until told otherwise. A generator abandoned mid-answer
+  // never reaches an assignment after the loop, so the value that survives has
+  // to be the one that is true at every point before the end.
+  let outcome: "ok" | "error" | "cancelled" = "cancelled";
+  let model: string | null = null;
+  let promptTokens: number | null = null;
+  let completionTokens: number | null = null;
+  let errorKind: string | null = null;
+
+  try {
+    for await (const event of createOpenAiCompatibleClient(resolved.config).stream(req)) {
+      if (!stamped && (event.kind === "delta" || event.kind === "done")) {
+        stamped = true;
+        // Best effort, and deliberately not awaited into the critical path: a
+        // token in flight must not wait on a bookkeeping write.
+        void db
+          .update(modelProviders)
+          .set({ lastUsedAt: new Date() })
+          .where(eq(modelProviders.id, resolved.id))
+          .catch(() => {});
+      }
+      if (event.kind === "done") {
+        outcome = "ok";
+        model = event.model;
+        promptTokens = event.usage.promptTokens;
+        completionTokens = event.usage.completionTokens;
+      } else if (event.kind === "error") {
+        outcome = "error";
+        errorKind = event.error.kind;
+      }
+      yield event;
     }
-    yield event;
+  } finally {
+    await recordUsage(db, {
+      workspaceId,
+      ...attribution,
+      model,
+      promptTokens,
+      completionTokens,
+      outcome,
+      errorKind,
+    });
   }
 }
 
+/**
+ * Run one completion against the workspace's configured model.
+ *
+ * The single entry point for unstreamed inference. Returns the adapter's
+ * outcome verbatim so callers can branch on `error.kind`, plus distinct
+ * `not_configured` and `capped` outcomes, because "no model connected" is a
+ * setup prompt and "you have hit your cap" is a decision this workspace made,
+ * and neither is a failure to report as one.
+ */
 export async function completeWithWorkspaceModel(
   db: Database,
   workspaceId: string,
   req: Parameters<ReturnType<typeof createOpenAiCompatibleClient>["complete"]>[0],
-): Promise<CompletionOutcome | { ok: false; error: { kind: "not_configured" } }> {
+  attribution: UsageAttribution,
+): Promise<
+  | CompletionOutcome
+  | { ok: false; error: { kind: "not_configured" } }
+  | { ok: false; error: CappedOutcome }
+> {
   const resolved = await resolveConfig(db, workspaceId);
   if (!resolved) return { ok: false, error: { kind: "not_configured" } };
+
+  const allowance = await checkUsageAllowance(
+    db,
+    workspaceId,
+    attribution,
+    budgetFor(req),
+  );
+  if (!allowance.allowed) {
+    return { ok: false, error: { kind: "capped", message: allowance.message } };
+  }
 
   const client = createOpenAiCompatibleClient(resolved.config);
   const outcome = await client.complete(req);
@@ -394,5 +493,16 @@ export async function completeWithWorkspaceModel(
       .where(eq(modelProviders.id, resolved.id))
       .catch(() => {});
   }
+
+  await recordUsage(db, {
+    workspaceId,
+    ...attribution,
+    model: outcome.ok ? outcome.model : null,
+    promptTokens: outcome.ok ? outcome.usage.promptTokens : null,
+    completionTokens: outcome.ok ? outcome.usage.completionTokens : null,
+    outcome: outcome.ok ? "ok" : "error",
+    errorKind: outcome.ok ? null : outcome.error.kind,
+  });
+
   return outcome;
 }

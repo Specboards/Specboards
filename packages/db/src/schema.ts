@@ -2529,6 +2529,81 @@ export const workspaceAssistantSkills = pgTable(
   ],
 );
 
+/**
+ * One call to a model, and what it cost.
+ *
+ * The ledger behind usage accounting: a row per call through
+ * `model-provider-service.ts`, whatever triggered it and however it ended. A
+ * running counter would be cheaper and cannot answer the question that actually
+ * gets asked, which is "what is this charge on my provider bill" (see migration
+ * 0074).
+ *
+ * Append-only: RLS grants SELECT and INSERT and declares no UPDATE or DELETE
+ * policy, so nothing in the app can rewrite what was spent.
+ */
+export const modelUsageEvents = pgTable(
+  "model_usage_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    /** Who it was spent on behalf of. Snapshot with no FK, like
+     * `assistantMessages.authorId`: deactivating someone must not rewrite the
+     * record a billing dispute turns on. */
+    userId: uuid("user_id").notNull(),
+    /** What triggered it: see `UsageFeature` in `lib/usage-service.ts`. */
+    feature: text("feature").notNull(),
+    /** What the endpoint said answered. Null when nothing did. */
+    model: text("model"),
+    /** As reported by the endpoint. Null means unmeasured, not free. */
+    promptTokens: integer("prompt_tokens"),
+    completionTokens: integer("completion_tokens"),
+    /** `ok`, `error`, or `cancelled`, constrained by a CHECK. */
+    outcome: text("outcome").notNull(),
+    /** The adapter's `ModelErrorKind`, when `outcome` is `error`. */
+    errorKind: text("error_kind"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("model_usage_events_ws_time_idx").on(t.workspaceId, t.createdAt),
+    index("model_usage_events_ws_user_time_idx").on(
+      t.workspaceId,
+      t.userId,
+      t.createdAt,
+    ),
+  ],
+);
+
+/**
+ * What a workspace is allowed to spend through Specboards.
+ *
+ * Its own table rather than columns on {@link modelProviders}, even though both
+ * are one row per workspace, because deleting the provider is how you change
+ * endpoints: a cap living there would vanish on a reconnection and nobody would
+ * be told. Null means uncapped, which is not the same as zero ("stop
+ * entirely"); a workspace with no row has never set one.
+ */
+export const workspaceUsageLimits = pgTable("workspace_usage_limits", {
+  workspaceId: uuid("workspace_id")
+    .primaryKey()
+    .references(() => workspaces.id, { onDelete: "cascade" }),
+  /** Prompt + completion tokens allowed in a calendar month. Null is uncapped. */
+  monthlyTokenCap: integer("monthly_token_cap"),
+  /** Tokens one person may spend in a day. Null is uncapped. */
+  dailyUserTokenCap: integer("daily_user_token_cap"),
+  /** Who last changed it; a cap raised before a large bill gets looked up. */
+  updatedBy: uuid("updated_by"),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 export const workspaceRelations = relations(workspaces, ({ many }) => ({
   members: many(members),
   repositories: many(repositories),

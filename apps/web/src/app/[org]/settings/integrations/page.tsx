@@ -32,6 +32,8 @@ import { getStore } from "@/lib/store";
 import { listProducts } from "@/lib/products-service";
 import { listRepoProductLinks } from "@/lib/repo-links-service";
 import { isSingleTenant } from "@/lib/tenancy";
+import { summarizeUsage } from "@/lib/usage-service";
+import { UsageCard } from "@/components/usage-card";
 import { listWebhookEndpoints } from "@/lib/webhooks-service";
 import { requireWorkspaceAccess } from "@/lib/workspace-access";
 
@@ -141,6 +143,11 @@ export default async function IntegrationsSettingsPage({
     ? await getModelProvider(db, access.workspaceId)
     : null;
 
+  // Owner-only for the same reason the connection is, and one more: the
+  // breakdown names who spent what, which is management information rather than
+  // a member's business. The API route that serves it is gated identically.
+  const usage = isAdmin ? await summarizeUsage(db, access.workspaceId) : null;
+
   // Repository management: any member sees the connected list; only admins get
   // the GitHub setup/connect controls (matching the API authorization).
   const repoRows = await db
@@ -196,6 +203,7 @@ export default async function IntegrationsSettingsPage({
       model={
         <ModelProviderCard initialProvider={modelProvider} canManage={isAdmin} />
       }
+      usage={<UsageCard initialSummary={usage} canManage={isAdmin} />}
       apiKeys={<ApiKeysCard initialKeys={initialKeys} />}
       webhooks={
         isAdmin ? (

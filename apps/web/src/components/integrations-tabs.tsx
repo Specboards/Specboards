@@ -8,6 +8,7 @@ type TabKey =
   | "mcp"
   | "agents"
   | "model"
+  | "usage"
   | "api-keys"
   | "webhooks"
   | "repositories";
@@ -16,6 +17,7 @@ const TAB_KEYS: readonly TabKey[] = [
   "mcp",
   "agents",
   "model",
+  "usage",
   "api-keys",
   "webhooks",
   "repositories",
@@ -25,6 +27,7 @@ const LABELS: Record<TabKey, string> = {
   mcp: "MCP",
   agents: "Agents",
   model: "Model",
+  usage: "Usage",
   "api-keys": "API keys",
   webhooks: "Webhooks",
   repositories: "Repositories",
@@ -41,6 +44,7 @@ export function IntegrationsTabs({
   mcp,
   agents,
   model,
+  usage,
   apiKeys,
   webhooks,
   repositories,
@@ -49,6 +53,7 @@ export function IntegrationsTabs({
   mcp: ReactNode;
   agents: ReactNode;
   model: ReactNode;
+  usage: ReactNode;
   apiKeys: ReactNode;
   webhooks: ReactNode;
   repositories: ReactNode;
@@ -58,6 +63,7 @@ export function IntegrationsTabs({
     mcp,
     agents,
     model,
+    usage,
     "api-keys": apiKeys,
     webhooks,
     repositories,

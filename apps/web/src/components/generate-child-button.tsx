@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { Plus, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
@@ -21,8 +21,10 @@ import {
 import {
   AuthRequiredError,
   createWorkItem,
+  estimateBreakdown,
   suggestBreakdown,
 } from "@/lib/api-client";
+import { formatTokenEstimate } from "@/lib/ai/estimate";
 import { pluralLevel, statusLabel } from "@/lib/feature-helpers";
 import type { WorkspaceMember } from "@/lib/workspace";
 
@@ -91,6 +93,26 @@ export function GenerateChildButton({
   const [asking, setAsking] = useState(false);
   const [creating, setCreating] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
+  /**
+   * About how many tokens asking would send, or null while unknown.
+   *
+   * Fetched when the drawer opens rather than rendered by the server, because
+   * the drawer sits on a board where every card would otherwise pay for an
+   * estimate nobody is going to read. It is allowed to arrive late: the button
+   * works without it and the sentence simply gains a clause.
+   */
+  const [estimate, setEstimate] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    void estimateBreakdown(parentSpecId).then((n) => {
+      if (live) setEstimate(n);
+    });
+    return () => {
+      live = false;
+    };
+  }, [open, parentSpecId]);
 
   const defaultStatus = workflow.statuses[0] ?? "backlog";
   const label = childLevelLabel.toLowerCase();
@@ -276,6 +298,14 @@ export function GenerateChildButton({
               <p className="text-2xs text-muted-foreground">
                 Runs on the model this workspace connected. Nothing is created
                 until you accept it.
+                {/* What it will cost, before it costs it. This is the operation
+                    most likely to be far more expensive than the person
+                    pressing the button expects: the context grows with the item
+                    and everything already under it, and none of that is on
+                    screen here. */}
+                {estimate !== null
+                  ? ` Sends about ${formatTokenEstimate(estimate)} tokens to it.`
+                  : ""}
               </p>
               {modelError ? (
                 <p className="text-xs text-destructive">{modelError}</p>

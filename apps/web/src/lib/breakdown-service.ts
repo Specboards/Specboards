@@ -4,6 +4,7 @@ import {
   parseBreakdown,
   type ProposedChild,
 } from "@/lib/ai/breakdown";
+import { estimatePromptTokens } from "@/lib/ai/estimate";
 import { assembleBreakdownContext } from "@/lib/ai/item-context";
 import type { ModelErrorKind } from "@/lib/ai/provider";
 import {
@@ -63,8 +64,45 @@ export type BreakdownOutcome =
     }
   | {
       ok: false;
-      error: { kind: ModelErrorKind | "not_configured"; message: string };
+      error: { kind: ModelErrorKind | "not_configured" | "capped"; message: string };
     };
+
+/**
+ * Roughly what asking for a breakdown will send, before anybody asks.
+ *
+ * ── Why breakdowns get this and ordinary questions get it differently ───────
+ * A question in the panel is typed, so the person is already thinking about
+ * what they are about to send, and the panel shows the running figure beside
+ * the disclosure. A breakdown is one button, pressed on an item somebody may
+ * never have opened, over a context that grows with the size of the item and
+ * everything under it. It is the operation in the product most likely to cost
+ * far more than the person pressing it expects, which is exactly the case the
+ * spend feature exists for.
+ *
+ * Does the same work {@link proposeBreakdown} does to build its prompt, and
+ * measures the result, rather than approximating the approximation. The whole
+ * point is that the number describes the request that would actually be made.
+ * The cost is a handful of local reads, against a call that would otherwise
+ * cost the customer money at a vendor.
+ */
+export async function estimateBreakdown(
+  db: Database,
+  scope: WorkspaceScope,
+  specId: string,
+): Promise<{ estimatedPromptTokens: number; childLevelLabel: string } | null> {
+  const { feature } = await resolveAssistantItem(db, scope, specId);
+  const child = await childLevelOf(scope, feature);
+  if (!child) return null;
+
+  const { systemPrompt } = await buildContext(scope, feature, child.label);
+  return {
+    estimatedPromptTokens: estimatePromptTokens([
+      { content: systemPrompt },
+      { content: `Break this ${feature.level} down into ${child.label} items.` },
+    ]),
+    childLevelLabel: child.label,
+  };
+}
 
 /**
  * The level immediately below this item's, or null when there is none.
@@ -114,20 +152,28 @@ export async function proposeBreakdown(
   }
 
   const { systemPrompt } = await buildContext(scope, feature, child.label);
-  const outcome = await completeWithWorkspaceModel(db, scope.workspaceId, {
-    messages: [
-      { role: "system", content: systemPrompt },
-      // A user turn as well as the system one, because a chat endpoint given
-      // only a system message is a shape several runtimes handle badly, and
-      // the instruction is the whole request here.
-      {
-        role: "user",
-        content: `Break this ${feature.level} down into ${child.label} items.`,
-      },
-    ],
-  });
+  const outcome = await completeWithWorkspaceModel(
+    db,
+    scope.workspaceId,
+    {
+      messages: [
+        { role: "system", content: systemPrompt },
+        // A user turn as well as the system one, because a chat endpoint given
+        // only a system message is a shape several runtimes handle badly, and
+        // the instruction is the whole request here.
+        {
+          role: "user",
+          content: `Break this ${feature.level} down into ${child.label} items.`,
+        },
+      ],
+    },
+    { userId: scope.userId, feature: "breakdown" },
+  );
 
   if (!outcome.ok) {
+    if (outcome.error.kind === "capped") {
+      return { ok: false, error: { kind: "capped", message: outcome.error.message } };
+    }
     return {
       ok: false,
       error:

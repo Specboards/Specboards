@@ -42,6 +42,22 @@ for how and when the version is bumped.
   in the queue. Deciding a request is an operator action outside this repo; on
   the hosted service it lives in the internal admin console, which is granted
   UPDATE on this one table.
+- **Usage accounting and spend guardrails for your model connection.** Every
+  call Specboards makes to the endpoint you connected is now recorded (which
+  feature asked for it, on whose behalf, what it cost, and how it ended), and
+  Settings → Integrations → Usage shows the month's spend broken down by feature
+  and by person. You pay your provider for those tokens, so the honest thing is
+  to be able to explain a line on that invoice rather than ask you to accept it.
+  Counted in tokens rather than money: the price of a token is between you and
+  your provider, and a currency figure we invented would look authoritative and
+  be wrong. Owners can set a monthly cap for the workspace and a daily cap per
+  person; a request that would cross one is refused before it is sent, and the
+  person is told which cap was hit and who can raise it. The assistant panel and
+  the breakdown button both now say roughly how many tokens they are about to
+  send, so the size of a request is visible before anyone spends on it. A call
+  the endpoint reported no usage for is counted as unmeasured rather than as
+  free, and the screen says how many, so a runtime that omits usage does not
+  quietly look like zero spend.
 
 ### Security
 
