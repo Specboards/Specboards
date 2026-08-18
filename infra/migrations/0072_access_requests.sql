@@ -50,10 +50,15 @@ CREATE UNIQUE INDEX "access_requests_pending_email_uq"
 -- Deny-all for every non-owner role: RLS on, no policies.
 ALTER TABLE "access_requests" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 
--- Deliberately NOT granted to `writer` / `specboards_app` (the pattern the
--- other tables in this repo follow): nothing on the tenant connection has any
--- business reading or writing this table, and the RLS deny-all above is
--- belt-and-braces on top of that.
+-- Deliberately not granted to `writer` / `specboards_app`: nothing on the
+-- tenant connection has any business reading or writing this table, and the RLS
+-- deny-all above is belt-and-braces on top of that.
+--
+-- Saying nothing here turned out NOT to be enough. Both live clusters set
+-- ALTER DEFAULT PRIVILEGES granting new tables to `writer` (infra/rls-role.sql
+-- section 3), so this table was granted to it on creation anyway; 0073 revokes
+-- that explicitly. Left as it ran rather than edited, because this migration
+-- has already been applied.
 --
 -- The admin portal's role gets SELECT *and UPDATE*, and this is the one table
 -- where it gets more than SELECT. Approving a request is a status flip plus an
