@@ -6,6 +6,7 @@ import {
 } from "@specboards/db";
 
 import { assertReachableModelUrl } from "@/lib/ai/egress";
+import { sameEndpoint } from "@/lib/ai/endpoint";
 import { estimatePromptTokens } from "@/lib/ai/estimate";
 import { createOpenAiCompatibleClient } from "@/lib/ai/openai-compatible";
 import type {
@@ -145,6 +146,32 @@ export async function saveModelProvider(
     .where(eq(modelProviders.workspaceId, workspaceId))
     .limit(1);
 
+  // ── Why a stored key does not follow the endpoint ─────────────────────────
+  // `apiKey: undefined` means "keep what is stored", which is what lets an
+  // admin change the model without re-typing the key. Applied to a *different*
+  // base URL it would do something else entirely: the next completion would
+  // decrypt the stored credential and send it to the new address as a bearer
+  // token, where it is readable straight out of the Authorization header. That
+  // makes a deliberately write-only secret extractable by anyone who can reach
+  // this route, without them ever having seen it.
+  //
+  // `listWorkspaceModels` already refuses this for the same reason (see its
+  // note); the save path is the other half of that rule. Refusing rather than
+  // silently dropping the credential keeps the failure where the admin can act
+  // on it, instead of surfacing as a broken connection on somebody's next
+  // assistant turn.
+  if (
+    existing?.credentialId &&
+    input.apiKey === undefined &&
+    !sameEndpoint(existing.baseUrl, baseUrl)
+  ) {
+    throw new ModelProviderInputError(
+      "The base URL points at a different endpoint, so the stored API key cannot " +
+        "be carried over. Enter the key for the new endpoint, or clear it if the " +
+        "new endpoint takes none.",
+    );
+  }
+
   // Resolve the credential first, so the provider row never points at a
   // half-written one. `undefined` means "leave whatever is there".
   let credentialId = existing?.credentialId ?? null;
@@ -240,23 +267,6 @@ async function resolveConfig(
     apiKey = cred ? decryptSecret(cred.secret) : null;
   }
   return { id: row.id, config: { baseUrl: row.baseUrl, model: row.model, apiKey } };
-}
-
-/**
- * Compare two base URLs as endpoints rather than as strings, so a trailing
- * slash or a capitalised host does not read as a different server.
- */
-function sameEndpoint(a: string, b: string): boolean {
-  const norm = (raw: string) => {
-    const trimmed = raw.trim().replace(/\/+$/, "");
-    try {
-      const u = new URL(trimmed);
-      return `${u.protocol}//${u.host}${u.pathname.replace(/\/+$/, "")}`.toLowerCase();
-    } catch {
-      return trimmed.toLowerCase();
-    }
-  };
-  return norm(a) === norm(b);
 }
 
 export interface ModelListInput {
