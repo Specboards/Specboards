@@ -58,7 +58,12 @@ export function ApiKeysCard({ initialKeys }: { initialKeys: ApiKeyView[] }) {
       const res = await fetch("/api/v1/api-keys", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name: trimmed }),
+        // A personal key carries its owner's own authority, and this card has
+        // no scope picker, so full access is the intended product behaviour
+        // rather than an oversight. It is stated as `["*"]` because the
+        // endpoint no longer accepts an absent list: on a credential-minting
+        // route, saying nothing should not be the broadest thing you can say.
+        body: JSON.stringify({ name: trimmed, scopes: ["*"] }),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };

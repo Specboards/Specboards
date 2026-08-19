@@ -1,6 +1,6 @@
 import { readJsonBody } from "@/lib/api/body";
 import { createApiKey, listApiKeys } from "@/lib/api-keys";
-import { InvalidScopeError, parseApiScopes } from "@/lib/api-scopes";
+import { InvalidScopeError, parseGrantedScopes } from "@/lib/api-scopes";
 import { getAuth } from "@/lib/auth";
 import { getBrowserSessionUser } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
@@ -79,7 +79,9 @@ export async function POST(req: Request) {
 
   let scopes: string[];
   try {
-    scopes = parseApiScopes(record.scopes);
+    // Strict on creation, like the service-account path: a personal key must
+    // also say what it is for rather than defaulting to everything.
+    scopes = parseGrantedScopes(record.scopes);
   } catch (err) {
     if (err instanceof InvalidScopeError) {
       return Response.json({ error: err.message }, { status: 422 });
