@@ -442,11 +442,22 @@ export async function authorizeOrgAdminBrowserOnly(
   req: Request,
   keyRefusalMessage: string,
 ): Promise<ScopeResult> {
-  if (extractApiKey(req)) {
-    return {
-      ok: false,
-      response: Response.json({ error: keyRefusalMessage }, { status: 403 }),
-    };
-  }
+  const denied = refuseApiKeyAuth(req, keyRefusalMessage);
+  if (denied) return { ok: false, response: denied };
   return authorizeOrgAdmin(req);
+}
+
+/**
+ * A 403 when the request carries an API key at all, else `null`.
+ *
+ * The same refusal as {@link authorizeOrgAdminBrowserOnly}, for the routes that
+ * cannot decide up front whether it applies. `PATCH /org/members/:userId`
+ * changes a role or an active flag, and only the first of those confers
+ * authority, so it authorizes normally, reads the body, and then refuses. One
+ * implementation either way, because a second copy of a security check is how
+ * the two drift apart.
+ */
+export function refuseApiKeyAuth(req: Request, message: string): Response | null {
+  if (!extractApiKey(req)) return null;
+  return Response.json({ error: message }, { status: 403 });
 }

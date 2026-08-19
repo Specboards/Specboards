@@ -29,6 +29,7 @@ describe.skipIf(!DB_URL)("browser-session routes reject API keys", () => {
   let db: import("@specboards/db").Database;
   let scopedKey: string;
   let legacyKey: string;
+  let orgWriteKey: string;
   let getBrowserSessionUser: typeof import("./auth-session").getBrowserSessionUser;
   let resolveReadAccess: typeof import("./auth-session").resolveReadAccess;
 
@@ -57,6 +58,11 @@ describe.skipIf(!DB_URL)("browser-session routes reject API keys", () => {
     // Empty scopes: a legacy full-access key, the most privileged thing a key
     // can be. Even this must not stand in for a browser session.
     legacyKey = (await createApiKey(db, userId, "legacy", null, [])).key;
+    // The realistic case for the org surface. `org` is a grantable resource and
+    // the agent UI offers it, so "let this agent manage the org" is a box a
+    // customer can tick. Nothing about that grant should include minting a
+    // route to a human session.
+    orgWriteKey = (await createApiKey(db, userId, "org", null, ["org:write"])).key;
   });
 
   afterAll(async () => {
@@ -128,6 +134,81 @@ describe.skipIf(!DB_URL)("browser-session routes reject API keys", () => {
         expect(body.error, label).toMatch(/browser session/);
       }
     }
+  });
+
+  /**
+   * A leaked credential must not be able to obtain a different one.
+   *
+   * The service-account and key routes already refuse keys for exactly that
+   * reason. An invitation is the same shape of hole with an extra step: invite
+   * an address you control as an owner, redeem the emailed token, and hold a
+   * real session that revoking the leaked key does not take away. Promoting an
+   * existing account to owner is the same move, one step to the side.
+   */
+  it("refuses to create an invitation with a key", async () => {
+    const { POST } = await import("@/app/api/v1/org/invitations/route");
+    const url = "https://app.example.test/api/v1/org/invitations";
+    // `org:write` first, and on its own assertion: it is the key that actually
+    // reached this route. A `features:read` key was already turned away by
+    // scope enforcement, so asserting on it would prove nothing about this
+    // guard.
+    for (const key of [orgWriteKey, legacyKey]) {
+      const req = new Request(url, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${key}`,
+          "x-org-slug": workspace.slug,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ email: "attacker@example.test", role: "owner" }),
+      });
+      const res: Response = await POST(req);
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { error?: string }).error).toMatch(/browser session/);
+    }
+  });
+
+  it("refuses to change a member's role with a key", async () => {
+    const { PATCH } = await import("@/app/api/v1/org/members/[userId]/route");
+    const url = `https://app.example.test/api/v1/org/members/${userId}`;
+    for (const key of [orgWriteKey, legacyKey]) {
+      const res: Response = await PATCH(
+        new Request(url, {
+          method: "PATCH",
+          headers: {
+            authorization: `Bearer ${key}`,
+            "x-org-slug": workspace.slug,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ role: "owner" }),
+        }),
+        { params: Promise.resolve({ userId }) },
+      );
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { error?: string }).error).toMatch(/browser session/);
+    }
+  });
+
+  it("still lets a key deactivate a member, which takes authority away", async () => {
+    // The line this draws: conferring authority needs a session, removing it
+    // does not. A leaked key that can only deactivate people has gained nothing
+    // it did not already have.
+    const { PATCH } = await import("@/app/api/v1/org/members/[userId]/route");
+    const url = `https://app.example.test/api/v1/org/members/${userId}`;
+    const res: Response = await PATCH(
+      new Request(url, {
+        method: "PATCH",
+        headers: {
+          authorization: `Bearer ${legacyKey}`,
+          "x-org-slug": workspace.slug,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ active: true }),
+      }),
+      { params: Promise.resolve({ userId }) },
+    );
+    // Not 403: it gets as far as the service, which is the claim under test.
+    expect(res.status).not.toBe(403);
   });
 
   it("refuses to disconnect a GitHub credential with a key", async () => {

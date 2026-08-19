@@ -21,7 +21,16 @@ import { describe, expect, it } from "vitest";
 
 const API_DIR = fileURLToPath(new URL("../app/api", import.meta.url));
 
-/** Every `route.ts` under `src/app/api`, repo-relative for readable failures. */
+/**
+ * Every TypeScript file under `src/app/api`, repo-relative for readable
+ * failures.
+ *
+ * Not just `route.ts`. A route that shares its authorization with its siblings
+ * puts it in a helper beside them (`model-provider/guard.ts`), and checking
+ * only the handlers would let that helper import anything it liked while the
+ * routes themselves looked clean. The rule is about what the API surface
+ * authenticates with, not about which file the import sits in.
+ */
 async function routeFiles(dir = API_DIR, rel = "api"): Promise<
   { path: string; source: string }[]
 > {
@@ -31,8 +40,8 @@ async function routeFiles(dir = API_DIR, rel = "api"): Promise<
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
       out.push(...(await routeFiles(full, `${rel}/${entry.name}`)));
-    } else if (entry.name === "route.ts") {
-      out.push({ path: `${rel}/route.ts`, source: await readFile(full, "utf8") });
+    } else if (entry.name.endsWith(".ts") && !entry.name.endsWith(".test.ts")) {
+      out.push({ path: `${rel}/${entry.name}`, source: await readFile(full, "utf8") });
     }
   }
   return out;
@@ -53,6 +62,17 @@ const APPROVED = [
   "authorizeOrgAdmin",
   "getBrowserSessionUser",
   "getServerSessionUser",
+  // `authorizeOrgAdmin` plus a refusal when the request carries an API key at
+  // all. For the owner-only actions whose point is that holding one credential
+  // does not get you another: the model connection, and creating an invitation.
+  // Strictly narrower than `authorizeOrgAdmin`, so it enforces scopes and quota
+  // for everything it does let through.
+  "authorizeOrgAdminBrowserOnly",
+  // The same refusal on its own, for a route that cannot tell up front whether
+  // it applies. `PATCH /org/members/:userId` authorizes normally and then
+  // refuses a key for the half of the body that confers authority. Not an
+  // authenticator: it only ever subtracts.
+  "refuseApiKeyAuth",
   // Not an authenticator: reads the org the caller named, validated downstream.
   "orgSlugFromRequest",
   // Types, not behaviour.
