@@ -2,6 +2,7 @@ import {
   and,
   eq,
   featureGithubLinks,
+  inArray,
   notifications,
   repositories,
   type Database,
@@ -61,6 +62,24 @@ export function snippetFor(
  * can be linked from several workspaces, and each of their authors is a
  * separate person to tell.
  *
+ * ── Why repoIds is required rather than derived ─────────────────────────────
+ * A pull request number is only unique within a repository, and this used to
+ * match on kind, number and state alone. Anyone can install the App on a repo
+ * they own, open and merge pull requests numbered 1, 2, 3 with titles of their
+ * choosing, and GitHub will deliver validly signed events: every link row at
+ * that number and state, in every workspace, would be notified with the
+ * attacker's title text. The returned count leaked too, since GitHub shows the
+ * response in the sender's own delivery log, making it an oracle for how many
+ * workspaces hold a link at a given number.
+ *
+ * The repositories the event actually belongs to are resolved by the caller
+ * (the same set used to update the link rows), and passed in rather than
+ * re-derived here, so the notification and the state update cannot disagree
+ * about which repos an event touched. It is a required argument, not an
+ * optional filter, because the safe default is not something a future caller
+ * should be able to omit. A workspace filter would not work: the event carries
+ * no workspace, which is exactly why the repo is the unit of scoping.
+ *
  * Never throws. A failure here must not fail the delivery, because the link
  * state update that came before it is the more important of the two and GitHub
  * would retry the whole thing.
@@ -68,11 +87,15 @@ export function snippetFor(
 export async function notifyReviewOutcome(
   db: Database,
   evt: GithubEntityEvent,
+  repoIds: string[],
 ): Promise<number> {
   try {
     if (evt.kind !== "pull_request") return 0;
     // Nothing to announce while a review is still running.
     if (evt.state !== "merged" && evt.state !== "closed") return 0;
+    // No connected repository means nothing of ours is involved. Guarded
+    // explicitly because an empty `inArray` is not a predicate worth trusting.
+    if (repoIds.length === 0) return 0;
 
     const resolved = await db
       .select({
@@ -86,6 +109,7 @@ export async function notifyReviewOutcome(
       .from(featureGithubLinks)
       .where(
         and(
+          inArray(featureGithubLinks.repoId, repoIds),
           eq(featureGithubLinks.kind, "pull_request"),
           eq(featureGithubLinks.number, evt.number),
           eq(featureGithubLinks.state, evt.state),
