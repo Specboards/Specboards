@@ -5,6 +5,7 @@ import {
   isScopeExemptPath,
   keyScopesSatisfy,
   parseApiScopes,
+  parseGrantedScopes,
   requiredScopeFor,
   SCOPE_RESOURCES,
 } from "./api-scopes";
@@ -187,6 +188,40 @@ describe("spending the workspace's model credit", () => {
     // Reading is free; asking costs money. They are worth granting separately.
     expect(keyScopesSatisfy(["assistant:read"], requiredScopeFor("GET", ASK)!)).toBe(
       true,
+    );
+  });
+});
+
+describe("parseGrantedScopes", () => {
+  /**
+   * The creation-time counterpart of `parseApiScopes`. The permissive parse
+   * has to keep reading `[]` as full access, because keys minted before scopes
+   * existed carry exactly that and must keep working. Minting a NEW credential
+   * is the case where an absent answer must not be the broadest one.
+   */
+  it("refuses an omitted or empty list", () => {
+    expect(() => parseGrantedScopes(undefined)).toThrow(InvalidScopeError);
+    expect(() => parseGrantedScopes(null)).toThrow(InvalidScopeError);
+    expect(() => parseGrantedScopes([])).toThrow(InvalidScopeError);
+  });
+
+  it("names the way to ask for full access rather than just refusing", () => {
+    // A refusal that does not say what to do instead just moves the problem to
+    // whoever is holding the curl command.
+    expect(() => parseGrantedScopes(undefined)).toThrow(/\["\*"\]/);
+  });
+
+  it("still allows full access when it is asked for", () => {
+    expect(parseGrantedScopes(["*"])).toEqual(["*"]);
+  });
+
+  it("validates entries the same way the permissive parse does", () => {
+    expect(parseGrantedScopes(["features:write", "statuses:read"])).toEqual([
+      "features:write",
+      "statuses:read",
+    ]);
+    expect(() => parseGrantedScopes(["features:delete"])).toThrow(
+      InvalidScopeError,
     );
   });
 });

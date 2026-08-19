@@ -156,14 +156,50 @@ describe.skipIf(!DB_URL)("agent identities", () => {
     );
   });
 
-  it("maps an omitted productGrants to the sweep and a given one to explicit", () => {
+  it("requires the sweep to be asked for, and takes a list literally", () => {
+    // `"*"` is the sweep, stated. It used to be what an omitted field meant.
     expect(
-      svc.parseCreateServiceAccountInput({ name: "bot" }).grantPolicy,
+      svc.parseCreateServiceAccountInput({
+        name: "bot",
+        scopes: ["features:write"],
+        productGrants: "*",
+      }).grantPolicy,
     ).toEqual({ kind: "every-product-contributor" });
     expect(
-      svc.parseCreateServiceAccountInput({ name: "bot", productGrants: [] })
-        .grantPolicy,
+      svc.parseCreateServiceAccountInput({
+        name: "bot",
+        scopes: ["features:write"],
+        productGrants: [],
+      }).grantPolicy,
     ).toEqual({ kind: "explicit", grants: [] });
+  });
+
+  it("refuses to mint an account whose authority was never stated", () => {
+    // The fail-open this closes: omitting either field granted full access.
+    // The UI happened to send both, but the UI is not the gate - a direct API
+    // caller skipped that guard entirely, on the endpoint that hands out
+    // credentials. Absent must not be the broadest possible answer.
+    const base = { name: "bot", scopes: ["features:write"], productGrants: [] };
+
+    expect(() =>
+      svc.parseCreateServiceAccountInput({ ...base, productGrants: undefined }),
+    ).toThrow(/productGrants is required/);
+    expect(() =>
+      svc.parseCreateServiceAccountInput({ ...base, scopes: undefined }),
+    ).toThrow(/scopes is required/);
+    expect(() =>
+      svc.parseCreateServiceAccountInput({ ...base, scopes: [] }),
+    ).toThrow(/cannot be empty/);
+
+    // Full access is still reachable; it just has to be spelled out. Nothing
+    // here is about making broad access impossible, only about making it said.
+    const wide = svc.parseCreateServiceAccountInput({
+      ...base,
+      scopes: ["*"],
+      productGrants: "*",
+    });
+    expect(wide.scopes).toEqual(["*"]);
+    expect(wide.grantPolicy).toEqual({ kind: "every-product-contributor" });
   });
 
   it("authenticates over /api/mcp and is held to its scopes", async () => {

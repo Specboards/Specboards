@@ -42,14 +42,18 @@ The equivalent over the API, as an owner from a browser session:
 ```bash
 curl -X POST https://app.specboards.ai/api/v1/org/service-accounts \
   -H 'content-type: application/json' --cookie "$SESSION" \
-  -d '{"name":"CI sync bot","scopes":["features:write","statuses:read"]}'
+  -d '{"name":"CI sync bot","scopes":["features:write","statuses:read"],"productGrants":"*"}'
 ```
 
-Note the difference: omitting `productGrants`, as above, grants the account
-**contributor on every product in the workspace**, which is what a workspace-wide
-sync bot wants. Send an explicit `productGrants` list (even an empty one) to
-narrow it. The Agents UI always sends one, so an agent created there only ever
-reaches the products that were ticked.
+`productGrants` and `scopes` are both **required**. `"*"` grants the account
+contributor on every product in the workspace, which is what a workspace-wide
+sync bot wants; send a list of `{ productId, role }` to narrow it, or `[]` for
+none. Pass `["*"]` as `scopes` for an unrestricted key.
+
+Both were previously optional, and omitting them meant full access. That made
+saying nothing the broadest thing a caller could say, on the endpoint that hands
+out credentials, so they now have to be stated. Existing keys are unaffected:
+this changed what can be created, not what already works.
 
 The response returns the `sb_…` key once. (A personal full-access key under
 **Settings -> API keys** also works, but attributes activity to you.)

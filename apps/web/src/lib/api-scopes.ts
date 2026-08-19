@@ -85,6 +85,38 @@ export type ScopeResource = (typeof SCOPE_RESOURCES)[number];
  */
 export class InvalidScopeError extends Error {}
 
+/**
+ * Validate scopes for a credential being CREATED, where an absent list is not
+ * an acceptable answer.
+ *
+ * {@link parseApiScopes} reads omitted/empty as full access, and
+ * {@link keyScopesSatisfy} honours that, because keys minted before scopes
+ * existed have `[]` and must keep working. That backwards compatibility is
+ * fine for reading an existing key and wrong for minting a new one: it makes
+ * *saying nothing* the most permissive thing a caller can do, on the endpoint
+ * that hands out credentials.
+ *
+ * So creation goes through here instead. Full access is still reachable, by
+ * asking for it: `["*"]`. The difference is that it becomes a decision on the
+ * record rather than a default nobody stated.
+ */
+export function parseGrantedScopes(raw: unknown): string[] {
+  if (raw === undefined || raw === null) {
+    throw new InvalidScopeError(
+      'scopes is required. Pass ["*"] for full access, or a list like ' +
+        '["features:write", "statuses:read"].',
+    );
+  }
+  const scopes = parseApiScopes(raw);
+  if (scopes.length === 0) {
+    throw new InvalidScopeError(
+      'scopes cannot be empty. Pass ["*"] for full access, or name the ' +
+        "resources this credential needs.",
+    );
+  }
+  return scopes;
+}
+
 export function parseApiScopes(raw: unknown): string[] {
   if (raw === undefined || raw === null) return [];
   if (!Array.isArray(raw)) {

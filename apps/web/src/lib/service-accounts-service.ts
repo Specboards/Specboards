@@ -14,7 +14,7 @@ import {
 } from "@specboards/db";
 
 import { createApiKey, type GeneratedApiKey } from "@/lib/api-keys";
-import { parseApiScopes } from "@/lib/api-scopes";
+import { parseGrantedScopes } from "@/lib/api-scopes";
 import { listProducts, setProductMember } from "@/lib/products-service";
 import type { ProductRole, WorkspaceScope } from "@/lib/store/types";
 
@@ -42,12 +42,15 @@ export interface ProductGrant {
 /**
  * What product access a new account gets, always stated rather than defaulted.
  *
- * The two cases exist for two different callers. The CI sync bot is set up by
- * `curl`ing `POST /api/v1/org/service-accounts` with just a name and scopes
- * (see docs/RUNBOOK-specboard-dogfood.md), and has always meant "contributor
- * everywhere"; breaking that would break the documented setup. A customer's
- * agent, created from Settings, must never get that sweep by omission, so the
- * UI always sends an explicit list, even an empty one.
+ * The two cases exist for two different shapes of caller. A workspace-wide CI
+ * sync bot genuinely wants contributor on everything; a customer's agent wants
+ * the products that were ticked.
+ *
+ * Both are now asked for explicitly. `every-product-contributor` used to be
+ * what you got by *omitting* `productGrants`, which made silence the broadest
+ * answer available on the endpoint that mints credentials, and left the UI
+ * compensating by always sending a list. It is now reached by sending
+ * `productGrants: "*"`, so the sweep is a decision on the record.
  *
  * Making the policy a named value rather than an `undefined` check keeps the
  * choice visible at the call site instead of buried in a default.
@@ -70,7 +73,11 @@ export interface ServiceAccountSummary {
   name: string;
   email: string;
   createdAt: string;
-  /** Scopes on the account's live key; `[]` means unrestricted. */
+  /**
+   * Scopes on the account's live key. `[]` means unrestricted, and still
+   * appears here for accounts created before scopes were required; new ones
+   * cannot be minted that way.
+   */
   scopes: string[];
   productGrants: ProductGrant[];
   /** The live (unrevoked) key, or null once every key has been revoked. */
@@ -79,7 +86,7 @@ export interface ServiceAccountSummary {
 
 export interface CreateServiceAccountInput {
   name: string;
-  /** Validated resource scopes for the account's key (empty = full access). */
+  /** Validated resource scopes, never empty. `["*"]` is how full access is asked for. */
   scopes: string[];
   expiresInDays: number | null;
   grantPolicy: ProductGrantPolicy;
@@ -101,7 +108,9 @@ export function parseCreateServiceAccountInput(
 
   let scopes: string[];
   try {
-    scopes = parseApiScopes(raw.scopes);
+    // Strict on creation: an absent list is not read as full access here, the
+    // way it is when checking an existing key. See `parseGrantedScopes`.
+    scopes = parseGrantedScopes(raw.scopes);
   } catch (err) {
     throw new ServiceAccountError((err as Error).message);
   }
@@ -117,14 +126,30 @@ export function parseCreateServiceAccountInput(
 }
 
 /**
- * Read the grant policy off an untrusted body. An omitted `productGrants` is
- * the legacy CI-bot shape and still means "contributor on everything"; any
- * array, including an empty one, is taken literally.
+ * Read the grant policy off an untrusted body.
+ *
+ * An omitted `productGrants` used to mean "contributor on everything", which is
+ * what the documented CI-bot `curl` relied on. That made silence the broadest
+ * possible answer on the endpoint that mints credentials, and the UI had to
+ * work around it by always sending a list "even an empty one" - a client-side
+ * guard on a server-side decision, which a direct API caller simply skips.
+ *
+ * The sweep is still available and now has to be asked for: `productGrants:
+ * "*"`. Same access, stated rather than inferred. `[]` remains literal, and an
+ * array is taken as written.
  */
 function parseGrantPolicy(raw: unknown): ProductGrantPolicy {
-  if (raw === undefined) return { kind: "every-product-contributor" };
+  if (raw === "*") return { kind: "every-product-contributor" };
+  if (raw === undefined || raw === null) {
+    throw new ServiceAccountError(
+      'productGrants is required. Pass "*" for contributor on every product, ' +
+        "[] for none, or a list of { productId, role }.",
+    );
+  }
   if (!Array.isArray(raw)) {
-    throw new ServiceAccountError("productGrants must be an array.");
+    throw new ServiceAccountError(
+      'productGrants must be an array, or "*" for every product.',
+    );
   }
   const grants = raw.map((g): ProductGrant => {
     const grant = g as Record<string, unknown>;
