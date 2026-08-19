@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   commonModels,
   credentialPatch,
+  endpointMoveState,
   ModelProviderCard,
   modelPickerOptions,
   type ModelProviderView,
@@ -137,6 +138,67 @@ describe("the credential field on a save", () => {
     // Asking to remove the key and then pasting one is a change of mind, not a
     // request to destroy the key that was just typed.
     expect(credentialPatch("sk-new", true)).toEqual({ apiKey: "sk-new" });
+  });
+});
+
+/**
+ * Asking for the key again when the endpoint moves.
+ *
+ * The server refuses a save that carries a stored key to a different endpoint,
+ * because a credential sent to a server it was never issued for is readable out
+ * of the `Authorization` header by whoever runs that server. The form's job is
+ * to ask before the user gets there: a refusal at the end, about a rule nobody
+ * mentioned, is indistinguishable from a bug.
+ */
+describe("moving the endpoint away from the stored key", () => {
+  const stored = { baseUrl: "https://api.openai.com/v1", credentialHint: "a91c" };
+
+  it("says nothing while the endpoint is unchanged", () => {
+    const state = endpointMoveState(stored, "https://api.openai.com/v1", "", false);
+    expect(state).toEqual({ movedAway: false, needsKey: false });
+  });
+
+  it("says nothing when the URL is only spelled differently", () => {
+    // Tidying a trailing slash is not a move, and being asked to paste the key
+    // again for it would read as the form malfunctioning.
+    expect(
+      endpointMoveState(stored, "https://API.OpenAI.com/v1/", "", false).movedAway,
+    ).toBe(false);
+  });
+
+  it("asks for a key once the endpoint is a different server", () => {
+    const state = endpointMoveState(stored, "http://127.0.0.1:11434/v1", "", false);
+    expect(state).toEqual({ movedAway: true, needsKey: true });
+  });
+
+  it("is answered by typing a key for the new endpoint", () => {
+    const state = endpointMoveState(stored, "http://127.0.0.1:11434/v1", "sk-new", false);
+    expect(state).toEqual({ movedAway: true, needsKey: false });
+  });
+
+  it("is answered by saying the new endpoint needs none", () => {
+    const state = endpointMoveState(stored, "http://127.0.0.1:11434/v1", "", true);
+    expect(state).toEqual({ movedAway: true, needsKey: false });
+  });
+
+  it("stays quiet while the field is empty, so retyping a URL is not nagged", () => {
+    expect(endpointMoveState(stored, "", "", false)).toEqual({
+      movedAway: false,
+      needsKey: false,
+    });
+    expect(endpointMoveState(stored, "   ", "", false).movedAway).toBe(false);
+  });
+
+  it("has nothing to say when there is no stored key to strand", () => {
+    const keyless = { baseUrl: "http://127.0.0.1:11434/v1", credentialHint: null };
+    expect(endpointMoveState(keyless, "http://127.0.0.1:8000/v1", "", false)).toEqual({
+      movedAway: false,
+      needsKey: false,
+    });
+    expect(endpointMoveState(null, "https://api.openai.com/v1", "", false)).toEqual({
+      movedAway: false,
+      needsKey: false,
+    });
   });
 });
 

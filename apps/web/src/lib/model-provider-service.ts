@@ -6,6 +6,7 @@ import {
 } from "@specboards/db";
 
 import { assertReachableModelUrl } from "@/lib/ai/egress";
+import { sameEndpoint } from "@/lib/ai/endpoint";
 import { estimatePromptTokens } from "@/lib/ai/estimate";
 import { createOpenAiCompatibleClient } from "@/lib/ai/openai-compatible";
 import type {
@@ -266,23 +267,6 @@ async function resolveConfig(
     apiKey = cred ? decryptSecret(cred.secret) : null;
   }
   return { id: row.id, config: { baseUrl: row.baseUrl, model: row.model, apiKey } };
-}
-
-/**
- * Compare two base URLs as endpoints rather than as strings, so a trailing
- * slash or a capitalised host does not read as a different server.
- */
-function sameEndpoint(a: string, b: string): boolean {
-  const norm = (raw: string) => {
-    const trimmed = raw.trim().replace(/\/+$/, "");
-    try {
-      const u = new URL(trimmed);
-      return `${u.protocol}//${u.host}${u.pathname.replace(/\/+$/, "")}`.toLowerCase();
-    } catch {
-      return trimmed.toLowerCase();
-    }
-  };
-  return norm(a) === norm(b);
 }
 
 export interface ModelListInput {

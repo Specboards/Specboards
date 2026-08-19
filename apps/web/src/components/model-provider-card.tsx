@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { sameEndpoint } from "@/lib/ai/endpoint";
 
 export interface ModelProviderView {
   id: string;
@@ -63,20 +64,6 @@ const PROVIDERS = [
 type ProviderKey = (typeof PROVIDERS)[number]["key"];
 
 const providerFor = (key: ProviderKey) => PROVIDERS.find((p) => p.key === key)!;
-
-/** Compare two base URLs as endpoints, not as strings. Mirrors the server. */
-function sameEndpoint(a: string, b: string): boolean {
-  const norm = (raw: string) => {
-    const trimmed = raw.trim().replace(/\/+$/, "");
-    try {
-      const u = new URL(trimmed);
-      return `${u.protocol}//${u.host}${u.pathname.replace(/\/+$/, "")}`.toLowerCase();
-    } catch {
-      return trimmed.toLowerCase();
-    }
-  };
-  return norm(a) === norm(b);
-}
 
 /** Which provider a saved base URL belongs to, so editing opens on it. */
 function providerKindFor(baseUrl: string): ProviderKey {
@@ -148,6 +135,38 @@ export function credentialPatch(
   if (typed.trim()) return { apiKey: typed.trim() };
   if (dropStoredKey) return { apiKey: null };
   return {};
+}
+
+/**
+ * Whether this edit is pointing the connection at a server other than the one
+ * the stored key was given to, and whether that leaves the form unanswerable.
+ *
+ * The server refuses a save that moves the endpoint while omitting the key,
+ * because carrying a credential to an endpoint it was never issued for is how a
+ * write-only secret becomes readable out of an `Authorization` header. The form
+ * has to ask first: a control that fires at the end, about a rule the user did
+ * not know existed, is indistinguishable from a bug.
+ *
+ * `movedAway` needs a non-empty URL so the prompt does not appear the moment
+ * someone clears the field to retype it. `needsKey` stays true until the user
+ * answers one way or the other, by typing a key or by saying the new endpoint
+ * takes none.
+ */
+export function endpointMoveState(
+  provider: { baseUrl: string; credentialHint: string | null } | null,
+  typedBaseUrl: string,
+  typedKey: string,
+  dropStoredKey: boolean,
+): { movedAway: boolean; needsKey: boolean } {
+  const movedAway = Boolean(
+    provider?.credentialHint &&
+      typedBaseUrl.trim() &&
+      !sameEndpoint(provider.baseUrl, typedBaseUrl),
+  );
+  return {
+    movedAway,
+    needsKey: movedAway && !typedKey.trim() && !dropStoredKey,
+  };
 }
 
 /** A message that reads as what it is, rather than as more helper text. */
@@ -241,6 +260,8 @@ export function ModelProviderCard({
   const canProbe =
     baseUrl.trim().length > 0 &&
     (apiKey.trim().length > 0 || hasUsableStoredKey || selected.keyless);
+  const { movedAway: movedAwayFromStoredKey, needsKey: needsKeyForNewEndpoint } =
+    endpointMoveState(provider, baseUrl, apiKey, dropKey);
 
   function openForm() {
     const startingUrl = provider?.baseUrl ?? "";
@@ -641,11 +662,13 @@ export function ModelProviderCard({
                 placeholder={
                   hasUsableStoredKey && provider?.credentialHint
                     ? `Leave blank to keep ••••${provider.credentialHint}`
-                    : dropKey
-                      ? "Paste a key, or leave blank to store none"
-                      : selected.keyless
-                        ? "Leave blank if the endpoint needs no key"
-                        : "Paste your key"
+                    : movedAwayFromStoredKey && !dropKey
+                      ? "Paste the key for the new endpoint"
+                      : dropKey
+                        ? "Paste a key, or leave blank to store none"
+                        : selected.keyless
+                          ? "Leave blank if the endpoint needs no key"
+                          : "Paste your key"
                 }
                 autoComplete="off"
               />
@@ -655,34 +678,65 @@ export function ModelProviderCard({
                 next call uses the new one.
               </p>
 
-              {/* Revocation without rebuilding the connection. Only offered
-                  when there is something to revoke, and it takes effect on
-                  save like every other change in this form. */}
-              {storedKeyForThisEndpoint &&
-                (dropKey ? (
-                  <p className="text-xs text-destructive">
-                    The stored key will be destroyed when you save. Remember to
-                    revoke it at the provider too.{" "}
-                    <button
-                      type="button"
-                      className="underline underline-offset-2"
-                      onClick={() => setDropKey(false)}
-                    >
-                      Keep it instead
-                    </button>
-                  </p>
-                ) : (
+              {/* The endpoint has moved, so the stored key does not come with
+                  it. Explained where it can be acted on, with both answers
+                  offered: a key for the new endpoint, or "it needs none". */}
+              {movedAwayFromStoredKey && !dropKey && (
+                <p
+                  role="alert"
+                  className="rounded-md border border-amber-500/40 px-3 py-2 text-xs text-amber-700 dark:text-amber-400"
+                >
+                  This points at a different endpoint, so the stored key
+                  {provider?.credentialHint ? ` ••••${provider.credentialHint}` : ""} cannot
+                  come with it: a key is only ever sent to the server it was
+                  given to. Enter the key for the new endpoint, or{" "}
                   <button
                     type="button"
-                    className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                    className="underline underline-offset-2"
                     onClick={() => {
                       setDropKey(true);
                       forgetModels();
                     }}
                   >
-                    Remove the stored key without disconnecting
+                    say the new endpoint needs no key
                   </button>
-                ))}
+                  . The old key is destroyed either way.
+                </p>
+              )}
+
+              {/* What a pending removal means, whichever way it was asked for:
+                  the button below, or the moved-endpoint prompt above. */}
+              {dropKey && (storedKeyForThisEndpoint || movedAwayFromStoredKey) && (
+                <p className="text-xs text-destructive">
+                  {movedAwayFromStoredKey
+                    ? "The stored key will be destroyed when you save, and the new endpoint will be called without one."
+                    : "The stored key will be destroyed when you save."}{" "}
+                  Remember to revoke it at the provider too.{" "}
+                  <button
+                    type="button"
+                    className="underline underline-offset-2"
+                    onClick={() => setDropKey(false)}
+                  >
+                    {movedAwayFromStoredKey ? "Enter a key instead" : "Keep it instead"}
+                  </button>
+                </p>
+              )}
+
+              {/* Revocation without rebuilding the connection. Only offered
+                  when there is something to revoke at this endpoint, and it
+                  takes effect on save like every other change in this form. */}
+              {storedKeyForThisEndpoint && !dropKey && (
+                <button
+                  type="button"
+                  className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                  onClick={() => {
+                    setDropKey(true);
+                    forgetModels();
+                  }}
+                >
+                  Remove the stored key without disconnecting
+                </button>
+              )}
 
               <div className="pt-1">
                 <Button
@@ -773,7 +827,9 @@ export function ModelProviderCard({
                 type="button"
                 size="sm"
                 onClick={save}
-                disabled={pending || !baseUrl.trim() || !model.trim()}
+                disabled={
+                  pending || !baseUrl.trim() || !model.trim() || needsKeyForNewEndpoint
+                }
               >
                 {pending ? "Saving…" : "Save"}
               </Button>
