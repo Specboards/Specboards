@@ -10,6 +10,7 @@ import {
 import { parseAnswer } from "@/lib/ai/proposals";
 import {
   canEditItem,
+  contentVersion,
   resolveAssistantItem,
   type AssistantMessageView,
 } from "@/lib/assistant-service";
@@ -63,6 +64,57 @@ export class ProposalInvalidError extends Error {}
 export class ProposalSettledError extends Error {}
 /** The caller may read the item but not change it. Routes map to 403. */
 export class ProposalForbiddenError extends Error {}
+
+/**
+ * The document moved after the proposal was drafted, so accepting it would
+ * replace somebody's newer work. Routes map to 409, like a git write conflict.
+ *
+ * Carries the current body, because refusing without showing the new state only
+ * moves the problem to the reviewer: they clicked Accept on a diff, and the
+ * useful next step is seeing what it should have been a diff against.
+ */
+export class ProposalStaleError extends Error {
+  constructor(
+    message: string,
+    readonly currentBody: string,
+  ) {
+    super(message);
+    this.name = "ProposalStaleError";
+  }
+}
+
+/**
+ * Refuse an accept whose base no longer matches what is there now.
+ *
+ * A git-backed spec does not come through here: it has a blob sha and goes down
+ * the guarded, merged write path instead, which can three-way merge rather than
+ * simply refuse. This is for the two subjects that have no blob, where the only
+ * honest options are "apply blindly" and "stop and show them" - and applying
+ * blindly is what the audit found.
+ *
+ * `null` recorded means the proposal predates this guard. Those are allowed
+ * through rather than refused: refusing would break every draft already sitting
+ * on a card, to protect against a race that has probably not happened. New
+ * drafts all carry a version.
+ */
+function assertNotStale(
+  recordedBase: string | null,
+  currentBody: string,
+  subject: "item" | "release",
+): void {
+  if (recordedBase === null) return;
+  if (recordedBase === contentVersion(currentBody)) return;
+  throw new ProposalStaleError(
+    subject === "item"
+      ? "This item's description changed after the assistant drafted this, so " +
+        "accepting would replace that newer version. Review the current text " +
+        "and ask again if the change is still wanted."
+      : "These release notes changed after the assistant drafted this, so " +
+        "accepting would replace that newer version. Review the current notes " +
+        "and ask again if the change is still wanted.",
+    currentBody,
+  );
+}
 
 export interface ProposalResult {
   /** The turn as it now reads, so the panel can re-render from the answer. */
@@ -268,7 +320,7 @@ async function loadReleaseProposal(
   scope: WorkspaceScope,
   releaseId: string,
   messageId: string,
-): Promise<{ release: ReleaseRecord; proposed: string }> {
+): Promise<{ release: ReleaseRecord; proposed: string; baseSha: string | null }> {
   const store = await getStore();
   const releases = await store.listReleases(scope);
   const release = releases.find((r) => r.id === releaseId);
@@ -286,6 +338,7 @@ async function loadReleaseProposal(
       role: assistantMessages.role,
       outcome: assistantMessages.proposalOutcome,
       resolvedBy: assistantMessages.proposalResolvedBy,
+      baseSha: assistantMessages.proposalBaseSha,
     })
     .from(assistantMessages)
     .where(
@@ -319,7 +372,7 @@ async function loadReleaseProposal(
   if (!proposal) {
     throw new ProposalInvalidError("That message does not contain a proposal.");
   }
-  return { release, proposed: proposal };
+  return { release, proposed: proposal, baseSha: row.baseSha };
 }
 
 /** Turn down a proposed change to a release's notes. Nothing is written. */
@@ -345,15 +398,19 @@ export async function rejectReleaseProposal(
  * audit. There is no faster route from a model's output to the column, for the
  * reason this module opens with.
  *
- * ── What is not guarded ─────────────────────────────────────────────────────
- * There is no conflict check against the notes as they stand now. A spec is
- * guarded by its blob sha, because git gives us one and a spec is routinely
- * edited by several people through several tools. A release's notes are a
- * column edited in one place by whoever is looking at the flyout, and there is
- * no version to guard against without inventing one. The exposure is the same
- * as a DB-native card's description, which has always taken the last write, and
- * the reviewer is looking at the diff when they click. Worth revisiting if
- * notes ever become something two people write at once.
+ * ── How this is guarded ─────────────────────────────────────────────────────
+ * A spec is guarded by its blob sha, because git gives us one. A release's
+ * notes are a column with no version to point at, and this used to be left
+ * unguarded on the reasoning that the notes are edited in one place and the
+ * reviewer is looking at the diff when they click.
+ *
+ * Both halves of that turned out to be weaker than they read. "Edited in one
+ * place" is a statement about habit rather than about the system, and the diff
+ * the reviewer sees can itself be built from a stale browser copy, so the
+ * mitigation could be describing a comparison against a version that is no
+ * longer there. The base is now recorded as a content hash when the draft is
+ * made and checked here, so a proposal drafted against text that has since
+ * moved is refused rather than applied. See `assertNotStale`.
  *
  * Accepting also switches the notes on. A workspace with `releaseNotesMode` of
  * `none` that accepts a draft plainly means to have notes now, and leaving the
@@ -367,7 +424,7 @@ export async function acceptReleaseProposal(
   messageId: string,
   opts: { body?: string } = {},
 ): Promise<ProposalResult> {
-  const { release, proposed } = await loadReleaseProposal(
+  const { release, proposed, baseSha } = await loadReleaseProposal(
     db,
     scope,
     releaseId,
@@ -379,6 +436,9 @@ export async function acceptReleaseProposal(
       "An accepted proposal cannot be empty. Edit the notes directly to clear them.",
     );
   }
+
+  // Before the claim, so a refused accept leaves the proposal actionable.
+  assertNotStale(baseSha, release.releaseNotesBody ?? "", "release");
 
   const { resolvedAt } = await claim(db, scope, messageId, "accepted");
 
@@ -454,6 +514,13 @@ export async function acceptProposal(
     throw new ProposalInvalidError(
       "An accepted proposal cannot be empty. Edit the item directly to clear it.",
     );
+  }
+
+  // Checked BEFORE the claim, so a refused accept leaves the proposal exactly
+  // as it was rather than needing to be un-claimed. A spec skips this and is
+  // guarded further down by its blob sha, which can merge rather than refuse.
+  if (feature.isDbNative) {
+    assertNotStale(baseSha, feature.content ?? "", "item");
   }
 
   // Claimed before the write, so a double-click cannot apply the same text

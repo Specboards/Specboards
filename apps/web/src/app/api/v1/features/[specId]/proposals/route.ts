@@ -9,6 +9,7 @@ import {
   ProposalInvalidError,
   ProposalNotFoundError,
   ProposalSettledError,
+  ProposalStaleError,
 } from "@/lib/assistant-proposals";
 import { AssistantItemError } from "@/lib/assistant-service";
 import { getDb } from "@/lib/db";
@@ -106,6 +107,16 @@ export async function POST(req: Request, { params }: Params) {
     }
     if (err instanceof ProposalSettledError) {
       return Response.json({ error: err.message }, { status: 409 });
+    }
+    // 409 as well, and for the same reason a git write conflict is one: the
+    // request was valid and lost a race. The current body rides along so the
+    // reviewer can see what they should have been reviewing against, rather
+    // than being told no and left to go and find it.
+    if (err instanceof ProposalStaleError) {
+      return Response.json(
+        { error: err.message, currentBody: err.currentBody },
+        { status: 409 },
+      );
     }
     if (err instanceof ProposalInvalidError) {
       return Response.json({ error: err.message }, { status: 422 });

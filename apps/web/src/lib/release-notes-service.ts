@@ -12,6 +12,7 @@ import { skillsForSurface, type Skill } from "@/lib/ai/skills";
 import type { ModelErrorKind, ModelMessage, TokenUsage } from "@/lib/ai/provider";
 import {
   activeSkill,
+  contentVersion,
   isModelConnected,
   persistTurns,
   readThread,
@@ -420,6 +421,11 @@ export async function startReleaseTurn(
     // reports a cancel. Nothing is written; see the note above.
     if (!finished) return;
 
+    // Re-read rather than reusing whatever the context assembled: this is the
+    // version the accept path will be checked against, and the honest base is
+    // the notes as they stand at the moment the draft is recorded.
+    const release = await resolveRelease(scope, releaseId);
+
     yield {
       kind: "done",
       turns: await persistTurns(
@@ -431,10 +437,12 @@ export async function startReleaseTurn(
         model,
         usage,
         {
-          // A release's notes are a database column with no version to guard
-          // against, unlike a git-backed spec. Recorded as null rather than
-          // invented: see the note on `acceptReleaseProposal`.
-          baseSha: null,
+          // A release's notes are a database column, so there is no blob sha to
+          // record. There is still a version: the notes themselves. Hashing
+          // them gives the accept path something to check, which is what stops
+          // a proposal drafted this morning from silently replacing an edit
+          // somebody made this afternoon.
+          baseSha: contentVersion(release.releaseNotesBody ?? ""),
           skillKey: skill?.key ?? null,
         },
       ),

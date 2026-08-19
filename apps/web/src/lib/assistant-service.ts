@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { canWriteProduct } from "@specboards/core";
 import {
   alias,
@@ -138,6 +140,25 @@ export const MAX_TURN_CHARS = 8_000;
  * stops.
  */
 export const ANSWER_MAX_TOKENS = 2_000;
+
+/**
+ * Identify the version of a body a proposal was drafted against.
+ *
+ * A git-backed spec already has one: its blob sha, recorded as
+ * `proposalBaseSha` and used to take the same guarded, merged path a human save
+ * takes. A DB-native card's description and a release's notes are plain columns
+ * with nothing to point at, which is why accepting against them was an
+ * unguarded whole-document replacement. This is the missing identifier, derived
+ * from the text rather than stored beside it, so nothing needs migrating and no
+ * column can drift out of step with the content it claims to describe.
+ *
+ * A hash of the content, not a timestamp: `updatedAt` moves when a field nobody
+ * is proposing against changes, which would refuse good proposals for no
+ * reason. What the guard is about is whether the words moved.
+ */
+export function contentVersion(body: string): string {
+  return createHash("sha256").update(body, "utf8").digest("hex").slice(0, 32);
+}
 
 function toView(row: {
   id: string;
@@ -686,7 +707,12 @@ export async function startAssistantTurn(
           // read at accept time. A proposal can sit on a card for a day, and
           // what makes accepting it safe is being guarded against the document
           // the model was actually shown.
-          baseSha: feature.blobSha,
+          //
+          // A git-backed spec has a blob sha. A DB-native card has no blob, and
+          // used to record null here, which meant accepting it overwrote
+          // whatever the description had become in the meantime. A content
+          // version fills that gap without a schema change.
+          baseSha: feature.blobSha ?? contentVersion(feature.content ?? ""),
           skillKey: skill?.key ?? null,
         },
       ),
