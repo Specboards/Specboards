@@ -223,6 +223,7 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
   it("says 'not configured' rather than failing when nothing is connected", async () => {
     const out = await svc.completeWithWorkspaceModel(db, workspace.id, {
       messages: [{ role: "user", content: "hi" }],
+      maxTokens: 0,
     }, ATTRIBUTION);
     // A setup prompt, not an error to report: the distinction is what lets the
     // assistant offer to connect a model instead of showing a stack trace.
@@ -316,6 +317,7 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
 
       await svc.completeWithWorkspaceModel(db, workspace.id, {
         messages: [{ role: "user", content: "hi" }],
+        maxTokens: 0,
       }, ATTRIBUTION);
 
       expect((await svc.getModelProvider(db, workspace.id))?.lastUsedAt).not.toBeNull();
@@ -387,6 +389,7 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
       try {
         const out = await svc.completeWithWorkspaceModel(db, workspace.id, {
           messages: [{ role: "user", content: "hi" }],
+          maxTokens: 0,
         }, ATTRIBUTION);
         // The row was written while private targets were allowed. Re-checking
         // per call is what stops it outliving the policy that permitted it.
@@ -502,6 +505,7 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
           try {
             const out = await svc.completeWithWorkspaceModel(db, workspace.id, {
               messages: [{ role: "user", content: "hi" }],
+              maxTokens: 0,
               timeoutMs: TIMEOUT_MS,
             }, ATTRIBUTION);
             expect(out.ok).toBe(false);

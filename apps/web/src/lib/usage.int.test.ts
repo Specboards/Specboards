@@ -18,6 +18,15 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
  *    is counted as unknown rather than as free.
  *  - A cap refuses the call that would cross it, before anything is sent, and
  *    records nothing for it.
+ *  - That refusal counts the ceiling on the answer, not just the question.
+ *
+ * Most cases here pass `maxTokens: 0` deliberately. Their cap figures are tuned
+ * against the prompt estimate alone, and zero is the value that keeps that
+ * arithmetic saying what it was written to say. It is stated rather than
+ * omitted because omitting it is no longer possible: the workspace-model
+ * boundary requires a ceiling, which is the point of the change these tests
+ * were updated for. `counts the ceiling on the answer` below is the case that
+ * exercises a real one.
  *
  * Runs against DATABASE_URL. Skips when no database is configured.
  */
@@ -123,7 +132,7 @@ describe.skipIf(!DB_URL)("usage accounting", () => {
     const out = await provider.completeWithWorkspaceModel(
       db,
       workspace.id,
-      { messages: [{ role: "user", content: "hi" }] },
+      { messages: [{ role: "user", content: "hi" }], maxTokens: 0 },
       { userId: memberId, feature: "assistant_turn" },
     );
     expect(out.ok).toBe(true);
@@ -148,7 +157,7 @@ describe.skipIf(!DB_URL)("usage accounting", () => {
     const out = await provider.completeWithWorkspaceModel(
       db,
       workspace.id,
-      { messages: [{ role: "user", content: "hi" }] },
+      { messages: [{ role: "user", content: "hi" }], maxTokens: 0 },
       { userId: ownerId, feature: "connection_test" },
     );
     expect(out.ok).toBe(false);
@@ -181,7 +190,7 @@ describe.skipIf(!DB_URL)("usage accounting", () => {
     await provider.completeWithWorkspaceModel(
       db,
       workspace.id,
-      { messages: [{ role: "user", content: "hi" }] },
+      { messages: [{ role: "user", content: "hi" }], maxTokens: 0 },
       { userId: memberId, feature: "assistant_turn" },
     );
 
@@ -196,13 +205,13 @@ describe.skipIf(!DB_URL)("usage accounting", () => {
     await provider.completeWithWorkspaceModel(
       db,
       workspace.id,
-      { messages: [{ role: "user", content: "hi" }] },
+      { messages: [{ role: "user", content: "hi" }], maxTokens: 0 },
       { userId: memberId, feature: "assistant_turn" },
     );
     await provider.completeWithWorkspaceModel(
       db,
       workspace.id,
-      { messages: [{ role: "user", content: "hi" }] },
+      { messages: [{ role: "user", content: "hi" }], maxTokens: 0 },
       { userId: ownerId, feature: "breakdown" },
     );
 
@@ -237,7 +246,7 @@ describe.skipIf(!DB_URL)("usage accounting", () => {
     const first = await provider.completeWithWorkspaceModel(
       db,
       workspace.id,
-      { messages: [{ role: "user", content: "hi" }] },
+      { messages: [{ role: "user", content: "hi" }], maxTokens: 0 },
       { userId: memberId, feature: "assistant_turn" },
     );
     expect(first.ok).toBe(true);
@@ -247,7 +256,7 @@ describe.skipIf(!DB_URL)("usage accounting", () => {
     const second = await provider.completeWithWorkspaceModel(
       db,
       workspace.id,
-      { messages: [{ role: "user", content: "hi" }] },
+      { messages: [{ role: "user", content: "hi" }], maxTokens: 0 },
       { userId: memberId, feature: "assistant_turn" },
     );
     expect(second.ok).toBe(false);
@@ -259,6 +268,48 @@ describe.skipIf(!DB_URL)("usage accounting", () => {
     expect(await ledger()).toHaveLength(1);
   });
 
+  it("counts the ceiling on the answer, not just the question", async () => {
+    // The hole this covers: the allowance was `prompt estimate + (maxTokens ??
+    // 0)`, and the assistant and breakdown callers passed no ceiling, so the
+    // whole generated half of every call was reserved as zero. A cap could then
+    // admit a request on the strength of its question and be handed an answer
+    // of any size.
+    //
+    // The cap here is comfortably above the prompt on its own, so a refusal can
+    // only be the ceiling being counted.
+    let hit = 0;
+    const answered = respond;
+    respond = (res) => {
+      hit += 1;
+      answered(res);
+    };
+
+    await usage.saveUsageLimits(db, workspace.id, ownerId, {
+      monthlyTokenCap: 1_000,
+    });
+
+    const withoutCeiling = await provider.completeWithWorkspaceModel(
+      db,
+      workspace.id,
+      { messages: [{ role: "user", content: "hi" }], maxTokens: 0 },
+      { userId: memberId, feature: "assistant_turn" },
+    );
+    expect(withoutCeiling.ok).toBe(true);
+
+    const hitsBefore = hit;
+    const withCeiling = await provider.completeWithWorkspaceModel(
+      db,
+      workspace.id,
+      { messages: [{ role: "user", content: "hi" }], maxTokens: 5_000 },
+      { userId: memberId, feature: "assistant_turn" },
+    );
+    expect(withCeiling.ok).toBe(false);
+    expect(!withCeiling.ok && withCeiling.error.kind).toBe("capped");
+    // Refused BEFORE egress, which is the difference between a guardrail and a
+    // report: the endpoint was never asked, so nothing was spent.
+    expect(hit).toBe(hitsBefore);
+  });
+
   it("caps one person's day without capping the workspace", async () => {
     await usage.saveUsageLimits(db, workspace.id, ownerId, {
       dailyUserTokenCap: 52,
@@ -267,13 +318,13 @@ describe.skipIf(!DB_URL)("usage accounting", () => {
     await provider.completeWithWorkspaceModel(
       db,
       workspace.id,
-      { messages: [{ role: "user", content: "hi" }] },
+      { messages: [{ role: "user", content: "hi" }], maxTokens: 0 },
       { userId: memberId, feature: "assistant_turn" },
     );
     const blocked = await provider.completeWithWorkspaceModel(
       db,
       workspace.id,
-      { messages: [{ role: "user", content: "hi" }] },
+      { messages: [{ role: "user", content: "hi" }], maxTokens: 0 },
       { userId: memberId, feature: "assistant_turn" },
     );
     expect(!blocked.ok && blocked.error.kind).toBe("capped");
@@ -283,7 +334,7 @@ describe.skipIf(!DB_URL)("usage accounting", () => {
     const other = await provider.completeWithWorkspaceModel(
       db,
       workspace.id,
-      { messages: [{ role: "user", content: "hi" }] },
+      { messages: [{ role: "user", content: "hi" }], maxTokens: 0 },
       { userId: ownerId, feature: "assistant_turn" },
     );
     expect(other.ok).toBe(true);
@@ -297,7 +348,7 @@ describe.skipIf(!DB_URL)("usage accounting", () => {
     const out = await provider.completeWithWorkspaceModel(
       db,
       workspace.id,
-      { messages: [{ role: "user", content: "hi" }] },
+      { messages: [{ role: "user", content: "hi" }], maxTokens: 0 },
       { userId: memberId, feature: "assistant_turn" },
     );
     expect(out.ok).toBe(true);
@@ -315,7 +366,7 @@ describe.skipIf(!DB_URL)("usage accounting", () => {
     const out = await provider.completeWithWorkspaceModel(
       db,
       workspace.id,
-      { messages: [{ role: "user", content: "hi" }] },
+      { messages: [{ role: "user", content: "hi" }], maxTokens: 0 },
       { userId: memberId, feature: "assistant_turn" },
     );
     expect(out.ok).toBe(true);
@@ -356,6 +407,7 @@ describe.skipIf(!DB_URL)("usage accounting", () => {
       workspace.id,
       {
         messages: [{ role: "user", content: "hi" }],
+        maxTokens: 0,
         signal: controller.signal,
       },
       { userId: memberId, feature: "assistant_turn" },
@@ -409,7 +461,7 @@ describe.skipIf(!DB_URL)("usage accounting", () => {
     for await (const _event of provider.streamWithWorkspaceModel(
       db,
       workspace.id,
-      { messages: [{ role: "user", content: "hi" }] },
+      { messages: [{ role: "user", content: "hi" }], maxTokens: 0 },
       { userId: memberId, feature: "assistant_turn" },
     )) {
       // Drained; the assertions are about what was written, not what was read.
@@ -433,7 +485,7 @@ describe.skipIf(!DB_URL)("usage accounting", () => {
     for await (const event of provider.streamWithWorkspaceModel(
       db,
       workspace.id,
-      { messages: [{ role: "user", content: "hi" }] },
+      { messages: [{ role: "user", content: "hi" }], maxTokens: 0 },
       { userId: memberId, feature: "assistant_turn" },
     )) {
       events.push(event);

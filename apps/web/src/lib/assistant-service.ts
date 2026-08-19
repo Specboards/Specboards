@@ -123,6 +123,22 @@ export const HISTORY_TURN_LIMIT = 20;
  */
 export const MAX_TURN_CHARS = 8_000;
 
+/**
+ * Upper bound on one assistant answer.
+ *
+ * The spend cap is asked about prompt plus this, so a call is admitted on what
+ * it could cost rather than on what it probably will. Without a ceiling the
+ * check reserved the question and nothing for the answer, which is the half of
+ * the call with no natural bound: a guardrail that admits a request on an
+ * average and is then handed a maximum is not a guardrail.
+ *
+ * 2,000 matches the release-notes ceiling. An answer about a backlog item that
+ * runs longer than that has stopped answering, and the bound turns "the model
+ * decided to write an essay" from a surprise on the invoice into a reply that
+ * stops.
+ */
+export const ANSWER_MAX_TOKENS = 2_000;
+
 function toView(row: {
   id: string;
   role: string;
@@ -613,6 +629,7 @@ export async function startAssistantTurn(
       scope.workspaceId,
       {
         messages,
+        maxTokens: ANSWER_MAX_TOKENS,
         ...(opts.signal ? { signal: opts.signal } : {}),
       },
       // Attribution, not telemetry: this is the record of whose behalf the
