@@ -52,10 +52,12 @@ import { getStore, type GithubLink } from "@/lib/store";
 
 import { DOC_TOOLS } from "./doc-tools";
 import {
+  McpToolError,
   optionalLimit,
   optionalString,
   requireDbScope,
   requireString,
+  requireUuid,
   type McpTool,
 } from "./types";
 
@@ -296,7 +298,9 @@ export const TOOLS: McpTool[] = [
         store.listReleases(ctx.scope),
       ]);
       const group = groups.find((g) => g.key === args.group);
-      if (!group) throw new Error(`No product group with key "${args.group}".`);
+      if (!group) {
+        throw new McpToolError(`No product group with key "${args.group}".`);
+      }
       const summary = await store.getGroupSummary(group.id, ctx.scope);
       const productKeyById = new Map(products.map((p) => [p.id, p.key]));
       const releaseNameById = new Map(releases.map((r) => [r.id, r.name]));
@@ -379,14 +383,18 @@ export const TOOLS: McpTool[] = [
       let productId: string | undefined;
       if (typeof args.product === "string" && args.product) {
         const match = products.find((p) => p.key === args.product);
-        if (!match) throw new Error(`No product with key "${args.product}".`);
+        if (!match) {
+          throw new McpToolError(`No product with key "${args.product}".`);
+        }
         productId = match.id;
       }
       let groupProductIds: Set<string> | undefined;
       if (typeof args.group === "string" && args.group) {
         const groups = await store.listProductGroups(ctx.scope);
         const match = groups.find((g) => g.key === args.group);
-        if (!match) throw new Error(`No product group with key "${args.group}".`);
+        if (!match) {
+          throw new McpToolError(`No product group with key "${args.group}".`);
+        }
         const subtree = descendantGroupIds(groups, match.id);
         groupProductIds = new Set(
           products
@@ -448,10 +456,10 @@ export const TOOLS: McpTool[] = [
     write: false,
     scope: { resource: "features", action: "read" },
     run: async (args, ctx) => {
-      const specId = requireString(args, "specId");
+      const specId = requireUuid(args, "specId");
       const store = await getStore();
       const f = await store.getFeature(specId, ctx.scope);
-      if (!f) throw new Error(`No item with spec id ${specId}.`);
+      if (!f) throw new McpToolError(`No item with spec id ${specId}.`);
       // Advertise the moves update_item will accept from here, so agents step
       // the workflow instead of guessing stage keys (see list_statuses). The
       // goals answer the other half of the review question: why this exists.
@@ -507,10 +515,10 @@ export const TOOLS: McpTool[] = [
     write: false,
     scope: { resource: "features", action: "read" },
     run: async (args, ctx) => {
-      const specId = requireString(args, "specId");
+      const specId = requireUuid(args, "specId");
       const store = await getStore();
       const f = await store.getFeature(specId, ctx.scope);
-      if (!f) throw new Error(`No item with spec id ${specId}.`);
+      if (!f) throw new McpToolError(`No item with spec id ${specId}.`);
       return { specId: f.specId, title: f.title, relations: f.relations };
     },
   },
@@ -567,7 +575,7 @@ export const TOOLS: McpTool[] = [
     write: true,
     scope: { resource: "features", action: "write" },
     run: async (args, ctx) => {
-      const specId = requireString(args, "specId");
+      const specId = requireUuid(args, "specId");
       // parseFeaturePatch reads only known keys; specId/advance are ignored by it.
       const patch = parseFeaturePatch(args);
       const updated = await patchFeature(specId, patch, ctx.scope, {
@@ -613,12 +621,12 @@ export const TOOLS: McpTool[] = [
     destructive: true,
     scope: { resource: "features", action: "write" },
     run: async (args, ctx) => {
-      const specId = requireString(args, "specId");
+      const specId = requireUuid(args, "specId");
       const store = await getStore();
       // Read first so we can echo back what was removed (and give a clear
       // error before attempting the delete if the id is unknown).
       const existing = await store.getFeature(specId, ctx.scope);
-      if (!existing) throw new Error(`No item with spec id ${specId}.`);
+      if (!existing) throw new McpToolError(`No item with spec id ${specId}.`);
       const removeSpec = args.removeSpec === true;
       await deleteWorkItem(specId, ctx.scope, { removeSpec });
       return {
@@ -670,7 +678,9 @@ export const TOOLS: McpTool[] = [
       if (typeof raw.product === "string" && raw.product && !("productId" in raw)) {
         const products = await store.listProducts(ctx.scope);
         const match = products.find((p) => p.key === raw.product);
-        if (!match) throw new Error(`No product with key "${raw.product}".`);
+        if (!match) {
+          throw new McpToolError(`No product with key "${raw.product}".`);
+        }
         raw.productId = match.id;
       }
       delete raw.product;
@@ -729,7 +739,7 @@ export const TOOLS: McpTool[] = [
     scope: { resource: "features", action: "write" },
     run: async (args, ctx) => {
       const { db, scope } = requireDbScope(ctx);
-      const specId = requireString(args, "specId");
+      const specId = requireUuid(args, "specId");
       const content = requireString(args, "content");
       const message =
         typeof args.message === "string" ? args.message : undefined;
@@ -1070,11 +1080,9 @@ export const TOOLS: McpTool[] = [
     run: async (args, ctx) => {
       // Per-product authorization is enforced in the store via
       // canWriteProductId against the release's product (owner for portfolio).
-      if (typeof args.id !== "string" || args.id.trim() === "") {
-        throw new Error("id must be a non-empty string.");
-      }
+      const releaseId = requireUuid(args, "id");
       const release = await updateRelease(
-        args.id,
+        releaseId,
         parseReleasePatch(args),
         ctx.scope,
       );
@@ -1210,7 +1218,7 @@ export const TOOLS: McpTool[] = [
     write: true,
     scope: { resource: "cycles", action: "write" },
     run: async (args, ctx) => {
-      const id = requireString(args, "id");
+      const id = requireUuid(args, "id");
       const { id: _omit, ...rest } = args;
       const cycle = await updateCycle(id, parseCyclePatch(rest), ctx.scope);
       return {
@@ -1254,8 +1262,8 @@ export const TOOLS: McpTool[] = [
     write: true,
     scope: { resource: "cycles", action: "write" },
     run: async (args, ctx) => {
-      const fromCycleId = requireString(args, "fromCycleId");
-      const toCycleId = requireString(args, "toCycleId");
+      const fromCycleId = requireUuid(args, "fromCycleId");
+      const toCycleId = requireUuid(args, "toCycleId");
       return rolloverCycle(fromCycleId, toCycleId, ctx.scope);
     },
   },
@@ -1322,10 +1330,10 @@ export const TOOLS: McpTool[] = [
     write: false,
     scope: { resource: "goals", action: "read" },
     run: async (args, ctx) => {
-      const id = requireString(args, "id");
+      const id = requireUuid(args, "id");
       const goals = await listGoals(ctx.scope);
       const goal = goals.find((g) => g.id === id);
-      if (!goal) throw new Error(`No goal with id ${id}.`);
+      if (!goal) throw new McpToolError(`No goal with id ${id}.`);
       const contributions = await listGoalContributions(id, ctx.scope);
       return {
         id: goal.id,
@@ -1425,7 +1433,7 @@ export const TOOLS: McpTool[] = [
     write: true,
     scope: { resource: "goals", action: "write" },
     run: async (args, ctx) => {
-      const id = requireString(args, "id");
+      const id = requireUuid(args, "id");
       const { id: _omit, ...rest } = args;
       const goal = await updateGoal(id, parseGoalPatch(rest), ctx.scope);
       return {
@@ -1459,12 +1467,12 @@ export const TOOLS: McpTool[] = [
     destructive: true,
     scope: { resource: "goals", action: "write" },
     run: async (args, ctx) => {
-      const id = requireString(args, "id");
+      const id = requireUuid(args, "id");
       // Read first so the response can name what was removed, and so an
       // unknown id fails before anything is deleted.
       const goals = await listGoals(ctx.scope);
       const goal = goals.find((g) => g.id === id);
-      if (!goal) throw new Error(`No goal with id ${id}.`);
+      if (!goal) throw new McpToolError(`No goal with id ${id}.`);
       const contributions = await listGoalContributions(id, ctx.scope);
       await deleteGoal(id, ctx.scope);
       return {
@@ -1506,7 +1514,7 @@ export const TOOLS: McpTool[] = [
     write: true,
     scope: { resource: "key-results", action: "write" },
     run: async (args, ctx) => {
-      const goalId = requireString(args, "goalId");
+      const goalId = requireUuid(args, "goalId");
       const { goalId: _omit, ...rest } = args;
       const goal = await createKeyResult(
         goalId,
@@ -1539,7 +1547,7 @@ export const TOOLS: McpTool[] = [
     write: true,
     scope: { resource: "key-results", action: "write" },
     run: async (args, ctx) => {
-      const id = requireString(args, "id");
+      const id = requireUuid(args, "id");
       const { id: _omit, ...rest } = args;
       const goal = await updateKeyResult(
         id,
@@ -1583,7 +1591,7 @@ export const TOOLS: McpTool[] = [
     destructive: true,
     scope: { resource: "key-results", action: "write" },
     run: async (args, ctx) => {
-      const id = requireString(args, "id");
+      const id = requireUuid(args, "id");
       const goal = await deleteKeyResult(id, ctx.scope);
       return {
         id: goal.id,
@@ -1624,8 +1632,8 @@ export const TOOLS: McpTool[] = [
     write: true,
     scope: { resource: "goals", action: "write" },
     run: async (args, ctx) => {
-      const goalId = requireString(args, "goalId");
-      const specId = requireString(args, "specId");
+      const goalId = requireUuid(args, "goalId");
+      const specId = requireUuid(args, "specId");
       if (args.unlink === true) {
         await unlinkGoal(goalId, specId, ctx.scope);
       } else {
@@ -1690,11 +1698,9 @@ export const TOOLS: McpTool[] = [
       // contributor for a product release, owner for portfolio) matches
       // update_release exactly. The patch is release-notes-only, so this tool
       // can never rename, reschedule, or edit the internal planning notes.
-      if (typeof args.id !== "string" || args.id.trim() === "") {
-        throw new Error("id must be a non-empty string.");
-      }
+      const releaseId = requireUuid(args, "id");
       const release = await updateRelease(
-        args.id,
+        releaseId,
         parseReleaseNotesPatch(args),
         ctx.scope,
       );
@@ -1725,10 +1731,10 @@ export const TOOLS: McpTool[] = [
     write: false,
     scope: { resource: "features", action: "read" },
     run: async (args, ctx) => {
-      const specId = requireString(args, "specId");
+      const specId = requireUuid(args, "specId");
       const store = await getStore();
       const f = await store.getFeature(specId, ctx.scope);
-      if (!f) throw new Error(`No item with spec id ${specId}.`);
+      if (!f) throw new McpToolError(`No item with spec id ${specId}.`);
       return {
         specId: f.specId,
         title: f.title,
@@ -1782,7 +1788,7 @@ export const TOOLS: McpTool[] = [
     write: true,
     scope: { resource: "features", action: "write" },
     run: async (args, ctx) => {
-      const specId = requireString(args, "specId");
+      const specId = requireUuid(args, "specId");
       // Reuse the app's validation and GitHub resolution end to end; the store
       // enforces per-product write access, matching the web link action.
       const input = parseGithubLinkInput(args);
@@ -1827,8 +1833,8 @@ export const TOOLS: McpTool[] = [
     destructive: true,
     scope: { resource: "features", action: "write" },
     run: async (args, ctx) => {
-      const specId = requireString(args, "specId");
-      const linkId = requireString(args, "linkId");
+      const specId = requireUuid(args, "specId");
+      const linkId = requireUuid(args, "linkId");
       const links = await removeFeatureGithubLink(specId, linkId, ctx.scope);
       return { specId, githubLinks: links.map(githubLinkOut) };
     },

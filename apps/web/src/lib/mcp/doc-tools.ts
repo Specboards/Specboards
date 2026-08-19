@@ -26,7 +26,12 @@ import {
   type DocSpace,
 } from "@/lib/store/types";
 
-import { requireString, type McpContext, type McpTool } from "./types";
+import {
+  McpToolError,
+  requireString,
+  type McpContext,
+  type McpTool,
+} from "./types";
 
 /**
  * MCP tools for the Plan-section doc areas: Strategy, Research, and
@@ -79,7 +84,7 @@ async function resolveProductId(
   const store = await getStore();
   const products = await store.listProducts(ctx.scope);
   const match = products.find((p) => p.key === key);
-  if (!match) throw new Error(`No product with key "${key}".`);
+  if (!match) throw new McpToolError(`No product with key "${key}".`);
   return { id: match.id, key: match.key };
 }
 
@@ -116,7 +121,7 @@ async function requireProductWrite(
   const store = await getStore();
   const access = await store.getProductAccess(ctx.scope);
   if (!access.isOrgAdmin && !canWriteProduct(access, productId)) {
-    throw new Error("Your role does not permit editing these docs.");
+    throw new McpToolError("Your role does not permit editing these docs.");
   }
 }
 
@@ -124,7 +129,7 @@ async function requireProductWrite(
 function requireGithubDeps(ctx: McpContext) {
   const db = getDb();
   if (!db || !ctx.scope) {
-    throw new Error(
+    throw new McpToolError(
       "GitHub-backed docs need a database-backed deployment with a connected " +
         "repository; they are unavailable in local file mode.",
     );
@@ -135,7 +140,7 @@ function requireGithubDeps(ctx: McpContext) {
 /** Refuse writes to an area that only links out; there is nothing to edit. */
 function refuseExternal(target: DocTarget): void {
   if (target.space.mode === "external") {
-    throw new Error(
+    throw new McpToolError(
       `The ${target.area} area for "${target.productKey}" links out to ` +
         `${target.space.externalUrl ?? "an external repository"}; Specboards ` +
         "does not hold its pages, so there is nothing to edit here.",
@@ -303,7 +308,7 @@ export const DOC_TOOLS: McpTool[] = [
       const target = await resolveTarget(ctx, args);
       const docId = requireString(args, "docId");
       if (target.space.mode === "external") {
-        throw new Error(
+        throw new McpToolError(
           `The ${target.area} area for "${target.productKey}" links out to ` +
             `${target.space.externalUrl ?? "an external repository"}; its ` +
             "pages are not readable through Specboards.",

@@ -31,6 +31,7 @@ import {
   resolveCommitAuthor,
   specCommitMessage,
 } from "@/lib/commit-attribution";
+import { DomainError } from "@/lib/errors";
 import { recordWritePullRequest } from "@/lib/github-links-service";
 import { recordSpecWrite } from "@/lib/spec-write-audit";
 import {
@@ -52,7 +53,7 @@ import { getStore, type WorkspaceScope } from "@/lib/store";
  */
 
 /** Raised when a spec can't be written (no repo, no access, name clash, ...). */
-export class SpecContentError extends Error {}
+export class SpecContentError extends DomainError {}
 
 /**
  * The spec moved in git between the author loading it and saving. Kept apart
@@ -65,7 +66,7 @@ export class SpecContentError extends Error {}
  * editor holds, so the two versions can be put side by side without either
  * side re-parsing.
  */
-export class SpecConflictError extends Error {
+export class SpecConflictError extends DomainError {
   constructor(
     readonly path: string,
     readonly currentContent: string,
