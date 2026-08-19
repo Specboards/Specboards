@@ -25,13 +25,16 @@ export const dynamic = "force-dynamic";
  * Refresh the cached state/title of any links to the PR/issue this event
  * describes. Owner-side write (no RLS) keyed by repo + kind + number. No-op
  * when the repo isn't connected or nothing links to the entity.
+ *
+ * Takes the connected repositories rather than resolving them, so this and the
+ * notification that follows are scoped by one resolution and cannot disagree
+ * about which repos the event touched.
  */
 async function updateLinksFromEntityEvent(
   db: Database,
   evt: GithubEntityEvent,
+  repos: { id: string }[],
 ): Promise<number> {
-  // Update every workspace that connected this repo, not just one.
-  const repos = await resolveRepositories(db, evt.owner, evt.name);
   let total = 0;
   for (const repo of repos) {
     const updated = await db
@@ -160,11 +163,22 @@ export async function POST(req: Request) {
         : parseIssuesEvent(payload);
     if (!entity) return Response.json({ ignored: `malformed ${event}` }, { status: 202 });
     try {
-      const updated = await updateLinksFromEntityEvent(db, entity);
+      // Resolved once and handed to both: every workspace that connected this
+      // repo, and nothing else. A pull request number is unique only within a
+      // repository, so this set is what stops an event from a repo an attacker
+      // owns reaching link rows that merely share its number. The returned
+      // counts are scoped by the same set, which matters because GitHub shows
+      // this response in the sender's delivery log.
+      const repos = await resolveRepositories(db, entity.owner, entity.name);
+      const updated = await updateLinksFromEntityEvent(db, entity, repos);
       // After the state lands, tell whoever proposed the change what happened
       // to it. Ordered this way on purpose: the notification reads the stored
       // state back, and it must never be the reason the state update is lost.
-      const notified = await notifyReviewOutcome(db, entity);
+      const notified = await notifyReviewOutcome(
+        db,
+        entity,
+        repos.map((r) => r.id),
+      );
       return Response.json({ ok: true, updated, notified });
     } catch (err) {
       console.error(`[webhooks/github] ${event} update failed:`, err);

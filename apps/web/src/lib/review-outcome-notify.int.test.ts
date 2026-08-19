@@ -42,7 +42,15 @@ const author = randomUUID();
 const otherAuthor = randomUUID();
 const suffix = randomUUID().slice(0, 8);
 
-const PR = { merged: 900_101, closed: 900_102, handLinked: 900_103, shared: 900_104, open: 900_105 };
+const PR = {
+  merged: 900_101,
+  closed: 900_102,
+  handLinked: 900_103,
+  shared: 900_104,
+  open: 900_105,
+  crossTenant: 900_106,
+  unconnected: 900_107,
+};
 
 function event(number: number, state: string, title: string | null = "Update the refund policy") {
   return { owner: "acme", name: "specs", kind: "pull_request" as const, number, state, title };
@@ -104,7 +112,7 @@ describe.skipIf(!OWNER_URL)("notifyReviewOutcome", () => {
 
   it("tells the author their change is live", async () => {
     await link({ number: PR.merged, state: "merged" });
-    expect(await notifyReviewOutcome(db, event(PR.merged, "merged"))).toBe(1);
+    expect(await notifyReviewOutcome(db, event(PR.merged, "merged"), [repoId])).toBe(1);
 
     const rows = await inbox(author);
     expect(rows).toHaveLength(1);
@@ -121,7 +129,7 @@ describe.skipIf(!OWNER_URL)("notifyReviewOutcome", () => {
 
   it("says out loud when a change was closed without merging", async () => {
     await link({ number: PR.closed, state: "closed" });
-    expect(await notifyReviewOutcome(db, event(PR.closed, "closed"))).toBe(1);
+    expect(await notifyReviewOutcome(db, event(PR.closed, "closed"), [repoId])).toBe(1);
 
     const rows = await inbox(author);
     const closed = rows.find((r) => r.type === "spec_change_closed");
@@ -133,12 +141,12 @@ describe.skipIf(!OWNER_URL)("notifyReviewOutcome", () => {
 
   it("says nothing about a pull request somebody linked by hand", async () => {
     await link({ number: PR.handLinked, state: "merged", authorId: null });
-    expect(await notifyReviewOutcome(db, event(PR.handLinked, "merged"))).toBe(0);
+    expect(await notifyReviewOutcome(db, event(PR.handLinked, "merged"), [repoId])).toBe(0);
   });
 
   it("says nothing while a review is still open", async () => {
     await link({ number: PR.open, state: "open" });
-    expect(await notifyReviewOutcome(db, event(PR.open, "open"))).toBe(0);
+    expect(await notifyReviewOutcome(db, event(PR.open, "open"), [repoId])).toBe(0);
   });
 
   it("tells every workspace's author, not just the first", async () => {
@@ -151,7 +159,50 @@ describe.skipIf(!OWNER_URL)("notifyReviewOutcome", () => {
       repoId: otherRepoId,
       authorId: otherAuthor,
     });
-    expect(await notifyReviewOutcome(db, event(PR.shared, "merged"))).toBe(2);
+    // Both repos are the same acme/specs, connected by two tenants, so both
+    // resolve for this event and both authors are owed the news.
+    expect(
+      await notifyReviewOutcome(db, event(PR.shared, "merged"), [repoId, otherRepoId]),
+    ).toBe(2);
     expect(await inbox(otherAuthor)).toHaveLength(1);
+  });
+
+  /**
+   * A pull request number is unique only within a repository.
+   *
+   * Matching on kind, number and state alone meant anyone could install the App
+   * on a repo they own, merge pull requests numbered 1, 2, 3 with titles of
+   * their choosing, and have validly signed events notify every link row at
+   * that number in every workspace, carrying their text. The count came back
+   * too, and GitHub renders the response in the sender's own delivery log, so
+   * it doubled as an oracle for how many workspaces hold a link at a number.
+   */
+  it("does not notify a workspace whose link merely shares the number", async () => {
+    await link({ number: PR.crossTenant, state: "merged" });
+    await link({
+      number: PR.crossTenant,
+      state: "merged",
+      workspaceId: otherWsId,
+      featureId: otherFeatureId,
+      repoId: otherRepoId,
+      authorId: otherAuthor,
+    });
+    const before = (await inbox(otherAuthor)).length;
+
+    // The event belongs to one repo only: the attacker's, standing in here for
+    // any repo that is not the other tenant's.
+    const notified = await notifyReviewOutcome(
+      db,
+      event(PR.crossTenant, "merged"),
+      [repoId],
+    );
+
+    expect(notified).toBe(1);
+    expect(await inbox(otherAuthor)).toHaveLength(before);
+  });
+
+  it("says nothing when the event's repository is connected by nobody", async () => {
+    await link({ number: PR.unconnected, state: "merged" });
+    expect(await notifyReviewOutcome(db, event(PR.unconnected, "merged"), [])).toBe(0);
   });
 });
