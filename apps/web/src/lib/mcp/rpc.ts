@@ -371,6 +371,15 @@ function toolError(text: string) {
  * the *client's* timeout fires, which the agent reports as the server
  * "disconnecting". Returning a JSON-RPC error keeps the connection healthy and
  * tells the model what happened. MCP clients typically allow ~60s; stay under.
+ *
+ * Reviewed when the timeout was made to report writes as indeterminate. It
+ * stays at 30s: the expensive call here is a spec commit, which is several
+ * GitHub round trips (ref, blob, tree, commit, update ref) and lands in a few
+ * seconds normally, so 30s is comfortably clear of the ordinary case while
+ * still leaving room under a 60s client budget. Raising it would mostly extend
+ * how long a genuinely wedged call ties up a connection; lowering it would
+ * start reporting healthy commits as indeterminate, which is the more expensive
+ * mistake now that the message asks the agent to go and re-read.
  */
 const TOOL_TIMEOUT_MS = 30_000;
 
@@ -396,20 +405,73 @@ function isTransientDbError(err: unknown): boolean {
   );
 }
 
-/** Reject if `p` has not settled within `ms`; always clears its timer. */
+/**
+ * A tool call that ran out of time.
+ *
+ * Its own type because the caller has to treat it differently from an ordinary
+ * failure: `Promise.race` settles the *caller*, it does not cancel the work, so
+ * a timed-out write is still running and may still commit.
+ */
+class ToolTimeoutError extends Error {
+  constructor(
+    readonly tool: string,
+    readonly ms: number,
+  ) {
+    super(`Tool "${tool}" timed out after ${ms}ms.`);
+    this.name = "ToolTimeoutError";
+  }
+}
+
+/**
+ * Reject if `p` has not settled within `ms`; always clears its timer.
+ *
+ * This bounds how long the *caller* waits and nothing more. The underlying work
+ * carries on: there is no cancellation to hand it, because the store and the
+ * GitHub client do not take one. That is exactly why the rejection is typed, so
+ * the call site can say "unknown" instead of "failed"; see `describeTimeout`.
+ */
 async function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(
-      () => reject(new Error(`Tool "${label}" timed out after ${ms}ms.`)),
-      ms,
-    );
+    timer = setTimeout(() => reject(new ToolTimeoutError(label, ms)), ms);
   });
   try {
     return await Promise.race([p, timeout]);
   } finally {
     clearTimeout(timer);
+    // The loser of the race is still pending. Nothing here can stop it, but an
+    // unhandled rejection from it would be logged as if it were unrelated, so
+    // it is swallowed: the call site has already been told the outcome is
+    // unknown, and a late failure does not change that.
+    void Promise.resolve(p).catch(() => {});
   }
+}
+
+/**
+ * What to tell an agent whose call timed out.
+ *
+ * The distinction that matters is between "this did not happen" and "I do not
+ * know whether this happened", and only the second is true of a write. The old
+ * message said the tool failed, which is the one thing we cannot know: the
+ * commit or the row update may land a moment after we stop waiting.
+ *
+ * Getting this wrong is worse for an agent than for a person. A person who sees
+ * a timeout reloads and looks; an agent retries, immediately, and the retry is
+ * what turns one write into two. The same reasoning already governs the DB
+ * retry above, which refuses to replay a write for exactly this reason.
+ *
+ * A read is safe to report as a plain failure: nothing was mutated, so retrying
+ * costs only time.
+ */
+function describeTimeout(err: ToolTimeoutError, isWrite: boolean): string {
+  if (!isWrite) {
+    return `${err.message} Nothing was changed; retrying is safe.`;
+  }
+  return (
+    `${err.message} The outcome is UNKNOWN: the write was not cancelled and ` +
+    `may still complete. Do not retry blindly. Read the affected item back ` +
+    `first, and only repeat the call if the change is genuinely absent.`
+  );
 }
 
 /**
@@ -541,6 +603,19 @@ async function handleToolCall(
       ],
     });
   } catch (err) {
+    if (err instanceof ToolTimeoutError) {
+      // Logged as its own outcome rather than folded into `ok=false`, because
+      // "we stopped waiting" and "it failed" are different events and only the
+      // first leaves work possibly still running. A run of these on a write
+      // tool is the signal that something downstream is wedged.
+      logMcpCall({
+        tool: tool.name,
+        ok: false,
+        ms: Date.now() - started,
+        timeout: tool.write ? "write_indeterminate" : "read",
+      });
+      return ok(id, toolError(describeTimeout(err, tool.write)));
+    }
     logMcpCall({
       tool: tool.name,
       ok: false,
