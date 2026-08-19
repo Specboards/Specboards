@@ -1,5 +1,5 @@
 import { readJsonBody } from "@/lib/api/body";
-import { authorizeOrgAdmin } from "@/lib/auth-session";
+import { authorizeOrgAdmin, authorizeOrgAdminBrowserOnly } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
 import {
   createInvitation,
@@ -26,9 +26,26 @@ export async function GET(req: Request) {
   return Response.json({ invitations: list });
 }
 
-/** POST /api/v1/org/invitations — invite an email with a role. Org-admin only. */
+/**
+ * POST /api/v1/org/invitations — invite an email with a role. Org-admin only,
+ * and from a browser session only.
+ *
+ * An invitation is a route to a real session, so this belongs with the other
+ * actions a leaked credential must not be able to perform: minting a key,
+ * creating a service account, configuring the model connection. A holder of a
+ * leaked owner key could otherwise invite an address they control as an owner,
+ * redeem the emailed token, and hold a session that revoking the key does not
+ * take away.
+ *
+ * GET stays reachable with a key. Listing invitations discloses who has been
+ * invited, which is worth knowing about, but it confers no authority and is not
+ * what this guard is for.
+ */
 export async function POST(req: Request) {
-  const authz = await authorizeOrgAdmin(req);
+  const authz = await authorizeOrgAdminBrowserOnly(
+    req,
+    "Invitations are sent from a signed-in browser session, never with an API key.",
+  );
   if (!authz.ok) return authz.response;
   const db = getDb();
   if (!authz.scope || !db) return FILE_MODE;

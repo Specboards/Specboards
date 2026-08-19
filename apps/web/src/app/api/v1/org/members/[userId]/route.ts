@@ -1,5 +1,5 @@
 import { readJsonBody } from "@/lib/api/body";
-import { authorizeOrgAdmin } from "@/lib/auth-session";
+import { authorizeOrgAdmin, refuseApiKeyAuth } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
 import {
   OrgMemberError,
@@ -21,6 +21,15 @@ const FILE_MODE = Response.json(
 /**
  * PATCH /api/v1/org/members/:userId — change a member's `role` and/or `active`
  * flag. Organization-admin only. Refuses to demote/deactivate the last admin.
+ *
+ * A `role` change additionally requires a browser session. Promoting somebody
+ * to owner confers authority, and a leaked owner key that can promote an
+ * account it controls has escalated into something revoking the key does not
+ * undo. That is the same hole as inviting yourself back, one step to the side.
+ *
+ * `active` and DELETE stay reachable with a key on purpose: both take authority
+ * away rather than conferring it, and a leaked key that could only deactivate
+ * members has gained nothing it did not already have.
  */
 export async function PATCH(req: Request, { params }: Params) {
   const authz = await authorizeOrgAdmin(req);
@@ -44,6 +53,17 @@ export async function PATCH(req: Request, { params }: Params) {
       { error: "Provide `role` and/or `active`." },
       { status: 400 },
     );
+  }
+
+  // Authorization first, then the extra restriction, because which one applies
+  // is only knowable from the body. Ordered this way so an unauthenticated
+  // caller still gets a 401 rather than a critique of their JSON.
+  if ("role" in raw) {
+    const denied = refuseApiKeyAuth(
+      req,
+      "A member's role is changed from a signed-in browser session, never with an API key.",
+    );
+    if (denied) return denied;
   }
 
   try {
