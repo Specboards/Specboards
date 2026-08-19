@@ -19,7 +19,10 @@
  *    endpoint, read it now (see lib/ai/tls.ts). A mistyped path should stop the
  *    release rather than surface as an unreachable endpoint on someone's first
  *    call.
- * 6. Start the in-process webhook outbox drainer. No-op in local file mode,
+ * 6. Sign-up gate: refuse to start when the sign-up-code gate is on but no code
+ *    is configured, which would gate sign-up in name only (see
+ *    lib/access-gate.ts).
+ * 7. Start the in-process webhook outbox drainer. No-op in local file mode,
  *    where `startDrainer` finds no database.
  */
 export async function register(): Promise<void> {
@@ -42,6 +45,9 @@ export async function register(): Promise<void> {
 
     const { assertModelTlsConfig } = await import("@/lib/ai/tls");
     assertModelTlsConfig();
+
+    const { assertSignUpCodeConfigured } = await import("@/lib/access-gate");
+    assertSignUpCodeConfigured();
 
     const { startDrainer } = await import("@/lib/webhooks/drainer");
     startDrainer();

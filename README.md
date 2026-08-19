@@ -114,7 +114,10 @@ Optional environment flags for a hosted deployment:
   the pre-release beta): the first user on a given email domain must present a
   valid sign-up code to start a team; teammates who follow them on the same
   domain, and anyone holding a live org invitation, sign up without one.
-- `SPECBOARDS_SIGNUP_CODE` - override the sign-up code (default `SPECBUILDER2026`).
+- `SPECBOARDS_SIGNUP_CODE` - the code itself. Required whenever
+  `SPECBOARDS_SIGNUP_CODE_REQUIRED` is on: there is no default, and the app
+  refuses to start with the gate on and no code set. Choose a value only the
+  people you are admitting know, and rotate it by changing this variable.
 - `SPECBOARDS_INVITE_ONLY` - legacy gate: close public sign-up so only addresses
   with a pending org invitation can create an account. Superseded by
   `SPECBOARDS_SIGNUP_CODE_REQUIRED`; leave unset when the code gate is on.
