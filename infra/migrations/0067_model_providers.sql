@@ -118,6 +118,21 @@ CREATE INDEX "model_provider_credentials_ws_idx"
 -- future tables automatically, so a table with no policy of its own is reachable
 -- the moment it exists, and "nothing queries it today" is precisely the
 -- assumption that stops being true without anyone noticing.
+--
+-- ── These policies do not run on the connection the routes use ─────────────
+-- Written for `specboards_app` (DATABASE_URL_APP), which is not what reaches
+-- these tables. Every model-provider route resolves `getDb()`, the owner
+-- connection, and an owner is exempt from RLS unless the table carries FORCE
+-- ROW LEVEL SECURITY, which nothing sets. What actually confines a request to
+-- its tenant here is the `workspaceId` predicate in `model-provider-service.ts`
+-- and the org-admin check in the route.
+--
+-- The rules above are therefore the intended rules, held ready, not the
+-- enforced ones. Anyone moving these routes onto the app connection should read
+-- the note on `getDb()` in apps/web/src/lib/db.ts first: the credential SELECT
+-- below is org-admin only and runs inside an ordinary member's assistant
+-- request, so a naive move silently breaks the assistant for everyone who is
+-- not an admin.
 -- ─────────────────────────────────────────────────────────────────────────
 ALTER TABLE "model_providers" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 ALTER TABLE "model_provider_credentials" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint

@@ -152,6 +152,16 @@ CREATE TABLE "workspace_usage_limits" (
 -- have no UPDATE or DELETE policy at all, so the ledger is append-only to the
 -- app. Limits are org-admin, like every other setting that decides what the
 -- product may spend.
+--
+-- ── None of that is enforced yet ───────────────────────────────────────────
+-- `usage-service.ts` runs on `getDb()`, the owner connection, which RLS exempts
+-- (nothing sets FORCE ROW LEVEL SECURITY). These policies are only reached over
+-- `specboards_app`, and nothing touching these tables connects as it. In
+-- particular the append-only property described above is a property of the
+-- policies, not of the running system: on the owner connection an UPDATE or
+-- DELETE against the ledger would succeed. What holds today is that no code
+-- issues one, and the grant below withholds the privilege from the app role for
+-- when the move happens. See the note on `getDb()` in apps/web/src/lib/db.ts.
 -- ─────────────────────────────────────────────────────────────────────────
 ALTER TABLE "model_usage_events" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 ALTER TABLE "workspace_usage_limits" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint

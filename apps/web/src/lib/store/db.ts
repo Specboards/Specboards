@@ -417,9 +417,14 @@ export class DbStore implements FeatureStore {
    * Run `fn` inside a transaction scoped to `scope`: it sets the
    * `app.user_id` session variable RLS keys on (transaction-local, so it must
    * live in a transaction), and callers additionally filter by `workspaceId`.
-   * Refuses to run unscoped because that would expose every tenant's rows, since the
-   * app still connects as the table owner (RLS bypassed until the
-   * `specboard_app` non-owner role lands; see docs/archive/PLAN-fly-better-auth.md).
+   * Refuses to run unscoped because an unset `app.user_id` is not a safe
+   * default: on a self-host without `DATABASE_URL_APP` this store is still the
+   * owner connection, where every policy is bypassed and the `workspaceId`
+   * predicate is all that stands between tenants.
+   *
+   * The `specboards_app` non-owner role has landed, so on a hosted deployment
+   * the policies do apply here. This is the one connection where that is true.
+   * See the note on `getDb()` in lib/db.ts for the paths where it is not.
    */
   private async scoped<T>(
     scope: WorkspaceScope | undefined,
