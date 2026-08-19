@@ -117,6 +117,106 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
     expect(rows).toHaveLength(1);
   });
 
+  /**
+   * The stored key belongs to the endpoint it was stored for.
+   *
+   * "Omit the key to keep it" is what lets an admin rename the model without
+   * re-typing a secret. Applied to a different base URL it becomes an
+   * extraction primitive: the next completion decrypts the stored credential
+   * and sends it to the new address as a bearer token, readable straight out of
+   * the Authorization header by whoever owns that address. `listWorkspaceModels`
+   * has always refused this; these pin the same rule onto the save path.
+   */
+  describe("moving the endpoint", () => {
+    /** The endpoint the key is stored for, and somewhere else entirely. */
+    const STORED = "https://api.openai.com/v1";
+    const ELSEWHERE = "http://127.0.0.1:11434/v1";
+
+    async function connect() {
+      return svc.saveModelProvider(db, workspace.id, {
+        baseUrl: STORED,
+        model: "gpt-4o-mini",
+        apiKey: "sk-stored-key-4444",
+      });
+    }
+
+    it("refuses to carry a stored key to a different endpoint", async () => {
+      await connect();
+
+      await expect(
+        svc.saveModelProvider(db, workspace.id, {
+          baseUrl: ELSEWHERE,
+          model: "gpt-4o-mini",
+        }),
+      ).rejects.toThrow(svc.ModelProviderInputError);
+
+      // Refused, not half-applied: the connection is exactly as it was.
+      const view = await svc.getModelProvider(db, workspace.id);
+      expect(view!.baseUrl).toBe(STORED);
+      expect(view!.credentialHint).toBe("4444");
+      expect(await credentialRows()).toHaveLength(1);
+    });
+
+    // Same server, spelled differently. Refusing these would make the rule feel
+    // arbitrary and teach admins to paste the key back for no reason.
+    it("treats a trailing slash and a capitalised host as the same endpoint", async () => {
+      await connect();
+
+      const view = await svc.saveModelProvider(db, workspace.id, {
+        baseUrl: "https://API.OpenAI.com/v1/",
+        model: "gpt-4o",
+      });
+
+      expect(view.credentialHint).toBe("4444");
+      expect(view.model).toBe("gpt-4o");
+    });
+
+    it("allows the move when a key for the new endpoint is supplied", async () => {
+      await connect();
+
+      const view = await svc.saveModelProvider(db, workspace.id, {
+        baseUrl: ELSEWHERE,
+        model: "llama3.1",
+        apiKey: "sk-new-endpoint-5555",
+      });
+
+      expect(view.baseUrl).toBe(ELSEWHERE);
+      expect(view.credentialHint).toBe("5555");
+      const rows = await credentialRows();
+      expect(rows).toHaveLength(1);
+      expect(decryptSecret(rows[0]!.secret)).toBe("sk-new-endpoint-5555");
+    });
+
+    it("allows the move when the key is explicitly cleared", async () => {
+      await connect();
+
+      const view = await svc.saveModelProvider(db, workspace.id, {
+        baseUrl: ELSEWHERE,
+        model: "llama3.1",
+        apiKey: null,
+      });
+
+      expect(view.baseUrl).toBe(ELSEWHERE);
+      expect(view.credentialHint).toBeNull();
+      expect(await credentialRows()).toHaveLength(0);
+    });
+
+    it("allows the move when there is no stored key to carry", async () => {
+      await svc.saveModelProvider(db, workspace.id, {
+        baseUrl: ELSEWHERE,
+        model: "llama3.1",
+      });
+
+      const view = await svc.saveModelProvider(db, workspace.id, {
+        baseUrl: "http://127.0.0.1:8000/v1",
+        model: "llama3.1",
+      });
+
+      expect(view.baseUrl).toBe("http://127.0.0.1:8000/v1");
+      expect(view.credentialHint).toBeNull();
+    });
+  });
+
   it("rotates a key without ever leaving the workspace without one", async () => {
     await svc.saveModelProvider(db, workspace.id, {
       baseUrl: "https://api.openai.com/v1",

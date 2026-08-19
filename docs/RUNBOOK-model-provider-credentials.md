@@ -24,10 +24,18 @@ with webhooks).
   shape any route returns, has no field that could carry one. Decryption happens
   in one non-exported function, and the only ways to reach it are making a
   completion or listing an endpoint's models.
-- A model list probe will only send the stored key to the endpoint it was stored
-  for. Probing any other URL carries only a key supplied with the request.
-  Without that rule, anyone who could reach the route could point it at a server
-  they control and read the key out of the `Authorization` header.
+- **A stored key is bound to the endpoint it was stored for**, on both paths
+  that could otherwise move it:
+  - A model list probe only sends the stored key to the stored endpoint.
+    Probing any other URL carries only a key supplied with the request.
+  - Saving a different base URL without supplying a key is **refused**. The
+    admin must enter the key for the new endpoint, or clear it.
+
+  Without that rule, anyone who could reach these routes could point them at a
+  server they control and read the key out of the `Authorization` header,
+  making a deliberately write-only secret readable by someone who never saw it.
+  The probe has always enforced this; the save path did not until the 2026-08-19
+  security review, which is the gap this section used to describe as closed.
 
 Consequence worth knowing before you rotate `BETTER_AUTH_SECRET`: every stored
 provider key becomes undecryptable, exactly like the GitHub App credentials. The
@@ -44,9 +52,13 @@ connection → Edit.
   usable key.
 - The next completion picks up the new key: the config is resolved per call,
   never cached, so there is nothing to restart or invalidate.
-- Editing the model or endpoint without typing a key leaves the stored key
-  alone. The save request omits the field entirely, which is what "keep it"
-  means on the wire.
+- Editing the model without typing a key leaves the stored key alone. The save
+  request omits the field entirely, which is what "keep it" means on the wire.
+- Editing the **endpoint** is different: a save that moves the base URL to a
+  different server while omitting the key is refused, because "keep it" there
+  would mean sending the key somewhere it was never issued for. Re-entering the
+  key is part of moving the endpoint. A trailing slash or a change of case is
+  not a move, so ordinary tidying of the URL still keeps the key.
 
 ## Revocation
 
