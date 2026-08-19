@@ -12,7 +12,7 @@ import {
 } from "@/lib/docs-service";
 import {
   deleteGithubDocFile,
-  loadGithubDocs,
+  loadGithubDocIndex,
   readGithubDocFile,
   renameGithubDocFile,
   saveGithubDocFile,
@@ -242,7 +242,12 @@ export const DOC_TOOLS: McpTool[] = [
       }
       if (target.space.mode === "github") {
         const { db, workspaceId } = requireGithubDeps(ctx);
-        const { repo, files } = await loadGithubDocs(
+        // The index, not the documents. Everything reported here comes from the
+        // repo tree, so this is one GitHub request rather than one per file;
+        // reading every blob to measure its length is what made a read-only
+        // listing able to spend a whole rate limit. `read_doc` fetches a page
+        // when someone actually wants one.
+        const { repo, entries, truncated, total } = await loadGithubDocIndex(
           db,
           workspaceId,
           target.space,
@@ -250,12 +255,25 @@ export const DOC_TOOLS: McpTool[] = [
         return {
           ...base,
           repo: { fullName: `${repo.owner}/${repo.name}`, url: repo.htmlUrl },
-          pages: files.map((f) => ({
+          // Said out loud, because a caller handed a silent prefix would
+          // reasonably conclude the rest of the repo does not exist.
+          ...(truncated
+            ? {
+                truncated: true,
+                note:
+                  `Showing ${entries.length} of ${total} pages. Narrow the ` +
+                  `area or read pages by path.`,
+              }
+            : {}),
+          pages: entries.map((f) => ({
             docId: f.path,
             kind: "page" as const,
             title: titleOfPath(f.path),
             folder: folderOf(f.path),
-            contentChars: f.content.length,
+            // Bytes off the tree entry, not characters of loaded content. The
+            // two differ for non-ASCII Markdown, and the honest name for what
+            // we actually know is the one that says bytes.
+            contentBytes: f.size,
           })),
         };
       }

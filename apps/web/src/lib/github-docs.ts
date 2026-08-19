@@ -22,6 +22,24 @@ export interface GithubDocFile {
   blobSha: string;
 }
 
+/** One doc page as the repo tree describes it, without its Markdown. */
+export interface GithubDocEntry {
+  path: string;
+  blobSha: string;
+  /** Blob size in bytes, off the tree entry rather than the file's length. */
+  size: number;
+}
+
+/**
+ * How many pages a single listing returns.
+ *
+ * A docs repo is normally tens of files, so this is not a limit anyone should
+ * meet; it exists so that a repo which is not normal cannot return an answer
+ * large enough to exhaust an agent's context in one call. Callers are told when
+ * it bites (see `truncated`) rather than being handed a silent prefix.
+ */
+const DOC_LIST_LIMIT = 500;
+
 export interface GithubDocRepo {
   id: string;
   owner: string;
@@ -52,7 +70,57 @@ export async function requireDocRepo(
   return repo;
 }
 
-/** Load the docs repo and all of its Markdown files (content included). */
+/**
+ * Load the docs repo and list its Markdown files WITHOUT their contents.
+ *
+ * This is what a listing needs. `loadGithubDocs` reads every blob, which is one
+ * GitHub request per file; the only thing `list_docs` ever did with that
+ * content was measure its length, so it was downloading an entire documentation
+ * tree to report its size. The tree already carries both the sha and the size,
+ * so this is a single request whatever the repo contains.
+ *
+ * Returns at most {@link DOC_LIST_LIMIT} pages, and says so when it truncates:
+ * a caller handed a silent prefix would reasonably conclude the rest does not
+ * exist.
+ */
+export async function loadGithubDocIndex(
+  db: Database,
+  workspaceId: string,
+  space: DocSpace,
+): Promise<{
+  repo: GithubDocRepo;
+  entries: GithubDocEntry[];
+  truncated: boolean;
+  total: number;
+}> {
+  const repo = await requireDocRepo(db, workspaceId, space);
+  const client = await resolveRepoClient(db, repo);
+  const meta = await client.listSpecFileMetadata(DOC_GLOBS);
+  const sorted = meta
+    .map((f) => ({ path: f.path, blobSha: f.blobSha, size: f.size }))
+    .sort((a, b) => a.path.localeCompare(b.path));
+  return {
+    repo: {
+      id: repo.id,
+      owner: repo.owner,
+      name: repo.name,
+      defaultBranch: repo.defaultBranch,
+      htmlUrl: `https://github.com/${repo.owner}/${repo.name}`,
+    },
+    entries: sorted.slice(0, DOC_LIST_LIMIT),
+    truncated: sorted.length > DOC_LIST_LIMIT,
+    total: sorted.length,
+  };
+}
+
+/**
+ * Load the docs repo and all of its Markdown files (content included).
+ *
+ * Every blob is read, so this is one GitHub request per file (bounded in
+ * concurrency by the client, but still linear in file count). Use
+ * {@link loadGithubDocIndex} unless the contents are genuinely going to be
+ * shown; the editing UI is the case that needs them.
+ */
 export async function loadGithubDocs(
   db: Database,
   workspaceId: string,

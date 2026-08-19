@@ -8,6 +8,7 @@ import {
   type GitRepoClient,
   type InstallationRepo,
   type SpecFile,
+  type SpecFileMeta,
   type WriteFileInput,
   type WriteFileResult,
   type WritePullRequest,
@@ -103,6 +104,20 @@ export function fakeRepoClient(repo: Pick<RepoRecord, "owner" | "name">): GitRep
       return Object.entries(files)
         .filter(([path]) => matchesAnyGlob(path, globs))
         .map(([path, raw]) => ({ path, raw, blobSha: blobShaOf(raw) }));
+    },
+
+    async listSpecFileMetadata(globs: string[]): Promise<SpecFileMeta[]> {
+      // The real client answers this from the repo tree without reading blobs.
+      // The fixture holds contents in memory, so `size` is measured here; what
+      // matters for parity is that callers get bytes, not characters.
+      const files = readFixture()[key]?.files ?? {};
+      return Object.entries(files)
+        .filter(([path]) => matchesAnyGlob(path, globs))
+        .map(([path, raw]) => ({
+          path,
+          blobSha: blobShaOf(raw),
+          size: Buffer.byteLength(raw, "utf8"),
+        }));
     },
 
     async readFile(path: string, ref?: string): Promise<SpecFile> {

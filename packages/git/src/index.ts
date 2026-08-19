@@ -9,12 +9,35 @@ export interface SpecFile {
 }
 
 /**
+ * A spec file as the repo tree describes it, without its contents.
+ *
+ * The tree already carries everything here, so a listing costs one API call
+ * whatever the repo's size. Reading the blobs to answer "what files are there"
+ * costs one call per file, which is how a read-only listing came to be able to
+ * spend a whole GitHub rate limit.
+ */
+export interface SpecFileMeta {
+  path: string;
+  blobSha: string;
+  /** Blob size in bytes, straight off the tree entry. */
+  size: number;
+}
+
+/**
  * Minimal surface the git layer needs from a host (GitHub App, local clone,
  * or a fake in tests). Concrete GitHub implementation lives in `github.ts`.
  */
 export interface GitRepoClient {
   /** List spec files matching the repo's configured globs. */
   listSpecFiles(globs: string[]): Promise<SpecFile[]>;
+  /**
+   * List matching files from the repo tree WITHOUT reading their contents.
+   *
+   * Prefer this whenever the answer is "which files exist and how big are
+   * they": it is one API call regardless of repo size, where `listSpecFiles` is
+   * one per file on top of that.
+   */
+  listSpecFileMetadata(globs: string[]): Promise<SpecFileMeta[]>;
   /**
    * Read a single file's contents + sha, at the client's ref by default.
    * `ref` names a different branch, which is how a conflict on a working
