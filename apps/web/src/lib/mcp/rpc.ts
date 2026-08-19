@@ -453,6 +453,51 @@ function toolFailure(
 }
 
 /**
+ * How much of a withheld error's message to keep in the log line.
+ *
+ * The whole message is what makes a reference id worth issuing, but a
+ * `DrizzleQueryError` carries an entire statement plus its bound parameters,
+ * and those parameters can be a spec body on a write. 2k is comfortably past
+ * the statement and the failing detail while keeping one call to one readable
+ * line, and keeping a truncated tail out of the log entirely.
+ */
+const LOGGED_ERROR_LIMIT = 2_000;
+
+function loggableError(err: unknown): string {
+  const raw = (err as Error)?.message ?? String(err);
+  return raw.length > LOGGED_ERROR_LIMIT
+    ? `${raw.slice(0, LOGGED_ERROR_LIMIT)}...[truncated ${raw.length - LOGGED_ERROR_LIMIT}]`
+    : raw;
+}
+
+/**
+ * Log a failed tool call and shape the JSON-RPC result for it.
+ *
+ * Shared by every failure path so none of them can drift into reporting the
+ * raw message: the decision about what may be said lives in `toolFailure`, and
+ * this is the only place that acts on it.
+ */
+function failureResult(
+  id: JsonRpcId,
+  toolName: string,
+  err: unknown,
+  fields: Record<string, string | number | boolean>,
+) {
+  const failure = toolFailure(err, toolName);
+  // The message is logged either way: withholding it from the caller is the
+  // point, withholding it from us would just make the bug unfindable.
+  logMcpCall({
+    tool: toolName,
+    ok: false,
+    ...fields,
+    errType: (err as Error)?.name ?? typeof err,
+    ...(failure.ref ? { ref: failure.ref } : {}),
+    err: loggableError(err),
+  });
+  return ok(id, toolError(failure.text));
+}
+
+/**
  * A tool call that ran out of time.
  *
  * Its own type because the caller has to treat it differently from an ordinary
@@ -597,11 +642,17 @@ async function handleToolCall(
   // does not spend a commit's worth of budget. A per-request counter cannot do
   // this job: one batch can carry 50 commits.
   if (tool.commits && auth.ctx.credentialKey) {
-    const quota = await checkQuota(
-      getDb(),
-      QUOTAS.mcpWrite,
-      auth.ctx.credentialKey,
-    );
+    // Guarded on its own because it sits outside the run's try/catch and talks
+    // to the database. An error here used to escape `handleToolCall` entirely
+    // and surface as a bare 500, which kills every other message in the same
+    // batch and reaches the client as a transport failure rather than an
+    // answer about this one tool.
+    let quota;
+    try {
+      quota = await checkQuota(getDb(), QUOTAS.mcpWrite, auth.ctx.credentialKey);
+    } catch (err) {
+      return failureResult(id, tool.name, err, { stage: "quota" });
+    }
     if (!quota.ok) {
       logMcpCall({
         tool: tool.name,
@@ -663,18 +714,7 @@ async function handleToolCall(
       });
       return ok(id, toolError(describeTimeout(err, tool.write)));
     }
-    const failure = toolFailure(err, tool.name);
-    // The full message is logged either way: withholding it from the caller is
-    // the point, withholding it from us would just make the bug unfindable.
-    logMcpCall({
-      tool: tool.name,
-      ok: false,
-      ms: Date.now() - started,
-      errType: (err as Error)?.name ?? typeof err,
-      ...(failure.ref ? { ref: failure.ref } : {}),
-      err: (err as Error)?.message ?? String(err),
-    });
-    return ok(id, toolError(failure.text));
+    return failureResult(id, tool.name, err, { ms: Date.now() - started });
   }
 }
 

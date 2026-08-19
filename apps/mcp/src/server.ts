@@ -47,6 +47,25 @@ import {
  *
  * Requires DATABASE_URL (the same Postgres the web app uses).
  */
+
+/**
+ * An error whose message was written for whoever made the call: a setup step
+ * they have to take, a name that does not resolve, an argument out of scope.
+ *
+ * The same split the hosted `/api/mcp` makes, for the same reason. Everything
+ * else reaching `errorResult` came from a library and quotes internals: a
+ * drizzle `DrizzleQueryError`'s message is the whole failing statement plus
+ * every bound parameter, so returning it verbatim handed the connected agent
+ * the schema. This server is a local subprocess rather than a shared endpoint,
+ * which makes that far less serious than it was on the hosted path, but it is
+ * the same mistake and it costs nothing to not make it.
+ *
+ * Its own class rather than a shared one: this app deliberately does not depend
+ * on the web app, and a marker class is a smaller thing to duplicate than a
+ * dependency is to add.
+ */
+class McpUserError extends Error {}
+
 const server = new McpServer({ name: "specboard", version: "0.1.0" });
 
 let dbInstance: Database | undefined;
@@ -54,7 +73,7 @@ function db(): Database {
   if (!dbInstance) {
     const url = process.env.DATABASE_URL;
     if (!url) {
-      throw new Error(
+      throw new McpUserError(
         "DATABASE_URL is not set. Point it at the Specboards Postgres (e.g. postgres://postgres:postgres@localhost:5432/specboard) and seed it with `pnpm --filter @specboards/db seed`.",
       );
     }
@@ -76,7 +95,7 @@ async function mcpScope(): Promise<McpScope> {
   if (scopeInstance) return scopeInstance;
   const userId = process.env.SPECBOARDS_MCP_USER_ID;
   if (!userId) {
-    throw new Error(
+    throw new McpUserError(
       "SPECBOARDS_MCP_USER_ID is required. Use a real Specboards user id so MCP access is scoped to that user's workspace and product roles.",
     );
   }
@@ -100,7 +119,7 @@ async function mcpScope(): Promise<McpScope> {
       ? memberships[0]
       : undefined;
   if (!membership) {
-    throw new Error(
+    throw new McpUserError(
       requestedWorkspace
         ? `User ${userId} is not a member of workspace ${requestedWorkspace}.`
         : "SPECBOARDS_MCP_WORKSPACE is required when the MCP user belongs to zero or multiple workspaces.",
@@ -162,7 +181,7 @@ function canWriteProductId(
 
 function assertWorkspaceArg(scope: McpScope, workspace: string): void {
   if (workspace !== scope.workspaceSlug && workspace !== scope.workspaceId) {
-    throw new Error(`MCP is scoped to workspace "${scope.workspaceSlug}".`);
+    throw new McpUserError(`MCP is scoped to workspace "${scope.workspaceSlug}".`);
   }
 }
 
@@ -179,7 +198,19 @@ function text(value: unknown) {
 }
 
 function errorResult(err: unknown) {
-  return { isError: true, ...text(`Error: ${(err as Error).message}`) };
+  if (err instanceof McpUserError) {
+    return { isError: true, ...text(`Error: ${err.message}`) };
+  }
+  // Withheld, and logged to stderr instead: stdout is the JSON-RPC transport,
+  // so anything written there would corrupt the stream.
+  console.error("[specboards-mcp] tool failed:", err);
+  return {
+    isError: true,
+    ...text(
+      "Error: the tool failed for an internal reason, which has been written " +
+        "to this server's stderr. Changing the arguments will not fix it.",
+    ),
+  };
 }
 
 server.tool(
@@ -226,7 +257,7 @@ server.tool(
       if (product) {
         const match = prods.find((p) => p.key === product);
         if (!match)
-          return errorResult(new Error(`No product with key "${product}"`));
+          return errorResult(new McpUserError(`No product with key "${product}"`));
         productId = match.id;
       }
       let groupProductIds: Set<string> | undefined;
@@ -241,7 +272,7 @@ server.tool(
           .where(eq(productGroups.workspaceId, scope.workspaceId));
         const match = groupRows.find((g) => g.key === group);
         if (!match)
-          return errorResult(new Error(`No product group with key "${group}"`));
+          return errorResult(new McpUserError(`No product group with key "${group}"`));
         const subtree = descendantGroupIds(groupRows, match.id);
         groupProductIds = new Set(
           prods
@@ -349,9 +380,9 @@ server.tool(
         with: { index: true },
       });
       if (!row)
-        return errorResult(new Error(`No feature with spec id ${specId}`));
+        return errorResult(new McpUserError(`No feature with spec id ${specId}`));
       if (!canReadProductId(scope.access, productById, row.productId))
-        return errorResult(new Error(`No feature with spec id ${specId}`));
+        return errorResult(new McpUserError(`No feature with spec id ${specId}`));
       let parentSpecId: string | null = null;
       if (row.parentId) {
         const parent = await db().query.features.findFirst({
@@ -534,9 +565,9 @@ server.tool(
         ),
       });
       if (!row)
-        return errorResult(new Error(`No feature with spec id ${specId}`));
+        return errorResult(new McpUserError(`No feature with spec id ${specId}`));
       if (!canReadProductId(scope.access, productById, row.productId))
-        return errorResult(new Error(`No feature with spec id ${specId}`));
+        return errorResult(new McpUserError(`No feature with spec id ${specId}`));
       const links = await db()
         .select({
           fromFeatureId: featureLinks.fromFeatureId,
@@ -618,10 +649,10 @@ server.tool(
         ),
       });
       if (!row)
-        return errorResult(new Error(`No feature with spec id ${specId}`));
+        return errorResult(new McpUserError(`No feature with spec id ${specId}`));
       if (!canWriteProductId(scope.access, row.productId)) {
         return errorResult(
-          new Error("Your MCP user cannot edit this feature's product."),
+          new McpUserError("Your MCP user cannot edit this feature's product."),
         );
       }
       // Validate against the item's product's (possibly custom) workflow.
@@ -631,7 +662,7 @@ server.tool(
       );
       if (!canTransition(row.status, status, workflow)) {
         return errorResult(
-          new Error(transitionErrorMessage(row.status, status, workflow)),
+          new McpUserError(transitionErrorMessage(row.status, status, workflow)),
         );
       }
       // Exit-criteria stage gates block forward moves (mirrors the web app).
@@ -643,7 +674,7 @@ server.tool(
         const open = await openGates(scope.workspaceId, row.id, passed);
         if (open.length > 0) {
           return errorResult(
-            new Error(
+            new McpUserError(
               `Blocked by stage gates. Complete first: ${open
                 .map((g) => `"${g}"`)
                 .join(", ")}.`,
