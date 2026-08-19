@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { GithubSyncError } from "@/lib/github-sync";
 import { FeatureError } from "@/lib/store/types";
 
 import { McpToolError, requireUuid, type McpTool } from "./types";
@@ -85,6 +86,11 @@ const TOOLS: McpTool[] = [
   }),
   tool("thrown_string", () => {
     throw "not even an error";
+  }),
+  tool("setup_error", () => {
+    throw new GithubSyncError(
+      "GitHub App is not configured. Set it up on the Repositories page.",
+    );
   }),
 ];
 
@@ -194,6 +200,16 @@ describe("what a failed tool call discloses", () => {
   it("passes a service-layer domain error through unchanged", async () => {
     const text = await callTool("domain_error");
     expect(text).toContain('Level "epic" cannot be a child of "feature".');
+    expect(text).not.toMatch(/reference [0-9a-f]{8}/);
+  });
+
+  it("passes a setup message through, which withholding once broke", async () => {
+    // Regression: making the boundary withhold non-domain errors silently
+    // swallowed this one, which every spec-writing and GitHub-backed doc tool
+    // can reach. "Set it up on the Repositories page" is the entire value of
+    // the message, and a reference id in its place tells the agent nothing.
+    const text = await callTool("setup_error");
+    expect(text).toContain("Set it up on the Repositories page.");
     expect(text).not.toMatch(/reference [0-9a-f]{8}/);
   });
 });

@@ -32,12 +32,24 @@ import {
 } from "@specboards/git";
 
 import { isE2E } from "@/lib/e2e";
+import { DomainError } from "@/lib/errors";
 import { getGithubApp } from "@/lib/github-app";
 import { fakeRepoClient } from "@/lib/github-e2e";
 import { resolveUserWriteToken } from "@/lib/github-user-token";
 import { ensureDefaultProduct } from "@/lib/workspace";
 
 export type RepoRecord = typeof repositories.$inferSelect;
+
+/**
+ * A setup or naming problem the caller can actually act on: the GitHub App is
+ * not connected, the name they chose makes no slug, the path is taken.
+ *
+ * A {@link DomainError} because these are reached from the MCP spec and doc
+ * tools, where a bare `Error` is withheld as an internal fault and the agent
+ * would be told only that something went wrong. Defined here rather than reused
+ * from `spec-content` because that module imports this one.
+ */
+export class GithubSyncError extends DomainError {}
 
 /**
  * The product this repo's newly discovered specs are assigned to: the linked
@@ -77,7 +89,9 @@ export async function resolveRepoClient(
   if (isE2E()) return fakeRepoClient(repo);
   const app = await getGithubApp(db);
   if (!app) {
-    throw new Error("GitHub App is not configured. Set it up on the Repositories page.");
+    throw new GithubSyncError(
+      "GitHub App is not configured. Set it up on the Repositories page.",
+    );
   }
   return createGitHubRepoClient(app, {
     installationId: repo.githubInstallationId,
@@ -420,7 +434,9 @@ export async function createStarterSpec(
   const title = featureName.trim();
   const slug = featureSlug(title);
   if (!slug) {
-    throw new Error("Give the feature a name with at least one letter or number.");
+    throw new GithubSyncError(
+      "Give the feature a name with at least one letter or number.",
+    );
   }
 
   const client = await resolveRepoClient(db, repo);
@@ -435,7 +451,9 @@ export async function createStarterSpec(
     exists = false;
   }
   if (exists) {
-    throw new Error(`${path} already exists in ${repo.owner}/${repo.name}. Pick a different name.`);
+    throw new GithubSyncError(
+      `${path} already exists in ${repo.owner}/${repo.name}. Pick a different name.`,
+    );
   }
 
   await client.writeFile({

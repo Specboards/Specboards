@@ -174,3 +174,57 @@ describe("the tool registry", () => {
     );
   });
 });
+
+/**
+ * That the real tools actually validate a spec id, rather than leaving it to
+ * Postgres.
+ *
+ * The disclosure bug this guards was found by calling `read_item` with an
+ * 8-character prefix: `features.spec_id` is a `uuid` column, so the driver
+ * rejected it and its error carried the whole statement back to the caller.
+ * `error-disclosure.test.ts` covers both halves of the fix in isolation - that
+ * `requireUuid` rejects a prefix, and that the boundary withholds a driver
+ * error. Neither proves the tools are *wired* to `requireUuid`, which is the
+ * part a later refactor could quietly undo.
+ *
+ * These run the genuine registry, so nothing is mocked. Validation is the first
+ * thing each `run` does, which is why no store or database is needed: reaching
+ * one would itself be the failure.
+ */
+describe("spec id validation is wired into the tools", () => {
+  /** Enough of an McpContext to call `run`; never read, as validation throws first. */
+  const ctx = {
+    scope: { userId: "user-1", workspaceId: "ws-1" },
+    role: "owner",
+    isLocal: false,
+    scopes: [],
+    credentialKey: null,
+    allowDestructive: true,
+  } as unknown as Parameters<(typeof TOOLS)[number]["run"]>[1];
+
+  const specIdOnly = TOOLS.filter((t) => {
+    const schema = t.inputSchema as { required?: unknown };
+    const required = schema.required;
+    return (
+      Array.isArray(required) &&
+      required.length === 1 &&
+      required[0] === "specId"
+    );
+  });
+
+  it("finds tools to check", () => {
+    // Guards against the filter silently matching nothing after a refactor,
+    // which would make every case below pass without asserting anything.
+    expect(specIdOnly.length).toBeGreaterThanOrEqual(4);
+    expect(specIdOnly.map((t) => t.name)).toContain("read_item");
+  });
+
+  it.each(specIdOnly.map((t) => [t.name, t] as const))(
+    "%s rejects an abbreviated spec id before any query",
+    async (_name, tool) => {
+      await expect(tool.run({ specId: "7f053ebc" }, ctx)).rejects.toThrow(
+        /must be a full UUID/,
+      );
+    },
+  );
+});
