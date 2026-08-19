@@ -730,6 +730,40 @@ describe("streaming a completion", () => {
     expect(out.error?.kind).toBe("protocol");
   });
 
+  /**
+   * A hostile endpoint is a reachable one.
+   *
+   * The base URL is chosen by an org owner and passes the egress guard by being
+   * a genuinely public address, so nothing about "our customer configured it"
+   * makes what comes back trustworthy. The ceilings themselves are asserted in
+   * `response-limits.test.ts`; this proves one of them is actually wired into
+   * the reading loop, against a server that really does misbehave.
+   */
+  it("cuts off an endpoint streaming one endless line", async () => {
+    server = createServer((req, res) => {
+      req.resume();
+      req.on("end", async () => {
+        requestCount += 1;
+        res.writeHead(200, { "Content-Type": "text/event-stream" });
+        // No newline, ever: the parser holds the tail waiting for one, which is
+        // the buffer that used to grow without bound.
+        res.write("data: ");
+        for (let i = 0; i < 12; i++) {
+          res.write("x".repeat(100_000));
+          await new Promise((r) => setTimeout(r, 1));
+        }
+      });
+    });
+    await listen();
+
+    const out = await drain();
+    expect(out.error?.kind).toBe("protocol");
+    expect(out.error?.message).toMatch(/single stream line/);
+    // Cut off rather than hung: the idle timer would never have fired, because
+    // bytes kept arriving the whole time.
+    expect(out.done).toBeNull();
+  });
+
   it("ends silently when the caller cancels", async () => {
     await serveStream([{ choices: [{ delta: { content: "partial" } }] }], {
       holdOpen: true,

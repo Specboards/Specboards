@@ -1,6 +1,12 @@
 import { fetch as undiciFetch } from "undici";
 
 import { modelDispatcher, resolveModelTarget } from "@/lib/ai/egress";
+import {
+  MAX_RESPONSE_BYTES,
+  describeStreamLimit,
+  readResponseTextWithin,
+  streamLimitExceeded,
+} from "@/lib/ai/response-limits";
 import type {
   CompletionOutcome,
   CompletionRequest,
@@ -364,7 +370,21 @@ async function send(
       ...(agent ? { dispatcher: agent } : {}),
     });
 
-    return { ok: true, status: res.status, text: await res.text() };
+    const text = await readResponseTextWithin(res);
+    if (text === null) {
+      return {
+        ok: false,
+        error: {
+          kind: "protocol",
+          message:
+            `The model endpoint sent more than ${MAX_RESPONSE_BYTES / 1_000_000} MB ` +
+            "in one response, which no answer to this request should need. " +
+            "Check that the base URL points at an OpenAI-compatible API root.",
+          status: res.status,
+        },
+      };
+    }
+    return { ok: true, status: res.status, text };
   } catch (err) {
     // undici throws for DNS, TLS, connection refused and the abort signal.
     // All of them are "we could not reach it", but the reason underneath is
@@ -410,6 +430,11 @@ function modelIdsFrom(parsed: unknown): string[] | null {
   return [...ids].sort((a, b) => a.localeCompare(b));
 }
 
+/** A stream event for an endpoint that is not speaking the protocol it claimed. */
+function protocolError(status: number | null, message: string): StreamEvent {
+  return { kind: "error", error: { kind: "protocol", message, status } };
+}
+
 /**
  * The streamed form of a completion.
  *
@@ -452,6 +477,9 @@ async function* streamCompletion(
   /** True when the caller asked us to stop, as opposed to anything going wrong. */
   const cancelled = () => req.signal?.aborted === true;
 
+  /** For the wall-clock ceiling; see MAX_STREAM_MS. */
+  const startedAt = Date.now();
+
   try {
     bump();
     const signal = req.signal
@@ -492,7 +520,9 @@ async function* streamCompletion(
       });
 
       if (res.status !== 400) break;
-      const text = await res.text();
+      // Bounded like every other read: an error body is still a body, and this
+      // one arrives before anything has decided the endpoint is well behaved.
+      const text = (await readResponseTextWithin(res)) ?? "";
       // Only retry when the endpoint named the thing it did not like. A blind
       // retry would turn one bad request into three.
       if (wantUsage && rejectsStreamOptions(text)) {
@@ -523,7 +553,7 @@ async function* streamCompletion(
     if (!res) return;
 
     if (res.status < 200 || res.status >= 300) {
-      const text = await res.text();
+      const text = (await readResponseTextWithin(res)) ?? "";
       const reason = reasonFromBody(text);
       yield {
         kind: "error",
@@ -556,12 +586,31 @@ async function* streamCompletion(
     let model: string | null = null;
     let usage: TokenUsage | null = null;
     let sawText = false;
+    let streamedBytes = 0;
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       bump();
+      streamedBytes += value.byteLength;
       buffer += decoder.decode(value, { stream: true });
+
+      // None of these is caught by the idle timer, which resets on every chunk
+      // by design. Checked after adding the chunk so the counts include it, and
+      // before parsing so an oversized buffer is refused rather than split.
+      // Reported as a protocol error rather than thrown, so a caller that has
+      // already rendered part of an answer is told why it stopped.
+      const limit = streamLimitExceeded({
+        bufferedChars: buffer.length,
+        streamedBytes,
+        elapsedMs: Date.now() - startedAt,
+      });
+      if (limit) {
+        await reader.cancel().catch(() => {});
+        yield protocolError(res.status, describeStreamLimit(limit));
+        return;
+      }
+
       const { data, rest } = sseDataLines(buffer);
       buffer = rest;
       for (const payload of data) {
