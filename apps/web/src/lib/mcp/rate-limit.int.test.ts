@@ -99,6 +99,20 @@ describe.skipIf(!DB_URL)("MCP rate limiting", () => {
          ${clientA}, ${userId}, ''),
         (${tokenB}, ${`${tokenB}-r`}, ${expires}, ${expires},
          ${clientB}, ${userId}, '')`;
+    // A token alone is not a usable connection: an OAuth caller with no recorded
+    // grant is refused and retired (see `resolveMcpAuth`). This suite is about
+    // budgets rather than authorization, so both connections get the full grant
+    // and the quota is the only thing left that can refuse them.
+    const full = (await import("./connection-grants")).connectionGrantById("full");
+    const { recordMcpWorkspaceBinding } = await import("./workspace-binding");
+    for (const clientId of [clientA, clientB]) {
+      await recordMcpWorkspaceBinding(db, {
+        userId,
+        clientId,
+        workspaceId: workspace.id,
+        grant: { scopes: full.scopes, allowDestructive: full.allowDestructive },
+      });
+    }
   });
 
   afterEach(() => {
@@ -107,6 +121,7 @@ describe.skipIf(!DB_URL)("MCP rate limiting", () => {
 
   afterAll(async () => {
     await sql`delete from operation_limits where key like ${`%${suffix}%`}`;
+    await sql`delete from mcp_workspace_bindings where user_id = ${userId}`;
     await sql`delete from oauth_access_tokens where user_id = ${userId}`;
     await sql`delete from oauth_applications
       where client_id in (${clientA}, ${clientB})`;

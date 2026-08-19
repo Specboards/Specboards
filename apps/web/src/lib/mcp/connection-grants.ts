@@ -85,13 +85,19 @@ export function connectionGrantById(id: unknown): ConnectionGrant {
  * Name a stored grant for display, matching it back to the choice that produced
  * it. A connection made before consent asked the question has `null` scopes and
  * is reported as such rather than guessed at.
+ *
+ * `null` used to be described as full access, which was accurate at the time and
+ * is not any more: an ungranted connection is now refused and retired on its
+ * next call (see `retireUngrantedConnection`). Describing it as working would
+ * tell the reader the opposite of what happens the moment their agent runs, so
+ * it names the action needed instead.
  */
 export function describeStoredGrant(
   scopes: string[] | null,
   allowDestructive: boolean,
 ): string {
   if (scopes === null) {
-    return "Full access (granted before connections could be scoped)";
+    return "Needs reconnecting (authorized before connections could be scoped)";
   }
   const match = CONNECTION_GRANTS.find(
     (g) =>

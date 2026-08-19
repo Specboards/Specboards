@@ -12,11 +12,14 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
  * agent could do everything its authorising user could, `delete_item` included,
  * with no way to narrow it and no per-connection revocation.
  *
- * The migration case is the one that most needs a test, because getting it
- * wrong is silent in the other direction: a connection made before this shipped
- * has NULL scopes and `allow_destructive` sitting at its column default of
- * false, so reading the flag directly would strip delete access from every live
- * agent without anyone asking for it.
+ * The migration case is the one that most needs a test. It was first written to
+ * assert the opposite of what it asserts now: a connection made before consent
+ * asked has NULL scopes, and those were read as `[]` so that live agents kept
+ * working. That preserved access nobody had granted, against a tool registry
+ * that kept growing, and measurement later showed every connection in production
+ * was in exactly that state - so the consent feature governed none of them. The
+ * absent answer is now refused rather than trusted, and the connection is
+ * retired so its next call goes back through consent.
  *
  * Runs against DATABASE_URL. Skips when no database is configured.
  */
@@ -128,17 +131,52 @@ describe.skipIf(!DB_URL)("OAuth connection grants", () => {
     await sql.end({ timeout: 5 });
   });
 
-  it("keeps a connection made before this shipped fully working", async () => {
+  it("refuses a connection that carries no recorded grant, and retires it", async () => {
     const auth = await resolveMcpAuth(request(tokens.legacy));
-    expect(auth.ok).toBe(true);
-    if (!auth.ok) return;
-    // NULL scopes resolve to `[]`, which is unrestricted, and destructive stays
-    // allowed. Anything else would break live agents to close the gap.
-    expect(auth.ctx.scopes).toEqual([]);
-    expect(auth.ctx.allowDestructive).toBe(true);
-    expect(await callTool(tokens.legacy, "delete_item")).not.toContain(
-      "not granted",
-    );
+    expect(auth.ok).toBe(false);
+    if (auth.ok) return;
+    // `unauthenticated` is what makes the route answer 401 + WWW-Authenticate,
+    // which is what makes an OAuth-capable client restart the flow instead of
+    // surfacing a dead error. A 403 here would leave the agent stuck.
+    expect(auth.unauthenticated).toBe(true);
+    expect(auth.message).toMatch(/reconnect/i);
+
+    // Retired, not merely refused: the binding, the tokens and the recorded
+    // consent all go, because leaving the consent row lets the authorize
+    // endpoint answer from the stored decision and hand back a fresh token
+    // without asking anyone, which would put the connection straight back here.
+    const [bindingRow] = await sql`select 1 from mcp_workspace_bindings
+      where user_id = ${userId} and client_id = ${clients.legacy}`;
+    expect(bindingRow).toBeUndefined();
+    const [tokenRow] = await sql`select 1 from oauth_access_tokens
+      where user_id = ${userId} and client_id = ${clients.legacy}`;
+    expect(tokenRow).toBeUndefined();
+    const [consentRow] = await sql`select 1 from oauth_consents
+      where user_id = ${userId} and client_id = ${clients.legacy}`;
+    expect(consentRow).toBeUndefined();
+  });
+
+  it("refuses an OAuth token with no binding row at all", async () => {
+    // The authorize flow can complete without the grant POST landing, which
+    // left a token resolving to unrestricted access off the back of a row that
+    // does not exist. Absent is absent either way.
+    const orphan = `grant-token-orphan-${randomUUID()}`;
+    const expires = new Date(Date.now() + 3_600_000);
+    await sql`insert into oauth_applications
+        (client_id, name, redirect_urls, type, disabled, user_id)
+      values (${`grant-orphan-${suffix}`}, 'Agent orphan', '', 'public', false, ${userId})`;
+    await sql`insert into oauth_access_tokens
+        (access_token, refresh_token, access_token_expires_at,
+         refresh_token_expires_at, client_id, user_id, scopes)
+      values (${orphan}, ${`${orphan}-r`}, ${expires}, ${expires},
+              ${`grant-orphan-${suffix}`}, ${userId}, '')`;
+
+    const auth = await resolveMcpAuth(request(orphan));
+    expect(auth.ok).toBe(false);
+    if (auth.ok) return;
+    expect(auth.unauthenticated).toBe(true);
+
+    await sql`delete from oauth_applications where client_id = ${`grant-orphan-${suffix}`}`;
   });
 
   it("holds a read-only connection to reads", async () => {
@@ -191,15 +229,16 @@ describe.skipIf(!DB_URL)("OAuth connection grants", () => {
     expect(before.find((c) => c.clientId === clients.read)?.lastUsedAt).not.toBe(
       null,
     );
-    // The legacy row was inserted raw and has been used by the first test.
-    const legacy = before.find((c) => c.clientId === clients.legacy);
-    expect(legacy?.scopes).toBeNull();
-    expect(legacy?.clientName).toBe("Agent legacy");
+    // The legacy connection is deliberately absent: the first test retired it.
+    // A NULL-scoped row surviving here would mean the refusal did not stick.
+    expect(before.find((c) => c.clientId === clients.legacy)).toBeUndefined();
+    expect(before.every((c) => c.scopes !== null)).toBe(true);
   });
 
   it("lists a user's connections with what each was granted", async () => {
     const listed = await binding.listMcpConnections(db, userId);
-    expect(listed).toHaveLength(4);
+    // Three, not four: the legacy connection was retired by the first test.
+    expect(listed).toHaveLength(3);
     const author = listed.find((c) => c.clientId === clients.author)!;
     expect(author.workspaceName).toBe("Grants");
     expect(author.allowDestructive).toBe(false);
