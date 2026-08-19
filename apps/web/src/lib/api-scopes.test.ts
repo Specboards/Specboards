@@ -39,6 +39,48 @@ describe("parseApiScopes", () => {
     expect(() => parseApiScopes("features:read")).toThrow(InvalidScopeError);
     expect(() => parseApiScopes([42])).toThrow(InvalidScopeError);
   });
+
+  /**
+   * The vocabulary is an allow-list, not documentation.
+   *
+   * Validating only the *shape* made "this route is never delegable" a comment.
+   * `requiredScopeFor` derives `<segment>:<action>` for every route, including
+   * the session-only ones deliberately kept out of SCOPE_RESOURCES, so a
+   * well-formed scope naming one of them satisfied that route exactly.
+   */
+  it("rejects a resource that is not in the vocabulary", () => {
+    expect(() => parseApiScopes(["unicorns:read"])).toThrow(InvalidScopeError);
+    expect(() => parseApiScopes(["features:read", "unicorns:write"])).toThrow(
+      InvalidScopeError,
+    );
+  });
+
+  it("rejects the session-only resources by name", () => {
+    // Each of these is a real route directory left out of SCOPE_RESOURCES on
+    // purpose. Before this check, every one of them was mintable.
+    for (const resource of ["model-provider", "api-keys", "github", "workspaces"]) {
+      expect(() => parseApiScopes([`${resource}:write`]), resource).toThrow(
+        InvalidScopeError,
+      );
+      expect(() => parseApiScopes([`${resource}:read`]), resource).toThrow(
+        InvalidScopeError,
+      );
+    }
+  });
+
+  it("names the grantable resources when it refuses one", () => {
+    // The caller has to be able to fix their request from the error alone.
+    expect(() => parseApiScopes(["model-provider:write"])).toThrow(/features/);
+  });
+
+  it("still accepts every resource in the vocabulary, in both actions", () => {
+    for (const resource of SCOPE_RESOURCES) {
+      expect(parseApiScopes([`${resource}:read`]), resource).toEqual([`${resource}:read`]);
+      expect(parseApiScopes([`${resource}:write`]), resource).toEqual([
+        `${resource}:write`,
+      ]);
+    }
+  });
 });
 
 describe("requiredScopeFor", () => {

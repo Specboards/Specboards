@@ -29,12 +29,16 @@ export interface RequiredScope {
 const SCOPE_RE = /^([a-z][a-z0-9-]*):(read|write)$/;
 
 /**
- * A human-readable list of the resources scopes can target (for docs/UI).
+ * The resources a scope can target: the grantable vocabulary, not just a list
+ * for docs and UI.
  *
  * Every `/api/v1/<segment>` a key can reach must appear here, or a key can
- * never be granted access to it (`requiredScopeFor` still derives the scope, and
- * no grant satisfies it). `api-scopes.test.ts` walks the route directory and
- * fails when a new resource route lands without an entry.
+ * never be granted access to it: {@link parseApiScopes} refuses to mint a scope
+ * naming anything absent, and `requiredScopeFor` still derives the scope, so
+ * nothing satisfies it. That is what makes leaving a route out (see
+ * `SESSION_ONLY` in `api-scopes.test.ts`) an enforceable decision rather than a
+ * convention. `api-scopes.test.ts` walks the route directory and fails when a
+ * new resource route lands without an entry.
  */
 export const SCOPE_RESOURCES = [
   "features",
@@ -132,9 +136,24 @@ export function parseApiScopes(raw: unknown): string[] {
       out.add("*");
       continue;
     }
-    if (!SCOPE_RE.test(scope)) {
+    const match = SCOPE_RE.exec(scope);
+    if (!match) {
       throw new InvalidScopeError(
         `Invalid scope "${entry}". Use "*" or "<resource>:read" / "<resource>:write".`,
+      );
+    }
+    // The resource must be one we actually publish, not merely something
+    // shaped like a resource. Checking only the shape made the
+    // never-delegable list a comment rather than a rule: `requiredScopeFor`
+    // derives its scope from the URL for *every* route, including the
+    // session-only ones deliberately left out of SCOPE_RESOURCES, so a key
+    // minted with `model-provider:write` satisfied that route exactly. The
+    // vocabulary is the allow-list; this is where it gets enforced.
+    const resource = match[1]!;
+    if (!(SCOPE_RESOURCES as readonly string[]).includes(resource)) {
+      throw new InvalidScopeError(
+        `Unknown scope resource "${resource}". Grantable resources are: ` +
+          `${SCOPE_RESOURCES.join(", ")}.`,
       );
     }
     out.add(scope);
