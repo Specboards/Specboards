@@ -711,6 +711,64 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
       expect(result.message.proposal!.resolvedAt).not.toBeNull();
     });
 
+    it("refuses a proposal whose item moved after it was drafted", async () => {
+      // The hole this covers: accepting was an unguarded whole-document
+      // replacement for a DB-native card. A proposal can sit on a card for a
+      // day, and someone else editing the description in the meantime had
+      // their work silently replaced by text drafted against a version that no
+      // longer existed.
+      const turn = await propose();
+
+      // Somebody else edits the description while the proposal sits there.
+      const theirs = `${ITEM_BODY}\n\nAdded by a colleague while this sat unreviewed.`;
+      await sql`update features set details = ${theirs}
+        where workspace_id = ${ws} and spec_id = ${specId}`;
+
+      await expect(
+        proposals.acceptProposal(db, asOwner, specId, turn.id),
+      ).rejects.toBeInstanceOf(proposals.ProposalStaleError);
+
+      // Their work is still there: refused means refused, not "applied anyway".
+      expect(await bodyNow()).toBe(theirs);
+    });
+
+    it("hands back the current text when it refuses, so the diff can be redone", async () => {
+      const turn = await propose();
+      const theirs = `${ITEM_BODY}\n\nTheirs.`;
+      await sql`update features set details = ${theirs}
+        where workspace_id = ${ws} and spec_id = ${specId}`;
+
+      // Refusing without showing the new state only moves the problem to the
+      // reviewer, who clicked Accept on a diff and now has to go and find what
+      // it should have been a diff against.
+      await expect(
+        proposals.acceptProposal(db, asOwner, specId, turn.id),
+      ).rejects.toMatchObject({ currentBody: theirs });
+    });
+
+    it("leaves a refused proposal open for someone to act on later", async () => {
+      const turn = await propose();
+      await sql`update features set details = ${`${ITEM_BODY}\n\nMoved.`}
+        where workspace_id = ${ws} and spec_id = ${specId}`;
+
+      await expect(
+        proposals.acceptProposal(db, asOwner, specId, turn.id),
+      ).rejects.toBeInstanceOf(proposals.ProposalStaleError);
+
+      // The staleness check runs before the claim, so a refusal must not leave
+      // the proposal marked as resolved by the person it just refused.
+      const [row] = await sql<{ proposal_outcome: string | null }[]>`
+        select proposal_outcome from assistant_messages where id = ${turn.id}`;
+      expect(row!.proposal_outcome).toBeNull();
+    });
+
+    it("still accepts when the item has not moved", async () => {
+      // The guard must not refuse the ordinary case, which is most of them.
+      const turn = await propose();
+      const result = await proposals.acceptProposal(db, asOwner, specId, turn.id);
+      expect(result.body).toBe(NEW_BODY);
+    });
+
     it("applies the reviewer's own text when they edited it first", async () => {
       const turn = await propose();
       const mine = `${NEW_BODY}\n\nRetry after the window closes.`;
