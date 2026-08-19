@@ -24,6 +24,7 @@ import {
   resolveReleaseProposal,
   getAssistantThread,
   resolveProposal,
+  ProposalStaleError,
   SpecConflictError,
 } from "@/lib/api-client";
 import type { AssistantMessageView } from "@/lib/assistant-service";
@@ -743,6 +744,19 @@ export function AssistantPanel({
             "assistant again now that the spec has moved.",
         );
         setItemBody(err.conflict.currentContent);
+        return;
+      }
+      if (err instanceof ProposalStaleError) {
+        // The same shape as the conflict above, and for the same reason: the
+        // proposal stays open, and the diff is redrawn against the text that
+        // won. Without the second line the reviewer is told their base is gone
+        // while still looking at it, which is the stale-diff problem the guard
+        // exists to close rather than a smaller version of it.
+        setProposalError(
+          `${err.message} The diff below now compares against the current ` +
+            `${noun === "release" ? "notes" : "description"}.`,
+        );
+        setItemBody(err.currentBody);
         return;
       }
       setProposalError(

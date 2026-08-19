@@ -252,6 +252,30 @@ export class SpecConflictError extends Error {
   }
 }
 
+/**
+ * An accept was refused because the body moved after the proposal was drafted.
+ *
+ * The counterpart to {@link SpecConflictError} for the two subjects with no blob
+ * sha: a DB-native card's description and a release's notes. Separate rather
+ * than folded into that type because the outcomes differ. A spec can be merged
+ * with, so its conflict carries a sha to save against deliberately; these can
+ * only be refused, so all there is to hand back is the text that won.
+ */
+export class ProposalStaleError extends Error {
+  constructor(
+    message: string,
+    /** The body as it stands now, so the diff can be redrawn against it. */
+    readonly currentBody: string,
+  ) {
+    super(
+      message ||
+        "This changed after the assistant drafted its suggestion, so accepting " +
+          "would replace the newer version.",
+    );
+    this.name = "ProposalStaleError";
+  }
+}
+
 /** What a create returned: the spec, plus anything that partly went wrong. */
 export interface SpecCreateResult {
   spec: SpecWriteResult;
@@ -598,7 +622,9 @@ export interface ProposalOutcome {
  *
  * A conflict comes back as {@link SpecConflictError}, the same type a hand-made
  * save raises, because it is the same situation and the caller needs the same
- * thing: the version that won, not just the news that it did.
+ * thing: the version that won, not just the news that it did. A DB-native card
+ * has no sha to merge against and raises {@link ProposalStaleError} instead,
+ * which carries the same thing for the same reason.
  */
 export async function resolveProposal(
   specId: string,
@@ -620,10 +646,19 @@ export async function resolveProposal(
   );
   if (res.status === 401) throw new AuthRequiredError();
   const payload = (await res.json().catch(() => null)) as
-    | (ProposalOutcome & { conflict?: SpecConflict; error?: string })
+    | (ProposalOutcome & {
+        conflict?: SpecConflict;
+        currentBody?: string;
+        error?: string;
+      })
     | null;
   if (res.status === 409 && payload?.conflict) {
     throw new SpecConflictError(payload.error ?? "", payload.conflict);
+  }
+  // Checked for the property rather than for a 409, because a proposal already
+  // settled by somebody else is a 409 too and carries no body to redraw against.
+  if (res.status === 409 && typeof payload?.currentBody === "string") {
+    throw new ProposalStaleError(payload.error ?? "", payload.currentBody);
   }
   if (!res.ok || !payload?.message) {
     throw new Error(payload?.error ?? `That did not go through (${res.status}).`);
@@ -901,6 +936,9 @@ export async function askReleaseAssistant(
  *
  * Under `/releases` rather than `/assistant`, so an API key needs the grant that
  * lets it edit the release by hand. Drafting and publishing stay two decisions.
+ *
+ * Notes drafted against a version that has since moved raise
+ * {@link ProposalStaleError}, carrying the notes as they stand now.
  */
 export async function resolveReleaseProposal(
   releaseId: string,
@@ -922,8 +960,13 @@ export async function resolveReleaseProposal(
   );
   if (res.status === 401) throw new AuthRequiredError();
   const payload = (await res.json().catch(() => null)) as
-    | (ProposalOutcome & { error?: string })
+    | (ProposalOutcome & { currentBody?: string; error?: string })
     | null;
+  // See the note in `resolveProposal`: a settled proposal is a 409 as well, so
+  // the body riding along is what distinguishes this one.
+  if (res.status === 409 && typeof payload?.currentBody === "string") {
+    throw new ProposalStaleError(payload.error ?? "", payload.currentBody);
+  }
   if (!res.ok || !payload?.message) {
     throw new Error(payload?.error ?? `That did not go through (${res.status}).`);
   }
