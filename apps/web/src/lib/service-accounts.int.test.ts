@@ -256,6 +256,92 @@ describe.skipIf(!DB_URL)("agent identities", () => {
     expect(newAuth.ok).toBe(true);
   });
 
+  /**
+   * The two halves of one failure.
+   *
+   * Rotation copies the previous key's scopes and used to fall back to `[]`
+   * when it found none. `[]` is not "no access", it is *unrestricted* at every
+   * enforcement point, so an agent with no live key would rotate into the
+   * broadest credential the system can issue, from a button whose tooltip
+   * promises the same scopes as before.
+   *
+   * That state was reachable because creation was not atomic: a grant naming an
+   * unknown product threw part way through, after the bot user and its
+   * membership existed. Settings then rendered "no live key, Unrestricted" with
+   * a Rotate button beside it.
+   */
+  describe("an agent with no live key", () => {
+    it("cannot be created by a failed grant, so nothing is left behind", async () => {
+      const before = await sql<{ user_id: string }[]>`
+        select user_id from members
+        where workspace_id = ${workspace.id} and role = 'service'`;
+
+      const attempt = svc.createServiceAccount(
+        db,
+        workspace.id,
+        {
+          name: "Doomed by a bad grant",
+          scopes: ["features:read"],
+          expiresInDays: null,
+          grantPolicy: {
+            kind: "explicit",
+            // Well-formed and belonging to no product of this workspace.
+            grants: [{ productId: randomUUID(), role: "contributor" }],
+          },
+        },
+        scope(),
+      );
+      // However it fails is secondary. It always failed; what it left behind is
+      // the finding, so those assertions come first and are not hidden behind a
+      // check on the wording.
+      const error = await attempt.then(
+        () => null,
+        (err: unknown) => err as Error,
+      );
+      expect(error).not.toBeNull();
+
+      const after = await sql<{ user_id: string }[]>`
+        select user_id from members
+        where workspace_id = ${workspace.id} and role = 'service'`;
+      expect(after).toHaveLength(before.length);
+
+      // And no orphaned user row wearing the name either.
+      const [orphan] = await sql`
+        select id from users where name = 'Doomed by a bad grant'`;
+      expect(orphan).toBeUndefined();
+
+      // Last, and least important: the refusal comes from the up-front check
+      // rather than from `setProductMember` half way through the create.
+      expect(error!.message).toMatch(/No such product/);
+    });
+
+    it("is refused a rotation rather than handed an unrestricted key", async () => {
+      const { account } = await svc.createServiceAccount(
+        db,
+        workspace.id,
+        {
+          name: "Keyless agent",
+          scopes: ["features:read"],
+          expiresInDays: null,
+          grantPolicy: { kind: "explicit", grants: [] },
+        },
+        scope(),
+      );
+
+      // Put the account into the state a failed create used to leave behind.
+      await sql`update api_keys set revoked_at = now() where user_id = ${account.userId}`;
+
+      await expect(
+        svc.rotateServiceAccountKey(db, workspace.id, account.userId, 90),
+      ).rejects.toThrow(/no live key/i);
+
+      // And nothing was minted on the way to refusing.
+      const keys = await sql`
+        select id from api_keys where user_id = ${account.userId} and revoked_at is null`;
+      expect(keys).toHaveLength(0);
+    });
+  });
+
   it("stops a revoked agent on its next call, but keeps it attributable", async () => {
     const { account, key } = await svc.createServiceAccount(
       db,

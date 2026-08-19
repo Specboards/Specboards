@@ -75,6 +75,35 @@ describe("AgentsCard", () => {
     expect(html).toContain("Unrestricted");
   });
 
+  it("does not call an agent with no key unrestricted", () => {
+    // The scopes come off the key, so an account without one reports `[]` and
+    // used to render as "Unrestricted": the most alarming label available, for
+    // an agent that cannot authenticate at all. Both halves of that sentence
+    // were wrong.
+    const html = render([{ ...agent, scopes: [], key: null }]);
+    expect(html).toContain("no live key");
+    expect(html).not.toContain("Unrestricted");
+  });
+
+  it("does not offer to rotate a key that does not exist", () => {
+    // Rotation carries the previous key's scopes over, so with no key there is
+    // nothing to carry and the server refuses. A button promising "the same
+    // scopes" is a promise it cannot keep.
+    const html = render([{ ...agent, key: null }]);
+    // `disabled=""`, the attribute, not the `disabled:` Tailwind variants that
+    // every one of these buttons carries in its class list.
+    const button = html.match(/<button[^>]*>Rotate key<\/button>/)?.[0];
+    expect(button).toBeDefined();
+    expect(button).toContain('disabled=""');
+    expect(button).toContain("no scopes to carry over");
+
+    // And still offered for an agent that has one, or this would be a
+    // regression dressed as a fix.
+    const live = render([agent]).match(/<button[^>]*>Rotate key<\/button>/)?.[0];
+    expect(live).toBeDefined();
+    expect(live).not.toContain('disabled=""');
+  });
+
   it("shows a non-owner nothing but the reason", () => {
     const html = render([agent], false);
     expect(html).toContain("Only the workspace owner");
