@@ -1,4 +1,4 @@
-import { authorizeOrgAdmin } from "@/lib/auth-session";
+import { authorizeModelProviderAdmin } from "../guard";
 import { getDb } from "@/lib/db";
 import { completeWithWorkspaceModel } from "@/lib/model-provider-service";
 
@@ -31,7 +31,7 @@ const NO_DB = Response.json(
 const PROMPT = "Reply with the single word: ready";
 
 export async function POST(req: Request) {
-  const authz = await authorizeOrgAdmin(req);
+  const authz = await authorizeModelProviderAdmin(req);
   if (!authz.ok) return authz.response;
   const db = getDb();
   if (!db || !authz.scope) return NO_DB;

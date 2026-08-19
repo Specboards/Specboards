@@ -90,6 +90,46 @@ describe.skipIf(!DB_URL)("browser-session routes reject API keys", () => {
     expect(access.access?.workspaceId).toBe(workspace.id);
   });
 
+  /**
+   * The model connection is declared never delegable: `SCOPE_RESOURCES` leaves
+   * `model-provider` out on purpose, because it decides where the workspace's
+   * prompts are sent. That stopped a new key naming the resource; it never
+   * stopped an existing broad key from arriving, because `authorizeOrgAdmin`
+   * resolves a key before the session cookie. Both keys below belong to the
+   * workspace owner, so before the guard they reached all five routes.
+   */
+  it("refuses every model connection route with a key", async () => {
+    const routes = await Promise.all([
+      import("@/app/api/v1/model-provider/route"),
+      import("@/app/api/v1/model-provider/test/route"),
+      import("@/app/api/v1/model-provider/limits/route"),
+      import("@/app/api/v1/model-provider/usage/route"),
+      import("@/app/api/v1/model-provider/models/route"),
+    ]);
+    const [root, test, limits, usage, models] = routes;
+
+    const handlers: [string, (req: Request) => Promise<Response>][] = [
+      ["GET /model-provider", root!.GET],
+      ["PUT /model-provider", root!.PUT],
+      ["DELETE /model-provider", root!.DELETE],
+      ["POST /model-provider/test", test!.POST],
+      ["GET /model-provider/limits", limits!.GET],
+      ["PUT /model-provider/limits", limits!.PUT],
+      ["GET /model-provider/usage", usage!.GET],
+      ["POST /model-provider/models", models!.POST],
+    ];
+
+    const url = "https://app.example.test/api/v1/model-provider";
+    for (const [label, handler] of handlers) {
+      for (const key of [scopedKey, legacyKey]) {
+        const res = await handler(keyed(url, key, "POST"));
+        expect(res.status, label).toBe(403);
+        const body = (await res.json()) as { error?: string };
+        expect(body.error, label).toMatch(/browser session/);
+      }
+    }
+  });
+
   it("refuses to disconnect a GitHub credential with a key", async () => {
     // End to end through the real handler: this is the route where the review
     // found the sharpest consequence, so assert the response, not just the
