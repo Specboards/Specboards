@@ -63,15 +63,29 @@ const store = {
   })),
 };
 
+const REPO = {
+  id: "repo-1",
+  owner: "acme",
+  name: "docs",
+  defaultBranch: "main",
+  htmlUrl: "https://github.com/acme/docs",
+};
+
 const github = {
+  // What `list_docs` calls: the repo tree, no blob reads. Kept separate from
+  // `loadGithubDocs` in the fake as well as in the real module, so a test that
+  // expects a listing to read file contents fails rather than passing quietly.
+  loadGithubDocIndex: vi.fn(async () => ({
+    repo: REPO,
+    entries: [
+      { path: "constitution.md", blobSha: "sha-a", size: 7 },
+      { path: "services/api.md", blobSha: "sha-b", size: 5 },
+    ],
+    truncated: false,
+    total: 2,
+  })),
   loadGithubDocs: vi.fn(async () => ({
-    repo: {
-      id: "repo-1",
-      owner: "acme",
-      name: "docs",
-      defaultBranch: "main",
-      htmlUrl: "https://github.com/acme/docs",
-    },
+    repo: REPO,
     files: [
       { path: "constitution.md", content: "# Rules", blobSha: "sha-a" },
       { path: "services/api.md", content: "# API", blobSha: "sha-b" },
@@ -210,6 +224,39 @@ describe("list_docs", () => {
       "services/api.md",
     ]);
     expect(out.pages[1]).toMatchObject({ title: "api", folder: "services" });
+    // Sizes come off the tree entry, so they are bytes and no blob was read.
+    expect(out.pages[0]).toMatchObject({ contentBytes: 7 });
+  });
+
+  it("lists without reading a single file's contents", async () => {
+    space = { ...space, mode: "github", repoId: "repo-1" };
+    await tool("list_docs").run({ product: "atlas", area: "architecture" }, ctx);
+
+    // The whole point of the change: a listing is one tree call, not one
+    // request per file. `loadGithubDocs` reads every blob, so calling it here
+    // would mean a read-only listing could still spend a repo's rate limit.
+    expect(github.loadGithubDocIndex).toHaveBeenCalled();
+    expect(github.loadGithubDocs).not.toHaveBeenCalled();
+  });
+
+  it("says so when the listing is truncated, rather than returning a prefix", async () => {
+    space = { ...space, mode: "github", repoId: "repo-1" };
+    github.loadGithubDocIndex.mockResolvedValueOnce({
+      repo: REPO,
+      entries: [{ path: "a.md", blobSha: "sha-a", size: 1 }],
+      truncated: true,
+      total: 900,
+    });
+    const out = (await tool("list_docs").run(
+      { product: "atlas", area: "architecture" },
+      ctx,
+    )) as { truncated?: boolean; note?: string; pages: unknown[] };
+
+    // A caller handed a silent prefix would reasonably conclude the rest of the
+    // repo does not exist, so the cap has to be visible in the response.
+    expect(out.truncated).toBe(true);
+    expect(out.note).toContain("900");
+    expect(out.pages).toHaveLength(1);
   });
 
   it("returns the link and no pages when the area points outside", async () => {

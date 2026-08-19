@@ -8,10 +8,48 @@ import {
   type DeleteFileInput,
   type GitRepoClient,
   type SpecFile,
+  type SpecFileMeta,
   type WriteFileInput,
   type WriteFileResult,
   type WritePullRequest,
 } from "./index.js";
+
+/**
+ * How many blobs `listSpecFiles` reads at once.
+ *
+ * Chosen to keep a large repo's sync brisk without opening a connection per
+ * file. GitHub's REST limit is 5000 requests/hour for an App installation, so
+ * the cost that matters is not the ceiling but the burst: an unbounded fan-out
+ * over a few thousand specs spends a meaningful slice of the hour instantly and
+ * competes with every other call the installation is making.
+ */
+const BLOB_READ_CONCURRENCY = 8;
+
+/**
+ * `items.map(fn)` with at most `limit` in flight, preserving input order.
+ *
+ * Workers pull from a shared cursor rather than being handed a fixed slice, so
+ * one slow blob does not idle the others.
+ */
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let cursor = 0;
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const i = cursor++;
+      if (i >= items.length) return;
+      out[i] = await fn(items[i]!);
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, () => worker()),
+  );
+  return out;
+}
 
 /** Cached-display metadata for a linked GitHub artifact (PR/issue/branch). */
 export interface GithubArtifactMeta {
@@ -200,8 +238,10 @@ export class GitHubRepoClient implements GitRepoClient {
     this.ref = config.ref;
   }
 
-  /** Walk the repo tree at `ref` and read every blob matching `globs`. */
-  async listSpecFiles(globs: string[]): Promise<SpecFile[]> {
+  /** Walk the repo tree at `ref` and return the entries matching `globs`. */
+  private async matchingBlobs(
+    globs: string[],
+  ): Promise<{ path: string; sha: string; size?: number }[]> {
     const { data } = await this.octokit.rest.git.getTree({
       owner: this.owner,
       repo: this.repo,
@@ -217,21 +257,48 @@ export class GitHubRepoClient implements GitRepoClient {
     }
 
     const matches = compileGlobs(globs);
-    const blobs = data.tree.filter(
+    return data.tree.filter(
       (entry): entry is typeof entry & { path: string; sha: string } =>
         entry.type === "blob" &&
         typeof entry.path === "string" &&
         typeof entry.sha === "string" &&
         matches(entry.path),
     );
+  }
 
-    return Promise.all(
-      blobs.map(async (entry) => ({
-        path: entry.path,
-        blobSha: entry.sha,
-        raw: await this.readBlob(entry.sha),
-      })),
-    );
+  /**
+   * List matching files from the tree alone: one API call, no blob reads.
+   *
+   * `size` comes straight off the tree entry, which is what makes this the
+   * right call for a listing. GitHub omits it for entries it cannot size, and
+   * 0 is the honest answer there rather than a reason to go and fetch.
+   */
+  async listSpecFileMetadata(globs: string[]): Promise<SpecFileMeta[]> {
+    const blobs = await this.matchingBlobs(globs);
+    return blobs.map((entry) => ({
+      path: entry.path,
+      blobSha: entry.sha,
+      size: entry.size ?? 0,
+    }));
+  }
+
+  /**
+   * Walk the repo tree at `ref` and read every blob matching `globs`.
+   *
+   * Reads are issued at a bounded concurrency. This used to be one
+   * `Promise.all` over every match, which on a large repo meant thousands of
+   * simultaneous GitHub requests, a rate limit spent in a single call, and every
+   * file resident in memory at once. Callers that only need to know which files
+   * exist should use {@link listSpecFileMetadata} instead of paying for any of
+   * this.
+   */
+  async listSpecFiles(globs: string[]): Promise<SpecFile[]> {
+    const blobs = await this.matchingBlobs(globs);
+    return mapWithConcurrency(blobs, BLOB_READ_CONCURRENCY, async (entry) => ({
+      path: entry.path,
+      blobSha: entry.sha,
+      raw: await this.readBlob(entry.sha),
+    }));
   }
 
   /** Read a single file's content + blob sha at `ref` via the contents API. */

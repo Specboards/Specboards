@@ -507,3 +507,107 @@ describe("GitHubRepoClient guarded writes", () => {
     );
   });
 });
+
+/**
+ * Listing a repo's spec files.
+ *
+ * The hole this covers: `listSpecFiles` read every matching blob through one
+ * unbounded `Promise.all`, and `list_docs` called it purely to measure how long
+ * each file was. On a large repo that is thousands of simultaneous GitHub
+ * requests and a rate limit spent inside one read-only tool call.
+ */
+describe("GitHubRepoClient listings", () => {
+  /** A tree of `count` markdown blobs, plus a counter of blob reads issued. */
+  function treeOctokit(count: number, onBlob?: () => void) {
+    const tree = Array.from({ length: count }, (_, i) => ({
+      type: "blob",
+      path: `docs/file-${i}.md`,
+      sha: `sha-${i}`,
+      size: i + 1,
+    }));
+    return {
+      rest: {
+        git: {
+          getTree: () => Promise.resolve({ data: { tree, truncated: false } }),
+          getBlob: async ({ file_sha }: { file_sha: string }) => {
+            onBlob?.();
+            // Yield, so overlapping reads genuinely overlap and a concurrency
+            // bug shows up rather than being hidden by synchronous resolution.
+            await new Promise((r) => setTimeout(r, 1));
+            return {
+              data: {
+                content: Buffer.from(`# ${file_sha}`).toString("base64"),
+                encoding: "base64",
+              },
+            };
+          },
+        },
+      },
+    } as unknown as ConstructorParameters<typeof GitHubRepoClient>[0];
+  }
+
+  const repo = { owner: "acme", name: "docs", ref: "main" };
+
+  it("lists metadata from the tree without reading any blob", async () => {
+    let blobReads = 0;
+    const client = new GitHubRepoClient(
+      treeOctokit(50, () => blobReads++),
+      repo,
+    );
+
+    const meta = await client.listSpecFileMetadata(["**/*.md"]);
+
+    expect(meta).toHaveLength(50);
+    // The assertion that matters: zero, not "fewer". A listing that reads one
+    // blob reads all of them on a repo one file bigger.
+    expect(blobReads).toBe(0);
+    // Size comes off the tree entry, so it is available without a fetch.
+    expect(meta[0]).toMatchObject({ path: "docs/file-0.md", size: 1 });
+  });
+
+  it("bounds how many blobs it reads at once", async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const octokit = treeOctokit(40);
+    const realGetBlob = octokit.rest.git.getBlob;
+    octokit.rest.git.getBlob = async (params: { file_sha: string }) => {
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      try {
+        return await realGetBlob(params);
+      } finally {
+        inFlight--;
+      }
+    };
+
+    const files = await new GitHubRepoClient(octokit, repo).listSpecFiles([
+      "**/*.md",
+    ]);
+
+    expect(files).toHaveLength(40);
+    // Bounded, and genuinely concurrent rather than serialised into 40 round
+    // trips: a fix that just awaited in a loop would peak at 1 and be far
+    // slower on the sync path this shares.
+    expect(peak).toBeLessThanOrEqual(8);
+    expect(peak).toBeGreaterThan(1);
+  });
+
+  it("keeps tree order when reads finish out of order", async () => {
+    const octokit = treeOctokit(12);
+    const realGetBlob = octokit.rest.git.getBlob;
+    // Reverse the latency, so later files resolve first.
+    octokit.rest.git.getBlob = async (params: { file_sha: string }) => {
+      const n = Number(params.file_sha.split("-")[1]);
+      await new Promise((r) => setTimeout(r, (12 - n) * 2));
+      return realGetBlob(params);
+    };
+
+    const files = await new GitHubRepoClient(octokit, repo).listSpecFiles([
+      "**/*.md",
+    ]);
+
+    expect(files.map((f) => f.path)).toEqual(
+      Array.from({ length: 12 }, (_, i) => `docs/file-${i}.md`),
+    );
+  });
+});
