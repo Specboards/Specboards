@@ -1,4 +1,4 @@
-import { authorizeOrgAdmin } from "@/lib/auth-session";
+import { authorizeModelProviderAdmin } from "../guard";
 import { getDb } from "@/lib/db";
 import { summarizeUsage } from "@/lib/usage-service";
 
@@ -33,7 +33,7 @@ const NO_DB = Response.json(
 );
 
 export async function GET(req: Request) {
-  const authz = await authorizeOrgAdmin(req);
+  const authz = await authorizeModelProviderAdmin(req);
   if (!authz.ok) return authz.response;
   const db = getDb();
   if (!db || !authz.scope) return NO_DB;

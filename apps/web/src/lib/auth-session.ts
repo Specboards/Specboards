@@ -419,3 +419,34 @@ export async function authorizeOrgAdmin(req: Request): Promise<ScopeResult> {
     },
   };
 }
+
+/**
+ * {@link authorizeOrgAdmin}, for the owner-only actions that must never be
+ * reachable with an API key at all.
+ *
+ * `authorizeOrgAdmin` resolves an API key before the session cookie, so an
+ * owner's key reaches everything an owner can do. That is right for most of the
+ * org surface and wrong for the handful of actions whose whole point is that
+ * holding one credential does not get you another: minting a key, creating or
+ * rotating a service account, and configuring the model connection, which
+ * decides where the workspace's prompts are sent and can be repointed at an
+ * endpoint of the caller's choosing.
+ *
+ * `/api/v1/api-keys` gets this from the genuinely cookie-only
+ * `getBrowserSessionUser`; the routes that also need the org-admin scope come
+ * here rather than repeating the check. Refuses whenever a key is presented,
+ * even alongside a valid session, so presenting both is never better than
+ * presenting the session alone.
+ */
+export async function authorizeOrgAdminBrowserOnly(
+  req: Request,
+  keyRefusalMessage: string,
+): Promise<ScopeResult> {
+  if (extractApiKey(req)) {
+    return {
+      ok: false,
+      response: Response.json({ error: keyRefusalMessage }, { status: 403 }),
+    };
+  }
+  return authorizeOrgAdmin(req);
+}

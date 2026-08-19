@@ -1,5 +1,5 @@
 import { readJsonBody } from "@/lib/api/body";
-import { authorizeOrgAdmin } from "@/lib/auth-session";
+import { authorizeModelProviderAdmin } from "./guard";
 import { getDb } from "@/lib/db";
 import {
   deleteModelProvider,
@@ -15,10 +15,11 @@ export const dynamic = "force-dynamic";
  * per workspace, so this is `/model-provider` rather than a collection, and
  * PUT upserts instead of the caller choosing between POST and PATCH.
  *
- * Admin-only throughout, including GET. The row itself holds no secret, but it
- * names the endpoint a workspace's inference goes to, and configuring it spends
- * the customer's money. RLS lets members read the row so an assistant request
- * can resolve it server-side; that is not the same as publishing it on an API.
+ * Owner-only throughout, including GET, and from a browser session only: see
+ * `./guard`. The row itself holds no secret, but it names the endpoint a
+ * workspace's inference goes to, and configuring it spends the customer's
+ * money. RLS lets members read the row so an assistant request can resolve it
+ * server-side; that is not the same as publishing it on an API.
  */
 
 /** Needs a database + running server; unavailable in local file mode. */
@@ -32,7 +33,7 @@ const NO_DB = Response.json(
 
 /** GET /api/v1/model-provider - the connection, or null. Admin-only. */
 export async function GET(req: Request) {
-  const authz = await authorizeOrgAdmin(req);
+  const authz = await authorizeModelProviderAdmin(req);
   if (!authz.ok) return authz.response;
   const db = getDb();
   if (!db || !authz.scope) return NO_DB;
@@ -43,7 +44,7 @@ export async function GET(req: Request) {
 
 /** PUT /api/v1/model-provider - create or replace it. Admin-only. */
 export async function PUT(req: Request) {
-  const authz = await authorizeOrgAdmin(req);
+  const authz = await authorizeModelProviderAdmin(req);
   if (!authz.ok) return authz.response;
   const db = getDb();
   if (!db || !authz.scope) return NO_DB;
@@ -73,7 +74,7 @@ export async function PUT(req: Request) {
 
 /** DELETE /api/v1/model-provider - disconnect and destroy the key. Admin-only. */
 export async function DELETE(req: Request) {
-  const authz = await authorizeOrgAdmin(req);
+  const authz = await authorizeModelProviderAdmin(req);
   if (!authz.ok) return authz.response;
   const db = getDb();
   if (!db || !authz.scope) return NO_DB;

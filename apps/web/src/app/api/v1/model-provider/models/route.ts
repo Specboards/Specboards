@@ -1,5 +1,5 @@
 import { readJsonBody } from "@/lib/api/body";
-import { authorizeOrgAdmin } from "@/lib/auth-session";
+import { authorizeModelProviderAdmin } from "../guard";
 import { getDb } from "@/lib/db";
 import { listWorkspaceModels } from "@/lib/model-provider-service";
 
@@ -28,7 +28,7 @@ const NO_DB = Response.json(
 );
 
 export async function POST(req: Request) {
-  const authz = await authorizeOrgAdmin(req);
+  const authz = await authorizeModelProviderAdmin(req);
   if (!authz.ok) return authz.response;
   const db = getDb();
   if (!db || !authz.scope) return NO_DB;
