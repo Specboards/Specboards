@@ -7,6 +7,7 @@ import {
   proposeBreakdown,
 } from "@/lib/breakdown-service";
 import { getDb } from "@/lib/db";
+import { enforceQuota, QUOTAS } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -70,6 +71,14 @@ export async function POST(req: Request, { params }: Params) {
   if (!authz.ok) return authz.response;
   const db = getDb();
   if (!db || !authz.scope) return NO_DB;
+
+  // Bounds the RATE; the workspace spend cap bounds the total. The cap is
+  // checked without a transaction, so concurrent calls can each pass it;
+  // throttling a breakdown is what keeps that overshoot to roughly one
+  // window rather than to however many requests arrive at once. Keyed per
+  // user so one runaway script cannot starve a colleague.
+  const limited = await enforceQuota(db, QUOTAS.breakdown, authz.scope.userId);
+  if (limited) return limited;
 
   const { specId } = await params;
   try {

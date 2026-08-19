@@ -47,6 +47,19 @@ import type { FeatureDetail, WorkspaceScope } from "@/lib/store/types";
  * conversation has to hold it.
  */
 
+/**
+ * Upper bound on one breakdown.
+ *
+ * Higher than an assistant answer because the output here is a structured list
+ * of child items rather than a reply, and a wide epic legitimately produces a
+ * long one. Still bounded, and the spend cap is asked about prompt plus this,
+ * so the call is admitted on what it could cost. This is the runaway case the
+ * cap was built for: a breakdown over a large tree is the single most expensive
+ * thing the product can be asked to do, and until now the check reserved the
+ * prompt and treated the generated list as free.
+ */
+export const BREAKDOWN_MAX_TOKENS = 4_000;
+
 /** The item cannot be broken down: it is already at the lowest level. */
 export class BreakdownLevelError extends Error {}
 /** The caller may read the item but not add children to it. Routes map to 403. */
@@ -166,6 +179,7 @@ export async function proposeBreakdown(
           content: `Break this ${feature.level} down into ${child.label} items.`,
         },
       ],
+      maxTokens: BREAKDOWN_MAX_TOKENS,
     },
     { userId: scope.userId, feature: "breakdown" },
   );

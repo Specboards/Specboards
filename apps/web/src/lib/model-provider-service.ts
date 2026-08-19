@@ -344,10 +344,29 @@ export async function listWorkspaceModels(
  */
 function budgetFor(req: {
   messages: readonly { content: string }[];
-  maxTokens?: number;
+  maxTokens: number;
 }): number {
-  return estimatePromptTokens(req.messages) + (req.maxTokens ?? 0);
+  return estimatePromptTokens(req.messages) + req.maxTokens;
 }
+
+/**
+ * A request through the workspace's own model, where `maxTokens` is REQUIRED.
+ *
+ * The adapter keeps it optional, because a connection test genuinely has no
+ * ceiling to state. Here it is mandatory, and the type is the enforcement:
+ * every caller on this path is charged against a workspace's spend cap, and a
+ * cap computed from the prompt alone reserves nothing for the part of the call
+ * that is unbounded. Both callers used to omit it, so the guardrail admitted
+ * every request on the strength of its question and never counted the answer.
+ *
+ * Requiring it here rather than defaulting it is deliberate. A default is a
+ * number nobody chose, applied to a feature whose right ceiling depends on what
+ * it generates; making it a compile error means a new caller has to decide.
+ */
+export type WorkspaceModelRequest<T> = Omit<T, "maxTokens"> & {
+  /** Upper bound on generated tokens. Counted against the cap before egress. */
+  maxTokens: number;
+};
 
 /** Refused by this workspace's own spend cap, before anything was sent. */
 export interface CappedOutcome {
@@ -380,7 +399,7 @@ export interface CappedOutcome {
 export async function* streamWithWorkspaceModel(
   db: Database,
   workspaceId: string,
-  req: StreamRequest,
+  req: WorkspaceModelRequest<StreamRequest>,
   attribution: UsageAttribution,
 ): AsyncGenerator<StreamEvent | { kind: "not_configured" } | CappedOutcome> {
   const resolved = await resolveConfig(db, workspaceId);
@@ -461,7 +480,9 @@ export async function* streamWithWorkspaceModel(
 export async function completeWithWorkspaceModel(
   db: Database,
   workspaceId: string,
-  req: Parameters<ReturnType<typeof createOpenAiCompatibleClient>["complete"]>[0],
+  req: WorkspaceModelRequest<
+    Parameters<ReturnType<typeof createOpenAiCompatibleClient>["complete"]>[0]
+  >,
   attribution: UsageAttribution,
 ): Promise<
   | CompletionOutcome

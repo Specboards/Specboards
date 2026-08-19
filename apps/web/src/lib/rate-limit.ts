@@ -174,4 +174,30 @@ export const QUOTAS = {
    * specs and revising them, with room to spare.
    */
   mcpWrite: { op: "mcp-write", limit: 60, windowSec: 600 },
+  /**
+   * Assistant turns and release-notes drafts, keyed per USER.
+   *
+   * The most expensive call in the product was the one surface with no throttle
+   * at all, while scans, imports and webhook tests each had one. The spend cap
+   * is the other half of this and does a different job: it bounds the total,
+   * this bounds the rate. A cap alone is overshot by however many calls are in
+   * flight when it is checked, because the check is deliberately not a
+   * transaction (see `checkUsageAllowance`); bounding concurrency is what turns
+   * that overshoot from unbounded into roughly one window's worth.
+   *
+   * Per user rather than per workspace, so one person's runaway script cannot
+   * exhaust their colleagues' ability to ask a question. 60 per 10 minutes is
+   * far above a person typing and well below a loop.
+   */
+  assistantTurn: { op: "assistant-turn", limit: 60, windowSec: 600 },
+  /**
+   * Breakdowns, keyed per USER and much tighter than a turn.
+   *
+   * A breakdown reads an item's whole subtree into the prompt and generates a
+   * list of children, so it is both the largest prompt and the largest
+   * completion the product produces. It is the runaway case the spend cap was
+   * built for, and 12 per 10 minutes is more than anyone breaking work down by
+   * hand will reach.
+   */
+  breakdown: { op: "breakdown", limit: 12, windowSec: 600 },
 } as const satisfies Record<string, Quota>;

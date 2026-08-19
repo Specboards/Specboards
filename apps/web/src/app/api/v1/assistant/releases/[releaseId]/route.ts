@@ -1,6 +1,7 @@
 import { readJsonBody } from "@/lib/api/body";
 import { authorizeWrite } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
+import { enforceQuota, QUOTAS } from "@/lib/rate-limit";
 import {
   getReleaseAssistantPanelData,
   ReleaseNotesForbiddenError,
@@ -109,6 +110,14 @@ export async function POST(req: Request, { params }: Params) {
   if (!authz.ok) return authz.response;
   const db = getDb();
   if (!db || !authz.scope) return NO_DB;
+
+  // Bounds the RATE; the workspace spend cap bounds the total. The cap is
+  // checked without a transaction, so concurrent calls can each pass it;
+  // throttling an assistant turn is what keeps that overshoot to roughly one
+  // window rather than to however many requests arrive at once. Keyed per
+  // user so one runaway script cannot starve a colleague.
+  const limited = await enforceQuota(db, QUOTAS.assistantTurn, authz.scope.userId);
+  if (limited) return limited;
 
   const { releaseId } = await params;
   const parsed = await readJsonBody(req);
