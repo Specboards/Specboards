@@ -1,6 +1,8 @@
 import { type RequiredScope, type ScopeResource } from "@/lib/api-scopes";
 import { getDb } from "@/lib/db";
+import { DomainError } from "@/lib/errors";
 import { type WorkspaceScope } from "@/lib/store";
+import { isUuid } from "@/lib/uuid";
 import { type MemberRole } from "@/lib/workspace";
 
 /**
@@ -85,15 +87,56 @@ export interface McpTool {
   run: (args: Record<string, unknown>, ctx: McpContext) => Promise<unknown>;
 }
 
+/**
+ * An error a tool raises on purpose, whose message is written for the model.
+ *
+ * A {@link DomainError}, so the RPC layer surfaces its text rather than
+ * replacing it with a reference id. Tools must use this (or another
+ * `DomainError`) for anything the agent is meant to read and act on: a bare
+ * `Error` is now treated as an internal fault and its message is withheld.
+ */
+export class McpToolError extends DomainError {}
+
 export function requireString(
   args: Record<string, unknown>,
   key: string,
 ): string {
   const value = args[key];
   if (typeof value !== "string" || value.trim() === "") {
-    throw new Error(`"${key}" is required and must be a non-empty string.`);
+    throw new McpToolError(
+      `"${key}" is required and must be a non-empty string.`,
+    );
   }
   return value;
+}
+
+/**
+ * A required argument that is bound to a `uuid` column, checked here rather
+ * than left to Postgres.
+ *
+ * Postgres rejects a malformed uuid with a type error, which is correct but
+ * arrives as a driver error carrying the whole statement, and the RPC layer now
+ * (rightly) refuses to repeat those to the caller. So an agent that abbreviates
+ * an id - a real thing agents do, since these ids are long and the first octet
+ * looks like enough - would get "something went wrong" for what is really a
+ * typo. Checking first turns that into an answer it can act on.
+ *
+ * Deliberately strict about the canonical form: accepting a prefix or a
+ * braced/urn spelling would mean guessing which row was meant.
+ */
+export function requireUuid(
+  args: Record<string, unknown>,
+  key: string,
+): string {
+  const value = requireString(args, key);
+  const trimmed = value.trim();
+  if (!isUuid(trimmed)) {
+    throw new McpToolError(
+      `"${key}" must be a full UUID (8-4-4-4-12 hex), not "${trimmed}". ` +
+        `These ids are not abbreviated; copy the whole value from list_items.`,
+    );
+  }
+  return trimmed;
 }
 
 /**
@@ -108,7 +151,7 @@ export function optionalString(
   const value = args[key];
   if (value === undefined || value === null) return null;
   if (typeof value !== "string") {
-    throw new Error(`"${key}" must be a string when given.`);
+    throw new McpToolError(`"${key}" must be a string when given.`);
   }
   return value.trim() === "" ? null : value;
 }
@@ -126,7 +169,9 @@ export function optionalLimit(value: unknown, max: number): number | null {
   if (value === undefined || value === null) return null;
   const n = typeof value === "number" ? value : Number(value);
   if (!Number.isInteger(n) || n < 1 || n > max) {
-    throw new Error(`"limit" must be a whole number between 1 and ${max}.`);
+    throw new McpToolError(
+      `"limit" must be a whole number between 1 and ${max}.`,
+    );
   }
   return n;
 }
@@ -141,7 +186,7 @@ export function requireDbScope(ctx: McpContext): {
 } {
   const db = getDb();
   if (!db || !ctx.scope) {
-    throw new Error(
+    throw new McpToolError(
       "Editing spec content needs a database-backed deployment with a " +
         "connected GitHub repository; it is unavailable in local file mode.",
     );

@@ -1,7 +1,10 @@
+import { randomUUID } from "node:crypto";
+
 import { keyScopesSatisfy } from "@/lib/api-scopes";
 import { getAuth } from "@/lib/auth";
 import { orgSlugFromRequest, resolveReadAccess } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
+import { isDomainError } from "@/lib/errors";
 import { checkQuota, QUOTAS } from "@/lib/rate-limit";
 import { logSecurityEvent } from "@/lib/security-log";
 import { resolveApiMembership } from "@/lib/workspace";
@@ -406,6 +409,50 @@ function isTransientDbError(err: unknown): boolean {
 }
 
 /**
+ * A short, logged handle for an error whose text the caller is not allowed to
+ * see, so a report of "my agent said reference a1b2c3d4" can still be matched
+ * to the real failure in the Fly logs.
+ *
+ * Deliberately not derived from the error in any way: the point is that it
+ * carries no information about what went wrong.
+ */
+function errorRef(): string {
+  return randomUUID().replace(/-/g, "").slice(0, 8);
+}
+
+/**
+ * Decide what a failed tool call may tell the caller.
+ *
+ * Our own {@link DomainError}s are written for whoever made the call ("No item
+ * with spec id X.", "status must be a non-empty string.") and the agent needs
+ * them verbatim to correct itself. Everything else was written for somebody
+ * holding a stack trace and quotes internals freely: drizzle's
+ * `DrizzleQueryError` message is the entire failing SQL statement plus every
+ * bound parameter, which here meant handing any connected agent the schema and
+ * the workspace id in exchange for one malformed argument.
+ *
+ * So the default is to withhold, and hand back a reference id instead. That is
+ * the safe direction for a mistake to fall: a domain error somebody forgets to
+ * derive from `DomainError` costs the agent a vaguer message, whereas the old
+ * default cost a disclosure.
+ */
+function toolFailure(
+  err: unknown,
+  toolName: string,
+): { text: string; ref: string | null } {
+  if (isDomainError(err)) return { text: err.message, ref: null };
+  const ref = errorRef();
+  return {
+    text:
+      `"${toolName}" failed for an internal reason, which has been logged ` +
+      `as reference ${ref}. This is not something the arguments can be ` +
+      `changed to fix; retrying may work, and quoting that reference lets ` +
+      `an administrator find the cause.`,
+    ref,
+  };
+}
+
+/**
  * A tool call that ran out of time.
  *
  * Its own type because the caller has to treat it differently from an ordinary
@@ -616,13 +663,18 @@ async function handleToolCall(
       });
       return ok(id, toolError(describeTimeout(err, tool.write)));
     }
+    const failure = toolFailure(err, tool.name);
+    // The full message is logged either way: withholding it from the caller is
+    // the point, withholding it from us would just make the bug unfindable.
     logMcpCall({
       tool: tool.name,
       ok: false,
       ms: Date.now() - started,
-      err: (err as Error).message,
+      errType: (err as Error)?.name ?? typeof err,
+      ...(failure.ref ? { ref: failure.ref } : {}),
+      err: (err as Error)?.message ?? String(err),
     });
-    return ok(id, toolError((err as Error).message));
+    return ok(id, toolError(failure.text));
   }
 }
 

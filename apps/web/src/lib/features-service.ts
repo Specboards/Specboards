@@ -21,9 +21,11 @@ import {
 } from "@specboards/core";
 
 import { getDb } from "@/lib/db";
+import { DomainError } from "@/lib/errors";
 import { RICE_IMPACT_VALUES } from "@/lib/feature-helpers";
 import { resolveWorkflowFor } from "@/lib/repo-config";
 import { deleteSpecFile } from "@/lib/spec-content";
+import { isUuid } from "@/lib/uuid";
 import { notifyOutbox } from "@/lib/webhooks/events";
 import {
   getStore,
@@ -89,13 +91,13 @@ import type { IdeaStage } from "@specboards/core";
  * thin; validation and store access live here.
  */
 
-export class FeatureNotFoundError extends Error {
+export class FeatureNotFoundError extends DomainError {
   constructor(specId: string) {
     super(`Unknown feature: ${specId}`);
   }
 }
 
-export class InvalidPatchError extends Error {}
+export class InvalidPatchError extends DomainError {}
 
 /** Parse and validate an untrusted PATCH body into a FeaturePatch. */
 export function parseFeaturePatch(body: unknown): FeaturePatch {
@@ -193,12 +195,6 @@ export function parseFeaturePatch(body: unknown): FeaturePatch {
     );
   }
   return patch;
-}
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-function isUuid(value: unknown): value is string {
-  return typeof value === "string" && UUID_RE.test(value);
 }
 
 /** Validate a RICE numeric input: a finite number within bounds, or null. */

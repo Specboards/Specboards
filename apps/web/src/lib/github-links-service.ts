@@ -12,6 +12,7 @@ import {
 } from "@specboards/git";
 
 import { getDb } from "@/lib/db";
+import { DomainError } from "@/lib/errors";
 import { getGithubApp } from "@/lib/github-app";
 import { FeatureNotFoundError } from "@/lib/features-service";
 import {
@@ -29,8 +30,8 @@ import {
  * GitHub (owner-side, like the sync engine) then persists through the store.
  */
 
-export class InvalidGithubLinkError extends Error {}
-export class GithubNotConfiguredError extends Error {}
+export class InvalidGithubLinkError extends DomainError {}
+export class GithubNotConfiguredError extends DomainError {}
 
 const KINDS = new Set<GithubLinkKind>(["pull_request", "issue", "branch"]);
 

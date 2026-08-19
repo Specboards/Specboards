@@ -19,6 +19,8 @@ import type {
   WorkspaceLevel,
 } from "@specboards/core";
 
+import { DomainError } from "@/lib/errors";
+
 export type {
   CycleScheduleInput,
   CycleState,
@@ -40,7 +42,7 @@ export type {
 };
 
 /** Raised when a detail template can't be created/updated/deleted. */
-export class DetailTemplateError extends Error {}
+export class DetailTemplateError extends DomainError {}
 
 /** A value stored for an admin-defined custom property (see PropertyDef). */
 export type CustomFieldValue = string | number | boolean | string[] | null;
@@ -356,7 +358,7 @@ export type ProductGroupPatch = Partial<{
 
 /** Raised when a group can't be created/updated/deleted (cycle, depth, in
  * use, …). */
-export class GroupError extends Error {}
+export class GroupError extends DomainError {}
 
 /** One product's contribution to a group roll-up. */
 export interface GroupProductSummary {
@@ -511,7 +513,7 @@ export interface InvitationInput {
 }
 
 /** Raised when a product can't be created/updated/deleted (in use, dup, …). */
-export class ProductError extends Error {}
+export class ProductError extends DomainError {}
 
 /**
  * One level in a hierarchy-config update, ordered top → leaf in the array.
@@ -543,7 +545,7 @@ export type PropertyPatch = Partial<{
 }>;
 
 /** Raised when a property can't be created/updated/deleted. */
-export class PropertyError extends Error {}
+export class PropertyError extends DomainError {}
 
 /** An admin-defined workflow stage as the UI consumes it. */
 export interface WorkspaceStatus {
@@ -581,7 +583,7 @@ export interface StageGateInput {
 }
 
 /** Raised when stage gates can't be replaced (bad stage key, empty label, …). */
-export class StageGateError extends Error {}
+export class StageGateError extends DomainError {}
 
 export type ReleaseStatus = "planned" | "in_progress" | "shipped";
 
@@ -666,7 +668,7 @@ export type ReleasePatch = Partial<{
 }>;
 
 /** Raised when a release can't be created/updated/deleted. */
-export class ReleaseError extends Error {}
+export class ReleaseError extends DomainError {}
 
 /**
  * A cycle (sprint / iteration) as the UI consumes it: a date-bounded time box,
@@ -733,7 +735,7 @@ export interface CycleRolloverResult {
 }
 
 /** Raised when a cycle can't be created/updated/deleted. */
-export class CycleError extends Error {}
+export class CycleError extends DomainError {}
 
 /** One key result under a goal, with its progress computed on read. */
 export interface KeyResultRecord {
@@ -841,7 +843,7 @@ export interface ItemGoalRef {
 }
 
 /** Raised when a goal or key result can't be created/updated/deleted. */
-export class GoalError extends Error {}
+export class GoalError extends DomainError {}
 
 /** A comment on a feature, with its author resolved for display. */
 export interface CommentRecord {
@@ -870,7 +872,7 @@ export interface CommentInput {
 }
 
 /** Raised when a comment can't be created/read/deleted. */
-export class CommentError extends Error {}
+export class CommentError extends DomainError {}
 
 /** A notification as the inbox renders it, actor + target resolved. */
 export interface NotificationRecord {
@@ -1090,7 +1092,7 @@ export type IdeaSettingsPatch = Partial<{
 }>;
 
 /** Raised when an idea can't be created/updated/deleted/promoted. */
-export class IdeaError extends Error {}
+export class IdeaError extends DomainError {}
 
 /** The Plan-section areas that hold team docs. */
 export const DOC_AREAS = ["strategy", "research", "architecture"] as const;
@@ -1157,7 +1159,7 @@ export type DocPagePatch = Partial<{
 }>;
 
 /** Raised when a doc space or doc page operation is invalid. */
-export class DocError extends Error {}
+export class DocError extends DomainError {}
 
 /** Validate an external doc-repository link (SharePoint, Box, ...). */
 export function validateExternalDocUrl(raw: unknown): string {
@@ -1178,10 +1180,10 @@ export function validateExternalDocUrl(raw: unknown): string {
 }
 
 /** Raised when a work item can't be created/deleted (bad level, has a spec, …). */
-export class FeatureError extends Error {}
+export class FeatureError extends DomainError {}
 
 /** Raised when a hierarchy-level config update is invalid or unsafe. */
-export class LevelError extends Error {}
+export class LevelError extends DomainError {}
 
 /**
  * Per-request tenant context. Carries the acting user and their workspace so
@@ -1979,4 +1981,4 @@ export interface FeatureStore {
 }
 
 /** Raised when a relation can't be created (self-link, cycle, unknown target). */
-export class RelationError extends Error {}
+export class RelationError extends DomainError {}
