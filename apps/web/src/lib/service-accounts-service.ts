@@ -183,10 +183,79 @@ function botEmail(): string {
 }
 
 /**
+ * Resolve the grant policy into the grants to apply, refusing any product id
+ * that is not one of this workspace's.
+ *
+ * Up front, before anything is written. An unknown or malformed id used to
+ * surface from `setProductMember` half way through creation, after the bot user
+ * and its membership already existed, leaving an account with grants and no
+ * key. That state is worse than a failed create: settings renders it as "no
+ * live key, Unrestricted" and offers a Rotate button, which is how a broken
+ * create turned into a credential question. `parseInvitationInput` validates
+ * its own product ids the same way.
+ */
+async function resolveGrants(
+  policy: ProductGrantPolicy,
+  scope: WorkspaceScope,
+): Promise<ProductGrant[]> {
+  const products = await listProducts(scope);
+  if (policy.kind !== "explicit") {
+    return products.map((p) => ({ productId: p.id, role: "contributor" as ProductRole }));
+  }
+  const known = new Set(products.map((p) => p.id));
+  for (const grant of policy.grants) {
+    if (!known.has(grant.productId)) {
+      throw new ServiceAccountError(
+        `No such product in this workspace: "${grant.productId}".`,
+      );
+    }
+  }
+  return policy.grants;
+}
+
+/**
+ * Undo a create that failed part way through.
+ *
+ * The grants live on the tenant store connection and the auth rows on the owner
+ * one, so no single transaction can cover both. Compensating instead: whatever
+ * exists of this account goes away, because a half-built agent is not a
+ * harmless leftover. Best effort by design, and the original failure is what
+ * the caller sees either way.
+ */
+async function undoHalfBuiltAccount(
+  db: Database,
+  workspaceId: string,
+  userId: string,
+): Promise<void> {
+  try {
+    await db.delete(apiKeys).where(eq(apiKeys.userId, userId));
+    await db
+      .delete(productMembers)
+      .where(
+        and(eq(productMembers.workspaceId, workspaceId), eq(productMembers.userId, userId)),
+      );
+    await db
+      .delete(members)
+      .where(and(eq(members.workspaceId, workspaceId), eq(members.userId, userId)));
+    await db.delete(users).where(eq(users.id, userId));
+  } catch (err) {
+    // Nothing better to do: this is already the error path, and the account is
+    // reported as not created either way. Log it so an operator can find the
+    // orphan rather than discovering them later with no explanation.
+    console.error("[service-accounts] could not undo a failed create:", err);
+  }
+}
+
+/**
  * Create a service account: a bot user, a `service` membership, its product
  * grants, and one API key (plaintext returned exactly once). Runs against the
  * owner connection for the auth rows and the tenant store (owner scope) for the
  * grants.
+ *
+ * Either the whole account exists or none of it does. The two auth rows go in
+ * one transaction, and anything that fails after them takes the account with
+ * it: an agent with no key is the state that made rotation mint an unrestricted
+ * credential, so it must not be reachable by a failed create.
  */
 export async function createServiceAccount(
   db: Database,
@@ -194,37 +263,45 @@ export async function createServiceAccount(
   input: CreateServiceAccountInput,
   scope: WorkspaceScope,
 ): Promise<{ account: ServiceAccountSummary; key: GeneratedApiKey }> {
-  const [user] = await db
-    .insert(users)
-    .values({ name: input.name, email: botEmail(), emailVerified: false })
-    .returning({ id: users.id, name: users.name, email: users.email, createdAt: users.createdAt });
-  if (!user) throw new ServiceAccountError("Failed to create the service user.");
+  // Before any writes, so the common failure leaves nothing behind at all.
+  const grants = await resolveGrants(input.grantPolicy, scope);
 
-  await db
-    .insert(members)
-    .values({ workspaceId, userId: user.id, role: "service" })
-    .onConflictDoNothing({ target: [members.workspaceId, members.userId] });
+  const user = await db.transaction(async (tx) => {
+    const [created] = await tx
+      .insert(users)
+      .values({ name: input.name, email: botEmail(), emailVerified: false })
+      .returning({
+        id: users.id,
+        name: users.name,
+        email: users.email,
+        createdAt: users.createdAt,
+      });
+    if (!created) throw new ServiceAccountError("Failed to create the service user.");
 
-  // Grant product access so the account can actually write. The policy is
-  // always stated by the caller; there is no "grants omitted" branch here.
-  const grants =
-    input.grantPolicy.kind === "explicit"
-      ? input.grantPolicy.grants
-      : (await listProducts(scope)).map((p) => ({
-          productId: p.id,
-          role: "contributor" as ProductRole,
-        }));
-  for (const grant of grants) {
-    await setProductMember(grant.productId, { userId: user.id, role: grant.role }, scope);
+    await tx
+      .insert(members)
+      .values({ workspaceId, userId: created.id, role: "service" })
+      .onConflictDoNothing({ target: [members.workspaceId, members.userId] });
+    return created;
+  });
+
+  let key: GeneratedApiKey;
+  try {
+    for (const grant of grants) {
+      await setProductMember(grant.productId, { userId: user.id, role: grant.role }, scope);
+    }
+
+    key = await createApiKey(
+      db,
+      user.id,
+      `${input.name} key`,
+      expiresAtFrom(input.expiresInDays),
+      input.scopes,
+    );
+  } catch (err) {
+    await undoHalfBuiltAccount(db, workspaceId, user.id);
+    throw err;
   }
-
-  const key = await createApiKey(
-    db,
-    user.id,
-    `${input.name} key`,
-    expiresAtFrom(input.expiresInDays),
-    input.scopes,
-  );
 
   return {
     account: {
@@ -414,12 +491,30 @@ export async function rotateServiceAccountKey(
     .limit(1);
   if (!account) throw new ServiceAccountError("No such agent in this workspace.");
 
-  const live = await db
+  const [previous] = await db
     .select({ scopes: apiKeys.scopes })
     .from(apiKeys)
     .where(and(eq(apiKeys.userId, userId), isNull(apiKeys.revokedAt)))
     .orderBy(sql`${apiKeys.createdAt} desc`)
     .limit(1);
+
+  // Rotation copies the previous key's scopes, so with no key to copy from
+  // there is nothing to copy. This used to fall back to `[]`, which is not "no
+  // access" but *unrestricted*: an empty list means a legacy full-access key at
+  // all three enforcement points. An account left without a key would rotate
+  // itself into the broadest credential the system can issue, from a button
+  // whose tooltip promises the same scopes as before.
+  //
+  // There is no correct answer to "the same scopes as what?", so refuse instead
+  // of guessing at the permissive end. Unlike creation, rotate has nowhere to
+  // put a stated scope list: it is a credential operation by design, not a
+  // re-authorization, and widening it into one would be the bigger change.
+  if (!previous) {
+    throw new ServiceAccountError(
+      "This agent has no live key, so there are no scopes to carry over to a " +
+        "new one. Revoke the agent and create it again with the scopes it needs.",
+    );
+  }
 
   await db
     .update(apiKeys)
@@ -431,6 +526,6 @@ export async function rotateServiceAccountKey(
     userId,
     `${account.name} key`,
     expiresAtFrom(expiresInDays),
-    live[0]?.scopes ?? [],
+    previous.scopes,
   );
 }

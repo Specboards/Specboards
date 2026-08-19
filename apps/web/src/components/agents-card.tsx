@@ -523,15 +523,20 @@ export function AgentsCard({
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium">{a.name}</p>
                     <p className="text-xs text-muted-foreground">
+                      {/* With no live key there is nothing to describe. The
+                          scopes come off the key, so an account without one
+                          reported `[]`, which this line rendered as
+                          "Unrestricted": the most alarming possible label for
+                          an agent that cannot authenticate at all. */}
                       {a.key ? (
                         <>
-                          <code className="font-mono">{a.key.prefix}…</code>{" "}
-                          ·{" "}
+                          <code className="font-mono">{a.key.prefix}…</code> ·{" "}
+                          {describeScopes(a.scopes)} ·{" "}
                         </>
                       ) : (
                         <>no live key · </>
                       )}
-                      {describeScopes(a.scopes)} · last used{" "}
+                      last used{" "}
                       <LocalTime
                         iso={a.key?.lastUsedAt ?? null}
                         options={DATE_ONLY}
@@ -553,9 +558,17 @@ export function AgentsCard({
                       type="button"
                       variant="ghost"
                       size="sm"
-                      title={`Revoke this agent's current key and mint a replacement, valid ${ROTATE_LIFETIME_DAYS} days, with the same scopes.`}
+                      title={
+                        a.key
+                          ? `Revoke this agent's current key and mint a replacement, valid ${ROTATE_LIFETIME_DAYS} days, with the same scopes.`
+                          : "This agent has no live key, so there are no scopes to carry over. Revoke it and create a new one."
+                      }
                       onClick={() => rotate(a)}
-                      disabled={pending}
+                      // Rotation copies the previous key's scopes, so with no
+                      // key there is nothing to copy and the server refuses.
+                      // Offering the button anyway made a promise ("the same
+                      // scopes") that could not be kept.
+                      disabled={pending || !a.key}
                     >
                       Rotate key
                     </Button>
