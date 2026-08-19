@@ -66,12 +66,49 @@ export interface McpConnectionBinding {
    */
   slug: string;
   /**
-   * The granted scopes, or `null` when this connection predates consent asking.
-   * `null` must be passed through as `[]` to the scope checker (unrestricted),
-   * which is how live agents keep working; see `resolveMcpAuth`.
+   * The granted scopes, or `null` when no grant was ever recorded for this
+   * connection.
+   *
+   * `null` used to be read as `[]`, meaning unrestricted, so that connections
+   * made before the consent screen asked kept working. That was the wrong
+   * default in a way that only became visible with time: "keep what it had" was
+   * evaluated against the tool registry *as it stands now*, not as it stood when
+   * the connection was made, so every tool added later - including destructive
+   * ones - was granted retroactively and silently. It also meant the consent
+   * feature governed none of the connections that predated it, which by the time
+   * it was measured was all of them.
+   *
+   * `null` now means "never asked", and never-asked is refused rather than
+   * trusted. See `requireRecordedGrant`.
    */
   scopes: string[] | null;
   allowDestructive: boolean;
+}
+
+/**
+ * Retire an OAuth connection that carries no recorded grant, so its next call
+ * has to go back through consent.
+ *
+ * This is the migration for connections made before the consent screen asked
+ * what an agent may do, and it runs lazily on use rather than as a schema
+ * migration: a one-off UPDATE would have to invent a grant for each connection,
+ * and the only honest answer to "what was this allowed to do" is "nobody was
+ * ever asked".
+ *
+ * Both the access tokens and the recorded consent go, not just the binding. The
+ * tokens go so the client is challenged; the consent row goes because leaving it
+ * lets the authorize endpoint answer from the stored decision and hand back a
+ * fresh token without showing anyone the screen, which would put the connection
+ * straight back in this state and loop. Deleting it is what makes the next
+ * authorize actually ask. This mirrors `revokeMcpConnection`, which deletes the
+ * same three things for the same reason.
+ */
+export async function retireUngrantedConnection(
+  db: Database,
+  userId: string,
+  clientId: string,
+): Promise<void> {
+  await revokeMcpConnection(db, userId, clientId);
 }
 
 /**

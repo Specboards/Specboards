@@ -3,6 +3,7 @@ import { getAuth } from "@/lib/auth";
 import { orgSlugFromRequest, resolveReadAccess } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
 import { checkQuota, QUOTAS } from "@/lib/rate-limit";
+import { logSecurityEvent } from "@/lib/security-log";
 import { resolveApiMembership } from "@/lib/workspace";
 
 import { TOOLS } from "./tools";
@@ -10,6 +11,7 @@ import { type McpContext, type McpTool } from "./types";
 import {
   boundConnection,
   oauthClientName,
+  retireUngrantedConnection,
   touchMcpConnection,
 } from "./workspace-binding";
 
@@ -172,7 +174,42 @@ export async function resolveMcpAuth(req: Request): Promise<McpAuth> {
     const binding = db
       ? await boundConnection(db, oauth.userId, oauth.clientId)
       : null;
-    const orgSlug = orgSlugFromRequest(req) ?? binding?.slug ?? null;
+    // No recorded grant, no call. A binding whose `scopes` is NULL predates the
+    // consent screen asking; a missing binding means consent never recorded one
+    // at all (the authorize flow completed but the grant POST did not). Both
+    // used to resolve to "unrestricted, destructive allowed", which made the
+    // absence of an answer the most permissive answer available.
+    //
+    // The connection is retired rather than quietly downgraded. A downgrade
+    // would leave an agent running with less authority than it had and no way to
+    // discover why, which surfaces as tools failing one at a time; a 401 makes
+    // an OAuth-capable client restart the flow, and the user re-answers the
+    // question that was never put to them.
+    // The refusal does not depend on `db`: being unable to reach the database is
+    // a reason to refuse, never a reason to fall through to the permissive path.
+    // Only the retire is conditional, and a failed retire is survivable because
+    // the next call refuses again.
+    if (!binding || binding.scopes == null) {
+      logSecurityEvent("mcp-connection-ungranted", {
+        clientId: oauth.clientId,
+        reason: binding ? "legacy-null-scopes" : "no-binding",
+      });
+      if (db) {
+        await retireUngrantedConnection(db, oauth.userId, oauth.clientId).catch(
+          () => {},
+        );
+      }
+      return {
+        ok: false,
+        unauthenticated: true,
+        message:
+          "This connection was authorized before Specboards asked what an " +
+          "agent may do, so it has been disconnected. Reconnect and choose " +
+          "what to allow: your MCP client will prompt you to sign in again.",
+      };
+    }
+
+    const orgSlug = orgSlugFromRequest(req) ?? binding.slug;
     const resolved = db
       ? await resolveApiMembership(db, oauth.userId, orgSlug)
       : null;
@@ -209,17 +246,11 @@ export async function resolveMcpAuth(req: Request): Promise<McpAuth> {
         // Per connection, not per user: two agents one person authorised get
         // independent budgets, so a runaway one cannot starve the other.
         credentialKey: `oauth:${oauth.clientId}:${oauth.userId}`,
-        // What the user granted this client on the consent screen. A connection
-        // made before consent asked has no stored grant, and `[]` is
-        // unrestricted, so those keep the access they had rather than breaking
-        // mid-flight. New connections always carry a real list.
-        scopes: binding?.scopes ?? [],
-        // Keyed off `scopes`, not off the row: a binding written before this
-        // shipped has NULL scopes and `allow_destructive` sitting at its column
-        // default of false, so reading the flag directly would quietly strip
-        // delete access from every live connection. NULL scopes means "never
-        // asked", and never-asked keeps what it had.
-        allowDestructive: binding?.scopes == null ? true : binding.allowDestructive,
+        // What the user granted this client on the consent screen. Always a
+        // real list: the ungranted cases returned above, so there is no longer a
+        // path where an absent grant is read as an unrestricted one.
+        scopes: binding.scopes,
+        allowDestructive: binding.allowDestructive,
       },
     };
   }

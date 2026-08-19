@@ -127,9 +127,14 @@ describe("describeStoredGrant", () => {
   });
 
   it("calls a pre-scoping connection what it is", () => {
-    // NULL means the connection predates consent asking, and it keeps full
-    // access. Saying "0 scopes" would read as the safest row on the page.
-    expect(describeStoredGrant(null, false)).toContain("Full access");
+    // NULL means the connection predates consent asking. It no longer keeps
+    // full access: it is refused and retired on its next call, so the row has
+    // to name the action needed. Saying "Full access" here would tell the
+    // reader the opposite of what their agent is about to experience, and
+    // saying "0 scopes" would read as the safest row on the page.
+    const described = describeStoredGrant(null, false);
+    expect(described).toContain("Needs reconnecting");
+    expect(described).not.toContain("Full access");
   });
 
   it("falls back to counts for a grant that matches no preset", () => {

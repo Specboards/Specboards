@@ -21,7 +21,13 @@ export type SecurityEvent =
   | "webhook-delivery-id-missing"
   // A GitHub account-connect callback whose state did not match the cookie.
   // Worth a line because this flow ends in storing a repo-write credential.
-  | "github-user-connect-state-mismatch";
+  | "github-user-connect-state-mismatch"
+  // An MCP OAuth connection carrying no recorded grant tried to call. Either it
+  // predates the consent screen asking, or its consent never wrote a binding.
+  // The connection is retired here and must consent again, so a burst of these
+  // is the one-time migration of legacy connections working, and a steady
+  // trickle afterwards is worth looking at.
+  | "mcp-connection-ungranted";
 
 export function logSecurityEvent(
   event: SecurityEvent,

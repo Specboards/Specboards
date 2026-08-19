@@ -1972,10 +1972,17 @@ export const mcpWorkspaceBindings = pgTable(
      * The Specboards scopes this connection was granted at consent time.
      *
      * NULL means no grant was ever recorded, which is every connection made
-     * before consent asked the question. Those keep their existing behaviour
-     * (the full access of the authorizing user) rather than breaking mid-flight;
-     * `[]` would mean the same thing to `keyScopesSatisfy` but by accident, so
-     * the two are kept distinct: NULL is "never asked", `[]` is unreachable.
+     * before consent asked the question. Those used to keep the full access of
+     * the authorizing user rather than breaking mid-flight, which turned out to
+     * be the wrong trade: "keep what it had" was resolved against the tool
+     * registry as it stood at call time, so tools added later were granted
+     * retroactively, and by the time anyone measured, NULL was the state of
+     * every connection in production. An ungranted connection is now refused
+     * and retired on its next call, so it goes back through consent.
+     *
+     * `[]` remains unreachable: `keyScopesSatisfy` reads it as unrestricted, so
+     * writing one would be a full-access grant spelled like an empty one. NULL
+     * is "never asked" and is the only absent value.
      *
      * Better Auth's own `scopes` are the OIDC set (openid/profile/email/
      * offline_access) and cannot carry an application grant, so this is stored
