@@ -5,7 +5,14 @@ import { DEFAULT_MAX_BODY_BYTES, readJsonBody, readTextBodyWithin } from "./body
 const URL = "https://example.test/api/v1/thing";
 
 function jsonReq(body: string, headers: Record<string, string> = {}): Request {
-  return new Request(URL, { method: "POST", body, headers });
+  // The content type is part of the fixture now: `readJsonBody` requires it, so
+  // a request without one never reaches the size or parse logic these cases are
+  // about. The requirement itself is covered separately below.
+  return new Request(URL, {
+    method: "POST",
+    body,
+    headers: { "content-type": "application/json", ...headers },
+  });
 }
 
 /**
@@ -35,6 +42,7 @@ function chunkedReq(chunks: string[]): { req: Request; sent: () => number } {
   const req = new Request(URL, {
     method: "POST",
     body,
+    headers: { "content-type": "application/json" },
     // Required by undici to send a stream body.
     duplex: "half",
   } as RequestInit & { duplex: "half" });
@@ -42,6 +50,66 @@ function chunkedReq(chunks: string[]): { req: Request; sent: () => number } {
 }
 
 describe("readJsonBody", () => {
+  /**
+   * F26. A cross-site HTML form can send only three content types, and
+   * `text/plain` is one of them, so `<form enctype="text/plain">` used to post a
+   * body this parser accepted. Requiring JSON means a form cannot reach these
+   * endpoints at all, whatever the cookie policy is, because a form cannot set
+   * this header.
+   */
+  describe("requires a JSON content type", () => {
+    const body = JSON.stringify({ hello: "world" });
+
+    it("refuses the content type a cross-site form can send", async () => {
+      const req = new Request(URL, {
+        method: "POST",
+        body,
+        headers: { "content-type": "text/plain;charset=UTF-8" },
+      });
+      const result = await readJsonBody(req);
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      // 415, not 400: the body may be perfectly good JSON, and the caller needs
+      // to know it is the header that is wrong.
+      expect(result.response.status).toBe(415);
+      await expect(result.response.json()).resolves.toMatchObject({
+        error: expect.stringContaining("Content-Type: application/json"),
+      });
+    });
+
+    it("refuses the other two a form can send, and a missing header", async () => {
+      for (const contentType of [
+        "application/x-www-form-urlencoded",
+        "multipart/form-data; boundary=x",
+      ]) {
+        const result = await readJsonBody(
+          new Request(URL, { method: "POST", body, headers: { "content-type": contentType } }),
+        );
+        expect(result.ok, contentType).toBe(false);
+      }
+      // No header at all. `fetch` sets `text/plain` by default for a string
+      // body, so this is the hand-rolled case rather than the common one.
+      const bare = await readJsonBody(new Request(URL, { method: "POST", body }));
+      expect(bare.ok).toBe(false);
+    });
+
+    it("accepts the shapes real clients send", async () => {
+      for (const contentType of [
+        "application/json",
+        "application/json; charset=utf-8",
+        "APPLICATION/JSON",
+        // The structured suffix, so a JSON Patch or merge-patch request is not
+        // refused for using its own precise media type.
+        "application/merge-patch+json",
+      ]) {
+        const result = await readJsonBody(
+          new Request(URL, { method: "POST", body, headers: { "content-type": contentType } }),
+        );
+        expect(result.ok, contentType).toBe(true);
+      }
+    });
+  });
+
   it("parses a well-formed JSON body", async () => {
     const parsed = await readJsonBody(jsonReq(JSON.stringify({ a: 1 })));
     expect(parsed).toEqual({ ok: true, body: { a: 1 } });
@@ -71,7 +139,11 @@ describe("readJsonBody", () => {
     // Body over a small explicit limit; the header path is skipped so the
     // post-read byte check must catch it.
     const big = JSON.stringify({ pad: "x".repeat(200) });
-    const req = new Request(URL, { method: "POST", body: big });
+    const req = new Request(URL, {
+      method: "POST",
+      body: big,
+      headers: { "content-type": "application/json" },
+    });
     req.headers.delete("content-length");
     const parsed = await readJsonBody(req, { limit: 50 });
     expect(parsed.ok).toBe(false);
@@ -145,7 +217,12 @@ describe("readTextBodyWithin", () => {
         controller.close();
       },
     });
-    const req = new Request(URL, { method: "POST", body: stream, duplex: "half" } as
+    const req = new Request(URL, {
+      method: "POST",
+      body: stream,
+      headers: { "content-type": "application/json" },
+      duplex: "half",
+    } as
       RequestInit & { duplex: "half" });
     expect(await readTextBodyWithin(req, 1000, "test")).toBe("a😀b");
   });

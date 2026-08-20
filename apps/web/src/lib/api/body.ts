@@ -113,12 +113,50 @@ function tooLarge(limit: number): JsonBodyResult {
   };
 }
 
+/**
+ * Whether a Content-Type names JSON.
+ *
+ * Accepts `application/json` and the `+json` structured suffix (`application/
+ * merge-patch+json` and friends), with any parameters after a `;` ignored so
+ * `application/json; charset=utf-8` passes. Case-insensitive, because the
+ * header is.
+ */
+function isJsonContentType(value: string | null): boolean {
+  if (!value) return false;
+  const type = value.split(";")[0]!.trim().toLowerCase();
+  return type === "application/json" || type.endsWith("+json");
+}
+
 export async function readJsonBody(
   req: Request,
   opts: { limit?: number; endpoint?: string } = {},
 ): Promise<JsonBodyResult> {
   const limit = opts.limit ?? DEFAULT_MAX_BODY_BYTES;
   const endpoint = opts.endpoint ?? new URL(req.url).pathname;
+
+  // ── Why the content type is required ──────────────────────────────────────
+  // A cross-site HTML form can only send three content types, and
+  // `text/plain` is one of them: `<form enctype="text/plain">` posts a body
+  // this parser was happy to accept. Requiring JSON means a form cannot reach
+  // any of these endpoints at all, whatever the cookie policy is, because a
+  // form cannot set this header. `fetch` and XHR can, but those are already
+  // governed by CORS.
+  //
+  // This is the second of two layers, beside the origin check in middleware,
+  // and both are deliberately independent of `SameSite=Lax`, which is currently
+  // the only thing blocking the attack (see `lib/csrf-origin.ts`).
+  //
+  // Not a hardship for real clients: anything posting JSON already sets this,
+  // and one that does not gets a message saying exactly what to add.
+  if (!isJsonContentType(req.headers.get("content-type"))) {
+    return {
+      ok: false,
+      response: Response.json(
+        { error: "Request body must be JSON. Set Content-Type: application/json." },
+        { status: 415 },
+      ),
+    };
+  }
 
   // Shares the streaming reader with the MCP and webhook routes, so the cap
   // bounds what is allocated rather than what is returned. It logs the

@@ -293,7 +293,13 @@ export type RedeemResult =
   | { ok: true; workspaceId: string }
   | {
       ok: false;
-      reason: "not_found" | "revoked" | "accepted" | "expired" | "email_mismatch";
+      reason:
+        | "not_found"
+        | "revoked"
+        | "accepted"
+        | "expired"
+        | "email_mismatch"
+        | "email_unverified";
       email?: string;
     };
 
@@ -321,6 +327,30 @@ export async function redeemInvitation(
   }
   if (user.email.toLowerCase() !== invite.email.toLowerCase()) {
     return { ok: false, reason: "email_mismatch", email: invite.email };
+  }
+
+  // ── Why the address has to be a proven one ────────────────────────────────
+  // The check above compares `users.email`, and `changeEmail` is enabled, so
+  // that column can hold an address whose control the holder has not proven.
+  // On its own that does not steal an invitation: the token only ever reaches
+  // the real invitee's mailbox, so somebody has to have been sent it first.
+  //
+  // What it does reach is the domain-based sign-up gating. A deployment that
+  // decides who may join by email domain is trusting this column, and an
+  // unverified one lets a person pick the domain they are judged by. Refusing
+  // here costs a verified invitee nothing and closes that.
+  //
+  // Read from the database rather than taken from the session: a session minted
+  // before verification carries the old answer, and this is exactly the moment
+  // the answer matters. `SessionUser` deliberately stays as it is; adding a
+  // field there would spread a stale copy of this to every caller.
+  const [account] = await db
+    .select({ verified: users.emailVerified })
+    .from(users)
+    .where(eq(users.id, user.id))
+    .limit(1);
+  if (!account?.verified) {
+    return { ok: false, reason: "email_unverified", email: invite.email };
   }
 
   const grants = ((invite.productGrants as InvitationProductGrant[]) ?? []).slice();
