@@ -1614,17 +1614,13 @@ export const TOOLS: McpTool[] = [
       "initiative and a single work item can both contribute, one item can " +
       "serve several goals, and the item may belong to a different product " +
       "than the goal (cross-product linkage is the point). Pass `goalId` and " +
-      "the item's `specId`. Linking something already linked is a no-op. Use " +
-      "`unlink: true` to remove the link instead.",
+      "the item's `specId`. Linking something already linked is a no-op. To " +
+      "remove a link, use `unlink_goal`.",
     inputSchema: {
       type: "object",
       properties: {
         goalId: { type: "string" },
         specId: specIdSchema,
-        unlink: {
-          type: "boolean",
-          description: "Remove the link rather than create it.",
-        },
       },
       required: ["goalId", "specId"],
       additionalProperties: false,
@@ -1634,16 +1630,51 @@ export const TOOLS: McpTool[] = [
     run: async (args, ctx) => {
       const goalId = requireUuid(args, "goalId");
       const specId = requireUuid(args, "specId");
-      if (args.unlink === true) {
-        await unlinkGoal(goalId, specId, ctx.scope);
-      } else {
-        await linkGoal(goalId, specId, ctx.scope);
-      }
+      await linkGoal(goalId, specId, ctx.scope);
       const contributions = await listGoalContributions(goalId, ctx.scope);
       return {
         goalId,
         specId,
-        linked: args.unlink !== true,
+        linked: true,
+        contributionCount: contributions.length,
+      };
+    },
+  },
+  {
+    // Its own tool rather than `link_goal({ unlink: true })`, because
+    // `destructive` is a property of a tool and that flag is what a connection
+    // denied deletion is checked against. As one tool carrying both directions
+    // it could not be flagged without also blocking the create direction, so a
+    // connection explicitly denied deletion could remove goal links. Split, the
+    // two directions can be governed separately, which is what the consent
+    // screen already implies.
+    name: "unlink_goal",
+    description:
+      "Remove the record that a work item ladders up to a goal. Pass `goalId` " +
+      "and the item's `specId`. Unlinking something that is not linked is a " +
+      "no-op. This removes the LINK only: neither the goal nor the work item " +
+      "is deleted. Use `link_goal` to create one.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        goalId: { type: "string" },
+        specId: specIdSchema,
+      },
+      required: ["goalId", "specId"],
+      additionalProperties: false,
+    },
+    write: true,
+    destructive: true,
+    scope: { resource: "goals", action: "write" },
+    run: async (args, ctx) => {
+      const goalId = requireUuid(args, "goalId");
+      const specId = requireUuid(args, "specId");
+      await unlinkGoal(goalId, specId, ctx.scope);
+      const contributions = await listGoalContributions(goalId, ctx.scope);
+      return {
+        goalId,
+        specId,
+        linked: false,
         contributionCount: contributions.length,
       };
     },
