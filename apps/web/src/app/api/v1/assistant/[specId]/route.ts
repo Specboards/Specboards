@@ -7,7 +7,7 @@ import {
   startAssistantTurn,
   type AssistantEvent,
 } from "@/lib/assistant-service";
-import { getDb } from "@/lib/db";
+import { getAppDb } from "@/lib/db";
 import { enforceQuota, QUOTAS } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
@@ -54,7 +54,7 @@ const NO_DB = Response.json(
 export async function GET(req: Request, { params }: Params) {
   const authz = await resolveReadScope(req);
   if (!authz.ok) return authz.response;
-  const db = getDb();
+  const db = getAppDb();
   if (!db || !authz.scope) return NO_DB;
 
   const { specId } = await params;
@@ -108,7 +108,7 @@ export async function GET(req: Request, { params }: Params) {
 export async function POST(req: Request, { params }: Params) {
   const authz = await authorizeWrite(req);
   if (!authz.ok) return authz.response;
-  const db = getDb();
+  const db = getAppDb();
   if (!db || !authz.scope) return NO_DB;
 
   // Bounds the RATE; the workspace spend cap bounds the total. The cap is

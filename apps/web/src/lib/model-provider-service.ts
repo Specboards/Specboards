@@ -2,6 +2,7 @@ import {
   eq,
   modelProviderCredentials,
   modelProviders,
+  sql,
   type Database,
 } from "@specboards/db";
 
@@ -17,6 +18,7 @@ import type {
   StreamRequest,
 } from "@/lib/ai/provider";
 import { decryptSecret, encryptSecret } from "@/lib/crypto";
+import { asUser, type ScopedTx } from "@/lib/db-scope";
 import {
   checkUsageAllowance,
   recordUsage,
@@ -101,29 +103,78 @@ async function validate(input: ModelProviderInput): Promise<{
   return { baseUrl, model };
 }
 
+/**
+ * Who is asking, and about which workspace.
+ *
+ * Both are required because these run on the RLS-enforced connection, where
+ * the policies in 0067 need an acting user to decide what a request may see or
+ * change. The `workspaceId` predicates are kept as well: the policy decides
+ * what a caller MAY touch, the predicate says what this query is FOR.
+ */
+export interface ProviderScope {
+  userId: string;
+  workspaceId: string;
+}
+
 /** The workspace's connection, or null when none is configured. */
 export async function getModelProvider(
   db: Database,
-  workspaceId: string,
+  scope: ProviderScope,
 ): Promise<ModelProviderView | null> {
-  const [row] = await db
-    .select()
-    .from(modelProviders)
-    .where(eq(modelProviders.workspaceId, workspaceId))
-    .limit(1);
-  if (!row) return null;
-  return toView(row, await hintFor_(db, row.credentialId));
+  return asUser(db, scope.userId, async (tx) => {
+    const [row] = await tx
+      .select()
+      .from(modelProviders)
+      .where(eq(modelProviders.workspaceId, scope.workspaceId))
+      .limit(1);
+    if (!row) return null;
+    return toView(row, await hintFor_(tx, row.credentialId));
+  });
 }
 
-/** Read just the hint for a credential id, never the secret. */
-async function hintFor_(db: Database, credentialId: string | null) {
+/**
+ * Read just the hint for a credential id, never the secret.
+ *
+ * An ordinary SELECT, so it is governed by `model_provider_credentials_admin`
+ * and returns null for anyone who is not an org admin. That is correct: the
+ * hint is only ever rendered on the settings screen, which is admin-only, and
+ * the completion path does not want it. Contrast `resolveSecret` below, which
+ * deliberately routes around that policy for the one read that has to work for
+ * everybody.
+ */
+async function hintFor_(tx: ScopedTx, credentialId: string | null) {
   if (!credentialId) return null;
-  const [cred] = await db
+  const [cred] = await tx
     .select({ hint: modelProviderCredentials.hint })
     .from(modelProviderCredentials)
     .where(eq(modelProviderCredentials.id, credentialId))
     .limit(1);
   return cred?.hint ?? null;
+}
+
+/**
+ * The stored secret for a credential, for a caller who is merely a member.
+ *
+ * Goes through `specboards_resolve_provider_credential` (0078), a SECURITY
+ * DEFINER function, rather than selecting the column. It has to: the SELECT
+ * policy on that table is org-admin only, and this read happens inside an
+ * ordinary member's assistant request, so a plain query returns no row and the
+ * key silently resolves to null. The function checks workspace membership
+ * itself and answers one question rather than exposing the table.
+ *
+ * What comes back is ciphertext; `decryptSecret` runs here, in the application,
+ * with a key that lives in the environment and never in the database.
+ */
+async function resolveSecret(
+  tx: ScopedTx,
+  workspaceId: string,
+  credentialId: string,
+): Promise<string | null> {
+  const rows = await tx.execute(
+    sql`select specboards_resolve_provider_credential(${workspaceId}::uuid, ${credentialId}::uuid) as secret`,
+  );
+  const secret = (rows as unknown as { secret: string | null }[])[0]?.secret;
+  return secret ? decryptSecret(secret) : null;
 }
 
 /**
@@ -135,12 +186,19 @@ async function hintFor_(db: Database, credentialId: string | null) {
  */
 export async function saveModelProvider(
   db: Database,
-  workspaceId: string,
+  scope: ProviderScope,
   input: ModelProviderInput,
 ): Promise<ModelProviderView> {
   const { baseUrl, model } = await validate(input);
+  const { workspaceId } = scope;
 
-  const [existing] = await db
+  // One transaction for the whole save, which is what the credential rotation
+  // below already needed and never had: the new credential row, the retirement
+  // of the old one and the provider row that points at them now land or fail
+  // together. Before, a failure between them could leave the provider pointing
+  // at a credential that had just been deleted.
+  return asUser(db, scope.userId, async (tx) => {
+  const [existing] = await tx
     .select()
     .from(modelProviders)
     .where(eq(modelProviders.workspaceId, workspaceId))
@@ -181,7 +239,7 @@ export async function saveModelProvider(
       credentialId = null;
     } else {
       const key = input.apiKey.trim();
-      const [created] = await db
+      const [created] = await tx
         .insert(modelProviderCredentials)
         .values({ workspaceId, secret: encryptSecret(key), hint: hintFor(key) })
         .returning();
@@ -191,26 +249,27 @@ export async function saveModelProvider(
     // about to point at it. Rotation should never leave a window with no
     // usable credential.
     if (previous && previous !== credentialId) {
-      await db
+      await tx
         .delete(modelProviderCredentials)
         .where(eq(modelProviderCredentials.id, previous));
     }
   }
 
   if (existing) {
-    const [updated] = await db
+    const [updated] = await tx
       .update(modelProviders)
       .set({ baseUrl, model, credentialId, updatedAt: new Date() })
       .where(eq(modelProviders.id, existing.id))
       .returning();
-    return toView(updated!, await hintFor_(db, credentialId));
+    return toView(updated!, await hintFor_(tx, credentialId));
   }
 
-  const [created] = await db
+  const [created] = await tx
     .insert(modelProviders)
     .values({ workspaceId, kind: "openai_compatible", baseUrl, model, credentialId })
     .returning();
-  return toView(created!, await hintFor_(db, credentialId));
+  return toView(created!, await hintFor_(tx, credentialId));
+  });
 }
 
 /**
@@ -222,22 +281,24 @@ export async function saveModelProvider(
  */
 export async function deleteModelProvider(
   db: Database,
-  workspaceId: string,
+  scope: ProviderScope,
 ): Promise<boolean> {
-  const [row] = await db
-    .select()
-    .from(modelProviders)
-    .where(eq(modelProviders.workspaceId, workspaceId))
-    .limit(1);
-  if (!row) return false;
+  return asUser(db, scope.userId, async (tx) => {
+    const [row] = await tx
+      .select()
+      .from(modelProviders)
+      .where(eq(modelProviders.workspaceId, scope.workspaceId))
+      .limit(1);
+    if (!row) return false;
 
-  await db.delete(modelProviders).where(eq(modelProviders.id, row.id));
-  if (row.credentialId) {
-    await db
-      .delete(modelProviderCredentials)
-      .where(eq(modelProviderCredentials.id, row.credentialId));
-  }
-  return true;
+    await tx.delete(modelProviders).where(eq(modelProviders.id, row.id));
+    if (row.credentialId) {
+      await tx
+        .delete(modelProviderCredentials)
+        .where(eq(modelProviderCredentials.id, row.credentialId));
+    }
+    return true;
+  });
 }
 
 /**
@@ -248,25 +309,24 @@ export async function deleteModelProvider(
  */
 async function resolveConfig(
   db: Database,
-  workspaceId: string,
+  scope: ProviderScope,
 ): Promise<{ id: string; config: ProviderConfig } | null> {
-  const [row] = await db
-    .select()
-    .from(modelProviders)
-    .where(eq(modelProviders.workspaceId, workspaceId))
-    .limit(1);
-  if (!row || !row.enabled) return null;
-
-  let apiKey: string | null = null;
-  if (row.credentialId) {
-    const [cred] = await db
-      .select({ secret: modelProviderCredentials.secret })
-      .from(modelProviderCredentials)
-      .where(eq(modelProviderCredentials.id, row.credentialId))
+  return asUser(db, scope.userId, async (tx) => {
+    const [row] = await tx
+      .select()
+      .from(modelProviders)
+      .where(eq(modelProviders.workspaceId, scope.workspaceId))
       .limit(1);
-    apiKey = cred ? decryptSecret(cred.secret) : null;
-  }
-  return { id: row.id, config: { baseUrl: row.baseUrl, model: row.model, apiKey } };
+    if (!row || !row.enabled) return null;
+
+    // Via the SECURITY DEFINER resolver, because whoever is asking is usually
+    // not an admin and the SELECT policy on that table is admin-only. See
+    // `resolveSecret`.
+    const apiKey = row.credentialId
+      ? await resolveSecret(tx, scope.workspaceId, row.credentialId)
+      : null;
+    return { id: row.id, config: { baseUrl: row.baseUrl, model: row.model, apiKey } };
+  });
 }
 
 export interface ModelListInput {
@@ -299,14 +359,17 @@ export type WorkspaceModelListOutcome =
  */
 export async function listWorkspaceModels(
   db: Database,
-  workspaceId: string,
+  scope: ProviderScope,
   input: ModelListInput = {},
 ): Promise<WorkspaceModelListOutcome> {
-  const [row] = await db
-    .select()
-    .from(modelProviders)
-    .where(eq(modelProviders.workspaceId, workspaceId))
-    .limit(1);
+  const { row, storedKey } = await asUser(db, scope.userId, async (tx) => {
+    const [found] = await tx
+      .select()
+      .from(modelProviders)
+      .where(eq(modelProviders.workspaceId, scope.workspaceId))
+      .limit(1);
+    return { row: found, storedKey: found?.credentialId ?? null };
+  });
 
   const baseUrl = (input.baseUrl?.trim() || row?.baseUrl || "").trim();
   if (!baseUrl) {
@@ -321,13 +384,10 @@ export async function listWorkspaceModels(
 
   const supplied = input.apiKey?.trim() ?? "";
   let apiKey: string | null = supplied || null;
-  if (!apiKey && row?.credentialId && sameEndpoint(baseUrl, row.baseUrl)) {
-    const [cred] = await db
-      .select({ secret: modelProviderCredentials.secret })
-      .from(modelProviderCredentials)
-      .where(eq(modelProviderCredentials.id, row.credentialId))
-      .limit(1);
-    apiKey = cred ? decryptSecret(cred.secret) : null;
+  if (!apiKey && storedKey && row && sameEndpoint(baseUrl, row.baseUrl)) {
+    apiKey = await asUser(db, scope.userId, (tx) =>
+      resolveSecret(tx, scope.workspaceId, storedKey),
+    );
   }
 
   // `model` is irrelevant to listing; passing the stored one keeps the config
@@ -412,7 +472,13 @@ export async function* streamWithWorkspaceModel(
   req: WorkspaceModelRequest<StreamRequest>,
   attribution: UsageAttribution,
 ): AsyncGenerator<StreamEvent | { kind: "not_configured" } | CappedOutcome> {
-  const resolved = await resolveConfig(db, workspaceId);
+  // The acting user comes from `attribution`, which already records whose
+  // behalf the workspace's money is being spent on. That is exactly the person
+  // the policies key on, so there is no second parameter saying the same thing
+  // in a way that could drift from it.
+  const scope = { userId: attribution.userId, workspaceId };
+
+  const resolved = await resolveConfig(db, scope);
   if (!resolved) {
     yield { kind: "not_configured" };
     return;
@@ -448,11 +514,15 @@ export async function* streamWithWorkspaceModel(
         stamped = true;
         // Best effort, and deliberately not awaited into the critical path: a
         // token in flight must not wait on a bookkeeping write.
-        void db
-          .update(modelProviders)
-          .set({ lastUsedAt: new Date() })
-          .where(eq(modelProviders.id, resolved.id))
-          .catch(() => {});
+        // Its own short scoped transaction, NOT the stream's: a transaction
+        // held open for the length of a model answer pins a connection. Still
+        // not awaited, so a token in flight never waits on bookkeeping.
+        void asUser(db, scope.userId, (tx) =>
+          tx
+            .update(modelProviders)
+            .set({ lastUsedAt: new Date() })
+            .where(eq(modelProviders.id, resolved.id)),
+        ).catch(() => {});
       }
       if (event.kind === "done") {
         outcome = "ok";
@@ -499,7 +569,9 @@ export async function completeWithWorkspaceModel(
   | { ok: false; error: { kind: "not_configured" } }
   | { ok: false; error: CappedOutcome }
 > {
-  const resolved = await resolveConfig(db, workspaceId);
+  const scope = { userId: attribution.userId, workspaceId };
+
+  const resolved = await resolveConfig(db, scope);
   if (!resolved) return { ok: false, error: { kind: "not_configured" } };
 
   const allowance = await checkUsageAllowance(
@@ -518,11 +590,12 @@ export async function completeWithWorkspaceModel(
   if (outcome.ok) {
     // Best effort: a successful call must not be reported as a failure because
     // the bookkeeping write lost a race or the row was deleted mid-flight.
-    await db
-      .update(modelProviders)
-      .set({ lastUsedAt: new Date() })
-      .where(eq(modelProviders.id, resolved.id))
-      .catch(() => {});
+    await asUser(db, scope.userId, (tx) =>
+      tx
+        .update(modelProviders)
+        .set({ lastUsedAt: new Date() })
+        .where(eq(modelProviders.id, resolved.id)),
+    ).catch(() => {});
   }
 
   await recordUsage(db, {

@@ -3,7 +3,7 @@ import { revalidatePath } from "next/cache";
 import { readJsonBody } from "@/lib/api/body";
 import { parseSkills, SkillInputError } from "@/lib/ai/skills";
 import { authorizeOrgAdmin, resolveReadScope } from "@/lib/auth-session";
-import { getDb } from "@/lib/db";
+import { getAppDb } from "@/lib/db";
 import { listSkills, replaceSkills } from "@/lib/skills-service";
 
 export const dynamic = "force-dynamic";
@@ -45,10 +45,10 @@ const NO_DB = Response.json(
 export async function GET(req: Request) {
   const authz = await resolveReadScope(req);
   if (!authz.ok) return authz.response;
-  const db = getDb();
+  const db = getAppDb();
   if (!db || !authz.scope) return NO_DB;
 
-  return Response.json({ skills: await listSkills(db, authz.scope.workspaceId) });
+  return Response.json({ skills: await listSkills(db, authz.scope) });
 }
 
 /**
@@ -67,7 +67,7 @@ export async function GET(req: Request) {
 export async function PUT(req: Request) {
   const authz = await authorizeOrgAdmin(req);
   if (!authz.ok) return authz.response;
-  const db = getDb();
+  const db = getAppDb();
   if (!db || !authz.scope) return NO_DB;
 
   const parsed = await readJsonBody(req);
@@ -75,11 +75,7 @@ export async function PUT(req: Request) {
   const body = parsed.body as Record<string, unknown>;
 
   try {
-    const skills = await replaceSkills(
-      db,
-      authz.scope.workspaceId,
-      parseSkills(body.skills),
-    );
+    const skills = await replaceSkills(db, authz.scope, parseSkills(body.skills));
     revalidatePath("/[org]/settings/assistant", "page");
     return Response.json({ skills });
   } catch (err) {

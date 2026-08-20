@@ -1,5 +1,5 @@
 import { authorizeModelProviderAdmin } from "../guard";
-import { getDb } from "@/lib/db";
+import { getAppDb } from "@/lib/db";
 import { summarizeUsage } from "@/lib/usage-service";
 
 export const dynamic = "force-dynamic";
@@ -35,8 +35,8 @@ const NO_DB = Response.json(
 export async function GET(req: Request) {
   const authz = await authorizeModelProviderAdmin(req);
   if (!authz.ok) return authz.response;
-  const db = getDb();
+  const db = getAppDb();
   if (!db || !authz.scope) return NO_DB;
 
-  return Response.json(await summarizeUsage(db, authz.scope.workspaceId));
+  return Response.json(await summarizeUsage(db, authz.scope));
 }

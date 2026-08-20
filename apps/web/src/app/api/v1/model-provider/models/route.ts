@@ -1,6 +1,6 @@
 import { readJsonBody } from "@/lib/api/body";
 import { authorizeModelProviderAdmin } from "../guard";
-import { getDb } from "@/lib/db";
+import { getAppDb } from "@/lib/db";
 import { listWorkspaceModels } from "@/lib/model-provider-service";
 
 export const dynamic = "force-dynamic";
@@ -30,14 +30,14 @@ const NO_DB = Response.json(
 export async function POST(req: Request) {
   const authz = await authorizeModelProviderAdmin(req);
   if (!authz.ok) return authz.response;
-  const db = getDb();
+  const db = getAppDb();
   if (!db || !authz.scope) return NO_DB;
 
   const parsed = await readJsonBody(req);
   if (!parsed.ok) return parsed.response;
   const body = parsed.body as Record<string, unknown>;
 
-  const outcome = await listWorkspaceModels(db, authz.scope.workspaceId, {
+  const outcome = await listWorkspaceModels(db, authz.scope, {
     ...(typeof body.baseUrl === "string" ? { baseUrl: body.baseUrl } : {}),
     ...(typeof body.apiKey === "string" ? { apiKey: body.apiKey } : {}),
   });

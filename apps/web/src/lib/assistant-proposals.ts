@@ -7,6 +7,8 @@ import {
   type Database,
 } from "@specboards/db";
 
+import { asUser } from "@/lib/db-scope";
+
 import { parseAnswer } from "@/lib/ai/proposals";
 import {
   canEditItem,
@@ -154,23 +156,25 @@ async function loadProposal(
     );
   }
 
-  const [row] = await db
-    .select({
-      content: assistantMessages.content,
-      role: assistantMessages.role,
-      outcome: assistantMessages.proposalOutcome,
-      resolvedBy: assistantMessages.proposalResolvedBy,
-      baseSha: assistantMessages.proposalBaseSha,
-    })
-    .from(assistantMessages)
-    .where(
-      and(
-        eq(assistantMessages.id, messageId),
-        eq(assistantMessages.workspaceId, scope.workspaceId),
-        eq(assistantMessages.featureId, featureId),
-      ),
-    )
-    .limit(1);
+  const [row] = await asUser(db, scope.userId, (tx) =>
+    tx
+      .select({
+        content: assistantMessages.content,
+        role: assistantMessages.role,
+        outcome: assistantMessages.proposalOutcome,
+        resolvedBy: assistantMessages.proposalResolvedBy,
+        baseSha: assistantMessages.proposalBaseSha,
+      })
+      .from(assistantMessages)
+      .where(
+        and(
+          eq(assistantMessages.id, messageId),
+          eq(assistantMessages.workspaceId, scope.workspaceId),
+          eq(assistantMessages.featureId, featureId),
+        ),
+      )
+      .limit(1),
+  );
   if (!row || row.role !== "assistant") {
     throw new ProposalNotFoundError("That proposal is no longer here.");
   }
@@ -178,11 +182,13 @@ async function loadProposal(
     // Named, because the useful thing to know is who got there first: the
     // second person to click is usually looking at a stale panel.
     const [who] = row.resolvedBy
-      ? await db
-          .select({ name: users.name })
-          .from(users)
-          .where(eq(users.id, row.resolvedBy))
-          .limit(1)
+      ? await asUser(db, scope.userId, (tx) =>
+          tx
+            .select({ name: users.name })
+            .from(users)
+            .where(eq(users.id, row.resolvedBy!))
+            .limit(1),
+        )
       : [];
     throw new ProposalSettledError(
       `${who?.name ?? "Someone"} already ${row.outcome} this proposal.`,
@@ -214,21 +220,23 @@ async function claim(
   outcome: "accepted" | "rejected",
 ): Promise<{ resolvedAt: Date }> {
   const now = new Date();
-  const claimed = await db
-    .update(assistantMessages)
-    .set({
-      proposalOutcome: outcome,
-      proposalResolvedBy: scope.userId,
-      proposalResolvedAt: now,
-    })
-    .where(
-      and(
-        eq(assistantMessages.id, messageId),
-        // The whole guard. Anything already decided is not ours to decide.
-        isNull(assistantMessages.proposalOutcome),
-      ),
-    )
-    .returning({ id: assistantMessages.id });
+  const claimed = await asUser(db, scope.userId, (tx) =>
+    tx
+      .update(assistantMessages)
+      .set({
+        proposalOutcome: outcome,
+        proposalResolvedBy: scope.userId,
+        proposalResolvedAt: now,
+      })
+      .where(
+        and(
+          eq(assistantMessages.id, messageId),
+          // The whole guard. Anything already decided is not ours to decide.
+          isNull(assistantMessages.proposalOutcome),
+        ),
+      )
+      .returning({ id: assistantMessages.id }),
+  );
   if (claimed.length === 0) {
     throw new ProposalSettledError("Someone already decided about this proposal.");
   }
@@ -236,15 +244,21 @@ async function claim(
 }
 
 /** Put a claim back when the write it was taken for did not happen. */
-async function releaseClaim(db: Database, messageId: string): Promise<void> {
-  await db
-    .update(assistantMessages)
-    .set({
-      proposalOutcome: null,
-      proposalResolvedBy: null,
-      proposalResolvedAt: null,
-    })
-    .where(eq(assistantMessages.id, messageId));
+async function releaseClaim(
+  db: Database,
+  scope: WorkspaceScope,
+  messageId: string,
+): Promise<void> {
+  await asUser(db, scope.userId, (tx) =>
+    tx
+      .update(assistantMessages)
+      .set({
+        proposalOutcome: null,
+        proposalResolvedBy: null,
+        proposalResolvedAt: null,
+      })
+      .where(eq(assistantMessages.id, messageId)),
+  );
 }
 
 /** The turn as it now reads, for the panel to swap in. */
@@ -256,32 +270,34 @@ async function settled(
   resolvedAt: Date,
   commitSha: string | null,
 ): Promise<AssistantMessageView> {
-  if (commitSha) {
-    // Written after the commit exists rather than guessed before it: a sha on a
-    // row that no commit matches is worse than no sha.
-    await db
-      .update(assistantMessages)
-      .set({ proposalCommitSha: commitSha })
-      .where(eq(assistantMessages.id, messageId));
-  }
-  const [row] = await db
-    .select({
-      id: assistantMessages.id,
-      content: assistantMessages.content,
-      authorId: assistantMessages.authorId,
-      model: assistantMessages.model,
-      createdAt: assistantMessages.createdAt,
-    })
-    .from(assistantMessages)
-    .where(eq(assistantMessages.id, messageId))
-    .limit(1);
+  const { row, who } = await asUser(db, scope.userId, async (tx) => {
+    if (commitSha) {
+      // Written after the commit exists rather than guessed before it: a sha on
+      // a row that no commit matches is worse than no sha.
+      await tx
+        .update(assistantMessages)
+        .set({ proposalCommitSha: commitSha })
+        .where(eq(assistantMessages.id, messageId));
+    }
+    const [found] = await tx
+      .select({
+        id: assistantMessages.id,
+        content: assistantMessages.content,
+        authorId: assistantMessages.authorId,
+        model: assistantMessages.model,
+        createdAt: assistantMessages.createdAt,
+      })
+      .from(assistantMessages)
+      .where(eq(assistantMessages.id, messageId))
+      .limit(1);
+    const [resolver] = await tx
+      .select({ name: users.name })
+      .from(users)
+      .where(eq(users.id, scope.userId))
+      .limit(1);
+    return { row: found, who: resolver };
+  });
   if (!row) throw new ProposalNotFoundError("That proposal is no longer here.");
-
-  const [who] = await db
-    .select({ name: users.name })
-    .from(users)
-    .where(eq(users.id, scope.userId))
-    .limit(1);
 
   return {
     id: row.id,
@@ -332,36 +348,40 @@ async function loadReleaseProposal(
     );
   }
 
-  const [row] = await db
-    .select({
-      content: assistantMessages.content,
-      role: assistantMessages.role,
-      outcome: assistantMessages.proposalOutcome,
-      resolvedBy: assistantMessages.proposalResolvedBy,
-      baseSha: assistantMessages.proposalBaseSha,
-    })
-    .from(assistantMessages)
-    .where(
-      and(
-        eq(assistantMessages.id, messageId),
-        eq(assistantMessages.workspaceId, scope.workspaceId),
-        // By the release the URL named as well as by id, so a message id from
-        // another thread cannot be resolved through a release the caller
-        // happens to have write access to.
-        eq(assistantMessages.releaseId, releaseId),
-      ),
-    )
-    .limit(1);
+  const [row] = await asUser(db, scope.userId, (tx) =>
+    tx
+      .select({
+        content: assistantMessages.content,
+        role: assistantMessages.role,
+        outcome: assistantMessages.proposalOutcome,
+        resolvedBy: assistantMessages.proposalResolvedBy,
+        baseSha: assistantMessages.proposalBaseSha,
+      })
+      .from(assistantMessages)
+      .where(
+        and(
+          eq(assistantMessages.id, messageId),
+          eq(assistantMessages.workspaceId, scope.workspaceId),
+          // By the release the URL named as well as by id, so a message id from
+          // another thread cannot be resolved through a release the caller
+          // happens to have write access to.
+          eq(assistantMessages.releaseId, releaseId),
+        ),
+      )
+      .limit(1),
+  );
   if (!row || row.role !== "assistant") {
     throw new ProposalNotFoundError("That proposal is no longer here.");
   }
   if (row.outcome) {
     const [who] = row.resolvedBy
-      ? await db
-          .select({ name: users.name })
-          .from(users)
-          .where(eq(users.id, row.resolvedBy))
-          .limit(1)
+      ? await asUser(db, scope.userId, (tx) =>
+          tx
+            .select({ name: users.name })
+            .from(users)
+            .where(eq(users.id, row.resolvedBy!))
+            .limit(1),
+        )
       : [];
     throw new ProposalSettledError(
       `${who?.name ?? "Someone"} already ${row.outcome} this proposal.`,
@@ -452,7 +472,7 @@ export async function acceptReleaseProposal(
   } catch (err) {
     // A refusal at the store leaves a proposal somebody can still act on,
     // rather than one marked accepted with nothing to show for it.
-    await releaseClaim(db, messageId);
+    await releaseClaim(db, scope, messageId);
     throw err;
   }
 
@@ -537,7 +557,7 @@ export async function acceptProposal(
     try {
       await patchFeature(specId, { details: body }, scope);
     } catch (err) {
-      await releaseClaim(db, messageId);
+      await releaseClaim(db, scope, messageId);
       throw err;
     }
     return {
@@ -562,7 +582,7 @@ export async function acceptProposal(
   } catch (err) {
     // Most importantly a conflict: the reviewer has to be able to come back to
     // this proposal once the collision is sorted out.
-    await releaseClaim(db, messageId);
+    await releaseClaim(db, scope, messageId);
     throw err;
   }
 

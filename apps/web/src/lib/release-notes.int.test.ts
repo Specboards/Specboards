@@ -247,7 +247,7 @@ describe.skipIf(!DB_URL)("drafting a release's notes", () => {
   });
 
   async function connectStub() {
-    await providers.saveModelProvider(db, ws, {
+    await providers.saveModelProvider(db, asOwner, {
       baseUrl: endpoint,
       model: "stub-model",
       apiKey: "sk-stub-key-0001",
@@ -667,7 +667,7 @@ describe.skipIf(!DB_URL || !RUNTIME_URL)(
         await store.updateFeature(item.specId, { releaseId: rtReleaseId }, rtScope);
       }
 
-      await providers.saveModelProvider(db, rtWs, {
+      await providers.saveModelProvider(db, rtScope, {
         baseUrl: RUNTIME_URL!,
         model: RUNTIME_MODEL,
         apiKey: null,

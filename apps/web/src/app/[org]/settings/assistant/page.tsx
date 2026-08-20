@@ -3,7 +3,7 @@ import Link from "next/link";
 import { AssistantSkillsEditor } from "@/components/assistant-skills-editor";
 import { CollapsibleSettingsGroup } from "@/components/collapsible-settings-group";
 import { BUILT_IN_SKILLS, mergeSkills } from "@/lib/ai/skills";
-import { getDb } from "@/lib/db";
+import { getAppDb } from "@/lib/db";
 import { orgPath } from "@/lib/org-path";
 import { listSkills } from "@/lib/skills-service";
 import { currentOrgSlug, requireWorkspaceAccess } from "@/lib/workspace-access";
@@ -26,14 +26,14 @@ export const dynamic = "force-dynamic";
  */
 export default async function AssistantSettingsPage() {
   const access = await requireWorkspaceAccess();
-  const db = getDb();
+  const db = getAppDb();
 
   // Local file mode has no database and therefore no stored overrides. The
   // built-ins still exist, so the page shows what the assistant can do rather
   // than an error about a table nobody asked about.
   const skills =
     db && access
-      ? await listSkills(db, access.workspaceId)
+      ? await listSkills(db, access)
       : mergeSkills([]);
   const canEdit = Boolean(db) && (!access || access.role === "owner");
   const modelHref = orgPath(

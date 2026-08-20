@@ -10,6 +10,8 @@ import {
   type Database,
 } from "@specboards/db";
 
+import { asUser, type ScopedTx } from "@/lib/db-scope";
+
 /**
  * What the workspace has spent at its own model provider, and what it is
  * allowed to spend.
@@ -98,7 +100,11 @@ export async function recordUsage(
   record: UsageRecord,
 ): Promise<void> {
   try {
-    await db.insert(modelUsageEvents).values({
+    // `record.userId` is both the person the spend is attributed to and the
+    // person whose membership the append policy checks. They are the same
+    // person by construction: a call is recorded against whoever made it.
+    await asUser(db, record.userId, (tx) =>
+      tx.insert(modelUsageEvents).values({
       workspaceId: record.workspaceId,
       userId: record.userId,
       feature: record.feature,
@@ -107,10 +113,22 @@ export async function recordUsage(
       completionTokens: record.completionTokens,
       outcome: record.outcome,
       errorKind: record.errorKind ?? null,
-    });
+      }),
+    );
   } catch {
     // Deliberately swallowed; see the note above.
   }
+}
+
+/**
+ * Who is asking, and about which workspace. Required because these run on the
+ * RLS-enforced connection, where 0074's policies need an acting member: reads
+ * are member-level, the ledger is member-append, and the caps are org-admin
+ * write.
+ */
+export interface UsageScope {
+  userId: string;
+  workspaceId: string;
 }
 
 /** A workspace's caps. Null means uncapped, which is not zero. */
@@ -129,9 +147,14 @@ export const NO_LIMITS: UsageLimits = {
 
 export async function getUsageLimits(
   db: Database,
-  workspaceId: string,
+  scope: UsageScope,
 ): Promise<UsageLimits> {
-  const [row] = await db
+  return asUser(db, scope.userId, (tx) => readLimits(tx, scope.workspaceId));
+}
+
+/** The caps, on a transaction the caller already has open. */
+async function readLimits(tx: ScopedTx, workspaceId: string): Promise<UsageLimits> {
+  const [row] = await tx
     .select()
     .from(workspaceUsageLimits)
     .where(eq(workspaceUsageLimits.workspaceId, workspaceId))
@@ -180,31 +203,33 @@ export interface UsageLimitsInput {
  */
 export async function saveUsageLimits(
   db: Database,
-  workspaceId: string,
-  userId: string,
+  scope: UsageScope,
   input: UsageLimitsInput,
 ): Promise<UsageLimits> {
   const monthlyTokenCap = parseCap(input.monthlyTokenCap, "The monthly cap");
   const dailyUserTokenCap = parseCap(input.dailyUserTokenCap, "The per-person daily cap");
+  const { workspaceId, userId } = scope;
 
-  const [row] = await db
-    .insert(workspaceUsageLimits)
-    .values({
+  const [row] = await asUser(db, userId, (tx) =>
+    tx
+      .insert(workspaceUsageLimits)
+      .values({
       workspaceId,
       monthlyTokenCap,
       dailyUserTokenCap,
       updatedBy: userId,
     })
-    .onConflictDoUpdate({
-      target: workspaceUsageLimits.workspaceId,
-      set: {
-        monthlyTokenCap,
-        dailyUserTokenCap,
-        updatedBy: userId,
-        updatedAt: new Date(),
-      },
-    })
-    .returning();
+      .onConflictDoUpdate({
+        target: workspaceUsageLimits.workspaceId,
+        set: {
+          monthlyTokenCap,
+          dailyUserTokenCap,
+          updatedBy: userId,
+          updatedAt: new Date(),
+        },
+      })
+      .returning(),
+  );
 
   return {
     monthlyTokenCap: row!.monthlyTokenCap,
@@ -236,20 +261,22 @@ const SPENT = sql<number>`coalesce(sum(coalesce(${modelUsageEvents.promptTokens}
 
 async function tokensSince(
   db: Database,
-  workspaceId: string,
+  scope: UsageScope,
   since: Date,
-  userId?: string,
+  forUserId?: string,
 ): Promise<number> {
-  const [row] = await db
-    .select({ total: SPENT })
-    .from(modelUsageEvents)
-    .where(
-      and(
-        eq(modelUsageEvents.workspaceId, workspaceId),
-        gte(modelUsageEvents.createdAt, since),
-        ...(userId ? [eq(modelUsageEvents.userId, userId)] : []),
+  const [row] = await asUser(db, scope.userId, (tx) =>
+    tx
+      .select({ total: SPENT })
+      .from(modelUsageEvents)
+      .where(
+        and(
+          eq(modelUsageEvents.workspaceId, scope.workspaceId),
+          gte(modelUsageEvents.createdAt, since),
+          ...(forUserId ? [eq(modelUsageEvents.userId, forUserId)] : []),
+        ),
       ),
-    );
+  );
   return Number(row?.total ?? 0);
 }
 
@@ -287,7 +314,11 @@ export async function checkUsageAllowance(
   estimatedTokens: number,
   now: Date = new Date(),
 ): Promise<AllowanceDecision> {
-  const limits = await getUsageLimits(db, workspaceId);
+  // The cap check runs inside an ordinary member's request, before their
+  // question is sent, which is exactly why 0074 made both tables member-read
+  // rather than owner-only. The acting user is the one being attributed.
+  const asking = { userId: attribution.userId, workspaceId };
+  const limits = await getUsageLimits(db, asking);
   if (limits.monthlyTokenCap === null && limits.dailyUserTokenCap === null) {
     return { allowed: true };
   }
@@ -295,7 +326,7 @@ export async function checkUsageAllowance(
   const estimate = Math.max(0, Math.ceil(estimatedTokens));
 
   if (limits.monthlyTokenCap !== null) {
-    const used = await tokensSince(db, workspaceId, monthStart(now));
+    const used = await tokensSince(db, asking, monthStart(now));
     if (used + estimate > limits.monthlyTokenCap) {
       return {
         allowed: false,
@@ -306,12 +337,7 @@ export async function checkUsageAllowance(
   }
 
   if (limits.dailyUserTokenCap !== null) {
-    const used = await tokensSince(
-      db,
-      workspaceId,
-      dayStart(now),
-      attribution.userId,
-    );
+    const used = await tokensSince(db, asking, dayStart(now), attribution.userId);
     if (used + estimate > limits.dailyUserTokenCap) {
       return {
         allowed: false,
@@ -363,16 +389,20 @@ export interface UsageSummary {
  */
 export async function summarizeUsage(
   db: Database,
-  workspaceId: string,
+  scope: UsageScope,
   now: Date = new Date(),
 ): Promise<UsageSummary> {
   const since = monthStart(now);
-  const scope = and(
-    eq(modelUsageEvents.workspaceId, workspaceId),
+  const period = and(
+    eq(modelUsageEvents.workspaceId, scope.workspaceId),
     gte(modelUsageEvents.createdAt, since),
   );
 
-  const [totals] = await db
+  // All three aggregates in one scoped transaction: they are three views of the
+  // same period and a summary assembled from two different instants could
+  // report a per-person breakdown that does not add up to its own total.
+  return asUser(db, scope.userId, async (tx) => {
+  const [totals] = await tx
     .select({
       prompt: sql<number>`coalesce(sum(coalesce(${modelUsageEvents.promptTokens}, 0)), 0)::bigint`,
       completion: sql<number>`coalesce(sum(coalesce(${modelUsageEvents.completionTokens}, 0)), 0)::bigint`,
@@ -381,23 +411,23 @@ export async function summarizeUsage(
       failed: sql<number>`count(*) filter (where ${modelUsageEvents.outcome} = 'error')::int`,
     })
     .from(modelUsageEvents)
-    .where(scope);
+    .where(period);
 
-  const featureRows = await db
+  const featureRows = await tx
     .select({
       key: modelUsageEvents.feature,
       tokens: SPENT,
       calls: sql<number>`count(*)::int`,
     })
     .from(modelUsageEvents)
-    .where(scope)
+    .where(period)
     .groupBy(modelUsageEvents.feature)
     .orderBy(desc(SPENT));
 
   // Left-joined, not inner: the ledger keeps a snapshot user id with no FK, so
   // a row whose person has since been removed still has to appear in the total
   // rather than silently reducing it.
-  const userRows = await db
+  const userRows = await tx
     .select({
       key: modelUsageEvents.userId,
       name: users.name,
@@ -406,7 +436,7 @@ export async function summarizeUsage(
     })
     .from(modelUsageEvents)
     .leftJoin(users, eq(users.id, modelUsageEvents.userId))
-    .where(scope)
+    .where(period)
     .groupBy(modelUsageEvents.userId, users.name)
     .orderBy(desc(SPENT));
 
@@ -433,6 +463,9 @@ export async function summarizeUsage(
       tokens: Number(r.tokens),
       calls: Number(r.calls),
     })),
-    limits: await getUsageLimits(db, workspaceId),
+    // Read inside the same transaction, so the caps reported beside the totals
+    // are the caps that were in force for them.
+    limits: await readLimits(tx, scope.workspaceId),
   };
+  });
 }

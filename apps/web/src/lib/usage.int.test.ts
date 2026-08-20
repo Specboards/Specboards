@@ -43,6 +43,8 @@ delete process.env.SPECBOARDS_MULTI_TENANT;
 const suffix = randomUUID().slice(0, 8);
 const workspace = { id: randomUUID(), slug: `usage-${suffix}` };
 const ownerId = randomUUID();
+/** The acting user, now that these services run over the RLS-enforced connection. */
+const asOwner = { userId: ownerId, workspaceId: workspace.id };
 const memberId = randomUUID();
 
 describe.skipIf(!DB_URL)("usage accounting", () => {
@@ -194,7 +196,7 @@ describe.skipIf(!DB_URL)("usage accounting", () => {
       { userId: memberId, feature: "assistant_turn" },
     );
 
-    const summary = await usage.summarizeUsage(db, workspace.id);
+    const summary = await usage.summarizeUsage(db, asOwner);
     expect(summary.calls).toBe(1);
     expect(summary.tokens).toBe(0);
     // The number that stops a total of zero being read as broken accounting.
@@ -215,7 +217,7 @@ describe.skipIf(!DB_URL)("usage accounting", () => {
       { userId: ownerId, feature: "breakdown" },
     );
 
-    const summary = await usage.summarizeUsage(db, workspace.id);
+    const summary = await usage.summarizeUsage(db, asOwner);
     expect(summary.tokens).toBe(100);
     expect(
       Object.fromEntries(summary.byFeature.map((r) => [r.key, r.tokens])),
@@ -238,7 +240,7 @@ describe.skipIf(!DB_URL)("usage accounting", () => {
     // per answer, so the second call is refused on 50 already spent plus the
     // handful this one is estimated at, which is the ceiling behaviour the cap
     // is supposed to have.
-    await usage.saveUsageLimits(db, workspace.id, ownerId, {
+    await usage.saveUsageLimits(db, asOwner, {
       monthlyTokenCap: 52,
     });
 
@@ -284,7 +286,7 @@ describe.skipIf(!DB_URL)("usage accounting", () => {
       answered(res);
     };
 
-    await usage.saveUsageLimits(db, workspace.id, ownerId, {
+    await usage.saveUsageLimits(db, asOwner, {
       monthlyTokenCap: 1_000,
     });
 
@@ -311,7 +313,7 @@ describe.skipIf(!DB_URL)("usage accounting", () => {
   });
 
   it("caps one person's day without capping the workspace", async () => {
-    await usage.saveUsageLimits(db, workspace.id, ownerId, {
+    await usage.saveUsageLimits(db, asOwner, {
       dailyUserTokenCap: 52,
     });
 
@@ -341,7 +343,7 @@ describe.skipIf(!DB_URL)("usage accounting", () => {
   });
 
   it("treats no limits row as uncapped rather than as zero", async () => {
-    expect(await usage.getUsageLimits(db, workspace.id)).toMatchObject({
+    expect(await usage.getUsageLimits(db, asOwner)).toMatchObject({
       monthlyTokenCap: null,
       dailyUserTokenCap: null,
     });
@@ -355,10 +357,10 @@ describe.skipIf(!DB_URL)("usage accounting", () => {
   });
 
   it("clears a cap when it is saved as null", async () => {
-    await usage.saveUsageLimits(db, workspace.id, ownerId, {
+    await usage.saveUsageLimits(db, asOwner, {
       monthlyTokenCap: 10,
     });
-    const cleared = await usage.saveUsageLimits(db, workspace.id, ownerId, {
+    const cleared = await usage.saveUsageLimits(db, asOwner, {
       monthlyTokenCap: null,
     });
     expect(cleared.monthlyTokenCap).toBeNull();
@@ -374,12 +376,12 @@ describe.skipIf(!DB_URL)("usage accounting", () => {
 
   it("refuses a cap that is not a whole number of tokens", async () => {
     await expect(
-      usage.saveUsageLimits(db, workspace.id, ownerId, {
+      usage.saveUsageLimits(db, asOwner, {
         monthlyTokenCap: "lots",
       }),
     ).rejects.toThrow(/whole number/);
     await expect(
-      usage.saveUsageLimits(db, workspace.id, ownerId, {
+      usage.saveUsageLimits(db, asOwner, {
         monthlyTokenCap: -1,
       }),
     ).rejects.toThrow(/whole number/);
@@ -477,7 +479,7 @@ describe.skipIf(!DB_URL)("usage accounting", () => {
   });
 
   it("refuses a capped stream with a message rather than an error event", async () => {
-    await usage.saveUsageLimits(db, workspace.id, ownerId, {
+    await usage.saveUsageLimits(db, asOwner, {
       monthlyTokenCap: 0,
     });
 

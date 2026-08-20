@@ -1,6 +1,6 @@
 import { readJsonBody } from "@/lib/api/body";
 import { authorizeModelProviderAdmin } from "./guard";
-import { getDb } from "@/lib/db";
+import { getAppDb } from "@/lib/db";
 import {
   deleteModelProvider,
   getModelProvider,
@@ -35,10 +35,10 @@ const NO_DB = Response.json(
 export async function GET(req: Request) {
   const authz = await authorizeModelProviderAdmin(req);
   if (!authz.ok) return authz.response;
-  const db = getDb();
+  const db = getAppDb();
   if (!db || !authz.scope) return NO_DB;
 
-  const provider = await getModelProvider(db, authz.scope.workspaceId);
+  const provider = await getModelProvider(db, authz.scope);
   return Response.json({ provider });
 }
 
@@ -46,7 +46,7 @@ export async function GET(req: Request) {
 export async function PUT(req: Request) {
   const authz = await authorizeModelProviderAdmin(req);
   if (!authz.ok) return authz.response;
-  const db = getDb();
+  const db = getAppDb();
   if (!db || !authz.scope) return NO_DB;
 
   const parsed = await readJsonBody(req);
@@ -54,7 +54,7 @@ export async function PUT(req: Request) {
   const body = parsed.body as Record<string, unknown>;
 
   try {
-    const provider = await saveModelProvider(db, authz.scope.workspaceId, {
+    const provider = await saveModelProvider(db, authz.scope, {
       baseUrl: typeof body.baseUrl === "string" ? body.baseUrl : "",
       model: typeof body.model === "string" ? body.model : "",
       // Tri-state on purpose: absent keeps the stored key (so editing the model
@@ -76,10 +76,10 @@ export async function PUT(req: Request) {
 export async function DELETE(req: Request) {
   const authz = await authorizeModelProviderAdmin(req);
   if (!authz.ok) return authz.response;
-  const db = getDb();
+  const db = getAppDb();
   if (!db || !authz.scope) return NO_DB;
 
-  const removed = await deleteModelProvider(db, authz.scope.workspaceId);
+  const removed = await deleteModelProvider(db, authz.scope);
   if (!removed) {
     return Response.json({ error: "No model connection to remove." }, { status: 404 });
   }

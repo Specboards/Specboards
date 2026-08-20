@@ -1,5 +1,7 @@
 import { asc, eq, workspaceAssistantSkills, type Database } from "@specboards/db";
 
+import { asUser, type ScopedTx } from "@/lib/db-scope";
+
 import {
   mergeSkills,
   type Skill,
@@ -23,12 +25,18 @@ import {
  * third fails. The same call the stage gates editor makes, for the same reason.
  */
 
+/** Who is asking, and about which workspace. Both are needed: see the note above. */
+export interface SkillScope {
+  userId: string;
+  workspaceId: string;
+}
+
 /** The workspace's skills as the app sees them: built-ins plus its own rows. */
 export async function listSkills(
   db: Database,
-  workspaceId: string,
+  scope: SkillScope,
 ): Promise<Skill[]> {
-  return mergeSkills(await readRows(db, workspaceId));
+  return mergeSkills(await asUser(db, scope.userId, (tx) => readRows(tx, scope.workspaceId)));
 }
 
 /**
@@ -41,10 +49,10 @@ export async function listSkills(
  */
 export async function findEnabledSkill(
   db: Database,
-  workspaceId: string,
+  scope: SkillScope,
   key: string,
 ): Promise<Skill | null> {
-  const skills = await listSkills(db, workspaceId);
+  const skills = await listSkills(db, scope);
   return skills.find((s) => s.key === key && s.enabled) ?? null;
 }
 
@@ -58,10 +66,15 @@ export async function findEnabledSkill(
  */
 export async function replaceSkills(
   db: Database,
-  workspaceId: string,
+  scope: SkillScope,
   rows: readonly SkillRow[],
 ): Promise<Skill[]> {
-  await db.transaction(async (tx) => {
+  const { workspaceId } = scope;
+  // One transaction, and it is the same one that carries `app.user_id`: the
+  // delete and the insert are both governed by the org-admin write policy, and
+  // a caller who is not an admin must fail before either lands rather than
+  // between them.
+  await asUser(db, scope.userId, async (tx) => {
     await tx
       .delete(workspaceAssistantSkills)
       .where(eq(workspaceAssistantSkills.workspaceId, workspaceId));
@@ -83,11 +96,11 @@ export async function replaceSkills(
       );
     }
   });
-  return listSkills(db, workspaceId);
+  return listSkills(db, scope);
 }
 
-async function readRows(db: Database, workspaceId: string): Promise<SkillRow[]> {
-  const rows = await db
+async function readRows(tx: ScopedTx, workspaceId: string): Promise<SkillRow[]> {
+  const rows = await tx
     .select({
       key: workspaceAssistantSkills.key,
       name: workspaceAssistantSkills.name,

@@ -1,6 +1,6 @@
 import { readJsonBody } from "@/lib/api/body";
 import { authorizeModelProviderAdmin } from "../guard";
-import { getDb } from "@/lib/db";
+import { getAppDb } from "@/lib/db";
 import {
   getUsageLimits,
   saveUsageLimits,
@@ -33,10 +33,10 @@ const NO_DB = Response.json(
 export async function GET(req: Request) {
   const authz = await authorizeModelProviderAdmin(req);
   if (!authz.ok) return authz.response;
-  const db = getDb();
+  const db = getAppDb();
   if (!db || !authz.scope) return NO_DB;
 
-  return Response.json(await getUsageLimits(db, authz.scope.workspaceId));
+  return Response.json(await getUsageLimits(db, authz.scope));
 }
 
 /**
@@ -51,7 +51,7 @@ export async function GET(req: Request) {
 export async function PUT(req: Request) {
   const authz = await authorizeModelProviderAdmin(req);
   if (!authz.ok) return authz.response;
-  const db = getDb();
+  const db = getAppDb();
   if (!db || !authz.scope) return NO_DB;
 
   const parsed = await readJsonBody(req);
@@ -60,7 +60,7 @@ export async function PUT(req: Request) {
 
   try {
     return Response.json(
-      await saveUsageLimits(db, authz.scope.workspaceId, authz.scope.userId, {
+      await saveUsageLimits(db, authz.scope, {
         monthlyTokenCap: body.monthlyTokenCap as number | string | null,
         dailyUserTokenCap: body.dailyUserTokenCap as number | string | null,
       }),

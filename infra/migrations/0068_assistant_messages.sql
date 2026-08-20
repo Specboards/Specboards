@@ -74,18 +74,17 @@ CREATE INDEX "assistant_messages_feature_idx"
 -- service and the API route. Anyone who can read an item can ask the assistant
 -- about it, the same rule as commenting on it.
 --
--- ── "RLS here is the backstop rather than the gate" was wrong ──────────────
--- That is what this comment said, and it is not true of any path in the product
--- today. The assistant routes resolve `getDb()`, the owner connection, and an
--- owner is exempt from RLS unless the table carries FORCE ROW LEVEL SECURITY,
--- which nothing sets. These policies are only reached over `specboards_app`
--- (DATABASE_URL_APP), which nothing reading this table connects as. There is no
--- backstop under the service check; the service check is the whole of it.
+-- ── "RLS here is the backstop rather than the gate" was aspirational ───────
+-- It was not true when it was written: the assistant routes ran on the owner
+-- connection, which RLS exempts, so these policies were never evaluated and the
+-- service check was the whole of the enforcement. 0078 moved those routes onto
+-- `specboards_app`, and the sentence is now accurate.
 --
--- Worth contrasting with `comments`, whose policies this one was copied from:
--- those ARE live, because comments are read through `getStore()`. Same shape,
--- different connection, opposite answer. See the note on `getDb()` in
--- apps/web/src/lib/db.ts.
+-- Worth keeping in mind for the next table: `comments`, which this policy was
+-- copied from, was live all along because comments are read through
+-- `getStore()`. Same shape, different connection, opposite answer. Which
+-- connection a path uses is the thing to check. See `getDb()` and `getAppDb()`
+-- in apps/web/src/lib/db.ts.
 -- ─────────────────────────────────────────────────────────────────────────
 ALTER TABLE "assistant_messages" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 
