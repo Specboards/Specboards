@@ -6,28 +6,31 @@ import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 /**
- * What row-level security does, and does not, do for the paths that run on the
- * owner connection.
+ * What row-level security does, and does not, do on the owner connection.
  *
- * The model-provider, usage, assistant and skills routes all resolve `getDb()`,
- * built from `DATABASE_URL`: the owner and DDL connection. Postgres exempts a
- * table's owner from RLS unless the table carries `FORCE ROW LEVEL SECURITY`,
- * and nothing in `infra/` sets it. So the policies those migrations reason about
- * at length do not apply on those paths, and the `workspaceId` predicate in the
- * service layer is the entire enforcement.
+ * `getDb()` is built from `DATABASE_URL`: the owner and DDL connection. Postgres
+ * exempts a table's owner from RLS unless the table carries `FORCE ROW LEVEL
+ * SECURITY`, and nothing in `infra/` sets it. So on every path that still uses
+ * `getDb()` (onboarding, auth, GitHub setup, repositories) the `workspaceId`
+ * predicate in the query is the entire enforcement.
  *
- * This file exists because that is the kind of fact that gets quietly falsified.
- * It pins two things:
+ * The model-provider, usage, assistant and skills paths used to be among them,
+ * which made the policies in 0067, 0068, 0070 and 0074 inert. They now run on
+ * `getAppDb()`. This file pins the two facts that made that move delicate, so
+ * they stay true:
  *
- * 1. The premise. If FORCE ROW LEVEL SECURITY is ever added, or the app moves to
- *    a non-owner connection, the first case here fails and sends whoever did it
- *    to the comments that need updating with it.
- * 2. The trap in doing the move. `resolveConfig` reads a credential secret
- *    inside an ORDINARY MEMBER's assistant request, and the credential policy is
- *    org-admin only. On the RLS-enforced connection that read returns nothing,
- *    `apiKey` falls to null, and every non-admin's assistant call fails against
- *    a keyed endpoint with nothing in the response to explain it. Better to
- *    learn that from a red test than from a customer.
+ * 1. The premise. `getDb()` really is exempt, and no table forces RLS. If either
+ *    changes, the first case fails and sends whoever changed it to the comments
+ *    that need updating with it. In particular, adding FORCE ROW LEVEL SECURITY
+ *    would break every single-tenant self-host, which has no DATABASE_URL_APP
+ *    and therefore runs everything as the owner.
+ * 2. Why `specboards_resolve_provider_credential` (0078) has to exist. The
+ *    credential policy is org-admin only, and the secret is read inside an
+ *    ORDINARY MEMBER's request. Read by plain SELECT on the enforced connection
+ *    it returns nothing, `apiKey` falls to null, and every non-admin's assistant
+ *    call goes out unauthenticated with nothing in the response to explain it.
+ *    `model-provider-rls.int.test.ts` shows the working version end to end;
+ *    this case is the reason it cannot be a plain query.
  *
  * Neither case asserts that the current arrangement is good. They assert that it
  * is what the comments say it is.

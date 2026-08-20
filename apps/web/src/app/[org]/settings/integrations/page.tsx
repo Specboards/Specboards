@@ -21,7 +21,7 @@ import { WebhooksCard } from "@/components/webhooks-card";
 import { listApiKeys } from "@/lib/api-keys";
 import { listServiceAccounts } from "@/lib/service-accounts-service";
 import { getServerSessionUser } from "@/lib/auth-session";
-import { getDb } from "@/lib/db";
+import { getAppDb, getDb } from "@/lib/db";
 import { isGithubConfigured } from "@/lib/github-app";
 import { loadWorkspaceInstallations, NO_INSTALLATIONS } from "@/lib/github-connect";
 import { listMcpConnections } from "@/lib/mcp/workspace-binding";
@@ -93,6 +93,11 @@ export default async function IntegrationsSettingsPage({
 }) {
   const access = await requireWorkspaceAccess();
   const db = getDb();
+  // The model connection and the usage ledger are tenant data with live RLS
+  // policies, so they are read over the enforced connection. Everything else on
+  // this page (repositories, GitHub apps) still runs on the owner connection,
+  // which is why there are two handles here rather than one.
+  const appDb = getAppDb();
   const user = await getServerSessionUser();
 
   if (!access || !db || !user) {
@@ -140,13 +145,13 @@ export default async function IntegrationsSettingsPage({
   // workspace's inference goes and only an owner can change it, so only an
   // owner is shown it.
   const modelProvider = isAdmin
-    ? await getModelProvider(db, access.workspaceId)
+    ? appDb ? await getModelProvider(appDb, access) : null
     : null;
 
   // Owner-only for the same reason the connection is, and one more: the
   // breakdown names who spent what, which is management information rather than
   // a member's business. The API route that serves it is gated identically.
-  const usage = isAdmin ? await summarizeUsage(db, access.workspaceId) : null;
+  const usage = isAdmin && appDb ? await summarizeUsage(appDb, access) : null;
 
   // Repository management: any member sees the connected list; only admins get
   // the GitHub setup/connect controls (matching the API authorization).

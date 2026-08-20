@@ -45,11 +45,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS "workspace_assistant_skills_key_idx"
 -- off the back of one. That is a different kind of power from asking a question,
 -- and it belongs with the people who chose the model endpoint.
 --
--- Enforced by the route, not by these policies. `/api/v1/assistant-skills`
--- resolves `getDb()`, the owner connection, which RLS exempts; these rules are
--- only reached over `specboards_app`, which nothing touching this table
--- connects as. Same situation as 0067 and 0068, and the same note applies: see
--- `getDb()` in apps/web/src/lib/db.ts.
+-- Enforced here as well as in the route, since 0078. Until then
+-- `/api/v1/assistant-skills` ran on the owner connection, which RLS exempts, so
+-- the org-admin rule existed only in the route. `skills-rls.int.test.ts` drives
+-- the service over the enforced connection and shows a member's write refused
+-- by this policy with nothing in the service or the route consulted.
 -- ─────────────────────────────────────────────────────────────────────────
 ALTER TABLE "workspace_assistant_skills" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 

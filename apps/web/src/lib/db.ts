@@ -19,28 +19,17 @@ let db: Database | null | undefined;
  * So on every path that resolves `getDb()`, tenant isolation is whatever the
  * query says it is. The `workspaceId` predicate in the service layer is not a
  * belt beside the braces of a policy; it IS the enforcement, and a query that
- * omits it reads every tenant's rows. That is true today of the model-provider,
- * usage, assistant and skills tables, whose migrations (0067, 0068, 0070, 0074)
- * carry policies written as though they applied here. They do not. The
- * predicates are all present, which is why this is a sharp edge rather than a
- * defect, and why it is written down here rather than left to be rediscovered.
+ * omits it reads every tenant's rows.
  *
- * ── Moving a path onto the RLS-enforced connection ──────────────────────────
- * Worth doing, and not a search-and-replace. Two things bite:
+ * That is why onboarding, auth, GitHub setup and the rest still live here: they
+ * act before a workspace membership exists, or across one, and have no acting
+ * member for a policy to key on. Use this connection when that is genuinely
+ * true, and `getAppDb()` when it is not.
  *
- * 1. A policy that is org-admin-only for SELECT will return no rows inside an
- *    ordinary member's request. `resolveConfig` in `model-provider-service.ts`
- *    reads `model_provider_credentials.secret` on exactly that path, and the
- *    policy is org-admin only, so the move would resolve `apiKey` to null and
- *    fail every non-admin's assistant call against a keyed endpoint, with
- *    nothing in the response to say why. Such a read needs a SECURITY DEFINER
- *    function or a connection that stays privileged.
- * 2. The app role needs the table grant. `infra/rls-role.sql` grants future
- *    tables by default, but the live test and prod clusters predate it and use
- *    per-table grants (see the notes in 0067).
- *
- * `owner-connection-rls.int.test.ts` pins both, so a future move fails a test
- * rather than a customer's request.
+ * The model-provider, usage, assistant and skills paths USED to be here, which
+ * made the policies in 0067, 0068, 0070 and 0074 inert. They now run on
+ * `getAppDb()`. `owner-connection-rls.int.test.ts` pins the facts that made the
+ * move delicate.
  */
 export function getDb(): Database | null {
   if (db === undefined) {
@@ -48,6 +37,51 @@ export function getDb(): Database | null {
     db = url ? createDb(url) : null;
   }
   return db;
+}
+
+let appDb: Database | null | undefined;
+
+/**
+ * Drizzle client for tenant data on the RLS-enforced connection.
+ *
+ * `DATABASE_URL_APP` is the non-owner `specboards_app` role, the one every
+ * policy in `infra/migrations` is written against. Queries made through it are
+ * filtered by those policies, so a `workspaceId` predicate that is forgotten or
+ * wrong is caught by the database rather than shipped.
+ *
+ * The same connection `getStore()` uses, and gated the same way, deliberately:
+ * in multi-tenant mode falling back to `DATABASE_URL` would silently reinstate
+ * the owner connection and the bypass with it, so it refuses. Single-tenant
+ * self-host keeps the fallback, because there is no co-tenant to leak into and
+ * requiring a second connection string would be setup friction for no gain. On
+ * that fallback the policies genuinely do not apply, which is the same bargain
+ * `getStore()` and `getWorkerDb()` already make.
+ *
+ * Reads and writes through this MUST go through `asUser()` in `db-scope.ts`, or
+ * the policies evaluate with no `app.user_id` and match nothing. That is a safe
+ * failure (empty results, refused writes) rather than a leak, but it is a
+ * confusing one, so reach for the helper rather than this handle directly.
+ */
+export function getAppDb(): Database | null {
+  if (appDb === undefined) {
+    const url = process.env.DATABASE_URL;
+    if (!url) {
+      appDb = null;
+      return appDb;
+    }
+    const scopedUrl = process.env.DATABASE_URL_APP;
+    if (!scopedUrl && isMultiTenant()) {
+      // Not cached: every tenant-data request fails until the env is fixed,
+      // rather than one unlucky boot poisoning the process. Same shape as
+      // getStore().
+      throw new Error(
+        "[security] getAppDb: DATABASE_URL_APP is required in multi-tenant mode; " +
+          "refusing the owner-connection fallback, which bypasses row-level security.",
+      );
+    }
+    appDb = createDb(scopedUrl ?? url);
+  }
+  return appDb;
 }
 
 let workerDb: Database | null | undefined;

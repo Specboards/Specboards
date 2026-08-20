@@ -1,5 +1,5 @@
 import { authorizeModelProviderAdmin } from "../guard";
-import { getDb } from "@/lib/db";
+import { getAppDb } from "@/lib/db";
 import { completeWithWorkspaceModel } from "@/lib/model-provider-service";
 
 export const dynamic = "force-dynamic";
@@ -33,7 +33,7 @@ const PROMPT = "Reply with the single word: ready";
 export async function POST(req: Request) {
   const authz = await authorizeModelProviderAdmin(req);
   if (!authz.ok) return authz.response;
-  const db = getDb();
+  const db = getAppDb();
   if (!db || !authz.scope) return NO_DB;
 
   const started = Date.now();

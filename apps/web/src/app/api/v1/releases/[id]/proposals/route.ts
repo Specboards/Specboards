@@ -11,7 +11,7 @@ import {
   ProposalSettledError,
   ProposalStaleError,
 } from "@/lib/assistant-proposals";
-import { getDb } from "@/lib/db";
+import { getAppDb } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -52,7 +52,7 @@ const NO_DB = Response.json(
 export async function POST(req: Request, { params }: Params) {
   const authz = await authorizeWrite(req);
   if (!authz.ok) return authz.response;
-  const db = getDb();
+  const db = getAppDb();
   if (!db || !authz.scope) return NO_DB;
 
   const { id } = await params;

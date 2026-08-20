@@ -249,7 +249,7 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
 
   /** Point the workspace at the stub endpoint. */
   async function connectStub() {
-    await providers.saveModelProvider(db, ws, {
+    await providers.saveModelProvider(db, asOwner, {
       baseUrl: endpoint,
       model: "stub-model",
       apiKey: "sk-stub-key-0001",
@@ -394,12 +394,12 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
     const outcome = await ask(asOwner, specId, "Hi.");
     expect(outcome.error?.kind).toBe("not_configured");
     expect(outcome.error?.message).toMatch(/Settings/i);
-    expect(await svc.isModelConnected(db, ws)).toBe(false);
+    expect(await svc.isModelConnected(db, asOwner)).toBe(false);
   });
 
   it("reports a connected model before anyone spends a token", async () => {
     await connectStub();
-    expect(await svc.isModelConnected(db, ws)).toBe(true);
+    expect(await svc.isModelConnected(db, asOwner)).toBe(true);
   });
 
   it("refuses an item the caller cannot see", async () => {
@@ -1005,7 +1005,7 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
     });
 
     it("gives a workspace that has stored nothing the built-in skills", async () => {
-      const skills = await skillsSvc.listSkills(db, ws);
+      const skills = await skillsSvc.listSkills(db, asOwner);
       expect(skills.map((s) => s.key)).toContain("grill");
       expect(skills.every((s) => s.builtIn)).toBe(true);
     });
@@ -1060,7 +1060,7 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
 
     it("runs a workspace's own wording once it overrides a built-in", async () => {
       await connectStub();
-      await skillsSvc.replaceSkills(db, ws, [
+      await skillsSvc.replaceSkills(db, asOwner, [
         {
           key: "grill",
           surface: "item" as const,
@@ -1081,7 +1081,7 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
 
     it("refuses a skill that is switched off", async () => {
       await connectStub();
-      await skillsSvc.replaceSkills(db, ws, [
+      await skillsSvc.replaceSkills(db, asOwner, [
         {
           key: "grill",
           surface: "item" as const,
@@ -1108,7 +1108,7 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
 
     it("offers the panel only the skills that are switched on", async () => {
       await connectStub();
-      await skillsSvc.replaceSkills(db, ws, [
+      await skillsSvc.replaceSkills(db, asOwner, [
         {
           key: "gaps",
           surface: "item" as const,
@@ -1134,12 +1134,12 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
     });
 
     it("puts the skills in the order a workspace stored", async () => {
-      await skillsSvc.replaceSkills(db, ws, [
+      await skillsSvc.replaceSkills(db, asOwner, [
         { key: "draft", name: null, description: null, instructions: null, surface: "item" as const, enabled: true, position: 0 },
         { key: "grill", name: null, description: null, instructions: null, surface: "item" as const, enabled: true, position: 1 },
         { key: "gaps", name: null, description: null, instructions: null, surface: "item" as const, enabled: true, position: 2 },
       ]);
-      const skills = await skillsSvc.listSkills(db, ws);
+      const skills = await skillsSvc.listSkills(db, asOwner);
       // Filtered to this surface: the list now spans both panels, and the
       // release skills sit on the end in code order because no row places them.
       expect(
@@ -1150,11 +1150,11 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
     it("reorders without freezing the wording we ship", async () => {
       // The reason the columns are nullable. A workspace that only rearranged
       // its buttons must go on getting later improvements to these prompts.
-      await skillsSvc.replaceSkills(db, ws, [
+      await skillsSvc.replaceSkills(db, asOwner, [
         { key: "draft", name: null, description: null, instructions: null, surface: "item" as const, enabled: true, position: 0 },
         { key: "grill", name: null, description: null, instructions: null, surface: "item" as const, enabled: true, position: 1 },
       ]);
-      const skills = await skillsSvc.listSkills(db, ws);
+      const skills = await skillsSvc.listSkills(db, asOwner);
       const grill = skills.find((s) => s.key === "grill")!;
       const { BUILT_IN_SKILLS } = await import("./ai/skills");
       expect(grill.instructions).toBe(
@@ -1166,7 +1166,7 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
     it("stops reporting a skill as running once it is switched off", async () => {
       await connectStub();
       await ask(asOwner, specId, "", { skillKey: "grill" });
-      await skillsSvc.replaceSkills(db, ws, [
+      await skillsSvc.replaceSkills(db, asOwner, [
         {
           key: "grill",
           surface: "item" as const,
@@ -1186,7 +1186,7 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
 
     it("keeps a thread readable after the skill it ran is deleted", async () => {
       await connectStub();
-      await skillsSvc.replaceSkills(db, ws, [
+      await skillsSvc.replaceSkills(db, asOwner, [
         {
           key: "ours",
           surface: "item" as const,
@@ -1198,7 +1198,7 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
         },
       ]);
       await ask(asOwner, specId, "", { skillKey: "ours" });
-      await skillsSvc.replaceSkills(db, ws, []);
+      await skillsSvc.replaceSkills(db, asOwner, []);
 
       const thread = await svc.listAssistantThread(db, asOwner, specId);
       expect(thread[0]!.content).toBe("Our way");
@@ -1284,7 +1284,7 @@ describe.skipIf(!DB_URL || !RUNTIME_URL)(
       );
       rtProposalSpecId = clean.specId;
 
-      await providers.saveModelProvider(db, rtWs, {
+      await providers.saveModelProvider(db, scope, {
         baseUrl: RUNTIME_URL!,
         model: RUNTIME_MODEL,
         apiKey: null,

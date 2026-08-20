@@ -1,6 +1,6 @@
 import { readJsonBody } from "@/lib/api/body";
 import { authorizeWrite } from "@/lib/auth-session";
-import { getDb } from "@/lib/db";
+import { getAppDb } from "@/lib/db";
 import { enforceQuota, QUOTAS } from "@/lib/rate-limit";
 import {
   getReleaseAssistantPanelData,
@@ -79,7 +79,7 @@ function refusal(err: unknown): Response | null {
 export async function GET(req: Request, { params }: Params) {
   const authz = await authorizeWrite(req);
   if (!authz.ok) return authz.response;
-  const db = getDb();
+  const db = getAppDb();
   if (!db || !authz.scope) return NO_DB;
 
   const { releaseId } = await params;
@@ -108,7 +108,7 @@ export async function GET(req: Request, { params }: Params) {
 export async function POST(req: Request, { params }: Params) {
   const authz = await authorizeWrite(req);
   if (!authz.ok) return authz.response;
-  const db = getDb();
+  const db = getAppDb();
   if (!db || !authz.scope) return NO_DB;
 
   // Bounds the RATE; the workspace spend cap bounds the total. The cap is

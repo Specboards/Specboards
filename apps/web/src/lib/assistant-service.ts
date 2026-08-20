@@ -13,6 +13,8 @@ import {
   type Database,
 } from "@specboards/db";
 
+import { asUser } from "@/lib/db-scope";
+
 import { estimatePromptTokens } from "@/lib/ai/estimate";
 import { assembleItemContext, type ContextField } from "@/lib/ai/item-context";
 import { parseAnswer } from "@/lib/ai/proposals";
@@ -217,16 +219,18 @@ export async function resolveAssistantItem(
   const feature = await store.getFeature(specId, scope);
   if (!feature) throw new AssistantItemError(`Unknown item: ${specId}`);
 
-  const [row] = await db
-    .select({ id: features.id })
-    .from(features)
-    .where(
-      and(
-        eq(features.specId, specId),
-        eq(features.workspaceId, scope.workspaceId),
-      ),
-    )
-    .limit(1);
+  const [row] = await asUser(db, scope.userId, (tx) =>
+    tx
+      .select({ id: features.id })
+      .from(features)
+      .where(
+        and(
+          eq(features.specId, specId),
+          eq(features.workspaceId, scope.workspaceId),
+        ),
+      )
+      .limit(1),
+  );
   if (!row) throw new AssistantItemError(`Unknown item: ${specId}`);
   return { feature, featureId: row.id };
 }
@@ -276,11 +280,12 @@ const resolvers = alias(users, "proposal_resolvers");
 
 export async function readThread(
   db: Database,
-  workspaceId: string,
+  scope: WorkspaceScope,
   subject: ThreadSubject,
 ): Promise<AssistantMessageView[]> {
-  const rows = await db
-    .select({
+  const rows = await asUser(db, scope.userId, (tx) =>
+    tx
+      .select({
       id: assistantMessages.id,
       role: assistantMessages.role,
       content: assistantMessages.content,
@@ -294,11 +299,12 @@ export async function readThread(
       proposalResolvedByName: resolvers.name,
       skillKey: assistantMessages.skillKey,
     })
-    .from(assistantMessages)
-    .leftJoin(users, eq(users.id, assistantMessages.authorId))
-    .leftJoin(resolvers, eq(resolvers.id, assistantMessages.proposalResolvedBy))
-    .where(subjectWhere(workspaceId, subject))
-    .orderBy(asc(assistantMessages.createdAt));
+      .from(assistantMessages)
+      .leftJoin(users, eq(users.id, assistantMessages.authorId))
+      .leftJoin(resolvers, eq(resolvers.id, assistantMessages.proposalResolvedBy))
+      .where(subjectWhere(scope.workspaceId, subject))
+      .orderBy(asc(assistantMessages.createdAt)),
+  );
   return rows.map(toView);
 }
 
@@ -309,7 +315,7 @@ export async function listAssistantThread(
   specId: string,
 ): Promise<AssistantMessageView[]> {
   const { featureId } = await resolveAssistantItem(db, scope, specId);
-  return readThread(db, scope.workspaceId, { kind: "item", featureId });
+  return readThread(db, scope, { kind: "item", featureId });
 }
 
 /** Everything the panel needs to render, in one item resolution. */
@@ -404,10 +410,10 @@ export async function getAssistantPanelData(
   const { feature, featureId } = await resolveAssistantItem(db, scope, specId);
   const canEdit = await canEditItem(scope, feature);
   const [messages, assembled, modelConnected, skills] = await Promise.all([
-    readThread(db, scope.workspaceId, { kind: "item", featureId }),
+    readThread(db, scope, { kind: "item", featureId }),
     buildContext(scope, feature, canEdit),
-    isModelConnected(db, scope.workspaceId),
-    listSkills(db, scope.workspaceId),
+    isModelConnected(db, scope),
+    listSkills(db, scope),
   ]);
   const offered = skills.filter((s) => s.enabled);
   const running = activeSkill(messages);
@@ -467,18 +473,20 @@ export function activeSkill(messages: readonly AssistantMessageView[]): string |
  */
 export async function isModelConnected(
   db: Database,
-  workspaceId: string,
+  scope: WorkspaceScope,
 ): Promise<boolean> {
-  const [row] = await db
-    .select({ id: modelProviders.id })
-    .from(modelProviders)
-    .where(
-      and(
-        eq(modelProviders.workspaceId, workspaceId),
-        eq(modelProviders.enabled, true),
-      ),
-    )
-    .limit(1);
+  const [row] = await asUser(db, scope.userId, (tx) =>
+    tx
+      .select({ id: modelProviders.id })
+      .from(modelProviders)
+      .where(
+        and(
+          eq(modelProviders.workspaceId, scope.workspaceId),
+          eq(modelProviders.enabled, true),
+        ),
+      )
+      .limit(1),
+  );
   return Boolean(row);
 }
 
@@ -594,7 +602,7 @@ export async function startAssistantTurn(
   // typed message supplies the message: pressing "Grill me" is a question, and
   // the turn it writes has to read as one in the thread.
   const skill = opts.skillKey
-    ? await findEnabledSkill(db, scope.workspaceId, opts.skillKey)
+    ? await findEnabledSkill(db, scope, opts.skillKey)
     : null;
   if (opts.skillKey && !skill) {
     throw new AssistantInputError(
@@ -617,7 +625,7 @@ export async function startAssistantTurn(
   const { feature, featureId } = await resolveAssistantItem(db, scope, specId);
   const canEdit = await canEditItem(scope, feature);
   const { systemPrompt } = await buildContext(scope, feature, canEdit, skill);
-  const history = await readThread(db, scope.workspaceId, {
+  const history = await readThread(db, scope, {
     kind: "item",
     featureId,
   });
@@ -737,7 +745,11 @@ export async function persistTurns(
   // "this turn happened while the spec looked like that".
   const proposalBaseSha =
     parseAnswer(answer).proposal === null ? null : opts.baseSha;
-  const inserted = await db
+  // Both rows and the author lookup in one scoped transaction: a thread that
+  // recorded the question but not the answer would replay as an unanswered
+  // prompt for ever.
+  const { inserted, authorName } = await asUser(db, scope.userId, async (tx) => {
+  const written = await tx
     .insert(assistantMessages)
     .values([
       {
@@ -774,12 +786,13 @@ export async function persistTurns(
 
   // Looked up rather than taken from the history, which is empty on the first
   // turn of a thread and would leave that pair permanently unattributed.
-  const [author] = await db
+  const [author] = await tx
     .select({ name: users.name })
     .from(users)
     .where(eq(users.id, scope.userId))
     .limit(1);
-  const authorName = author?.name ?? null;
+    return { inserted: written, authorName: author?.name ?? null };
+  });
 
   // A freshly written pair has no resolution yet, so the proposal columns are
   // left at their defaults rather than mapped: `toView` reads the content to

@@ -263,10 +263,10 @@ export async function getReleaseAssistantPanelData(
 ): Promise<ReleaseAssistantPanelData> {
   const release = await resolveRelease(scope, releaseId);
   const [messages, assembled, modelConnected, allSkills] = await Promise.all([
-    readThread(db, scope.workspaceId, { kind: "release", releaseId }),
+    readThread(db, scope, { kind: "release", releaseId }),
     buildReleaseContext(scope, releaseId),
-    isModelConnected(db, scope.workspaceId),
-    listSkills(db, scope.workspaceId),
+    isModelConnected(db, scope),
+    listSkills(db, scope),
   ]);
 
   // Only this surface's skills. An item's "Grill me" on a release would produce
@@ -341,7 +341,7 @@ export async function startReleaseTurn(
   // typed message supplies the message: pressing "Draft the notes" is a
   // question, and the turn it writes has to read as one in the thread.
   const skill = opts.skillKey
-    ? await findEnabledSkill(db, scope.workspaceId, opts.skillKey)
+    ? await findEnabledSkill(db, scope, opts.skillKey)
     : null;
   if (opts.skillKey && !skill) {
     throw new ReleaseNotesInputError(
@@ -368,7 +368,7 @@ export async function startReleaseTurn(
   }
 
   const context = await buildReleaseContext(scope, releaseId, skill);
-  const history = await readThread(db, scope.workspaceId, {
+  const history = await readThread(db, scope, {
     kind: "release",
     releaseId,
   });

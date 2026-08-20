@@ -31,6 +31,8 @@ delete process.env.SPECBOARDS_MULTI_TENANT;
 const suffix = randomUUID().slice(0, 8);
 const workspace = { id: randomUUID(), slug: `model-${suffix}` };
 const ownerId = randomUUID();
+/** The acting user, now that these services run over the RLS-enforced connection. */
+const asOwner = { userId: ownerId, workspaceId: workspace.id };
 
 /**
  * Whose spend a call is recorded against. Required on every inference entry
@@ -83,7 +85,7 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
   });
 
   it("stores the key encrypted and returns only a hint", async () => {
-    const view = await svc.saveModelProvider(db, workspace.id, {
+    const view = await svc.saveModelProvider(db, asOwner, {
       baseUrl: "https://api.openai.com/v1",
       model: "gpt-4o-mini",
       apiKey: "sk-secret-value-a91c",
@@ -100,13 +102,13 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
   });
 
   it("keeps the stored key when a save omits it", async () => {
-    await svc.saveModelProvider(db, workspace.id, {
+    await svc.saveModelProvider(db, asOwner, {
       baseUrl: "https://api.openai.com/v1",
       model: "gpt-4o-mini",
       apiKey: "sk-original-key-1111",
     });
     // Editing just the model name must not silently disconnect the workspace.
-    const view = await svc.saveModelProvider(db, workspace.id, {
+    const view = await svc.saveModelProvider(db, asOwner, {
       baseUrl: "https://api.openai.com/v1",
       model: "gpt-4o",
     });
@@ -133,7 +135,7 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
     const ELSEWHERE = "http://127.0.0.1:11434/v1";
 
     async function connect() {
-      return svc.saveModelProvider(db, workspace.id, {
+      return svc.saveModelProvider(db, asOwner, {
         baseUrl: STORED,
         model: "gpt-4o-mini",
         apiKey: "sk-stored-key-4444",
@@ -144,14 +146,14 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
       await connect();
 
       await expect(
-        svc.saveModelProvider(db, workspace.id, {
+        svc.saveModelProvider(db, asOwner, {
           baseUrl: ELSEWHERE,
           model: "gpt-4o-mini",
         }),
       ).rejects.toThrow(svc.ModelProviderInputError);
 
       // Refused, not half-applied: the connection is exactly as it was.
-      const view = await svc.getModelProvider(db, workspace.id);
+      const view = await svc.getModelProvider(db, asOwner);
       expect(view!.baseUrl).toBe(STORED);
       expect(view!.credentialHint).toBe("4444");
       expect(await credentialRows()).toHaveLength(1);
@@ -162,7 +164,7 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
     it("treats a trailing slash and a capitalised host as the same endpoint", async () => {
       await connect();
 
-      const view = await svc.saveModelProvider(db, workspace.id, {
+      const view = await svc.saveModelProvider(db, asOwner, {
         baseUrl: "https://API.OpenAI.com/v1/",
         model: "gpt-4o",
       });
@@ -174,7 +176,7 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
     it("allows the move when a key for the new endpoint is supplied", async () => {
       await connect();
 
-      const view = await svc.saveModelProvider(db, workspace.id, {
+      const view = await svc.saveModelProvider(db, asOwner, {
         baseUrl: ELSEWHERE,
         model: "llama3.1",
         apiKey: "sk-new-endpoint-5555",
@@ -190,7 +192,7 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
     it("allows the move when the key is explicitly cleared", async () => {
       await connect();
 
-      const view = await svc.saveModelProvider(db, workspace.id, {
+      const view = await svc.saveModelProvider(db, asOwner, {
         baseUrl: ELSEWHERE,
         model: "llama3.1",
         apiKey: null,
@@ -202,12 +204,12 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
     });
 
     it("allows the move when there is no stored key to carry", async () => {
-      await svc.saveModelProvider(db, workspace.id, {
+      await svc.saveModelProvider(db, asOwner, {
         baseUrl: ELSEWHERE,
         model: "llama3.1",
       });
 
-      const view = await svc.saveModelProvider(db, workspace.id, {
+      const view = await svc.saveModelProvider(db, asOwner, {
         baseUrl: "http://127.0.0.1:8000/v1",
         model: "llama3.1",
       });
@@ -218,12 +220,12 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
   });
 
   it("rotates a key without ever leaving the workspace without one", async () => {
-    await svc.saveModelProvider(db, workspace.id, {
+    await svc.saveModelProvider(db, asOwner, {
       baseUrl: "https://api.openai.com/v1",
       model: "gpt-4o-mini",
       apiKey: "sk-original-key-1111",
     });
-    const view = await svc.saveModelProvider(db, workspace.id, {
+    const view = await svc.saveModelProvider(db, asOwner, {
       baseUrl: "https://api.openai.com/v1",
       model: "gpt-4o-mini",
       apiKey: "sk-rotated-key-2222",
@@ -237,12 +239,12 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
   });
 
   it("removes the key when asked, without removing the connection", async () => {
-    await svc.saveModelProvider(db, workspace.id, {
+    await svc.saveModelProvider(db, asOwner, {
       baseUrl: "http://127.0.0.1:11434/v1",
       model: "llama3.1",
       apiKey: "sk-not-needed-3333",
     });
-    const view = await svc.saveModelProvider(db, workspace.id, {
+    const view = await svc.saveModelProvider(db, asOwner, {
       baseUrl: "http://127.0.0.1:11434/v1",
       model: "llama3.1",
       apiKey: null,
@@ -251,18 +253,18 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
     // A keyless local endpoint is a real configuration, not an error state.
     expect(view.credentialHint).toBeNull();
     expect(await credentialRows()).toHaveLength(0);
-    expect((await svc.getModelProvider(db, workspace.id))?.model).toBe("llama3.1");
+    expect((await svc.getModelProvider(db, asOwner))?.model).toBe("llama3.1");
   });
 
   it("destroys the credential when the connection is removed", async () => {
-    await svc.saveModelProvider(db, workspace.id, {
+    await svc.saveModelProvider(db, asOwner, {
       baseUrl: "https://api.openai.com/v1",
       model: "gpt-4o-mini",
       apiKey: "sk-doomed-key-4444",
     });
 
-    expect(await svc.deleteModelProvider(db, workspace.id)).toBe(true);
-    expect(await svc.getModelProvider(db, workspace.id)).toBeNull();
+    expect(await svc.deleteModelProvider(db, asOwner)).toBe(true);
+    expect(await svc.getModelProvider(db, asOwner)).toBeNull();
     // The FK is ON DELETE SET NULL, so a cascade would NOT have collected this.
     // Leaving it behind would keep a live key in the database with nothing
     // pointing at it and nothing in the UI able to show or revoke it.
@@ -270,15 +272,15 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
   });
 
   it("reports a second delete as nothing to do", async () => {
-    expect(await svc.deleteModelProvider(db, workspace.id)).toBe(false);
+    expect(await svc.deleteModelProvider(db, asOwner)).toBe(false);
   });
 
   it("keeps one connection per workspace, replacing rather than adding", async () => {
-    await svc.saveModelProvider(db, workspace.id, {
+    await svc.saveModelProvider(db, asOwner, {
       baseUrl: "https://api.openai.com/v1",
       model: "gpt-4o-mini",
     });
-    await svc.saveModelProvider(db, workspace.id, {
+    await svc.saveModelProvider(db, asOwner, {
       baseUrl: "https://api.groq.com/openai/v1",
       model: "llama-3.3-70b",
     });
@@ -286,7 +288,7 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
     const rows = await sql`select id from model_providers
       where workspace_id = ${workspace.id}`;
     expect(rows).toHaveLength(1);
-    expect((await svc.getModelProvider(db, workspace.id))?.baseUrl).toBe(
+    expect((await svc.getModelProvider(db, asOwner))?.baseUrl).toBe(
       "https://api.groq.com/openai/v1",
     );
   });
@@ -297,7 +299,7 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
       // Rejected before anything is written, so the user finds out while they
       // are still on the form rather than at the first assistant turn.
       await expect(
-        svc.saveModelProvider(db, workspace.id, {
+        svc.saveModelProvider(db, asOwner, {
           baseUrl: "http://169.254.169.254/v1",
           model: "gpt-4o-mini",
         }),
@@ -305,15 +307,15 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
     } finally {
       delete process.env.SPECBOARDS_MULTI_TENANT;
     }
-    expect(await svc.getModelProvider(db, workspace.id)).toBeNull();
+    expect(await svc.getModelProvider(db, asOwner)).toBeNull();
   });
 
   it("requires a base URL and a model", async () => {
     await expect(
-      svc.saveModelProvider(db, workspace.id, { baseUrl: "", model: "gpt-4o-mini" }),
+      svc.saveModelProvider(db, asOwner, { baseUrl: "", model: "gpt-4o-mini" }),
     ).rejects.toThrow(/base URL is required/);
     await expect(
-      svc.saveModelProvider(db, workspace.id, {
+      svc.saveModelProvider(db, asOwner, {
         baseUrl: "https://api.openai.com/v1",
         model: "  ",
       }),
@@ -386,7 +388,7 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
     });
 
     it("completes a call using the stored, encrypted credential", async () => {
-      await svc.saveModelProvider(db, workspace.id, {
+      await svc.saveModelProvider(db, asOwner, {
         baseUrl: endpointUrl,
         model: "local-llama",
         apiKey: "sk-stored-key-9999",
@@ -409,30 +411,30 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
     });
 
     it("records last-used so a live connection is distinguishable", async () => {
-      await svc.saveModelProvider(db, workspace.id, {
+      await svc.saveModelProvider(db, asOwner, {
         baseUrl: endpointUrl,
         model: "local-llama",
       });
-      expect((await svc.getModelProvider(db, workspace.id))?.lastUsedAt).toBeNull();
+      expect((await svc.getModelProvider(db, asOwner))?.lastUsedAt).toBeNull();
 
       await svc.completeWithWorkspaceModel(db, workspace.id, {
         messages: [{ role: "user", content: "hi" }],
         maxTokens: 0,
       }, ATTRIBUTION);
 
-      expect((await svc.getModelProvider(db, workspace.id))?.lastUsedAt).not.toBeNull();
+      expect((await svc.getModelProvider(db, asOwner))?.lastUsedAt).not.toBeNull();
       // Keyless endpoint: no header at all rather than an empty bearer.
       expect(seen!.auth).toBeUndefined();
     });
 
     it("lists the models the stored connection serves", async () => {
-      await svc.saveModelProvider(db, workspace.id, {
+      await svc.saveModelProvider(db, asOwner, {
         baseUrl: endpointUrl,
         model: "local-llama",
         apiKey: "sk-stored-key-9999",
       });
 
-      const out = await svc.listWorkspaceModels(db, workspace.id);
+      const out = await svc.listWorkspaceModels(db, asOwner);
 
       expect(out.ok).toBe(true);
       expect(out.ok && out.models).toEqual(["local-llama", "local-mistral"]);
@@ -442,7 +444,7 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
     });
 
     it("never sends the stored key to an endpoint it was not stored for", async () => {
-      await svc.saveModelProvider(db, workspace.id, {
+      await svc.saveModelProvider(db, asOwner, {
         baseUrl: endpointUrl,
         model: "local-llama",
         apiKey: "sk-stored-key-9999",
@@ -452,7 +454,7 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
       // typed, and not the endpoint the key was entrusted to. Sending it here
       // would turn a write-only credential into a readable one, since whoever
       // controls the probed address reads the Authorization header.
-      const out = await svc.listWorkspaceModels(db, workspace.id, {
+      const out = await svc.listWorkspaceModels(db, asOwner, {
         baseUrl: `${endpointUrl}/elsewhere`,
       });
 
@@ -463,7 +465,7 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
     it("uses a key supplied with the probe, so setup works before saving", async () => {
       // Nothing is saved at all here: this is the first-run path, where the
       // picker has to work from what is still sitting in the form.
-      const out = await svc.listWorkspaceModels(db, workspace.id, {
+      const out = await svc.listWorkspaceModels(db, asOwner, {
         baseUrl: endpointUrl,
         apiKey: "sk-typed-in-the-form-7777",
       });
@@ -473,14 +475,14 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
     });
 
     it("says 'not configured' when there is no URL saved or supplied", async () => {
-      const out = await svc.listWorkspaceModels(db, workspace.id);
+      const out = await svc.listWorkspaceModels(db, asOwner);
       expect(out.ok).toBe(false);
       expect(!out.ok && out.error.kind).toBe("not_configured");
       expect(seen).toBeNull();
     });
 
     it("refuses the same live endpoint once the deployment is hosted", async () => {
-      await svc.saveModelProvider(db, workspace.id, {
+      await svc.saveModelProvider(db, asOwner, {
         baseUrl: endpointUrl,
         model: "local-llama",
       });
@@ -532,7 +534,7 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
           // The runtime takes no key; storing one anyway is the point. It
           // proves the credential survives the round trip through Postgres
           // independently of whether the endpoint checks it.
-          await svc.saveModelProvider(db, workspace.id, {
+          await svc.saveModelProvider(db, asOwner, {
             baseUrl: RUNTIME_URL,
             model: RUNTIME_MODEL,
             apiKey: "sk-onprem-gateway-token",
@@ -558,11 +560,11 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
       it(
         "records the call, so a live connection is distinguishable from a stale one",
         async () => {
-          await svc.saveModelProvider(db, workspace.id, {
+          await svc.saveModelProvider(db, asOwner, {
             baseUrl: RUNTIME_URL,
             model: RUNTIME_MODEL,
           });
-          expect((await svc.getModelProvider(db, workspace.id))!.lastUsedAt).toBeNull();
+          expect((await svc.getModelProvider(db, asOwner))!.lastUsedAt).toBeNull();
 
           await svc.completeWithWorkspaceModel(db, workspace.id, {
             messages: [{ role: "user", content: "hi" }],
@@ -570,7 +572,7 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
             timeoutMs: TIMEOUT_MS,
           }, ATTRIBUTION);
 
-          expect((await svc.getModelProvider(db, workspace.id))!.lastUsedAt).not.toBeNull();
+          expect((await svc.getModelProvider(db, asOwner))!.lastUsedAt).not.toBeNull();
         },
         TIMEOUT_MS,
       );
@@ -578,12 +580,12 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
       it(
         "fills the model picker from what the runtime actually serves",
         async () => {
-          await svc.saveModelProvider(db, workspace.id, {
+          await svc.saveModelProvider(db, asOwner, {
             baseUrl: RUNTIME_URL,
             model: RUNTIME_MODEL,
           });
 
-          const out = await svc.listWorkspaceModels(db, workspace.id);
+          const out = await svc.listWorkspaceModels(db, asOwner);
           expect(out.ok).toBe(true);
           expect(out.ok && out.models).toContain(RUNTIME_MODEL);
         },
@@ -596,7 +598,7 @@ describe.skipIf(!DB_URL)("model provider connection", () => {
           // The one conflict the two features have with each other, resolved
           // by deployment. On the hosted product this exact configuration is
           // a request-forgery primitive, and it has to stay refused there.
-          await svc.saveModelProvider(db, workspace.id, {
+          await svc.saveModelProvider(db, asOwner, {
             baseUrl: RUNTIME_URL,
             model: RUNTIME_MODEL,
           });
