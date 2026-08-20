@@ -127,7 +127,10 @@ describe("assembleReleaseContext", () => {
       const { systemPrompt } = assembleReleaseContext(input(), skill);
       const rules = systemPrompt.indexOf("Proposing is not editing.");
       const task = systemPrompt.indexOf("Write them in the house style.");
-      const release = systemPrompt.indexOf("Release: v1.4.0");
+      // The value, not "Release: v1.4.0": field values are now fenced onto
+      // their own lines, so the label and the value are no longer adjacent.
+      // What this case is about is the ORDER, which is unchanged.
+      const release = systemPrompt.indexOf("v1.4.0");
       // Who you are, then what you may do, then the job, then the thing itself.
       expect(rules).toBeLessThan(task);
       expect(task).toBeLessThan(release);

@@ -753,6 +753,48 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
       expect(item!.details).toBe(longBody);
     });
 
+    it("refuses to record a proposal from someone who cannot write the item", async () => {
+      // F19. A member with read-but-not-write on a product can still run
+      // assistant turns on its items. The read-only state reached the model as
+      // prompt text and nothing else, so a model that proposed anyway put a
+      // live proposal into a SHARED thread, where a colleague who does have an
+      // Accept button sees it and can apply it. The person who steered it never
+      // had that power.
+      //
+      // The persist-time guard added for F12 covers this by construction:
+      // canPropose is `canEdit && sawWholeBody`, so a read-only caller yields
+      // false down the same path. This asserts that rather than assuming it,
+      // because the two findings arrived separately and it would be easy to
+      // "simplify" canPropose into a length check later.
+      await connectStub();
+      answerFrames = [
+        "Here is a tighter version.\n\n",
+        "<<<BEGIN PROPOSED SPEC>>>\n",
+        `${NEW_BODY}\n`,
+        "<<<END PROPOSED SPEC>>>",
+      ];
+
+      // A plain workspace member with no product grant: can read an org-visible
+      // product, cannot write it.
+      const canEdit = await svc.canEditItem(asOutsider, {
+        specId,
+        productId: openProduct,
+      } as never);
+      expect(canEdit).toBe(false);
+
+      const outcome = await ask(asOutsider, specId, "Rewrite this for me.");
+      const turn = outcome.turns![1]!;
+
+      expect(turn.proposal).toBeNull();
+      expect(turn.content).not.toContain("BEGIN PROPOSED SPEC");
+      const [row] = await sql<{ base: string | null }[]>`
+        select proposal_base_sha as base from assistant_messages where id = ${turn.id}`;
+      expect(row!.base).toBeNull();
+
+      // And the item is untouched, which is the outcome that matters.
+      expect(await bodyNow()).toBe(ITEM_BODY);
+    });
+
     it("refuses an accept when the description grew past the limit after drafting", async () => {
       // The belt to the persist-time braces. A proposal drafted while the
       // description still fitted can be accepted a day later, by which time it
