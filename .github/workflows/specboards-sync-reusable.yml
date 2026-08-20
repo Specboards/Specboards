@@ -24,9 +24,19 @@ on:
   workflow_call:
     inputs:
       cli_version:
-        description: "Version of @specboards/cli to run (npm dist-tag or version)."
+        description: "Exact version of @specboards/cli to run. A dist-tag works but is not recommended."
         type: string
-        default: "latest"
+        # An exact version, not `latest`. This step runs in the customer's CI
+        # and the next one hands the CLI a token that can move their work
+        # items, so "whatever was published most recently" is a decision nobody
+        # made. Pinned, a compromise has to reach a specific release that can be
+        # audited and yanked, rather than any future publish being picked up
+        # automatically by every caller at once.
+        #
+        # MUST be bumped when @specboards/cli is released, or callers who do not
+        # pass cli_version stay on this version. That is the safe direction to
+        # fail, but it is silent, so it belongs in the release checklist.
+        default: "0.26.8"
     secrets:
       SPECBOARDS_URL:
         required: true
@@ -46,11 +56,52 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
-      - name: Sync work items from the PR
+      # Asked before the install rather than inside it, so a repo that has not
+      # set the secrets still skips the whole job rather than paying for (and
+      # failing on) an install it will not use. This used to be the first few
+      # lines of the sync step, which is why it moves here rather than appears.
+      - name: Check the Specboards secrets are set
+        id: configured
         env:
           SPECBOARDS_URL: ${{ secrets.SPECBOARDS_URL }}
           SPECBOARDS_TOKEN: ${{ secrets.SPECBOARDS_TOKEN }}
+        run: |
+          if [ -z "${SPECBOARDS_URL:-}" ] || [ -z "${SPECBOARDS_TOKEN:-}" ]; then
+            echo "Specboards secrets not set; skipping sync."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Its own step, with no secrets in the environment, and with install
+      # scripts off. An install is the one part of this job that runs code
+      # nobody in this repository wrote, and it used to run inside the step
+      # already holding SPECBOARDS_TOKEN, so a postinstall in a bad release of
+      # the CLI or of anything it depends on could read the token straight out
+      # of the environment.
+      #
+      # `--ignore-scripts` costs nothing here: @specboards/cli has no runtime
+      # dependencies at all and no install scripts of its own, and npm creates
+      # the `specboards` bin shim from the manifest rather than from a script.
+      # If it ever gains a dependency that genuinely needs to build on install,
+      # this flag is the thing that will break, and it should be argued with
+      # rather than removed.
+      #
+      # This does not make the CLI itself trusted: the next step runs it with
+      # the token in its environment, which is what the pin on `cli_version` is
+      # for. Together they mean the code that sees the token is a named release
+      # rather than whatever was published most recently.
+      - name: Install the Specboards CLI
+        if: steps.configured.outputs.ok == 'true'
+        env:
           CLI_VERSION: ${{ inputs.cli_version }}
+        run: npm install -g --ignore-scripts "@specboards/cli@${CLI_VERSION}"
+
+      - name: Sync work items from the PR
+        if: steps.configured.outputs.ok == 'true'
+        env:
+          SPECBOARDS_URL: ${{ secrets.SPECBOARDS_URL }}
+          SPECBOARDS_TOKEN: ${{ secrets.SPECBOARDS_TOKEN }}
           PR_BODY: ${{ github.event.pull_request.body }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -59,13 +110,6 @@ jobs:
           MERGED: ${{ github.event.pull_request.merged }}
         run: |
           set -uo pipefail
-          if [ -z "${SPECBOARDS_URL:-}" ] || [ -z "${SPECBOARDS_TOKEN:-}" ]; then
-            echo "Specboards secrets not set; skipping sync."
-            exit 0
-          fi
-
-          npm install -g "@specboards/cli@${CLI_VERSION:-latest}"
-
           # Resolve touched spec ids: frontmatter id of changed specs/**/spec.md,
           # plus any `Spec: <id>` trailer in the PR body (code-only PRs).
           base="${BASE_SHA:-origin/main}"
