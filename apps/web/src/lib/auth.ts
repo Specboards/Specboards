@@ -12,7 +12,7 @@ import {
   signUpCodeMatches,
   signUpCodeRequired,
 } from "@/lib/access-gate";
-import { trustsForwardedFor } from "@/lib/client-ip";
+import { onFly, trustsForwardedFor } from "@/lib/client-ip";
 import { getDb } from "@/lib/db";
 import { isE2E } from "@/lib/e2e";
 import { renderActionEmail, sendEmail } from "@/lib/email";
@@ -320,10 +320,18 @@ function createAuth(url: string) {
       // fresh limiter bucket per request by varying one header - the limit
       // looked per-IP and was not. On Fly the first entry answers anyway, so
       // this changes nothing there.
+      //
+      // `fly-client-ip` is likewise conditional now, on being on Fly rather
+      // than on an operator flag: off Fly nothing overwrites it either, so
+      // listing it unconditionally gave Better Auth's own limiter the same
+      // forgeable bucket key this block already refuses to give it via
+      // `x-forwarded-for`. With neither header trusted the limiter falls back
+      // to the socket peer, which is blunt but not forgeable.
       ipAddress: {
-        ipAddressHeaders: trustsForwardedFor()
-          ? ["fly-client-ip", "x-forwarded-for"]
-          : ["fly-client-ip"],
+        ipAddressHeaders: [
+          ...(onFly() ? ["fly-client-ip"] : []),
+          ...(trustsForwardedFor() ? ["x-forwarded-for"] : []),
+        ],
       },
     },
   });

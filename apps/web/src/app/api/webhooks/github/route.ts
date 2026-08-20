@@ -12,6 +12,7 @@ import { readTextBodyWithin } from "@/lib/api/body";
 import { getWorkerDb } from "@/lib/db";
 import { claimDelivery, pruneDeliveries } from "@/lib/github-delivery-dedup";
 import { getWebhookSecret } from "@/lib/github-app";
+import { checkQuota, QUOTAS } from "@/lib/rate-limit";
 import { notifyReviewOutcome } from "@/lib/review-outcome-notify";
 import { logSecurityEvent } from "@/lib/security-log";
 
@@ -202,10 +203,20 @@ export async function POST(req: Request) {
 
   let synced = 0;
   let failed = 0;
+  let throttled = 0;
   for (const repo of repos) {
     if (push.ref !== repo.defaultBranch) continue;
     // Skip the full reconcile when nothing under this repo's globs changed.
     if (affectedSpecs(push, repoGlobs(repo)).length === 0) continue;
+    // Counted per connected repository, and only once the work is known to be
+    // needed, so a quiet repo's quota is never spent by pushes that touch no
+    // specs. Keyed on the connection rather than the caller because the caller
+    // is always GitHub.
+    const quota = await checkQuota(db, QUOTAS.githubPushSync, repo.id);
+    if (!quota.ok) {
+      throttled += 1;
+      continue;
+    }
     try {
       await syncRepository(db, repo);
       synced += 1;
@@ -220,5 +231,15 @@ export async function POST(req: Request) {
 
   // 500 (so GitHub retries) only if a connection actually failed to sync.
   if (failed > 0) return Response.json({ error: "Sync failed." }, { status: 500 });
-  return Response.json({ ok: true, synced });
+  // 429 rather than 200 when work was skipped for quota, so GitHub retries with
+  // backoff and the sync lands late instead of being silently dropped. Only
+  // when nothing else succeeded: a delivery that synced one connection and
+  // throttled another has already done real work, and a retry would repeat it.
+  if (throttled > 0 && synced === 0) {
+    return Response.json(
+      { error: "This repository is syncing too frequently; retry shortly." },
+      { status: 429, headers: { "Retry-After": "60" } },
+    );
+  }
+  return Response.json({ ok: true, synced, ...(throttled ? { throttled } : {}) });
 }
