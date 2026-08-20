@@ -49,6 +49,7 @@ describe.skipIf(!DB_URL)("drafting a release's notes", () => {
   let svc: typeof import("./release-notes-service");
   let providers: typeof import("./model-provider-service");
   let proposals: typeof import("./assistant-proposals");
+  let assistant: typeof import("./assistant-service");
   let server: Server;
   let endpoint: string;
   /** A release with work in it, in a product everyone can read. */
@@ -106,6 +107,7 @@ describe.skipIf(!DB_URL)("drafting a release's notes", () => {
     svc = await import("./release-notes-service");
     providers = await import("./model-provider-service");
     proposals = await import("./assistant-proposals");
+    assistant = await import("./assistant-service");
 
     // A streaming stub, in frames, so reassembly is a real assertion.
     server = createServer((req, res) => {
@@ -472,6 +474,61 @@ describe.skipIf(!DB_URL)("drafting a release's notes", () => {
       await expect(
         proposals.acceptReleaseProposal(db, asOwner, releaseId, messageId),
       ).rejects.toThrow(/already/i);
+    });
+
+    it("refuses an accept when the notes were edited while the model was writing", async () => {
+      // The window this closes: somebody presses "Draft the notes", and while
+      // the answer is streaming a colleague saves an edit in the app. The
+      // proposal was written without sight of that edit, so accepting it must
+      // be refused rather than silently replacing the edit.
+      //
+      // The base used to be re-read AFTER the stream, which recorded the
+      // colleague's edit as though the model had been shown it. The staleness
+      // check then compared that text against itself, matched, and applied the
+      // proposal over the top. This is the same failure #286 refuses on the item
+      // path.
+      await connectStub();
+      answerFrames = withProposal;
+
+      const lateEdit = "## Written by a human\n\nWhile the model was talking.";
+      const turn = await svc.startReleaseTurn(
+        db,
+        asOwner,
+        releaseId,
+        "Draft the notes.",
+      );
+
+      let edited = false;
+      let turns: import("./assistant-service").AssistantMessageView[] | null = null;
+      for await (const event of turn) {
+        if (event.kind === "delta" && !edited) {
+          edited = true;
+          // Awaited inside the loop, so the generator is genuinely suspended
+          // mid-stream while this lands. No timing assumption.
+          await sql`update releases set release_notes_body = ${lateEdit}
+            where id = ${releaseId}`;
+        }
+        if (event.kind === "done") turns = event.turns;
+      }
+      expect(edited).toBe(true);
+
+      const messageId = turns![1]!.id;
+      const [row] = await sql<{ base: string | null }[]>`
+        select proposal_base_sha as base from assistant_messages where id = ${messageId}`;
+      // The notes were empty when the prompt was built, so that is the base.
+      // Recording the late edit here is the bug: it would make the check below
+      // pass and the edit disappear.
+      expect(row!.base).not.toBeNull();
+      expect(row!.base).not.toBe(assistant.contentVersion(lateEdit));
+
+      await expect(
+        proposals.acceptReleaseProposal(db, asOwner, releaseId, messageId),
+      ).rejects.toThrow(/changed after the assistant drafted this/i);
+
+      // And the human's edit is still there, which is the whole point.
+      const [after] = await sql<{ body: string }[]>`
+        select release_notes_body as body from releases where id = ${releaseId}`;
+      expect(after!.body).toBe(lateEdit);
     });
 
     it("refuses a message id from another release's thread", async () => {

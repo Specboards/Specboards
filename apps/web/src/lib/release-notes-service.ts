@@ -135,6 +135,21 @@ async function resolveRelease(scope: WorkspaceScope, releaseId: string) {
 }
 
 /**
+ * An assembled context plus the version of the notes it was assembled from.
+ *
+ * The version travels with the context because it has to be the version of the
+ * text the model was actually shown. Recomputing it later, from a fresh read,
+ * answers a different question: see the note in `run()` below.
+ */
+export interface AssembledReleaseTurnContext extends AssembledReleaseContext {
+  /**
+   * `contentVersion` of the notes body that went into `systemPrompt`. What a
+   * proposal drafted from this context is checked against on accept.
+   */
+  notesVersion: string;
+}
+
+/**
  * Everything the prompt is built from, resolved and assembled.
  *
  * Separate from the streaming below so the disclosure can be read without
@@ -145,7 +160,7 @@ export async function buildReleaseContext(
   scope: WorkspaceScope,
   releaseId: string,
   skill: Skill | null = null,
-): Promise<AssembledReleaseContext> {
+): Promise<AssembledReleaseTurnContext> {
   const release = await resolveRelease(scope, releaseId);
   const store = await getStore();
 
@@ -182,26 +197,33 @@ export async function buildReleaseContext(
   ];
   const workflow = await resolveWorkflowForProducts(scope, productIds);
 
-  return assembleReleaseContext(
-    {
-      name: release.name,
-      statusLabel: releaseStatusLabel(release.status),
-      targetDate: release.targetDate,
-      shippedDate: release.shippedDate,
-      groups: groupReleaseItemsByLevel(items, levels).map((group) => ({
-        levelLabel: group.levelLabel,
-        items: group.items.map((item) => ({
-          title: item.title,
-          statusLabel: statusLabel(item.status, workflow),
-          description: bodies.get(item.specId) ?? "",
+  const notesBody = release.releaseNotesBody ?? "";
+
+  return {
+    ...assembleReleaseContext(
+      {
+        name: release.name,
+        statusLabel: releaseStatusLabel(release.status),
+        targetDate: release.targetDate,
+        shippedDate: release.shippedDate,
+        groups: groupReleaseItemsByLevel(items, levels).map((group) => ({
+          levelLabel: group.levelLabel,
+          items: group.items.map((item) => ({
+            title: item.title,
+            statusLabel: statusLabel(item.status, workflow),
+            description: bodies.get(item.specId) ?? "",
+          })),
         })),
-      })),
-      notesBody: release.releaseNotesBody ?? "",
-      // Resolved above: nobody reaches here without it.
-      canEdit: true,
-    },
-    skill,
-  );
+        notesBody,
+        // Resolved above: nobody reaches here without it.
+        canEdit: true,
+      },
+      skill,
+    ),
+    // The same string the prompt was built from, hashed here rather than
+    // re-read later, so the accept check is against what the model saw.
+    notesVersion: contentVersion(notesBody),
+  };
 }
 
 /** Everything the panel needs to render, in one release resolution. */
@@ -421,11 +443,6 @@ export async function startReleaseTurn(
     // reports a cancel. Nothing is written; see the note above.
     if (!finished) return;
 
-    // Re-read rather than reusing whatever the context assembled: this is the
-    // version the accept path will be checked against, and the honest base is
-    // the notes as they stand at the moment the draft is recorded.
-    const release = await resolveRelease(scope, releaseId);
-
     yield {
       kind: "done",
       turns: await persistTurns(
@@ -442,7 +459,18 @@ export async function startReleaseTurn(
           // them gives the accept path something to check, which is what stops
           // a proposal drafted this morning from silently replacing an edit
           // somebody made this afternoon.
-          baseSha: contentVersion(release.releaseNotesBody ?? ""),
+          //
+          // From the context, captured BEFORE the stream, not from a fresh read
+          // taken after it. This used to re-read here, on the reasoning that
+          // the honest base was "the notes as they stand at the moment the
+          // draft is recorded". That reasoning is backwards. The base is what
+          // the model was shown, because that is what the proposal is a
+          // modification of. Re-reading afterwards records an edit made during
+          // generation as though the model had seen it, and the accept then
+          // overwrites that edit without ever detecting a conflict, which is
+          // precisely what #286 exists to refuse. The item path has always got
+          // this right (`feature`, resolved before its stream).
+          baseSha: context.notesVersion,
           skillKey: skill?.key ?? null,
         },
       ),
