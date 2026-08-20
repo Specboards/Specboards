@@ -71,9 +71,21 @@ CREATE INDEX "assistant_messages_feature_idx"
 -- it). Copied in shape from `comments_read` in 0012 for exactly that reason.
 --
 -- Write is member-level, because the product-level write check lives in the
--- service and the API route, and RLS here is the backstop rather than the gate.
--- Anyone who can read an item can ask the assistant about it, the same rule as
--- commenting on it.
+-- service and the API route. Anyone who can read an item can ask the assistant
+-- about it, the same rule as commenting on it.
+--
+-- ── "RLS here is the backstop rather than the gate" was wrong ──────────────
+-- That is what this comment said, and it is not true of any path in the product
+-- today. The assistant routes resolve `getDb()`, the owner connection, and an
+-- owner is exempt from RLS unless the table carries FORCE ROW LEVEL SECURITY,
+-- which nothing sets. These policies are only reached over `specboards_app`
+-- (DATABASE_URL_APP), which nothing reading this table connects as. There is no
+-- backstop under the service check; the service check is the whole of it.
+--
+-- Worth contrasting with `comments`, whose policies this one was copied from:
+-- those ARE live, because comments are read through `getStore()`. Same shape,
+-- different connection, opposite answer. See the note on `getDb()` in
+-- apps/web/src/lib/db.ts.
 -- ─────────────────────────────────────────────────────────────────────────
 ALTER TABLE "assistant_messages" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 

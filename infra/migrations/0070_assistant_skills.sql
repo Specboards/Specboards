@@ -44,6 +44,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS "workspace_assistant_skills_key_idx"
 -- question anyone on the team asks, and to every edit the assistant proposes
 -- off the back of one. That is a different kind of power from asking a question,
 -- and it belongs with the people who chose the model endpoint.
+--
+-- Enforced by the route, not by these policies. `/api/v1/assistant-skills`
+-- resolves `getDb()`, the owner connection, which RLS exempts; these rules are
+-- only reached over `specboards_app`, which nothing touching this table
+-- connects as. Same situation as 0067 and 0068, and the same note applies: see
+-- `getDb()` in apps/web/src/lib/db.ts.
 -- ─────────────────────────────────────────────────────────────────────────
 ALTER TABLE "workspace_assistant_skills" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 

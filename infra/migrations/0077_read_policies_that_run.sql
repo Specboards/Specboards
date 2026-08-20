@@ -31,6 +31,14 @@
 -- `_read` policy, and every one of those has a NARROWER `FOR ALL` condition
 -- (`specboards_is_org_admin` or `specboards_can_manage_product`), so the union
 -- is the read policy and they are already correct. Do not "fix" those.
+--
+-- One asymmetry between the two tables, so nobody reads more into this than it
+-- says. `comments` is reached through `getStore()`, the RLS-enforced connection,
+-- so the repair takes effect on the running system. `assistant_messages` is
+-- reached only through `getDb()`, the owner connection, which RLS exempts, so
+-- there the repair is a correct policy waiting for a connection that evaluates
+-- it. Both were worth doing and neither was a live leak, but only one of them
+-- changes behaviour today. See the note on `getDb()` in apps/web/src/lib/db.ts.
 
 DROP POLICY IF EXISTS comments_write ON "comments";--> statement-breakpoint
 
