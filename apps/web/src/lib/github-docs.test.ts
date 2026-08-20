@@ -160,6 +160,29 @@ describe("which write mode a doc edit uses", () => {
     expect(writeFile).toHaveBeenCalledWith(expect.objectContaining({ mode: "direct" }));
   });
 
+  it("commits directly when the repository has said nothing", async () => {
+    // The schema default is "pr", which is right for a SPEC repo. A docs repo
+    // is created with no config at all, so applying that default would make
+    // every existing docs repo start proposing pull requests for edits made in
+    // a WYSIWYG editor, with the page still showing the old text after Save.
+    // The e2e suite caught exactly that when this first honoured the default.
+    //
+    // An explicit setting is respected; its absence keeps what docs editing has
+    // always done. Changing the default for docs is a product decision, not
+    // part of a confinement fix.
+    repo.config = null;
+    repo.writeModeOverride = null;
+    await docs.saveGithubDocFile(db, "ws-1", space, "docs/a.md", "hi", null);
+    expect(writeFile).toHaveBeenCalledWith(expect.objectContaining({ mode: "direct" }));
+  });
+
+  it("honours an override even when the config says nothing", async () => {
+    repo.config = null;
+    repo.writeModeOverride = "pr";
+    await docs.saveGithubDocFile(db, "ws-1", space, "docs/a.md", "hi", null);
+    expect(writeFile).toHaveBeenCalledWith(expect.objectContaining({ mode: "pr" }));
+  });
+
   it("uses the resolved mode on a rename too", async () => {
     repo.config = { writeMode: "pr" };
     await docs.renameGithubDocFile(db, "ws-1", space, "docs/a.md", "docs/b.md");

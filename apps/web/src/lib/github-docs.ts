@@ -190,6 +190,35 @@ export function validateDocPath(raw: unknown): string {
 }
 
 /**
+ * Which write mode a doc edit uses.
+ *
+ * The finding was that these helpers hardcoded `mode: "direct"` and never
+ * consulted the repository, so a repo whose owner chose pull-request review got
+ * it on specs and not on docs. That is fixed by asking.
+ *
+ * What is deliberately NOT done is applying the schema DEFAULT, and this is the
+ * subtle part. `resolveWriteMode` defaults to `"pr"`, which is right for a spec
+ * repo: specs are the product's source of truth and reviewing a change to one
+ * is the point. A docs repo is created with `isSpecRepo: false` and NO config
+ * at all (see the note at the top of this file), so every existing docs repo
+ * would suddenly start proposing pull requests for edits made in a WYSIWYG
+ * editor, and the page would keep showing the old text after Save. The e2e
+ * suite caught exactly that.
+ *
+ * So an EXPLICIT setting is honoured, from the repository config or an admin's
+ * per-repository override, and the absence of one keeps the behaviour docs
+ * editing has always had. `source` is what distinguishes those, which is why
+ * `resolveWriteMode` returns it.
+ *
+ * Changing the default for docs is a product decision, not a security fix, and
+ * it is not this change's to make.
+ */
+function docWriteMode(repo: RepoRecord): "pr" | "direct" {
+  const resolved = resolveWriteMode(repo.config, repo.writeModeOverride);
+  return resolved.source === "default" ? "direct" : resolved.mode;
+}
+
+/**
  * Refuse a doc write that lands on a path this repository treats as a spec.
  *
  * The scope model has two separate grants: `docs:write` for the narrative
@@ -264,17 +293,11 @@ export async function saveGithubDocFile(
   const repo = await requireDocRepo(db, workspaceId, space);
   assertNotSpecPath(repo, path);
   const client = await resolveRepoClient(db, repo);
-  // The repository's configured mode, not a hardcoded "direct". A repo set to
-  // take changes as pull requests said so about its content; that setting did
-  // not stop applying because the file is a doc page rather than a spec.
-  // `spec-content.ts` has always resolved it, and these helpers not doing so
-  // was a way to commit straight to the default branch of a review-gated repo.
-  const { mode } = resolveWriteMode(repo.config, repo.writeModeOverride);
   return client.writeFile({
     path,
     content,
     message: `docs: update ${path}`,
-    mode,
+    mode: docWriteMode(repo),
     expectedBlobSha,
   });
 }
@@ -322,7 +345,7 @@ export async function renameGithubDocFile(
   } catch {
     throw new DocError("That page no longer exists in the repository.");
   }
-  const { mode } = resolveWriteMode(repo.config, repo.writeModeOverride);
+  const mode = docWriteMode(repo);
   const { blobSha } = await client.writeFile({
     path: toPath,
     content: current.raw,
