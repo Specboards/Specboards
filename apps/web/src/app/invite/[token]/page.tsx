@@ -61,6 +61,11 @@ const PROBLEM_COPY: Record<
     body: (email, current) =>
       `This invitation was sent to ${email}, but you're signed in as ${current}. Sign in with ${email} to accept it.`,
   },
+  email_unverified: {
+    title: "Verify your email first",
+    body: (email) =>
+      `Confirm ${email} using the verification link we sent you, then open this invitation again.`,
+  },
 };
 
 /**

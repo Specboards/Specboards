@@ -1,5 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+import { needsOriginCheck, originAllowed } from "@/lib/csrf-origin";
+
 /** The GitHub App "Setup URL" route, where GitHub lands admins post-install. */
 const GITHUB_SETUP_PATH = "/api/v1/github/setup";
 
@@ -89,7 +91,12 @@ function newNonce(): string {
  * 3. Inject the active org slug (the first path segment) as the `x-org-slug`
  *    request header so server code can resolve the tenant without threading
  *    `params.org` through every page (ADR 0001, D3). Authority still comes from
- *    a validated membership in `requireWorkspaceAccess` — this is only a hint.
+ *    a validated membership in `requireWorkspaceAccess` - this is only a hint.
+ *
+ * 4. Refuse a cross-site mutating API request. Here rather than in each route
+ *    because it has to hold for all ~70 of them and a per-route check is a list
+ *    somebody forgets to add to. See `lib/csrf-origin.ts` for the rule and why
+ *    an absent `Origin` is allowed.
  */
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
@@ -124,6 +131,24 @@ export function middleware(req: NextRequest) {
     const url = req.nextUrl.clone();
     url.pathname = GITHUB_SETUP_PATH;
     return NextResponse.redirect(url);
+  }
+
+  // Before anything else that costs work: a refused request should not have a
+  // nonce minted for it or headers assembled.
+  if (needsOriginCheck(req.method, pathname)) {
+    const expected = (process.env.APP_URL ?? process.env.BETTER_AUTH_URL)?.trim() ?? null;
+    const requestHost =
+      req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? null;
+    if (!originAllowed(req.headers.get("origin"), expected, requestHost)) {
+      return NextResponse.json(
+        {
+          error:
+            "This request came from another site. If you are using the API, " +
+            "send an API key and no Origin header.",
+        },
+        { status: 403 },
+      );
+    }
   }
 
   const nonce = newNonce();
