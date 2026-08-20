@@ -51,10 +51,13 @@ describe.skipIf(!DB_URL)("OAuth connection grants", () => {
   let resolveMcpAuth: typeof import("./rpc").resolveMcpAuth;
   let handleMcpMessage: typeof import("./rpc").handleMcpMessage;
 
-  function request(token: string): Request {
+  function request(token: string, orgSlug?: string): Request {
     return new Request("https://app.example.test/api/mcp", {
       method: "POST",
-      headers: { authorization: `Bearer ${token}` },
+      headers: {
+        authorization: `Bearer ${token}`,
+        ...(orgSlug ? { "x-org-slug": orgSlug } : {}),
+      },
     });
   }
 
@@ -154,6 +157,68 @@ describe.skipIf(!DB_URL)("OAuth connection grants", () => {
     const [consentRow] = await sql`select 1 from oauth_consents
       where user_id = ${userId} and client_id = ${clients.legacy}`;
     expect(consentRow).toBeUndefined();
+  });
+
+  describe("which workspace the connection acts in", () => {
+    // F14. `orgSlugFromRequest(req) ?? binding.slug` let a caller-supplied
+    // header beat the workspace recorded on the consent screen. Membership was
+    // still checked, so this was never cross-user escalation, but the grant
+    // travelled: scopes approved on a screen naming one workspace applied to
+    // another's data on a dialog the user never saw for it. The binding is now
+    // the authority.
+
+    it("accepts a header that agrees with the binding", async () => {
+      // Not ignored, confirmed. A client that redundantly sends the correct
+      // slug keeps working, which is why this refuses on disagreement rather
+      // than dropping the header on the floor.
+      const auth = await resolveMcpAuth(request(tokens.full, workspace.slug));
+      expect(auth.ok).toBe(true);
+      if (!auth.ok) return;
+      expect(auth.ctx.scope?.workspaceId).toBe(workspace.id);
+    });
+
+    it("resolves to the binding's workspace when no header is sent", async () => {
+      const auth = await resolveMcpAuth(request(tokens.full));
+      expect(auth.ok).toBe(true);
+      if (!auth.ok) return;
+      expect(auth.ctx.scope?.workspaceId).toBe(workspace.id);
+    });
+
+    it("refuses a header naming a different workspace", async () => {
+      const auth = await resolveMcpAuth(request(tokens.full, "some-other-org"));
+      expect(auth.ok).toBe(false);
+      if (auth.ok) return;
+      // Not `unauthenticated`: reconnecting with the same divergent header
+      // would land in exactly the same place, so sending the client back
+      // through OAuth would be a loop rather than a fix.
+      expect(auth.unauthenticated).toBe(false);
+      // Names both workspaces, because the operator of a misconfigured client
+      // needs to know which one it asked for and which one it may have.
+      expect(auth.message).toContain(workspace.slug);
+      expect(auth.message).toContain("some-other-org");
+    });
+
+    it("refuses even when the user really is a member of the other workspace", async () => {
+      // The case that made this a finding rather than a nuisance. Membership
+      // was always checked, so the old code only ever reached workspaces the
+      // user belonged to; what it did not check was whether they had consented
+      // for THAT one. Here they have joined a second workspace and never
+      // connected this agent to it.
+      const other = { id: randomUUID(), slug: `grant-other-${suffix}` };
+      await sql`insert into workspaces (id, name, slug)
+        values (${other.id}, 'Other', ${other.slug})`;
+      await sql`insert into members (workspace_id, user_id, role)
+        values (${other.id}, ${userId}, 'owner')`;
+      try {
+        const auth = await resolveMcpAuth(request(tokens.full, other.slug));
+        expect(auth.ok).toBe(false);
+        if (auth.ok) return;
+        expect(auth.message).toContain(other.slug);
+      } finally {
+        await sql`delete from members where workspace_id = ${other.id}`;
+        await sql`delete from workspaces where id = ${other.id}`;
+      }
+    });
   });
 
   it("refuses an OAuth token with no binding row at all", async () => {
