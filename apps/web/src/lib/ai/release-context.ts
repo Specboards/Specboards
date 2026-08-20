@@ -48,6 +48,7 @@
 import type { ContextField } from "./item-context";
 import { proposalInstructions } from "./proposals";
 import { skillTask, type SkillDef } from "./skills";
+import { FENCE_RULE, fenceValue } from "./fence";
 
 /** One item in the release, as the prompt names it. */
 export interface ReleaseContextItem {
@@ -496,18 +497,22 @@ function renderPrompt(
   rules: string,
   task: string | null = null,
 ): string {
+  // Fenced, like the item prompt. It matters more here: a portfolio release
+  // spans products, so the person who typed an item's title need not be the
+  // person reading the notes drafted from it, and may not be able to see the
+  // other products in the release at all.
   const rendered = fields.map((f) => {
     const note = f.truncated
       ? " (shortened; you have not been shown every item in this release)"
       : "";
-    return f.value.includes("\n")
-      ? `${f.label}${note}:\n${f.value}`
-      : `${f.label}${note}: ${f.value}`;
+    return `${f.label}${note}:\n${fenceValue(f.value)}`;
   });
   // Role, then what you may and may not do, then the job, then the thing
   // itself. The same order as the item prompt, and for the same reason: the
   // rule that must survive is the one saying nothing here is saved, and
   // instructions that follow a long document are the first a small model loses.
-  const head = task ? `${ROLE}\n\n${rules}\n\n${task}` : `${ROLE}\n\n${rules}`;
+  const head = task
+    ? `${ROLE}\n\n${rules}\n\n${FENCE_RULE}\n\n${task}`
+    : `${ROLE}\n\n${rules}\n\n${FENCE_RULE}`;
   return `${head}\n\n---\n\n${rendered.join("\n\n")}`;
 }

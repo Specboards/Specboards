@@ -32,6 +32,7 @@
 import { breakdownInstructions } from "./breakdown";
 import { PROPOSAL_INSTRUCTIONS } from "./proposals";
 import { skillTask, type SkillDef } from "./skills";
+import { FENCE_RULE, fenceValue } from "./fence";
 
 /** One labelled thing that goes into the prompt, and into the disclosure. */
 export interface ContextField {
@@ -330,12 +331,13 @@ function renderPrompt(
   rules: string,
   task: string | null = null,
 ): string {
+  // Every value is fenced, not just the long ones. A title or a tag is typed by
+  // a person exactly as a description is, and fencing only the obvious field
+  // teaches a reader that the unfenced ones are ours, which is the opposite of
+  // true. See `./fence.ts` for what this does and does not buy.
   const rendered = fields.map((f) => {
     const note = f.truncated ? " (shortened; you have not been shown all of it)" : "";
-    // Multi-line values read better as a block than as "Label: line1 line2".
-    return f.value.includes("\n")
-      ? `${f.label}${note}:\n${f.value}`
-      : `${f.label}${note}: ${f.value}`;
+    return `${f.label}${note}:\n${fenceValue(f.value)}`;
   });
   // The rules go above the item, not below it: instructions that follow a long
   // document are the ones a small model loses track of first, and the rule it
@@ -346,6 +348,8 @@ function renderPrompt(
   // now, then the thing itself. A skill that came first would be read as
   // permission to do whatever it describes, which is exactly the rule that must
   // survive contact with a team's own wording.
-  const head = task ? `${ROLE}\n\n${rules}\n\n${task}` : `${ROLE}\n\n${rules}`;
+  const head = task
+    ? `${ROLE}\n\n${rules}\n\n${FENCE_RULE}\n\n${task}`
+    : `${ROLE}\n\n${rules}\n\n${FENCE_RULE}`;
   return `${head}\n\n---\n\n${rendered.join("\n\n")}`;
 }
