@@ -169,10 +169,25 @@ describe("tools/list", () => {
     expect(await listedTools(authed([]))).toHaveLength(TOOLS.length);
   });
 
-  it("advertises everything when the caller is unauthenticated", async () => {
-    // The 401 challenge is the route's job; an unauthenticated client still
-    // needs to see the surface it is being asked to sign in for.
+  it("advertises nothing when the caller is unauthenticated", async () => {
+    // Reversed deliberately (F17). This used to assert the whole registry, on
+    // the reasoning that a client still needs to see the surface it is being
+    // asked to sign in for. That reasoning does not hold up: the 401 challenge
+    // is what tells a client to sign in, and it carries no tool list. Handing
+    // an unidentified caller a map of every operation the product supports
+    // bought nothing and disclosed the shape of the API.
+    //
+    // Calls were always refused, so this was never a grant. It is still worth
+    // closing: the list names features, and the names are informative.
     const anon: McpAuth = { ok: false, unauthenticated: true, message: "nope" };
-    expect(await listedTools(anon)).toHaveLength(TOOLS.length);
+    expect(await listedTools(anon)).toHaveLength(0);
+  });
+
+  it("advertises nothing when auth resolves to an error that is not a challenge", async () => {
+    // The other half of `!auth.ok`: a caller who authenticated but could not be
+    // resolved to a workspace. Same answer, and worth its own case because the
+    // old short-circuit covered both and it would be easy to fix one.
+    const stuck: McpAuth = { ok: false, unauthenticated: false, message: "nope" };
+    expect(await listedTools(stuck)).toHaveLength(0);
   });
 });

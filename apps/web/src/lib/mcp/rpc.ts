@@ -788,8 +788,16 @@ export async function handleMcpMessage(
       // not offered a tool it will be refused on. Convenience, not the gate:
       // tools/call re-checks, because a client may call a name it was never
       // offered.
+      //
+      // Fails closed. This used to read `!auth.ok || toolAllowedByScope(...)`,
+      // so a caller whose authentication could not be resolved was shown the
+      // entire registry. Calls were still refused, making it a disclosure of
+      // the tool surface rather than a grant of it, but a list of every
+      // operation the product supports is a map worth withholding from someone
+      // who has not identified themselves. An unresolvable caller now sees
+      // nothing, which is also the honest answer to "what may I call".
       return ok(id, {
-        tools: TOOLS.filter((t) => !auth.ok || toolAllowedByScope(t, auth.ctx)).map(
+        tools: TOOLS.filter((t) => auth.ok && toolAllowedByScope(t, auth.ctx)).map(
           (t) => ({
             name: t.name,
             description: t.description,

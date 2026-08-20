@@ -88,6 +88,7 @@ describe("the tool registry", () => {
       update_goal: "goals:write",
       delete_goal: "goals:write",
       link_goal: "goals:write",
+      unlink_goal: "goals:write",
       create_key_result: "key-results:write",
       update_key_result: "key-results:write",
       delete_key_result: "key-results:write",
@@ -170,6 +171,7 @@ describe("the tool registry", () => {
         "update_key_result",
         "delete_key_result",
         "link_goal",
+        "unlink_goal",
       ]),
     );
   });
