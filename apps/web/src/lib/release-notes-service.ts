@@ -472,6 +472,11 @@ export async function startReleaseTurn(
           // this right (`feature`, resolved before its stream).
           baseSha: context.notesVersion,
           skillKey: skill?.key ?? null,
+          // Same guard as the item path: notes too long to send whole were
+          // shortened, and a whole-document replacement drafted from the first
+          // 6,000 characters deletes the rest. The prompt already asks for no
+          // rewrite in that case; this is what makes it true.
+          canPropose: context.canPropose,
         },
       ),
     };

@@ -698,6 +698,96 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
       expect(turn.content).toContain("BEGIN PROPOSED SPEC");
     });
 
+    it("refuses to record a proposal when the description was too long to send whole", async () => {
+      // F12. When a description exceeds BODY_CHAR_LIMIT it is shortened before
+      // being sent and the prompt asks for no rewrite. That instruction was the
+      // entire guard, and the stated target deployment is small self-hosted
+      // models, which are exactly the ones that ignore a negative instruction.
+      // So: an over-long item, a model that emits the block anyway, and the
+      // assertion that nothing acceptable is stored.
+      const { BODY_CHAR_LIMIT } = await import("./ai/item-context");
+      const longBody = `# Long\n\n${"x".repeat(BODY_CHAR_LIMIT + 1)}`;
+
+      const { getStore } = await import("./store");
+      const store = await getStore();
+      const big = await store.createFeature(
+        {
+          title: "Too long to rewrite",
+          level: "epic",
+          productId: openProduct,
+          details: longBody,
+        },
+        asOwner,
+      );
+
+      answerFrames = [
+        "Here is a tighter version.\n\n",
+        "<<<BEGIN PROPOSED SPEC>>>\n",
+        "# Long\n\nMuch shorter now.\n",
+        "<<<END PROPOSED SPEC>>>",
+      ];
+      const outcome = await ask(asOwner, big.specId, "Tighten this up.");
+      const turn = outcome.turns![1]!;
+
+      // No proposal survives to the panel, and no Accept button with it.
+      expect(turn.proposal).toBeNull();
+      expect(turn.content).not.toContain("BEGIN PROPOSED SPEC");
+      expect(turn.content).not.toContain("Much shorter now.");
+
+      // The prose the model wrote is kept: it answered the question, and only
+      // the unusable edit is removed.
+      expect(turn.content).toContain("Here is a tighter version.");
+      expect(turn.content).toContain("too long to send to the model in full");
+
+      // Nothing recorded in the row either, so a later accept has nothing to
+      // find even if the panel were coaxed into asking.
+      const [row] = await sql<{ base: string | null; content: string }[]>`
+        select proposal_base_sha as base, content from assistant_messages
+        where id = ${turn.id}`;
+      expect(row!.base).toBeNull();
+      expect(row!.content).not.toContain("BEGIN PROPOSED SPEC");
+
+      // And the description is untouched.
+      const [item] = await sql<{ details: string }[]>`
+        select details from features where workspace_id = ${ws} and spec_id = ${big.specId}`;
+      expect(item!.details).toBe(longBody);
+    });
+
+    it("refuses an accept when the description grew past the limit after drafting", async () => {
+      // The belt to the persist-time braces. A proposal drafted while the
+      // description still fitted can be accepted a day later, by which time it
+      // may not: applying it would delete everything past the cut. The document
+      // is grown between the draft and the accept, which the persist guard
+      // cannot see.
+      const turn = await propose();
+      expect(turn.proposal).not.toBeNull();
+
+      // Grown past the limit AND the recorded base moved to match, so the
+      // staleness guard passes and this test is about the length rule alone.
+      // Without the second update `assertNotStale` fires first, which is
+      // correct behaviour and would make this assertion pass for the wrong
+      // reason.
+      const { BODY_CHAR_LIMIT } = await import("./ai/item-context");
+      const grown = "y".repeat(BODY_CHAR_LIMIT + 1);
+      await sql`update features set details = ${grown}
+        where workspace_id = ${ws} and spec_id = ${specId}`;
+      await sql`update assistant_messages set proposal_base_sha = ${svc.contentVersion(grown)}
+        where id = ${turn.id}`;
+
+      await expect(
+        proposals.acceptProposal(db, asOwner, specId, turn.id),
+      ).rejects.toBeInstanceOf(proposals.ProposalTooLongError);
+
+      // Refused before the claim, so the proposal is still actionable once
+      // somebody shortens the description.
+      const [row] = await sql<{ outcome: string | null }[]>`
+        select proposal_outcome as outcome from assistant_messages where id = ${turn.id}`;
+      expect(row!.outcome).toBeNull();
+
+      await sql`update features set details = ${ITEM_BODY}
+        where workspace_id = ${ws} and spec_id = ${specId}`;
+    });
+
     it("applies to the item once a person accepts it", async () => {
       const turn = await propose();
       const result = await proposals.acceptProposal(db, asOwner, specId, turn.id);
