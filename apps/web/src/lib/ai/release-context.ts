@@ -226,6 +226,17 @@ const TOO_LONG_TO_PROPOSE = [
 export const NOTES_CHAR_LIMIT = 6_000;
 
 /**
+ * Whether the existing notes were small enough to send whole.
+ *
+ * The single definition, shared by prompt assembly, the persist path and the
+ * accept path. The item side has the same rule in `bodyFitsWhole`; both exist
+ * because the limits differ, not because the reasoning does.
+ */
+export function notesFitWhole(notes: string | null | undefined): boolean {
+  return (notes ?? "").trim().length <= NOTES_CHAR_LIMIT;
+}
+
+/**
  * Assemble the context for one release.
  *
  * Absent values are omitted rather than sent as "none", for the reason the item
@@ -269,10 +280,9 @@ export function assembleReleaseContext(
   // the absence of this says, and a field saying so is a line in the disclosure
   // claiming we sent something we did not.
   const notes = input.notesBody.trim();
-  let sawWholeNotes = true;
+  const sawWholeNotes = notesFitWhole(notes);
   if (notes) {
-    const cut = notes.length > NOTES_CHAR_LIMIT;
-    sawWholeNotes = !cut;
+    const cut = !sawWholeNotes;
     fields.push({
       label: "Current release notes",
       value: cut ? notes.slice(0, NOTES_CHAR_LIMIT) : notes,

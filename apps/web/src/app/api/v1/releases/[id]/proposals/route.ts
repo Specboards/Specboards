@@ -10,6 +10,7 @@ import {
   ProposalNotFoundError,
   ProposalSettledError,
   ProposalStaleError,
+  ProposalTooLongError,
 } from "@/lib/assistant-proposals";
 import { getAppDb } from "@/lib/db";
 
@@ -107,6 +108,12 @@ export async function POST(req: Request, { params }: Params) {
       );
     }
     if (err instanceof ProposalInvalidError) {
+      return Response.json({ error: err.message }, { status: 422 });
+    }
+    // 422 rather than 409: nothing raced, the document is simply too long for a
+    // whole-document rewrite to be safe, and retrying changes nothing until it
+    // is shortened. The message says that.
+    if (err instanceof ProposalTooLongError) {
       return Response.json({ error: err.message }, { status: 422 });
     }
     throw err;

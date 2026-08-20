@@ -101,6 +101,18 @@ export const BODY_CHAR_LIMIT = 8_000;
 /** Enough to show the shape of a decomposition; a long list stops informing. */
 export const CHILD_LIMIT = 40;
 
+/**
+ * Whether a description was small enough to send whole.
+ *
+ * The single definition of that question, used both when assembling the prompt
+ * and when deciding whether a proposal may be recorded or accepted. Two copies
+ * of this rule that drift apart is exactly how a proposal drafted from a
+ * shortened document gets an Accept button.
+ */
+export function bodyFitsWhole(body: string | null | undefined): boolean {
+  return (body ?? "").trim().length <= BODY_CHAR_LIMIT;
+}
+
 function truncate(text: string, limit: number): { value: string; truncated: boolean } {
   if (text.length <= limit) return { value: text, truncated: false };
   return { value: text.slice(0, limit), truncated: true };
@@ -185,7 +197,9 @@ export function assembleItemContext(
   const fields = buildFields(input);
 
   // A shortened description cannot be safely rewritten; see TOO_LONG_TO_PROPOSE.
-  const sawWholeBody = !fields.some((f) => f.label === "Description" && f.truncated);
+  // Derived from the same predicate the persist and accept paths use, rather
+  // than from the assembled fields, so all three agree by construction.
+  const sawWholeBody = bodyFitsWhole(input.body);
   const rules = !input.canEdit
     ? READ_ONLY
     : sawWholeBody

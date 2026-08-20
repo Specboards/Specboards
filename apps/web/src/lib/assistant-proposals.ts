@@ -9,7 +9,9 @@ import {
 
 import { asUser } from "@/lib/db-scope";
 
+import { bodyFitsWhole } from "@/lib/ai/item-context";
 import { parseAnswer } from "@/lib/ai/proposals";
+import { notesFitWhole } from "@/lib/ai/release-context";
 import {
   canEditItem,
   contentVersion,
@@ -66,6 +68,41 @@ export class ProposalInvalidError extends Error {}
 export class ProposalSettledError extends Error {}
 /** The caller may read the item but not change it. Routes map to 403. */
 export class ProposalForbiddenError extends Error {}
+
+/**
+ * The document is too long to have been sent to the model whole, so a rewrite
+ * of it cannot be applied. Routes map to 422.
+ *
+ * The persist path already refuses to record such a proposal, so reaching this
+ * means the document grew past the limit between the draft and the accept, or
+ * the row predates that guard. Either way applying it would delete everything
+ * past the cut, which is not a thing to do because of when it was drafted.
+ */
+export class ProposalTooLongError extends Error {}
+
+/**
+ * Refuse an accept whose document could not have been sent whole.
+ *
+ * Belt and braces beside the persist-time refusal in `persistTurns`, and not
+ * redundant with it: an accept can happen a day later, and a description that
+ * fitted when the draft was made may not fit now. The rule is one predicate
+ * (`bodyFitsWhole` / `notesFitWhole`) used in three places, so the prompt, the
+ * record and the accept cannot disagree about it.
+ */
+function assertSentWhole(fits: boolean, subject: "item" | "release"): void {
+  if (fits) return;
+  throw new ProposalTooLongError(
+    subject === "item"
+      ? "This item's description is too long to send to the model in full, so a " +
+        "suggested rewrite cannot be applied: it would delete everything past " +
+        "the point the assistant could see. Shorten the description, or edit it " +
+        "directly."
+      : "These release notes are too long to send to the model in full, so a " +
+        "suggested rewrite cannot be applied: it would delete everything past " +
+        "the point the assistant could see. Shorten the notes, or edit them " +
+        "directly.",
+  );
+}
 
 /**
  * The document moved after the proposal was drafted, so accepting it would
@@ -459,6 +496,7 @@ export async function acceptReleaseProposal(
 
   // Before the claim, so a refused accept leaves the proposal actionable.
   assertNotStale(baseSha, release.releaseNotesBody ?? "", "release");
+  assertSentWhole(notesFitWhole(release.releaseNotesBody), "release");
 
   const { resolvedAt } = await claim(db, scope, messageId, "accepted");
 
@@ -542,6 +580,10 @@ export async function acceptProposal(
   if (feature.isDbNative) {
     assertNotStale(baseSha, feature.content ?? "", "item");
   }
+  // Applies to a spec as well as a card: a blob sha lets a merge resolve
+  // *concurrent* edits, and says nothing about whether the model ever saw the
+  // whole document.
+  assertSentWhole(bodyFitsWhole(feature.content), "item");
 
   // Claimed before the write, so a double-click cannot apply the same text
   // twice. Released if the write does not happen, so a refusal at the repo

@@ -624,7 +624,7 @@ export async function startAssistantTurn(
 
   const { feature, featureId } = await resolveAssistantItem(db, scope, specId);
   const canEdit = await canEditItem(scope, feature);
-  const { systemPrompt } = await buildContext(scope, feature, canEdit, skill);
+  const { systemPrompt, canPropose } = await buildContext(scope, feature, canEdit, skill);
   const history = await readThread(db, scope, {
     kind: "item",
     featureId,
@@ -722,10 +722,43 @@ export async function startAssistantTurn(
           // version fills that gap without a schema change.
           baseSha: feature.blobSha ?? contentVersion(feature.content ?? ""),
           skillKey: skill?.key ?? null,
+          canPropose,
         },
       ),
     };
   }
+}
+
+/**
+ * What the thread says instead, when a proposal had to be withheld.
+ *
+ * The model's prose is kept: it was asked a question and it answered one, and
+ * throwing that away because the last part of the reply was unusable would lose
+ * work the reader wanted. What is removed is the edit, and the note says so in
+ * the reader's terms rather than reporting an internal limit, so somebody
+ * looking at the card understands why there is no Accept button.
+ *
+ * Worth knowing: the raw answer, markers and all, has already streamed to the
+ * browser by the time this runs. The panel replaces what it rendered with these
+ * turns when the stream finishes, so the withheld version is what survives a
+ * reload and what any later accept can reach. A proposal that flickers past
+ * during streaming and is not there afterwards is a smaller problem than one
+ * that can be clicked.
+ */
+function withheldProposalAnswer(prose: string, subject: ThreadSubject): string {
+  const what =
+    subject.kind === "release"
+      ? "These release notes are"
+      : "This item's description is";
+  const fix =
+    subject.kind === "release"
+      ? "Shorten the notes, or edit them directly."
+      : "Shorten the description, or edit it directly.";
+  const note =
+    `_${what} too long to send to the model in full, so the assistant was ` +
+    "working from a shortened copy. A suggested rewrite was not kept, because " +
+    `applying one drafted from part of the document would delete the rest. ${fix}_`;
+  return prose ? `${prose}\n\n${note}` : note;
 }
 
 /** Write the pair and return them as the browser will see them. */
@@ -737,14 +770,45 @@ export async function persistTurns(
   answer: string,
   model: string | null,
   usage: TokenUsage,
-  opts: { baseSha: string | null; skillKey: string | null },
+  opts: {
+    baseSha: string | null;
+    skillKey: string | null;
+    /**
+     * Whether the document was sent to the model whole. False means it was
+     * shortened first, and a rewrite drafted from a shortened document deletes
+     * everything past the cut.
+     */
+    canPropose: boolean;
+  },
 ): Promise<AssistantMessageView[]> {
   const now = new Date();
+
+  // ── Refusing a proposal the model was told not to make ────────────────────
+  // When the description was too long to send whole, the prompt says so and
+  // asks for no rewrite (TOO_LONG_TO_PROPOSE). That was the entire guard, and a
+  // sentence in a prompt is not a guard: the stated target deployment is small
+  // self-hosted models, which are precisely the ones that ignore a negative
+  // instruction. A model that emitted the block anyway got its proposal stored
+  // live, with a valid base sha, behind an Accept button that would have
+  // deleted everything past the 8,000th character.
+  //
+  // Same class as the staleness bug fixed in #286, and the same answer: a
+  // proposal that is unsafe to accept is refused where it is recorded, not
+  // discouraged where it is asked for.
+  //
+  // The block is stripped from the stored text rather than merely left
+  // unrecorded, because whether a turn carries a proposal is derived by parsing
+  // the content (see `toView`). Leaving the markers in would keep the Accept
+  // button and only remove the base sha, which is worse: an accept with no
+  // staleness guard at all.
+  const parsed = parseAnswer(answer);
+  const withheld = parsed.proposal !== null && !opts.canPropose;
+  const stored = withheld ? withheldProposalAnswer(parsed.prose, subject) : answer;
+
   // Recorded only when the answer actually carries a proposal, so a sha on a
   // row always means "this text was drafted against that version" rather than
   // "this turn happened while the spec looked like that".
-  const proposalBaseSha =
-    parseAnswer(answer).proposal === null ? null : opts.baseSha;
+  const proposalBaseSha = withheld || parsed.proposal === null ? null : opts.baseSha;
   // Both rows and the author lookup in one scoped transaction: a thread that
   // recorded the question but not the answer would replay as an unanswered
   // prompt for ever.
@@ -768,7 +832,7 @@ export async function persistTurns(
         workspaceId: scope.workspaceId,
         ...subjectColumns(subject),
         role: "assistant",
-        content: answer,
+        content: stored,
         // The person who asked, so every row in the thread names someone
         // accountable for it. `role` is what says a model wrote this one.
         authorId: scope.userId,
