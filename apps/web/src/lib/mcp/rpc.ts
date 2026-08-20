@@ -212,9 +212,44 @@ export async function resolveMcpAuth(req: Request): Promise<McpAuth> {
       };
     }
 
-    const orgSlug = orgSlugFromRequest(req) ?? binding.slug;
+    // ── The binding decides which workspace, not the client ───────────────────
+    // This used to be `orgSlugFromRequest(req) ?? binding.slug`, which let a
+    // caller-supplied `x-org-slug` header beat the workspace recorded on the
+    // consent screen. Membership was still checked, so it was never
+    // cross-user escalation, but two things went wrong anyway:
+    //
+    // - The grant travelled. Scopes approved on a screen naming org A applied
+    //   to org B's data as soon as the header said B, on a dialog the user was
+    //   never shown for B. Consent constrained capability without constraining
+    //   reach, which is less than the screen promises.
+    // - Connected agents rendered `binding.slug`, so the UI said A while the
+    //   client worked in B.
+    //
+    // Refusing on disagreement rather than ignoring the header: a client that
+    // redundantly sends the correct slug keeps working and is confirmed rather
+    // than silently overridden, and the `org_ambiguous` branch below advises
+    // setting this very header, which would be advice this path no longer
+    // honoured. A specific error also tells the operator of a divergent client
+    // exactly what is wrong, where a silent override told them nothing.
+    const requestedSlug = orgSlugFromRequest(req);
+    if (requestedSlug && requestedSlug !== binding.slug) {
+      logSecurityEvent("mcp-org-slug-mismatch", {
+        clientId: oauth.clientId,
+        requested: requestedSlug,
+        authorized: binding.slug,
+      });
+      return {
+        ok: false,
+        unauthenticated: false,
+        message:
+          `This connection was authorized for the "${binding.slug}" workspace, ` +
+          `but the request asked for "${requestedSlug}". Remove the x-org-slug ` +
+          `header, or connect again from the workspace you want to work in.`,
+      };
+    }
+
     const resolved = db
-      ? await resolveApiMembership(db, oauth.userId, orgSlug)
+      ? await resolveApiMembership(db, oauth.userId, binding.slug)
       : null;
     if (!resolved || !resolved.ok) {
       const message =

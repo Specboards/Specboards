@@ -27,7 +27,14 @@ export type SecurityEvent =
   // The connection is retired here and must consent again, so a burst of these
   // is the one-time migration of legacy connections working, and a steady
   // trickle afterwards is worth looking at.
-  | "mcp-connection-ungranted";
+  | "mcp-connection-ungranted"
+  // An MCP OAuth call whose `x-org-slug` header named a different workspace
+  // from the one its consent screen recorded. Refused rather than honoured, so
+  // this is the guard working. Expected to be silent: every connection in
+  // production today belongs to a user with exactly one workspace, so a
+  // divergent header could not have resolved anyway. A steady stream means a
+  // client is setting the header deliberately and its operator needs telling.
+  | "mcp-org-slug-mismatch";
 
 export function logSecurityEvent(
   event: SecurityEvent,
