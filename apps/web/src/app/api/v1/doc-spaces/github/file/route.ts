@@ -113,7 +113,7 @@ export async function PUT(req: Request) {
 
   try {
     const path = validateDocPath(body.path);
-    const { commitSha, blobSha } = await saveGithubDocFile(
+    const { commitSha, blobSha, pullRequest } = await saveGithubDocFile(
       db,
       scope.workspaceId,
       space,
@@ -121,7 +121,16 @@ export async function PUT(req: Request) {
       body.content,
       body.blobSha,
     );
-    return Response.json({ ok: true, path, commitSha, blobSha });
+    // `pullRequest` present means the repo is review-gated and the edit is
+    // proposed rather than applied. Passed through so the caller can say so;
+    // omitted entirely on a direct-write repo rather than sent as null.
+    return Response.json({
+      ok: true,
+      path,
+      commitSha,
+      blobSha,
+      ...(pullRequest ? { pullRequest } : {}),
+    });
   } catch (err) {
     return errorResponse(err);
   }

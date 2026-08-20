@@ -1,6 +1,8 @@
+import { resolveWriteMode } from "@specboards/core";
 import { and, eq, repositories, type Database } from "@specboards/db";
+import { matchesAnyGlob } from "@specboards/git";
 
-import { resolveRepoClient, type RepoRecord } from "@/lib/github-sync";
+import { repoGlobs, resolveRepoClient, type RepoRecord } from "@/lib/github-sync";
 import { DocError, type DocSpace } from "@/lib/store/types";
 
 /**
@@ -11,7 +13,27 @@ import { DocError, type DocSpace } from "@/lib/store/types";
  * scans do no spec work).
  */
 
-/** Every Markdown file in the repo; the UI derives folders from the paths. */
+/**
+ * Where doc pages live in a docs repo.
+ *
+ * Every Markdown file in the repo; the UI derives folders from the paths.
+ *
+ * ── Why this is not simply narrowed ────────────────────────────────────────
+ * A docs area IS the repository it points at: a customer's docs repo puts its
+ * pages wherever it likes, at the root as often as not, so confining this to a
+ * `docs/` subtree would break the ordinary arrangement. What must not happen is
+ * `docs:write` reaching a SPEC, which the standard author grant carries and
+ * which the scope model reserves for `specs:write`. That is enforced by
+ * {@link assertNotSpecPath} against the repository's own spec globs, so the two
+ * scopes stay disjoint however the repository is laid out.
+ *
+ * Not exploitable today: no deployment points a doc area at a repo that also
+ * holds specs. It is fixed now because a customer plausibly will want exactly
+ * that (one repo holding the specs and the documentation around them), and the
+ * moment they do, the default author grant quietly crosses the boundary. A
+ * confinement change costs nothing while there is no such data; changing the
+ * meaning of a grant a customer already relies on costs a great deal.
+ */
 const DOC_GLOBS = ["**/*.md"];
 
 export interface GithubDocFile {
@@ -168,6 +190,32 @@ export function validateDocPath(raw: unknown): string {
 }
 
 /**
+ * Refuse a doc write that lands on a path this repository treats as a spec.
+ *
+ * The scope model has two separate grants: `docs:write` for the narrative
+ * areas, `specs:write` for the specs themselves. Those are different powers,
+ * and a spec write goes down a different road (`spec-content.ts`) with its own
+ * authorization, audit record and review gate. `docs:write` is carried by the
+ * standard author grant, so if a doc area and a spec tree share a repository,
+ * the doc tools become a way to rewrite specs without any of that.
+ *
+ * Enforced against the REPOSITORY'S OWN spec globs rather than a hardcoded
+ * `specs/` prefix, so it follows a customer who configured theirs differently,
+ * and stays correct if they change it later.
+ *
+ * By construction rather than by configuration: this holds even when the doc
+ * area is pointed at the whole tree, which is the ordinary case.
+ */
+function assertNotSpecPath(repo: RepoRecord, path: string): void {
+  if (!matchesAnyGlob(path, repoGlobs(repo))) return;
+  throw new DocError(
+    `${path} is a spec file in this repository, so it cannot be edited as a doc ` +
+      `page. Edit it as a spec instead, which applies that repository's review ` +
+      `settings and records the change against the work item.`,
+  );
+}
+
+/**
  * Read ONE Markdown file from the docs repo. `loadGithubDocs` fetches every
  * file for the editor's tree; an agent editing a single page needs only that
  * page plus its current sha (the guard `saveGithubDocFile` wants back), so
@@ -201,14 +249,32 @@ export async function saveGithubDocFile(
   path: string,
   content: string,
   expectedBlobSha: string | null,
-): Promise<{ commitSha: string; blobSha: string }> {
+): Promise<{
+  commitSha: string;
+  blobSha: string;
+  /**
+   * Set when the repository takes changes as pull requests. The edit is then
+   * proposed to git and NOT live, which the person who pressed Save has to be
+   * told: the page still shows the old text. Reported rather than dropped,
+   * because "saved" for a change that is only proposed is the same lie
+   * `spec-content.ts` already takes care to avoid.
+   */
+  pullRequest?: { number: number; url: string; created: boolean };
+}> {
   const repo = await requireDocRepo(db, workspaceId, space);
+  assertNotSpecPath(repo, path);
   const client = await resolveRepoClient(db, repo);
+  // The repository's configured mode, not a hardcoded "direct". A repo set to
+  // take changes as pull requests said so about its content; that setting did
+  // not stop applying because the file is a doc page rather than a spec.
+  // `spec-content.ts` has always resolved it, and these helpers not doing so
+  // was a way to commit straight to the default branch of a review-gated repo.
+  const { mode } = resolveWriteMode(repo.config, repo.writeModeOverride);
   return client.writeFile({
     path,
     content,
     message: `docs: update ${path}`,
-    mode: "direct",
+    mode,
     expectedBlobSha,
   });
 }
@@ -222,6 +288,7 @@ export async function deleteGithubDocFile(
   expectedBlobSha: string,
 ): Promise<{ commitSha: string }> {
   const repo = await requireDocRepo(db, workspaceId, space);
+  assertNotSpecPath(repo, path);
   const client = await resolveRepoClient(db, repo);
   return client.deleteFile({
     path,
@@ -244,6 +311,10 @@ export async function renameGithubDocFile(
   toPath: string,
 ): Promise<{ blobSha: string; content: string }> {
   const repo = await requireDocRepo(db, workspaceId, space);
+  // Both ends: a rename must not be a way to read a spec out of the tree, nor
+  // to write one by choosing the destination.
+  assertNotSpecPath(repo, fromPath);
+  assertNotSpecPath(repo, toPath);
   const client = await resolveRepoClient(db, repo);
   let current;
   try {
@@ -251,11 +322,12 @@ export async function renameGithubDocFile(
   } catch {
     throw new DocError("That page no longer exists in the repository.");
   }
+  const { mode } = resolveWriteMode(repo.config, repo.writeModeOverride);
   const { blobSha } = await client.writeFile({
     path: toPath,
     content: current.raw,
     message: `docs: rename ${fromPath} to ${toPath}`,
-    mode: "direct",
+    mode,
     expectedBlobSha: null,
   });
   await client.deleteFile({
