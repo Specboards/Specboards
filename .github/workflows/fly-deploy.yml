@@ -49,6 +49,25 @@ jobs:
     concurrency:
       group: fly-deploy-production
     steps:
+      # workflow_dispatch runs against whichever branch was selected, and the
+      # deploy below calls flyctl directly rather than going through
+      # scripts/deploy.sh, which is where the same refusal lives for a human
+      # running it locally. Without this the two paths to production disagree,
+      # and the one with no guard is the one that runs unattended.
+      #
+      # It also protects the AGPL s13 offer: GIT_SHA is baked into the bundle so
+      # /legal links to the exact commit running, and a sha that is not on main
+      # names source a reader may not be able to fetch.
+      #
+      # Failing rather than skipping is deliberate. Adding the ref to the job's
+      # `if:` would have been shorter, but a skipped job reports success and
+      # says nothing, so an operator who dispatched production from a branch
+      # would see a green run and reasonably believe it had deployed.
+      - name: Refuse production from anything but main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Refusing to deploy production from ${GITHUB_REF}. Merge to main first, then dispatch from main (see CLAUDE.md)."
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # master, 2026-04-08
       - run: flyctl deploy --remote-only --build-arg GIT_SHA="${GITHUB_SHA::7}"
