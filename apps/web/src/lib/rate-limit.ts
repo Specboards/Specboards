@@ -125,6 +125,24 @@ export async function enforceQuota(
 /** Quota definitions for the expensive endpoints (per workspace). */
 export const QUOTAS = {
   scan: { op: "scan", limit: 20, windowSec: 300 },
+  /**
+   * A repository's share of the push-webhook sync path, keyed per connected
+   * repository rather than per caller.
+   *
+   * The scan and import routes have had quotas since they were written; this
+   * path had none, and it is the one an outsider can drive: anyone with push
+   * access to a connected repository decides how often `syncRepository` runs,
+   * and each run walks the tree and reads every matching blob. Per repository
+   * rather than per IP because the caller is always GitHub, so an IP key would
+   * put every customer in one bucket.
+   *
+   * 60 syncs per 5 minutes is far above a human pushing (and the handler
+   * already skips the reconcile entirely when nothing under the repo's globs
+   * changed), and low enough that a push loop cannot spend an installation's
+   * whole GitHub rate limit. A refusal is a 429, which GitHub retries with
+   * backoff, so a burst is delayed rather than dropped.
+   */
+  githubPushSync: { op: "github-push-sync", limit: 60, windowSec: 300 },
   import: { op: "import", limit: 10, windowSec: 1800 },
   starterSpec: { op: "starter-spec", limit: 20, windowSec: 3600 },
   connectRepo: { op: "connect-repo", limit: 30, windowSec: 3600 },

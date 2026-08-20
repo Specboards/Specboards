@@ -26,6 +26,33 @@ import {
 const BLOB_READ_CONCURRENCY = 8;
 
 /**
+ * Ceilings on what one scan or sync of a repository may pull in.
+ *
+ * Neither existed. `matchingBlobs` returned every match in the tree and
+ * `listSpecFiles` then read all of them, so the work a single connected
+ * repository could cause was bounded only by that repository. A repo with fifty
+ * thousand matching Markdown files, whether by accident or by someone connecting
+ * one on purpose, meant fifty thousand blob reads, the whole content resident,
+ * and the installation's GitHub rate limit spent in one call.
+ *
+ * These are limits on OUR appetite, not a judgement about the customer's repo:
+ * both are far above any real spec tree (the largest in-house repo has tens),
+ * and both are reported loudly rather than silently truncating, so an operator
+ * whose repository is genuinely this large finds out instead of quietly losing
+ * files. That is the same posture the existing `data.truncated` warning takes.
+ */
+const MAX_MATCHING_FILES = 5_000;
+const MAX_TOTAL_BLOB_BYTES = 50 * 1024 * 1024; // 50 MB
+
+/** Raised when a repository is too large to scan in one pass. */
+export class RepoTooLargeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RepoTooLargeError";
+  }
+}
+
+/**
  * `items.map(fn)` with at most `limit` in flight, preserving input order.
  *
  * Workers pull from a shared cursor rather than being handed a fixed slice, so
@@ -257,13 +284,36 @@ export class GitHubRepoClient implements GitRepoClient {
     }
 
     const matches = compileGlobs(globs);
-    return data.tree.filter(
+    const matched = data.tree.filter(
       (entry): entry is typeof entry & { path: string; sha: string } =>
         entry.type === "blob" &&
         typeof entry.path === "string" &&
         typeof entry.sha === "string" &&
         matches(entry.path),
     );
+
+    // Refused rather than truncated. Silently taking the first 5,000 would mean
+    // a repository that syncs most of its specs and drops the rest with nothing
+    // to say which, which is a worse outcome than a clear failure an operator
+    // can act on.
+    if (matched.length > MAX_MATCHING_FILES) {
+      throw new RepoTooLargeError(
+        `${this.owner}/${this.repo}@${this.ref} matches ${matched.length.toLocaleString()} files, ` +
+          `above the ${MAX_MATCHING_FILES.toLocaleString()} Specboards will scan in one pass. ` +
+          `Narrow the spec globs for this repository, or split it.`,
+      );
+    }
+
+    const totalBytes = matched.reduce((sum, entry) => sum + (entry.size ?? 0), 0);
+    if (totalBytes > MAX_TOTAL_BLOB_BYTES) {
+      throw new RepoTooLargeError(
+        `${this.owner}/${this.repo}@${this.ref} matches ${(totalBytes / 1024 / 1024).toFixed(1)} MB ` +
+          `of files, above the ${MAX_TOTAL_BLOB_BYTES / 1024 / 1024} MB Specboards will read in one ` +
+          `pass. Narrow the spec globs for this repository, or split it.`,
+      );
+    }
+
+    return matched;
   }
 
   /**

@@ -28,10 +28,59 @@ function isMissingTable(err: unknown): boolean {
   return typeof err === "object" && err !== null && "code" in err && err.code === "42P01";
 }
 
+/**
+ * Memoized decrypt of the stored credentials.
+ *
+ * ── Why this is worth caching ──────────────────────────────────────────────
+ * The GitHub webhook endpoint is unauthenticated by construction: it has to
+ * read the credentials before it can verify the signature that decides whether
+ * the request is genuine. So every request, real or not, costs a database read,
+ * and when a `github_app` row exists it costs THREE `decryptSecret` calls, each
+ * of which runs `scryptSync`. That function is deliberately expensive, which is
+ * the right property for a password hash and the wrong one to run three times
+ * per unauthenticated request: it hands anyone who can reach the URL a cheap way
+ * to spend a lot of our CPU.
+ *
+ * Not live for us, verified rather than assumed: production holds **zero**
+ * `github_app` rows (checked directly against `specboard-prod-db`), so
+ * credentials come from Fly secrets and the cheap env path answers. 89 webhook
+ * deliveries have arrived, so the endpoint is genuinely exercised, just not on
+ * the expensive branch. It is live for any self-host that used the in-app
+ * manifest flow, which is the flow we recommend.
+ *
+ * ── Why a TTL rather than caching for ever ─────────────────────────────────
+ * Credentials change: `saveCredentials` replaces them during setup, and an
+ * operator may rotate a webhook secret. A permanent cache would serve the old
+ * webhook secret until the next deploy, which looks exactly like GitHub
+ * suddenly sending bad signatures. `saveCredentials` clears the cache directly
+ * for the in-process case, and the TTL bounds the window for the other machine
+ * in a two-machine deployment.
+ *
+ * The cache holds decrypted secrets in memory. That is not a new exposure:
+ * `getGithubApp` already keeps the same material in a live App instance, and
+ * anything that can read this process's heap can read the decryption key from
+ * its environment anyway.
+ */
+const CREDENTIALS_TTL_MS = 60_000;
+let credentialsCache: {
+  value: GithubAppCredentials | null;
+  expiresAt: number;
+} | null = null;
+
+/** Drop the memoized credentials. Exported for tests and for saves. */
+export function clearCredentialsCache(): void {
+  credentialsCache = null;
+}
+
 /** Load + decrypt the stored App credentials, or null if none saved. */
 export async function getStoredCredentials(
   db: Database,
 ): Promise<GithubAppCredentials | null> {
+  const now = Date.now();
+  if (credentialsCache && credentialsCache.expiresAt > now) {
+    return credentialsCache.value;
+  }
+
   let rows;
   try {
     rows = await db
@@ -46,15 +95,20 @@ export async function getStoredCredentials(
     throw err;
   }
   const row = rows[0];
-  if (!row) return null;
-  return {
-    appId: row.appId,
-    slug: row.slug,
-    clientId: row.clientId,
-    clientSecret: row.clientSecret ? decryptSecret(row.clientSecret) : null,
-    privateKey: decryptSecret(row.privateKey),
-    webhookSecret: decryptSecret(row.webhookSecret),
-  };
+  // The absence of a row is cached too, which is the case that matters for us:
+  // it is the one production takes on every webhook delivery.
+  const value: GithubAppCredentials | null = row
+    ? {
+        appId: row.appId,
+        slug: row.slug,
+        clientId: row.clientId,
+        clientSecret: row.clientSecret ? decryptSecret(row.clientSecret) : null,
+        privateKey: decryptSecret(row.privateKey),
+        webhookSecret: decryptSecret(row.webhookSecret),
+      }
+    : null;
+  credentialsCache = { value, expiresAt: now + CREDENTIALS_TTL_MS };
+  return value;
 }
 
 /** Encrypt + persist App credentials, replacing any existing ones (singleton). */
@@ -62,6 +116,10 @@ export async function saveCredentials(
   db: Database,
   creds: GithubAppCredentials,
 ): Promise<void> {
+  // Cleared before the write as well as after: a read racing this save should
+  // miss the cache and go to the database rather than be served a value that is
+  // about to be wrong.
+  clearCredentialsCache();
   await db.delete(githubApp);
   await db.insert(githubApp).values({
     appId: creds.appId,
@@ -71,6 +129,7 @@ export async function saveCredentials(
     privateKey: encryptSecret(creds.privateKey),
     webhookSecret: encryptSecret(creds.webhookSecret),
   });
+  clearCredentialsCache();
 }
 
 /**
