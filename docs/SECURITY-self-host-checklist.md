@@ -233,6 +233,28 @@ private TLS in `docs/GUIDE-self-hosted-model.md`.
       clients: blunter, but not forgeable. On Fly this does not arise, because
       `Fly-Client-IP` is set at the edge and takes precedence.
 
+### Removing someone's access
+
+On a single-tenant deployment (the self-host default) every authenticated user
+belongs to the one workspace, and the app auto-joins them on their first
+request. That is what makes sign-in the only gate you have to manage, and it has
+one consequence worth knowing:
+
+- **Removing a member marks them inactive rather than deleting the row.** The
+  row has to stay, because a deleted one would be recreated by the auto-join on
+  their next page load. They lose all access and their API keys are revoked, and
+  they will still be listed, shown as deactivated. That is the removal working,
+  not a partial one.
+- **Removing access is not the same as removing the account.** They can still
+  sign in; there is simply nothing they can reach. If the account itself should
+  not exist, delete the user in your identity provider or in the database, and
+  bear in mind that authorship records deliberately keep a snapshot of who did
+  what.
+- **If sign-up is open, they can create a new account.** Removal governs *this*
+  account's access. Set `SPECBOARDS_SIGNUP_CODE_REQUIRED` (with a code that is
+  not published anywhere) or restrict sign-up at your identity provider if that
+  matters to you.
+
 ## 9. License notices (AGPL)
 
 - [ ] The app ships an in-app source + license notice at `/legal`, linked from
