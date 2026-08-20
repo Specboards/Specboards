@@ -16,9 +16,22 @@ out/
 *.tsbuildinfo
 
 # Env
+#
+# Everything beginning `.env`, then the examples put back. The list used to be
+# `.env`, `.env.local` and `.env*.local`, which left `.env.production`,
+# `.env.staging` and `.env.test` tracked by default. Nothing had been committed
+# through the gap (history was searched by path), but the shape was wrong: it
+# enumerated the names somebody had thought of rather than the ones they had
+# not.
+#
+# Note what a path search cannot tell us: a secret pasted into a source file and
+# later deleted is still in history and would not show up. `gitleaks detect
+# --log-opts=--all` is the tool for that question, and it is a separate job from
+# this line.
 .env
-.env.local
-.env*.local
+.env.*
+!.env.example
+!.env.*.example
 
 # Playwright E2E (browser artifacts, reports, and the scratch DB/GitHub fixtures)
 test-results/
