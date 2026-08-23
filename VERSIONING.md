@@ -27,10 +27,12 @@ one gets its own version. Before shipping to `app.specboards.ai`:
 
 1. **Pick the bump.** Fix-only since the last release -> patch. New feature ->
    minor. (When in doubt, patch.)
-2. **Bump every package in lockstep.** Set the same new version in all eight
-   `package.json` files (root + `packages/*` + `apps/*`). One value, everywhere.
-3. **Update `CHANGELOG.md`.** Add a dated section for the new version describing
-   what changed, grouped under Added / Changed / Fixed.
+2. **Bump every package in lockstep, and scaffold the changelog:**
+   `pnpm release:prepare 0.1.3`. This sets the same version in all eight
+   `package.json` files (root + `packages/*` + `apps/*`) and inserts a dated
+   `CHANGELOG.md` section. It stops there: it does not commit, tag or push.
+3. **Write the `CHANGELOG.md` section** the previous step scaffolded, grouped
+   under Added / Changed / Fixed. Describe what shipped, not what changed in git.
 4. **Verify green.** `pnpm -w build`, `pnpm -w typecheck`, `pnpm -w test` must
    all pass before the branch is pushed.
 5. **Merge to `main`.** This auto-deploys to test (`test.specboards.ai`). Smoke
@@ -38,10 +40,32 @@ one gets its own version. Before shipping to `app.specboards.ai`:
 6. **Tag the release** on the merged `main` commit and push the tag:
    `git tag -a v0.1.3 -m "v0.1.3" && git push origin v0.1.3`.
 7. **Deploy production.** Run the Fly Deploy workflow with
-   `environment = production` (or `flyctl deploy` against `fly.toml`).
+   `environment = production` (or `pnpm deploy:prod`).
 
 Keep the tag, the `CHANGELOG.md` heading, and the `package.json` version
 identical for a given release.
+
+## This is enforced, not trusted
+
+The list above is not new, and it was skipped eight times: 0.22.0 through 0.25.2
+went out with the repo reading `0.21.0`, and 0.27.0 and 0.27.2 went out with it
+reading `0.26.8`. See the gap notice in [CHANGELOG.md](./CHANGELOG.md).
+
+So step 7 now checks steps 2, 3 and 6 actually happened.
+`scripts/release-guard.sh` refuses a production deploy unless:
+
+- every workspace package carries the same version;
+- `CHANGELOG.md` has a section for it;
+- a tag `vX.Y.Z` points at **the commit being deployed** (not merely somewhere
+  in history, which an old tag would satisfy).
+
+It runs on both routes to production, so neither is weaker than the other: from
+`scripts/deploy.sh` for a local `pnpm deploy:prod`, and as a step in the
+`deploy-production` job of `.github/workflows/fly-deploy.yml`. Test deploys are
+deliberately exempt: test exists to look at work in progress, most of which will
+never carry a version.
+
+Run `pnpm release:check` any time to see where a release currently stands.
 
 ## Publishing the CLI to npm
 

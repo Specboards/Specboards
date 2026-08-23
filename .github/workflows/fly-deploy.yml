@@ -68,7 +68,19 @@ jobs:
         run: |
           echo "::error::Refusing to deploy production from ${GITHUB_REF}. Merge to main first, then dispatch from main (see CLAUDE.md)."
           exit 1
+      # fetch-depth 0 so the tags are present: the release guard below asks
+      # whether one points at this commit, and a shallow checkout has none, so
+      # it would fail every release rather than only the unreleased ones.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      # The same refusal scripts/deploy.sh applies for a human, for the same
+      # reason the main-only check above is duplicated: the unattended path is
+      # the one that must not be the weaker of the two. A version that is not
+      # bumped in lockstep, described in the changelog and tagged here is not a
+      # release, and production has shipped eight of those already.
+      - name: Refuse production of an unreleased version
+        run: ./scripts/release-guard.sh
       - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # master, 2026-04-08
       - run: flyctl deploy --remote-only --build-arg GIT_SHA="${GITHUB_SHA::7}"
         env:

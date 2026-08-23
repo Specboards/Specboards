@@ -5,12 +5,22 @@ All notable changes to Specboard are recorded here. The format is based on
 [Semantic Versioning](https://semver.org/). See [VERSIONING.md](./VERSIONING.md)
 for how and when the version is bumped.
 
-> **Gap notice.** Versions **0.22.0 through 0.25.2** shipped to production
-> without a changelog entry, a version bump, or a git tag: the repo sat at
-> `0.21.0` across six releases while `app.specboards.ai` moved well past it, and
-> tagging stopped at `v0.19.0`. Their contents are recorded in each release's
-> notes in Specboards, not here. This file resumes at 0.25.5; backfilling the
-> gap is a deliberate decision that has not been taken yet.
+> **Gap notice.** Versions **0.22.0 through 0.25.2**, and again **0.27.0** and
+> **0.27.2**, shipped to production without a changelog entry, a version bump,
+> or a git tag. The repo sat at `0.21.0` across the first six releases while
+> `app.specboards.ai` moved well past it, and tagging stopped at `v0.19.0`;
+> after this notice was written it happened twice more, with the repo reading
+> `0.26.8` while production ran 0.27.2. Their contents are recorded in each
+> release's notes in Specboards, not here. Backfilling the gap is a deliberate
+> decision that has not been taken yet, and it is not a small one: no commit
+> carries those version numbers, so a tag added now would name source whose
+> `package.json` disagrees with it.
+>
+> **This can no longer recur.** `scripts/release-guard.sh` refuses a production
+> deploy whose version is not bumped in lockstep, described here, and tagged on
+> the commit being shipped. It runs on both routes to production, the local
+> `pnpm deploy:prod` and the dispatched workflow. See
+> [VERSIONING.md](./VERSIONING.md).
 
 ## [0.26.8] - 2026-08-18
 
