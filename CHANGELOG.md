@@ -25,6 +25,71 @@ for how and when the version is bumped.
 > `pnpm deploy:prod` and the dispatched workflow. See
 > [VERSIONING.md](./VERSIONING.md).
 
+## [0.27.3] - 2026-08-23
+
+Key results you can actually maintain, and a release process that checks itself.
+
+### Added
+
+- **Key results can be edited, and reordered.** Until now a key result was
+  write-once apart from its current value: get the title, the metric or the
+  target wrong and the only way out was to remove it and start again, losing
+  every check-in you had recorded against it. Each one now carries an **Edit**
+  control that opens the same fields you filled in to create it and closes again
+  when you save, and **↑ / ↓** controls to put them in the order you want to read
+  them in. The arrows are ordinary buttons rather than a drag handle, so they
+  work from the keyboard and announce which key result they move.
+
+### Changed
+
+- **A yes-no key result stops asking for numbers.** Choosing "Yes-no" used to
+  leave the From and To boxes on screen and refuse to save until you invented
+  values for them, which is a strange thing to ask about a question whose only
+  answers are yes and no. There is no target to set any more, because the target
+  of "did we do it" is always yes. You say whether it **starts** as Yes or No,
+  which matters when you are recording something that was already true when you
+  wrote it down, and you check it off with a Yes/No control rather than by typing
+  a number. Worth knowing: a yes-no key result that starts as Yes reads 100% from
+  the moment it is created.
+- **New key results are measured as a percentage by default**, since most are
+  proportions, and the menu now names the options (Percentage, Number, Yes-no)
+  instead of showing the internal keys. If you create key results through the API
+  or an agent, nothing changes: leaving the metric unstated still means a number,
+  exactly as before.
+
+### Fixed
+
+- **Key results stop rearranging themselves.** They are stored with an order and
+  that order was never being read, so the sequence you saw was whatever the
+  database happened to return, and it could change. In practice, checking in a
+  number against one key result could silently reshuffle the others. Both places
+  that read them (a goal, and the Goals page) are fixed, so the two agree.
+
+### Security
+
+- **Two dependencies carrying security-relevant code are now current.** `undici`,
+  which implements the defence that stops a server-side fetch being redirected to
+  a private address, moved from 6.28.0 to 8.10.0; that defence is now covered by
+  a test over HTTPS, the transport it actually runs on, where previously only the
+  plaintext path was covered. `octokit` moved from 4.1.4 to 5.0.5.
+- **A build that would ship with its scripts blocked now fails the test suite.**
+  Our content-security policy admits only scripts carrying a per-request token,
+  and the tests checked that the policy was correct without ever checking that
+  the page's scripts carried the token. A build could therefore pass every test
+  and be inert in the browser. The tests now read what the browser receives, and
+  confirm the page comes alive under the policy.
+
+### Internal
+
+- **A production deploy is refused unless it is a real release.** Eight releases
+  reached production without a version bump, a changelog entry or a tag, twice
+  after the changelog gained a notice describing exactly that. The rule no longer
+  depends on remembering it: `scripts/release-guard.sh` checks all three at the
+  moment of deploying and refuses otherwise, on both routes to production.
+  `pnpm release:prepare <version>` does the bump and scaffolds this section, so
+  the enforced path is also the quickest one. This release is the first through
+  it.
+
 ## [0.26.8] - 2026-08-18
 
 ### Added
