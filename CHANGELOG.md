@@ -11,10 +11,13 @@ for how and when the version is bumped.
 > `app.specboards.ai` moved well past it, and tagging stopped at `v0.19.0`;
 > after this notice was written it happened twice more, with the repo reading
 > `0.26.8` while production ran 0.27.2. Their contents are recorded in each
-> release's notes in Specboards, not here. Backfilling the gap is a deliberate
-> decision that has not been taken yet, and it is not a small one: no commit
-> carries those version numbers, so a tag added now would name source whose
-> `package.json` disagrees with it.
+> release's notes in Specboards, not here.
+>
+> **The gap will not be backfilled** (decided 2026-08-23). No commit carries
+> those version numbers, so a tag added now would name source whose
+> `package.json` disagrees with it, and an entry written now would be
+> reconstructed rather than recorded. The Specboards release notes are the
+> record for that stretch; this file is the record from the next release on.
 >
 > **This can no longer recur.** `scripts/release-guard.sh` refuses a production
 > deploy whose version is not bumped in lockstep, described here, and tagged on
