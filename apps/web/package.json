@@ -44,7 +44,7 @@
     "tailwind-merge": "^3.6.0",
     "tailwindcss": "^4.3.3",
     "tiptap-markdown": "^0.9.0",
-    "undici": "^6.28.0"
+    "undici": "^8.10.0"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.12.1",
