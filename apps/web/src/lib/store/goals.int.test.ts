@@ -144,6 +144,46 @@ describe.skipIf(!OWNER_URL)("goals, key results and linkage (store + RLS)", () =
     ).rejects.toThrow(/must differ/);
   });
 
+  it("refuses a patch that would leave start equal to target", async () => {
+    // The create path has always rejected a degenerate span. The patch path
+    // matters more now that the UI can edit these fields rather than only the
+    // current value: the check lives in the store, which validates the measure
+    // as it WILL be rather than the patch in isolation, so changing one side to
+    // collide with the other is caught even though neither field is wrong
+    // on its own.
+    const goal = await store.createGoal(
+      { title: "Editable", productId: product.alpha },
+      asOwner,
+    );
+    const created = await store.createKeyResult(
+      goal.id,
+      { title: "Actives", startValue: 10, targetValue: 20 },
+      asOwner,
+    );
+    const krId = created.keyResults[0]!.id;
+
+    await expect(
+      store.updateKeyResult(krId, { targetValue: 10 }, asOwner),
+    ).rejects.toThrow(/must differ/);
+    await expect(
+      store.updateKeyResult(krId, { startValue: 20 }, asOwner),
+    ).rejects.toThrow(/must differ/);
+
+    // The original is untouched, so a refused edit does not half-apply.
+    const after = (await store.listGoals(asOwner)).find((g) => g.id === goal.id);
+    expect(after!.keyResults[0]!.startValue).toBe(10);
+    expect(after!.keyResults[0]!.targetValue).toBe(20);
+
+    // Switching to yes-no is allowed to collapse the span, because that kind
+    // is exempt: its progress does not come from the distance.
+    const asBoolean = await store.updateKeyResult(
+      krId,
+      { metricKind: "boolean", startValue: 0, targetValue: 1 },
+      asOwner,
+    );
+    expect(asBoolean.keyResults[0]!.metricKind).toBe("boolean");
+  });
+
   it("reads key results in position order, not insertion order", async () => {
     // `position` is assigned on insert and was read by nothing: both goal
     // queries selected key results with no ORDER BY, so display order was

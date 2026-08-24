@@ -222,6 +222,37 @@ function GoalCard({
   const [linking, setLinking] = useState(false);
   const [pending, startTransition] = useTransition();
 
+  /**
+   * Swap a key result with its neighbour by exchanging their `position`
+   * values: two PATCHes rather than one call to a reorder endpoint. The API
+   * already accepts `position`, so this costs no server work, and these lists
+   * are three to five rows.
+   *
+   * What that trades away, stated because it diverges from `replaceSkills`,
+   * which takes the whole ordered set precisely so a client cannot produce an
+   * order nobody can reproduce: the two writes are not atomic. Positions start
+   * as a clean 0..n-1 permutation and a swap preserves that, so only a partial
+   * failure breaks it, and the read side orders by `(position, createdAt)`,
+   * which makes a duplicated position a stable order rather than an arbitrary
+   * one. The failure mode is "the move did not take", not "the list
+   * scrambled", and it is reported rather than left to be noticed.
+   */
+  function moveKeyResult(kr: KeyResultRecord, direction: -1 | 1) {
+    const ordered = goal.keyResults;
+    const from = ordered.findIndex((k) => k.id === kr.id);
+    const neighbour = ordered[from + direction];
+    if (!neighbour) return;
+    startTransition(async () => {
+      try {
+        await updateKeyResult(kr.id, { position: neighbour.position });
+        await updateKeyResult(neighbour.id, { position: kr.position });
+        router.refresh();
+      } catch (err) {
+        handleError(err, router);
+      }
+    });
+  }
+
   const levelLabel = new Map(levels.map((l) => [l.key, l.label]));
   // Nesting states the parent for every goal drawn under one, so this only
   // covers the case nesting cannot: a parent outside the current scope, whose
@@ -340,8 +371,15 @@ function GoalCard({
             measurement to make it checkable.
           </p>
         ) : null}
-        {goal.keyResults.map((kr) => (
-          <KeyResultRow key={kr.id} kr={kr} canEdit={canEdit} />
+        {goal.keyResults.map((kr, i) => (
+          <KeyResultRow
+            key={kr.id}
+            kr={kr}
+            canEdit={canEdit}
+            onMove={moveKeyResult}
+            canMoveUp={i > 0}
+            canMoveDown={i < goal.keyResults.length - 1}
+          />
         ))}
         {addingKr ? (
           <KeyResultForm goalId={goal.id} onDone={() => setAddingKr(false)} />
@@ -407,13 +445,33 @@ function GoalCard({
 function KeyResultRow({
   kr,
   canEdit,
+  onMove,
+  canMoveUp,
+  canMoveDown,
 }: {
   kr: KeyResultRecord;
   canEdit: boolean;
+  /** Swap this key result with its neighbour in that direction. */
+  onMove: (kr: KeyResultRecord, direction: -1 | 1) => void;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [value, setValue] = useState(String(kr.currentValue));
+  const [editing, setEditing] = useState(false);
+
+  // An "Edit" affordance that expands in place and collapses on save or
+  // cancel, rather than a row of always-open inputs.
+  if (editing) {
+    return (
+      <KeyResultForm
+        goalId={kr.goalId}
+        kr={kr}
+        onDone={() => setEditing(false)}
+      />
+    );
+  }
 
   function commitValue(next: number) {
     if (!Number.isFinite(next) || next === kr.currentValue) {
@@ -499,25 +557,67 @@ function KeyResultRow({
         {kr.progress === null ? "—" : `${kr.progress}%`}
       </span>
       {canEdit ? (
-        <Button
-          size="inline"
-          variant="link"
-          onClick={onRemove}
-          disabled={pending}
-          className="text-destructive"
-        >
-          Remove
-        </Button>
+        <>
+          {/* Buttons rather than a drag surface: these lists are three to five
+              rows, and buttons are keyboard-operable without extra work. Each
+              is labelled with the key result it moves, since "Move up" alone
+              tells a screen reader nothing about which row it is on. */}
+          <Button
+            size="inline"
+            variant="link"
+            aria-label={`Move ${kr.title} up`}
+            onClick={() => onMove(kr, -1)}
+            disabled={pending || !canMoveUp}
+          >
+            ↑
+          </Button>
+          <Button
+            size="inline"
+            variant="link"
+            aria-label={`Move ${kr.title} down`}
+            onClick={() => onMove(kr, 1)}
+            disabled={pending || !canMoveDown}
+          >
+            ↓
+          </Button>
+          <Button
+            size="inline"
+            variant="link"
+            onClick={() => setEditing(true)}
+            disabled={pending}
+          >
+            Edit
+          </Button>
+          <Button
+            size="inline"
+            variant="link"
+            onClick={onRemove}
+            disabled={pending}
+            className="text-destructive"
+          >
+            Remove
+          </Button>
+        </>
       ) : null}
     </div>
   );
 }
 
+/**
+ * The key result field set, in both the modes it is used in.
+ *
+ * One component rather than two because the fields are the same fields: what a
+ * key result is does not change between writing it and correcting it, and two
+ * copies would have drifted the first time one of them gained a field. Passing
+ * `kr` switches it from creating to editing that key result.
+ */
 function KeyResultForm({
   goalId,
+  kr,
   onDone,
 }: {
   goalId: string;
+  kr?: KeyResultRecord;
   onDone: () => void;
 }) {
   const router = useRouter();
@@ -526,9 +626,10 @@ function KeyResultForm({
   // Which fields are even shown depends on this, so the form has to know it as
   // state rather than read it off the FormData at submit time.
   const [metricKind, setMetricKind] = useState<MetricKind>(
-    DEFAULT_NEW_METRIC_KIND,
+    kr?.metricKind ?? DEFAULT_NEW_METRIC_KIND,
   );
   const isBoolean = metricKind === "boolean";
+  const editing = kr !== undefined;
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -558,12 +659,25 @@ function KeyResultForm({
     startTransition(async () => {
       setError(null);
       try {
-        await createKeyResult(goalId, {
-          title,
-          metricKind,
-          startValue,
-          ...(targetValue === undefined ? {} : { targetValue }),
-        });
+        if (editing) {
+          // Editing sends the target explicitly even for a yes-no key result,
+          // because a PATCH is a diff: switching an existing measured key
+          // result to yes-no has to move its target too, and omitting the
+          // field would leave the old one in place.
+          await updateKeyResult(kr.id, {
+            title,
+            metricKind,
+            startValue,
+            targetValue: targetValue ?? 1,
+          });
+        } else {
+          await createKeyResult(goalId, {
+            title,
+            metricKind,
+            startValue,
+            ...(targetValue === undefined ? {} : { targetValue }),
+          });
+        }
         onDone();
         router.refresh();
       } catch (err) {
@@ -580,7 +694,12 @@ function KeyResultForm({
           <span className="text-xs font-medium text-muted-foreground">
             Key result
           </span>
-          <Input name="title" className="h-8" placeholder="e.g. Weekly actives" />
+          <Input
+            name="title"
+            className="h-8"
+            placeholder="e.g. Weekly actives"
+            defaultValue={kr?.title ?? ""}
+          />
         </label>
         <label className="block space-y-1">
           <span className="text-xs font-medium text-muted-foreground">
@@ -604,7 +723,11 @@ function KeyResultForm({
             <span className="text-xs font-medium text-muted-foreground">
               Starts as
             </span>
-            <Select name="startsYes" defaultValue="no" className="h-8">
+            <Select
+              name="startsYes"
+              defaultValue={kr?.startValue ? "yes" : "no"}
+              className="h-8"
+            >
               <option value="no">No</option>
               <option value="yes">Yes</option>
             </Select>
@@ -615,11 +738,23 @@ function KeyResultForm({
               <span className="text-xs font-medium text-muted-foreground">
                 From
               </span>
-              <Input name="startValue" type="number" step="any" defaultValue={0} className="h-8" />
+              <Input
+                name="startValue"
+                type="number"
+                step="any"
+                defaultValue={kr?.startValue ?? 0}
+                className="h-8"
+              />
             </label>
             <label className="block space-y-1">
               <span className="text-xs font-medium text-muted-foreground">To</span>
-              <Input name="targetValue" type="number" step="any" className="h-8" />
+              <Input
+                name="targetValue"
+                type="number"
+                step="any"
+                defaultValue={kr?.targetValue ?? ""}
+                className="h-8"
+              />
             </label>
           </div>
         )}
@@ -632,7 +767,13 @@ function KeyResultForm({
       {error ? <p className="text-xs text-destructive">{error}</p> : null}
       <div className="flex items-center gap-2">
         <Button type="submit" size="sm" disabled={pending}>
-          {pending ? "Adding…" : "Add key result"}
+          {pending
+            ? editing
+              ? "Saving…"
+              : "Adding…"
+            : editing
+              ? "Save changes"
+              : "Add key result"}
         </Button>
         <Button type="button" size="sm" variant="ghost" onClick={onDone}>
           Cancel
