@@ -144,6 +144,110 @@ describe.skipIf(!OWNER_URL)("goals, key results and linkage (store + RLS)", () =
     ).rejects.toThrow(/must differ/);
   });
 
+  it("refuses a patch that would leave start equal to target", async () => {
+    // The create path has always rejected a degenerate span. The patch path
+    // matters more now that the UI can edit these fields rather than only the
+    // current value: the check lives in the store, which validates the measure
+    // as it WILL be rather than the patch in isolation, so changing one side to
+    // collide with the other is caught even though neither field is wrong
+    // on its own.
+    const goal = await store.createGoal(
+      { title: "Editable", productId: product.alpha },
+      asOwner,
+    );
+    const created = await store.createKeyResult(
+      goal.id,
+      { title: "Actives", startValue: 10, targetValue: 20 },
+      asOwner,
+    );
+    const krId = created.keyResults[0]!.id;
+
+    await expect(
+      store.updateKeyResult(krId, { targetValue: 10 }, asOwner),
+    ).rejects.toThrow(/must differ/);
+    await expect(
+      store.updateKeyResult(krId, { startValue: 20 }, asOwner),
+    ).rejects.toThrow(/must differ/);
+
+    // The original is untouched, so a refused edit does not half-apply.
+    const after = (await store.listGoals(asOwner)).find((g) => g.id === goal.id);
+    expect(after!.keyResults[0]!.startValue).toBe(10);
+    expect(after!.keyResults[0]!.targetValue).toBe(20);
+
+    // Switching to yes-no is allowed to collapse the span, because that kind
+    // is exempt: its progress does not come from the distance.
+    const asBoolean = await store.updateKeyResult(
+      krId,
+      { metricKind: "boolean", startValue: 0, targetValue: 1 },
+      asOwner,
+    );
+    expect(asBoolean.keyResults[0]!.metricKind).toBe("boolean");
+  });
+
+  it("reads key results in position order, not insertion order", async () => {
+    // `position` is assigned on insert and was read by nothing: both goal
+    // queries selected key results with no ORDER BY, so display order was
+    // whatever Postgres returned. Unstable, not merely arbitrary, since a row
+    // can relocate on UPDATE: checking in one number could reshuffle the list
+    // under the person doing it.
+    //
+    // Asserting that insertion order comes back is NOT a test of this: an
+    // unordered scan over a handful of rows returns insertion order by luck,
+    // and that version of this test duly passed against the unfixed code. So
+    // the positions below are set to DISAGREE with insertion order, which is
+    // the actual contract: `position` decides, not arrival.
+    //
+    // Worth knowing what this can and cannot promise. It pins the contract, and
+    // it fails whenever the read returns a different order. It is not a
+    // reliable reproduction of the bug, because the unfixed behaviour is
+    // *nondeterministic* rather than wrong-in-a-fixed-way: with an unordered
+    // query the answer depends on heap layout, and this row count happens to
+    // come back correct fairly often. That unpredictability is the bug, not a
+    // weakness of the test.
+    const goal = await store.createGoal(
+      { title: "Ordered measures", productId: product.alpha },
+      asOwner,
+    );
+    const inserted = ["Alpha", "Bravo", "Charlie"];
+    let created = goal;
+    for (const title of inserted) {
+      created = await store.createKeyResult(
+        goal.id,
+        { title, startValue: 0, targetValue: 100 },
+        asOwner,
+      );
+    }
+    expect(created.keyResults).toHaveLength(3);
+
+    // Reverse the positions. Insertion order is now the wrong answer.
+    const byTitle = new Map(created.keyResults.map((k) => [k.title, k.id]));
+    await store.updateKeyResult(byTitle.get("Alpha")!, { position: 2 }, asOwner);
+    await store.updateKeyResult(byTitle.get("Bravo")!, { position: 1 }, asOwner);
+    const reordered = await store.updateKeyResult(
+      byTitle.get("Charlie")!,
+      { position: 0 },
+      asOwner,
+    );
+
+    const expected = ["Charlie", "Bravo", "Alpha"];
+    // hydrateGoal, the read behind an individual goal.
+    expect(reordered.keyResults.map((k) => k.title)).toEqual(expected);
+
+    // listGoals is the Goals page and reads key results with its own query, so
+    // it needs asserting separately: fixing one and not the other would leave
+    // the two surfaces disagreeing about the same goal.
+    const listed = (await store.listGoals(asOwner)).find((g) => g.id === goal.id);
+    expect(listed!.keyResults.map((k) => k.title)).toEqual(expected);
+
+    // And a plain check-in still does not disturb that order.
+    const afterCheckIn = await store.updateKeyResult(
+      byTitle.get("Bravo")!,
+      { currentValue: 42 },
+      asOwner,
+    );
+    expect(afterCheckIn.keyResults.map((k) => k.title)).toEqual(expected);
+  });
+
   it("averages several key results for the goal's progress", async () => {
     const goal = await store.createGoal(
       { title: "Two measures", productId: product.alpha },

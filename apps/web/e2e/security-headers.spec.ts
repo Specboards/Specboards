@@ -60,4 +60,60 @@ test.describe("security headers", () => {
     expect(b).toBeTruthy();
     expect(a).not.toBe(b);
   });
+
+  /**
+   * The header is not the policy; the page is.
+   *
+   * Everything above asserts the CSP *string*, and a build that emits a perfect
+   * header and zero nonce attributes satisfies all of it while being completely
+   * non-interactive: with `strict-dynamic` and no `'unsafe-inline'`, a script
+   * tag missing its nonce is simply refused. That is the shape of
+   * vercel/next.js#96063, which we dodge by building with `--webpack`, but the
+   * blind spot is general and would not warn us about the next regression
+   * either. These two tests close it by looking at what the browser received.
+   */
+  test("every script tag in the document carries the nonce from the header", async ({
+    page,
+  }) => {
+    const res = await page.request.get("/sign-in");
+    const nonce = (res.headers()["content-security-policy"] ?? "").match(
+      /script-src[^;]*'nonce-([^']+)'/,
+    )?.[1];
+    expect(nonce, "a script-src nonce in the header").toBeTruthy();
+
+    const html = await res.text();
+    // Every <script> that carries code has to be nonced. `src`-less and
+    // `src`-ful alike: strict-dynamic refuses both without one.
+    const scripts = [...html.matchAll(/<script\b([^>]*)>/g)].map((m) => m[1]!);
+    expect(scripts.length, "the page ships script tags at all").toBeGreaterThan(0);
+
+    const unnonced = scripts.filter((attrs) => !attrs.includes(`nonce="${nonce}"`));
+    expect(
+      unnonced,
+      `every <script> must carry nonce="${nonce}"; these did not`,
+    ).toEqual([]);
+  });
+
+  test("the page hydrates under the nonce policy", async ({ page }) => {
+    // The assertion above proves the tags are nonced; this proves the browser
+    // accepted them and React came alive. A silently dead bundle fails here
+    // rather than in production, which is the whole point of the pair.
+    const violations: string[] = [];
+    page.on("console", (msg) => {
+      const text = msg.text();
+      if (/Content Security Policy|Refused to (execute|apply|load)/i.test(text)) {
+        violations.push(text);
+      }
+    });
+
+    await page.goto("/sign-in");
+    // An interaction that can only work post-hydration: React must have
+    // attached handlers for a controlled input to hold what is typed.
+    const email = page.getByLabel(/email/i).first();
+    await email.waitFor({ state: "visible" });
+    await email.fill("hydration@probe.test");
+    await expect(email).toHaveValue("hydration@probe.test");
+
+    expect(violations, "no CSP violations logged while loading").toEqual([]);
+  });
 });

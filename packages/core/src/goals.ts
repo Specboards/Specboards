@@ -28,6 +28,37 @@ export function isMetricKind(value: unknown): value is MetricKind {
 }
 
 /**
+ * How a metric kind is named to a person. The keys are how the value is stored
+ * and how the API names it; those are not the words to put in a menu, and a
+ * dropdown reading "number / percent / boolean" was asking the reader to know
+ * the schema. Lives here beside {@link goalStatusLabel} and {@link formatMetric}
+ * so every surface naming a metric kind uses the same word for it.
+ */
+export function metricKindLabel(kind: MetricKind): string {
+  switch (kind) {
+    case "number":
+      return "Number";
+    case "percent":
+      return "Percentage";
+    case "boolean":
+      return "Yes-no";
+  }
+}
+
+/**
+ * What a new key result is measured as unless the author says otherwise.
+ *
+ * Deliberately NOT the same as the column default. `key_results.metric_kind`
+ * defaults to `number`, and so does the API when `metricKind` is absent;
+ * changing that would silently reinterpret the payload of every existing API
+ * and MCP client that omits the field, which is a breaking change to fix a form
+ * default. A suggestion to a human looking at a screen and a contract with a
+ * program are allowed to differ, and here they should: most key results are
+ * proportions, but a caller that says nothing has told us nothing.
+ */
+export const DEFAULT_NEW_METRIC_KIND: MetricKind = "percent";
+
+/**
  * The owner's confidence in a goal. Deliberately separate from computed
  * progress: a goal can be 80% of the way to its target and still be off track
  * (the remaining 20% is the hard part, or the period is nearly over), and a

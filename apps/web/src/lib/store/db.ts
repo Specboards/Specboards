@@ -3681,7 +3681,13 @@ export class DbStore implements FeatureStore {
       const ws = scope!.workspaceId;
       const [goalRows, krRows, access, productById] = await Promise.all([
         tx.select().from(goals).where(eq(goals.workspaceId, ws)),
-        tx.select().from(keyResults).where(eq(keyResults.workspaceId, ws)),
+        // Same ordering as hydrateGoal, and for the same reason. This is the
+        // list page, so an unordered read here is the one most people see.
+        tx
+          .select()
+          .from(keyResults)
+          .where(eq(keyResults.workspaceId, ws))
+          .orderBy(asc(keyResults.position), asc(keyResults.createdAt)),
         this.accessIn(tx, scope!),
         this.productVisibilityIn(tx, ws),
       ]);
@@ -4162,7 +4168,18 @@ export class DbStore implements FeatureStore {
   ): Promise<GoalRecord> {
     const ws = scope.workspaceId;
     const [krs, linkRows, access, productById] = await Promise.all([
-      tx.select().from(keyResults).where(eq(keyResults.goalId, goal.id)),
+      // Ordered by the column that exists for it. `position` is set on insert
+      // and was never read here, which left display order to whatever Postgres
+      // returned: not merely arbitrary but unstable, since a row can move on
+      // UPDATE, so checking in one key result's value could reshuffle the list
+      // under the person doing it. `createdAt` breaks ties because nothing
+      // stops two rows sharing a position, and a tie without a tiebreaker is
+      // the same instability in a smaller place.
+      tx
+        .select()
+        .from(keyResults)
+        .where(eq(keyResults.goalId, goal.id))
+        .orderBy(asc(keyResults.position), asc(keyResults.createdAt)),
       tx
         .select({ status: features.status, productId: features.productId })
         .from(goalLinks)

@@ -48,7 +48,7 @@ import type {
   GoalInput,
   GoalPatch,
   GoalRecord,
-  KeyResultInput,
+  KeyResultCreateBody,
   KeyResultPatch,
   CyclePatch,
   CycleRecord,
@@ -1778,7 +1778,7 @@ export async function deleteGoal(id: string): Promise<void> {
 /** Add a key result; returns the goal with its recomputed progress. */
 export async function createKeyResult(
   goalId: string,
-  input: KeyResultInput,
+  input: KeyResultCreateBody,
 ): Promise<GoalRecord> {
   return goalRequest(
     `/api/v1/goals/${encodeURIComponent(goalId)}/key-results`,
