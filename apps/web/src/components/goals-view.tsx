@@ -32,6 +32,8 @@ import {
   buildGoalTree,
   flattenGoalTree,
   formatMetric,
+  metricKindLabel,
+  DEFAULT_NEW_METRIC_KIND,
   GOAL_STATUSES,
   METRIC_KINDS,
   type GoalContribution,
@@ -413,12 +415,12 @@ function KeyResultRow({
   const [pending, startTransition] = useTransition();
   const [value, setValue] = useState(String(kr.currentValue));
 
-  function commit() {
-    const next = Number(value);
+  function commitValue(next: number) {
     if (!Number.isFinite(next) || next === kr.currentValue) {
       setValue(String(kr.currentValue));
       return;
     }
+    setValue(String(next));
     startTransition(async () => {
       try {
         await updateKeyResult(kr.id, { currentValue: next });
@@ -428,6 +430,11 @@ function KeyResultRow({
         handleError(err, router);
       }
     });
+  }
+
+  /** The free-text path: parse what was typed, then commit it. */
+  function commit() {
+    commitValue(Number(value));
   }
 
   function onRemove() {
@@ -447,11 +454,26 @@ function KeyResultRow({
       <span className="min-w-0 flex-1 truncate" title={kr.title}>
         {kr.title}
       </span>
-      <span className="shrink-0 text-xs text-muted-foreground">
-        {formatMetric(kr.startValue, kr.metricKind)} →{" "}
-        {formatMetric(kr.targetValue, kr.metricKind)}
-      </span>
-      {canEdit ? (
+      {/* A yes-no key result has no span to show: its target is always yes,
+          so "No → Yes" would be a caption saying what the kind already says. */}
+      {kr.metricKind === "boolean" ? null : (
+        <span className="shrink-0 text-xs text-muted-foreground">
+          {formatMetric(kr.startValue, kr.metricKind)} →{" "}
+          {formatMetric(kr.targetValue, kr.metricKind)}
+        </span>
+      )}
+      {canEdit && kr.metricKind === "boolean" ? (
+        <Select
+          aria-label={`Current value for ${kr.title}`}
+          className="h-7 w-20 shrink-0"
+          value={Number(value) ? "1" : "0"}
+          disabled={pending}
+          onChange={(e) => commitValue(Number(e.target.value))}
+        >
+          <option value="0">No</option>
+          <option value="1">Yes</option>
+        </Select>
+      ) : canEdit ? (
         <Input
           aria-label={`Current value for ${kr.title}`}
           className="h-7 w-20 shrink-0"
@@ -501,22 +523,37 @@ function KeyResultForm({
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  // Which fields are even shown depends on this, so the form has to know it as
+  // state rather than read it off the FormData at submit time.
+  const [metricKind, setMetricKind] = useState<MetricKind>(
+    DEFAULT_NEW_METRIC_KIND,
+  );
+  const isBoolean = metricKind === "boolean";
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const data = new FormData(e.currentTarget);
     const title = String(data.get("title") ?? "").trim();
-    const metricKind = String(data.get("metricKind") ?? "number") as MetricKind;
-    const startValue = Number(data.get("startValue") ?? 0);
-    const targetValue = Number(data.get("targetValue") ?? 0);
     if (!title) return setError("Give the key result a title.");
-    if (!Number.isFinite(startValue) || !Number.isFinite(targetValue)) {
-      return setError("Start and target must be numbers.");
-    }
-    if (metricKind !== "boolean" && startValue === targetValue) {
-      return setError(
-        "The target must differ from the starting value: progress is measured as the distance between them.",
-      );
+
+    // A yes-no key result carries a start of yes or no and no target at all;
+    // the server supplies the target, since it is always "yes".
+    const startValue = isBoolean
+      ? data.get("startsYes") === "yes"
+        ? 1
+        : 0
+      : Number(data.get("startValue") ?? 0);
+    const targetValue = isBoolean ? undefined : Number(data.get("targetValue") ?? 0);
+
+    if (!isBoolean) {
+      if (!Number.isFinite(startValue) || !Number.isFinite(targetValue!)) {
+        return setError("Start and target must be numbers.");
+      }
+      if (startValue === targetValue) {
+        return setError(
+          "The target must differ from the starting value: progress is measured as the distance between them.",
+        );
+      }
     }
     startTransition(async () => {
       setError(null);
@@ -525,7 +562,7 @@ function KeyResultForm({
           title,
           metricKind,
           startValue,
-          targetValue,
+          ...(targetValue === undefined ? {} : { targetValue }),
         });
         onDone();
         router.refresh();
@@ -549,31 +586,48 @@ function KeyResultForm({
           <span className="text-xs font-medium text-muted-foreground">
             Measured as
           </span>
-          <Select name="metricKind" defaultValue="number" className="h-8">
+          <Select
+            name="metricKind"
+            value={metricKind}
+            onChange={(e) => setMetricKind(e.target.value as MetricKind)}
+            className="h-8"
+          >
             {METRIC_KINDS.map((k) => (
               <option key={k} value={k}>
-                {k}
+                {metricKindLabel(k)}
               </option>
             ))}
           </Select>
         </label>
-        <div className="grid grid-cols-2 gap-2">
+        {isBoolean ? (
           <label className="block space-y-1">
             <span className="text-xs font-medium text-muted-foreground">
-              From
+              Starts as
             </span>
-            <Input name="startValue" type="number" step="any" defaultValue={0} className="h-8" />
+            <Select name="startsYes" defaultValue="no" className="h-8">
+              <option value="no">No</option>
+              <option value="yes">Yes</option>
+            </Select>
           </label>
-          <label className="block space-y-1">
-            <span className="text-xs font-medium text-muted-foreground">To</span>
-            <Input name="targetValue" type="number" step="any" className="h-8" />
-          </label>
-        </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block space-y-1">
+              <span className="text-xs font-medium text-muted-foreground">
+                From
+              </span>
+              <Input name="startValue" type="number" step="any" defaultValue={0} className="h-8" />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-xs font-medium text-muted-foreground">To</span>
+              <Input name="targetValue" type="number" step="any" className="h-8" />
+            </label>
+          </div>
+        )}
       </div>
       <p className="text-2xs text-muted-foreground">
-        Progress is the distance travelled from &ldquo;From&rdquo; to
-        &ldquo;To&rdquo;, so set From to the real baseline. Decreasing metrics
-        work too: From 8, To 3.
+        {isBoolean
+          ? "A yes-no key result is done or it is not, so there is no target to set. Start it as Yes if it was already true when you wrote it."
+          : "Progress is the distance travelled from “From” to “To”, so set From to the real baseline. Decreasing metrics work too: From 8, To 3."}
       </p>
       {error ? <p className="text-xs text-destructive">{error}</p> : null}
       <div className="flex items-center gap-2">

@@ -808,6 +808,19 @@ export interface KeyResultInput {
   currentValue?: number;
 }
 
+/**
+ * What a caller may POST, as opposed to what the store receives.
+ *
+ * They differ in one field on purpose. The store always needs a concrete
+ * `targetValue`, but a yes-no key result has no target worth asking for, so
+ * `parseKeyResultInput` supplies it and the wire shape leaves it out. Keeping
+ * the store's requirement intact means nothing below the parse layer has to
+ * cope with an absent target.
+ */
+export type KeyResultCreateBody = Omit<KeyResultInput, "targetValue"> & {
+  targetValue?: number;
+};
+
 export type KeyResultPatch = Partial<{
   title: string;
   metricKind: MetricKind;
@@ -919,6 +932,8 @@ export {
   isGoalClosed,
   isGoalStatus,
   keyResultProgress,
+  metricKindLabel,
+  DEFAULT_NEW_METRIC_KIND,
   GOAL_STATUSES,
   METRIC_KINDS,
 } from "@specboards/core";

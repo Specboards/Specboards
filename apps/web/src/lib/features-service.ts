@@ -1970,16 +1970,35 @@ export function parseKeyResultInput(body: unknown): KeyResultInput {
   if (typeof raw.title !== "string" || raw.title.trim() === "") {
     throw new InvalidPatchError("title is required.");
   }
-  const targetValue = parseFiniteNumber(raw.targetValue, "targetValue");
+  const metricKind = "metricKind" in raw ? parseMetricKind(raw.metricKind) : undefined;
+
+  // A yes-no key result has no target worth asking for: the target of "did we
+  // do it" is always yes. `validateKeyResult` has always exempted boolean from
+  // the start-must-differ-from-target rule, but nothing exempted it from
+  // needing the number at all, so the exemption was unreachable through the
+  // form and picking "boolean" still demanded two numbers to get past.
+  //
+  // The start value IS meaningful and is kept: a key result can describe
+  // something already true when it was written. It is a truth value, so only 0
+  // and 1 are accepted; anything else is refused rather than coerced, because
+  // silently reading 7 as "yes" is how a typo becomes a measurement.
+  const isBoolean = metricKind === "boolean";
+  const targetValue = isBoolean
+    ? BOOLEAN_TARGET
+    : parseFiniteNumber(raw.targetValue, "targetValue");
   if (targetValue === null) {
     throw new InvalidPatchError("targetValue is required.");
   }
   const input: KeyResultInput = { title: raw.title.trim(), targetValue };
-  if ("metricKind" in raw) input.metricKind = parseMetricKind(raw.metricKind);
+  if (metricKind !== undefined) input.metricKind = metricKind;
   const startValue = parseFiniteNumber(raw.startValue, "startValue");
   if (startValue !== null) input.startValue = startValue;
   const currentValue = parseFiniteNumber(raw.currentValue, "currentValue");
   if (currentValue !== null) input.currentValue = currentValue;
+  if (isBoolean) {
+    assertTruthValue(input.startValue, "startValue");
+    assertTruthValue(input.currentValue, "currentValue");
+  }
   const error = validateKeyResult({
     metricKind: input.metricKind ?? "number",
     startValue: input.startValue ?? 0,
@@ -1987,6 +2006,23 @@ export function parseKeyResultInput(body: unknown): KeyResultInput {
   });
   if (error) throw new InvalidPatchError(error);
   return input;
+}
+
+/** What "done" is for a yes-no key result; `keyResultProgress` reads any
+ * non-zero as done, so this is a stored convention rather than a threshold. */
+const BOOLEAN_TARGET = 1;
+
+/**
+ * A yes-no key result's values are truth values. Absent is fine (the column
+ * defaults handle it); present and outside {0, 1} is a mistake worth naming.
+ */
+function assertTruthValue(value: number | undefined, field: string): void {
+  if (value === undefined) return;
+  if (value !== 0 && value !== 1) {
+    throw new InvalidPatchError(
+      `${field} must be 0 or 1 for a yes-no key result.`,
+    );
+  }
 }
 
 /** Parse and validate an untrusted key-result PATCH body. */
