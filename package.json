@@ -19,6 +19,8 @@
     "db:seed": "pnpm --filter @specboards/db seed",
     "deploy:test": "scripts/deploy.sh test",
     "deploy:prod": "scripts/deploy.sh production",
+    "release:prepare": "scripts/release-prepare.sh",
+    "release:check": "scripts/release-guard.sh",
     "format": "prettier --write \"**/*.{ts,tsx,md,json,yml,yaml}\"",
     "audit": "scripts/audit.sh"
   },

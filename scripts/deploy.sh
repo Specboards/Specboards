@@ -56,6 +56,10 @@ if [ "$config" = "fly.toml" ]; then
     echo "Refusing to deploy production from a dirty tree: commit or stash first." >&2
     exit 1
   fi
+  # And that the commit is a version anyone can name: bumped in lockstep,
+  # written up in the changelog, and tagged here. See release-guard.sh for why
+  # that check lives on the deploy rather than in the checklist it enforces.
+  "$root/scripts/release-guard.sh"
 fi
 if [ -n "$dirty" ] || [ -n "$untracked" ]; then
   echo "Warning: the working tree differs from $sha, and the image is built" >&2
