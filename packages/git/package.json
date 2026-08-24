@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "@specboards/core": "workspace:*",
-    "octokit": "^4.0.2",
+    "octokit": "^5.0.5",
     "picomatch": "^4.0.5"
   },
   "devDependencies": {
