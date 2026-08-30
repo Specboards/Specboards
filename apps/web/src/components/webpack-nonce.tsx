@@ -18,6 +18,12 @@ declare let __webpack_nonce__: string;
  * `__webpack_require__.nc`, so every later `<style>`/chunk the runtime injects
  * carries the nonce. Rendered at the top of the root layout so it runs before
  * any dialog can mount. Renders nothing.
+ *
+ * This is why BOTH `dev` and `build` pass `--webpack` in package.json. Under
+ * Turbopack (the Next 16 default for `next dev`) the free variable does not
+ * exist, so the assignment below throws a ReferenceError, and because this
+ * renders in the root layout that means every route 500s. Dropping the flag
+ * from `dev` breaks the whole app locally, not just dialogs.
  */
 export function WebpackNonce({ nonce }: { nonce?: string }) {
   if (nonce) {
