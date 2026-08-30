@@ -25,6 +25,48 @@ for how and when the version is bumped.
 > `pnpm deploy:prod` and the dispatched workflow. See
 > [VERSIONING.md](./VERSIONING.md).
 
+## [0.29.0] - 2026-08-30
+
+The CLI stops being something you build from this repo and becomes something you
+install.
+
+### Added
+
+- **`@specboards/cli` is published to npm.** `npx @specboards/cli whoami` runs it
+  without installing anything; `npm i -g @specboards/cli` puts `specboards` on
+  your PATH. Until now the CLI existed only as source in `apps/cli`, so using it
+  meant cloning the monorepo and building it, which is a lot to ask of someone
+  who wanted to check a work item's status. The published package has no runtime
+  dependencies, so the download is the whole thing.
+- **`brew install specboards/tap/specboards`.** The tap
+  ([Specboards/homebrew-tap](https://github.com/Specboards/homebrew-tap)) is
+  live. The README has advertised this command for some time; it now works.
+- **The formula keeps itself current.** A job in the tap watches npm, and when a
+  new CLI version appears it downloads that exact tarball, computes the checksum
+  from the bytes it fetched, then installs and runs the result on macOS before
+  committing. So a CLI release reaches `brew install` without anyone editing a
+  formula, and a formula that would not install never gets pushed.
+
+### Changed
+
+- **The CLI is Apache-2.0, and now says so everywhere.** The package metadata
+  claimed AGPL-3.0, matching the rest of the repo rather than the deliberate
+  exception described in `LICENSING.md`. The CLI is meant to be freely
+  scriptable against, including commercially, and npm was telling people
+  otherwise. The manifest, `apps/cli/LICENSE`, and the Homebrew formula now
+  agree.
+- **The Homebrew formula lives in the tap, and only there.** `packaging/homebrew`
+  used to hold a second copy that had to be kept byte-identical by hand. Now that
+  the bump is automated that copy would be stale within hours of every release,
+  so it is gone and the directory explains where the formula went and why.
+
+### Fixed
+
+- **Install instructions that did not work.** `apps/cli/README.md`, which doubles
+  as the npm listing page, described a Homebrew tap that did not exist yet, and
+  the formula pointed at version 0.21.0 with a placeholder checksum of all zeros.
+  Both now name a real, published, verified release.
+
 ## [0.27.3] - 2026-08-23
 
 Key results you can actually maintain, and a release process that checks itself.
