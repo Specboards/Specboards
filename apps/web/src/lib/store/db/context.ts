@@ -15,7 +15,12 @@ import { canReadProduct, canWriteProduct } from "@specboards/core";
 
 import { type Database } from "@specboards/db";
 
-import type { ProductAccess, WorkspaceScope } from "../types";
+import type {
+  CustomFieldValue,
+  OutboxEmit,
+  ProductAccess,
+  WorkspaceScope,
+} from "../types";
 
 export type Tx = Parameters<Parameters<Database["transaction"]>[0]>[0];
 export type ProductVisibilityRow = { id: string; visibility: "org" | "private" };
@@ -43,6 +48,21 @@ export interface DbStoreContext {
   accessIn(tx: Tx, scope: WorkspaceScope): Promise<ProductAccess>;
   /** Verify a product id belongs to the workspace, returning it. */
   requireProductId(tx: Tx, ws: string, productId: string): Promise<string>;
+  /**
+   * Append a transactional-outbox row inside the caller's own transaction, so
+   * the event commits atomically with the change that produced it. Shared by
+   * every domain that emits: items, releases and goals.
+   */
+  writeOutbox(tx: Tx, scope: WorkspaceScope, emit: OutboxEmit): Promise<void>;
+}
+
+/** Normalize the jsonb custom-fields column into the UI's value map. */
+export function toCustomFields(
+  value: unknown,
+): Record<string, CustomFieldValue> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, CustomFieldValue>)
+    : {};
 }
 
 export function canReadProductId(
