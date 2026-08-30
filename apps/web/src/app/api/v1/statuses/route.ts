@@ -4,6 +4,7 @@ import { isTransitionMode, type TransitionMode } from "@specboards/core";
 
 import {
   authorizeCardsWrite,
+  CARDS_REVALIDATE_PATHS,
   readCardsProductId,
 } from "@/lib/api/cards-scope";
 import { resolveReadScope } from "@/lib/auth-session";
@@ -96,11 +97,44 @@ export async function PATCH(req: Request) {
     scope,
     productId,
   );
-  for (const path of [
-    "/[org]/[product]/backlog",
-    "/[org]/[product]/roadmap",
-    "/[org]/settings/work-cards",
-  ])
-    revalidatePath(path, "page");
+  for (const path of CARDS_REVALIDATE_PATHS) revalidatePath(path, "page");
   return Response.json({ transitionMode });
+}
+
+/**
+ * PUT /api/v1/statuses - replace a product's workflow stages, or the workspace
+ * default's when `productId` is omitted. Stages are the board's columns, and a
+ * replace re-homes any item left in a stage that no longer exists, so writing
+ * needs product-admin rights (or workspace ownership for the default). Local
+ * file mode is ungated.
+ *
+ * An empty list is how a product goes back to inheriting: it owns no stage rows
+ * again, so resolution falls through to the workspace default. That is refused
+ * without a `productId`, since the workspace default has nothing to inherit
+ * from and an empty array there is more likely a client bug.
+ *
+ * This handler was deleted by accident in #259, which made these settings
+ * per-product and rewrote the file: the client kept sending PUT here and got a
+ * 405, so Settings > Cards could not save, override, or revert its stages.
+ * Mirrors the sibling stage-gates route, which the same commit did convert.
+ */
+export async function PUT(req: Request) {
+  const authz = await authorizeCardsWrite(req);
+  if (!authz.ok) return authz.response;
+  const { scope, productId, body } = authz;
+
+  try {
+    const statuses = await replaceStatuses(
+      parseStatusStages(body, { allowEmpty: productId !== null }),
+      scope,
+      productId,
+    );
+    for (const path of CARDS_REVALIDATE_PATHS) revalidatePath(path, "page");
+    return Response.json({ statuses });
+  } catch (err) {
+    if (err instanceof InvalidPatchError) {
+      return Response.json({ error: err.message }, { status: 422 });
+    }
+    throw err;
+  }
 }

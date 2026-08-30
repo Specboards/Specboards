@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import {
   canReadProduct,
   compareGoals,
+  DEFAULT_STATUSES,
   deliveryProgress,
   goalProgress,
   isGoalStatus,
@@ -2610,11 +2611,6 @@ export class DbStore implements FeatureStore, DbStoreContext {
     const target = productId ?? null;
     return this.scoped(scope, async (tx) => {
       const ws = scope!.workspaceId;
-      const keys = stages.map((s) => s.key);
-      const fallback = keys[0]!;
-      // `archived` is a system status and always remains valid so archived
-      // items aren't swept back onto the board.
-      const validKeys = new Set([...keys, "archived"]);
 
       // Which items this edit is allowed to touch. Editing a product's stages
       // must not re-home another product's work, and editing the workspace
@@ -2622,9 +2618,56 @@ export class DbStore implements FeatureStore, DbStoreContext {
       // with its own stage set is unaffected by a change to the default, so
       // sweeping its items to a stage it does not have would be a bug with no
       // way back.
+      //
+      // Read before the write below, because for the workspace default it asks
+      // which products override, and an empty `stages` deletes rows this query
+      // must not have seen yet.
       const productScope = target
         ? eq(features.productId, target)
         : await this.inheritingProductsFilter(tx, ws);
+
+      // Replace this scope's stage set wholesale (positions follow the order
+      // given). An empty list is how a scope gives up its own set: a product
+      // falls back to the workspace default, and the default falls back to the
+      // built-in vocabulary.
+      await tx
+        .delete(workspaceStatuses)
+        .where(
+          and(
+            eq(workspaceStatuses.workspaceId, ws),
+            target
+              ? eq(workspaceStatuses.productId, target)
+              : isNull(workspaceStatuses.productId),
+          ),
+        );
+      if (stages.length > 0) {
+        await tx.insert(workspaceStatuses).values(
+          stages.map((s, i) => ({
+            workspaceId: ws,
+            productId: target,
+            key: s.key,
+            label: s.label,
+            position: i,
+          })),
+        );
+      }
+
+      // What is in force *now*, which is not the same as what was just passed
+      // in. On a revert `stages` is empty, and the answer is whatever this
+      // scope has fallen back to. Deriving these from the incoming list instead
+      // is what used to strand items: an empty list made every key invalid and
+      // the fallback `undefined`, so the re-home below quietly updated nothing
+      // but `updatedAt` and left the work sitting in a stage the board no
+      // longer draws.
+      const effective = await this.statusesIn(tx, ws, target);
+      const keys =
+        effective.length > 0
+          ? effective.map((s) => s.key)
+          : DEFAULT_STATUSES.filter((s) => s !== "archived");
+      const fallback = keys[0]!;
+      // `archived` is a system status and always remains valid so archived
+      // items aren't swept back onto the board.
+      const validKeys = new Set([...keys, "archived"]);
 
       // Re-home any items whose current status is no longer a stage.
       const used = await tx
@@ -2673,30 +2716,6 @@ export class DbStore implements FeatureStore, DbStoreContext {
           );
       }
 
-      // Replace this scope's stage set wholesale (positions follow the order
-      // given). An empty list is how a product reverts to inheriting: it owns
-      // no rows again, so resolution falls through to the default.
-      await tx
-        .delete(workspaceStatuses)
-        .where(
-          and(
-            eq(workspaceStatuses.workspaceId, ws),
-            target
-              ? eq(workspaceStatuses.productId, target)
-              : isNull(workspaceStatuses.productId),
-          ),
-        );
-      if (stages.length > 0) {
-        await tx.insert(workspaceStatuses).values(
-          stages.map((s, i) => ({
-            workspaceId: ws,
-            productId: target,
-            key: s.key,
-            label: s.label,
-            position: i,
-          })),
-        );
-      }
       return this.statusesIn(tx, ws, target);
     });
   }
