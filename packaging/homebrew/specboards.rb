@@ -13,7 +13,10 @@ class Specboards < Formula
   # Replace after `npm publish`: shasum -a 256 of the published tarball
   # (`npm view @specboards/cli@0.21.0 dist.tarball` then curl | shasum -a 256).
   sha256 "0000000000000000000000000000000000000000000000000000000000000000"
-  license "AGPL-3.0-only"
+  # The CLI is the deliberate Apache-2.0 exception to the AGPL codebase, so you
+  # can script against it freely. See LICENSING.md and apps/cli/LICENSE; this
+  # must stay in step with `license` in apps/cli/package.json.
+  license "Apache-2.0"
 
   depends_on "node"
 

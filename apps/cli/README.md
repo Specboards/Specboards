@@ -6,17 +6,15 @@ uses, authenticating with a personal API key.
 
 ## Install
 
-Once the package is published to npm (and the Homebrew tap is set up):
-
 ```bash
 # npm (run without installing)
 npx @specboards/cli whoami
 
 # npm (global)
 npm install -g @specboards/cli
-specboard help
+specboards help
 
-# Homebrew
+# Homebrew (once the tap is published)
 brew install specboards/tap/specboards
 ```
 
@@ -28,7 +26,7 @@ pnpm --filter @specboards/cli build
 node apps/cli/dist/index.js help
 # or link it onto your PATH
 pnpm --filter @specboards/cli exec npm link
-specboard help
+specboards help
 ```
 
 ## Authenticate
