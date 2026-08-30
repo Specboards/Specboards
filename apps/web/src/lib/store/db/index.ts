@@ -202,7 +202,7 @@ import {
   type ActivitySummary,
   type ItemEvent,
   type WorkspaceScope,
-} from "./types";
+} from "../types";
 
 /** Normalize the jsonb filters column into the typed filter bundle. */
 function toSavedViewFilters(value: unknown): SavedViewFilters {
