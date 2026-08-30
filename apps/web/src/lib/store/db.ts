@@ -500,6 +500,10 @@ export class DbStore implements FeatureStore {
     );
   }
 
+  // ==========================================================================
+  // Items: read
+  // ==========================================================================
+
   async listFeatures(scope?: WorkspaceScope): Promise<FeatureRecord[]> {
     return this.scoped(scope, async (tx) => {
       const [allRows, access, productById] = await Promise.all([
@@ -982,6 +986,10 @@ export class DbStore implements FeatureStore {
     };
   }
 
+  // ==========================================================================
+  // Workspace levels
+  // ==========================================================================
+
   async listLevels(
     scope?: WorkspaceScope,
     productId?: string | null,
@@ -1203,6 +1211,10 @@ export class DbStore implements FeatureStore {
     });
   }
 
+  // ==========================================================================
+  // Detail templates
+  // ==========================================================================
+
   async listDetailTemplates(
     scope?: WorkspaceScope,
     productId?: string | null,
@@ -1343,6 +1355,14 @@ export class DbStore implements FeatureStore {
       if (!deleted[0]) throw new DetailTemplateError(`Unknown template: ${id}`);
     });
   }
+
+  // ==========================================================================
+  // Items: write, relations, GitHub links, and the event ledger
+  //
+  // `listItemEvents` and `itemActivitySummary` sit inside this block, between
+  // `addGithubLink` and `removeGithubLink`. They read the ledger the writes
+  // above populate, so they are in the right domain but the wrong order.
+  // ==========================================================================
 
   async createFeature(
     input: CreateFeatureInput,
@@ -2245,6 +2265,10 @@ export class DbStore implements FeatureStore {
     });
   }
 
+  // ==========================================================================
+  // Saved views and board preferences
+  // ==========================================================================
+
   async listSavedViews(scope?: WorkspaceScope): Promise<SavedView[]> {
     return this.scoped(scope, async (tx) => {
       const rows = await tx
@@ -2487,6 +2511,10 @@ export class DbStore implements FeatureStore {
       );
     return rows.map(toPropertyDef);
   }
+
+  // ==========================================================================
+  // Custom properties, statuses, and stage gates
+  // ==========================================================================
 
   async listProperties(
     scope?: WorkspaceScope,
@@ -3066,6 +3094,10 @@ export class DbStore implements FeatureStore {
 
   // ── Releases ──────────────────────────────────────────────────────────
 
+  // ==========================================================================
+  // Releases
+  // ==========================================================================
+
   async listReleases(scope?: WorkspaceScope): Promise<ReleaseRecord[]> {
     return this.scoped(scope, async (tx) => {
       const ws = scope!.workspaceId;
@@ -3314,6 +3346,10 @@ export class DbStore implements FeatureStore {
   // the two partial unique indexes, same set-null unscheduling on delete. The
   // one difference is that a cycle has no stored status: `state` is computed
   // from the dates on every read, so nothing can go stale.
+
+  // ==========================================================================
+  // Cycles
+  // ==========================================================================
 
   async listCycles(scope?: WorkspaceScope): Promise<CycleRecord[]> {
     return this.scoped(scope, async (tx) => {
@@ -3675,6 +3711,10 @@ export class DbStore implements FeatureStore {
   // while the goal itself stays visible. Hiding the goal because one of its
   // contributors is out of reach would make org-wide goals invisible to almost
   // everyone.
+
+  // ==========================================================================
+  // Goals and key results
+  // ==========================================================================
 
   async listGoals(scope?: WorkspaceScope): Promise<GoalRecord[]> {
     return this.scoped(scope, async (tx) => {
@@ -4216,6 +4256,10 @@ export class DbStore implements FeatureStore {
     return row[0];
   }
 
+  // ==========================================================================
+  // Comments
+  // ==========================================================================
+
   async listComments(
     specId: string,
     scope?: WorkspaceScope,
@@ -4359,6 +4403,10 @@ export class DbStore implements FeatureStore {
   }
 
   // ── Notifications ─────────────────────────────────────────────────────
+
+  // ==========================================================================
+  // Notifications
+  // ==========================================================================
 
   async listNotifications(scope?: WorkspaceScope): Promise<NotificationList> {
     return this.scoped(scope, async (tx) => {
@@ -4519,6 +4567,10 @@ export class DbStore implements FeatureStore {
       createdAt: row.createdAt.toISOString(),
     };
   }
+
+  // ==========================================================================
+  // Ideas
+  // ==========================================================================
 
   async listIdeas(scope?: WorkspaceScope): Promise<IdeaRecord[]> {
     return this.scoped(scope, async (tx) => {
@@ -4931,6 +4983,10 @@ export class DbStore implements FeatureStore {
     });
   }
 
+  // ==========================================================================
+  // Transition mode and per-product card configuration
+  // ==========================================================================
+
   async getTransitionMode(
     scope?: WorkspaceScope,
     productId?: string | null,
@@ -5171,6 +5227,10 @@ export class DbStore implements FeatureStore {
     return isTransitionMode(effective) ? effective : "strict";
   }
 
+  // ==========================================================================
+  // Idea settings
+  // ==========================================================================
+
   async getIdeaSettings(scope?: WorkspaceScope): Promise<IdeaSettings> {
     return this.scoped(scope, async (tx) => {
       const row = await tx.query.ideaSettings.findFirst({
@@ -5257,6 +5317,10 @@ export class DbStore implements FeatureStore {
       updatedAt: row.updatedAt.toISOString(),
     };
   }
+
+  // ==========================================================================
+  // Doc spaces and pages
+  // ==========================================================================
 
   async getDocSpace(
     productId: string,
@@ -5561,6 +5625,10 @@ export class DbStore implements FeatureStore {
     if (!row[0]) throw new ProductError(`Unknown product: ${productId}`);
     return row[0].id;
   }
+
+  // ==========================================================================
+  // Products, product groups, members, and roll-up summaries
+  // ==========================================================================
 
   async getProductAccess(scope?: WorkspaceScope): Promise<ProductAccess> {
     return this.scoped(scope, (tx) => this.accessIn(tx, scope!));
