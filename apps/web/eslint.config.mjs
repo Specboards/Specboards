@@ -52,6 +52,31 @@ export default [
     },
   },
   {
+    // Unused code was caught by nothing in this package, which is roughly
+    // ninety per cent of the codebase. The root `eslint.config.mjs` configures
+    // this rule as an error, but it excludes `apps/web/**` because this app
+    // needs the Next and jsx-a11y rulesets that config has no use for, and the
+    // exclusion silently took the rule with it. `noUnusedLocals` was not set
+    // either. So a refactor could leave imports and locals behind and a clean
+    // `pnpm lint` would say nothing, which is how #329's deleted route handler
+    // went unnoticed: its three orphaned imports were the only evidence, and
+    // no gate reported them.
+    //
+    // Same options as the root config, so the `_`-prefix convention means the
+    // same thing in both places.
+    files: ["**/*.{ts,tsx}"],
+    rules: {
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        {
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+          caughtErrorsIgnorePattern: "^_",
+        },
+      ],
+    },
+  },
+  {
     // eslint-config-next 16 brings eslint-plugin-react-hooks 7 (we were on 5),
     // which grows the recommended set from 2 rules to 16 by adding the React
     // Compiler checks. Thirteen of those fourteen new rules already pass and

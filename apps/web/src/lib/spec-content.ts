@@ -35,7 +35,6 @@ import { DomainError } from "@/lib/errors";
 import { recordWritePullRequest } from "@/lib/github-links-service";
 import { recordSpecWrite } from "@/lib/spec-write-audit";
 import {
-  resolveRepoClient,
   resolveRepoDefaultProduct,
   resolveSpecWriteClient,
   syncRepository,

@@ -65,7 +65,6 @@ export default async function GroupDashboardPage({
     releases.map((r: ReleaseRecord) => [r.id, r.name]),
   );
   const productById = new Map(products.map((p) => [p.id, p]));
-  const summariesById = new Map(summary.products.map((s) => [s.productId, s]));
 
   const totalItems = summary.products.reduce((a, s) => a + s.itemCount, 0);
   const totalCounts = combineStatusCounts(summary.products);

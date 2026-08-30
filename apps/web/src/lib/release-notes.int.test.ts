@@ -65,10 +65,6 @@ describe.skipIf(!DB_URL)("drafting a release's notes", () => {
   let slow = false;
   let disconnected = false;
   let answerFrames = ["## Highlights\n", "- Single sign-on is here.\n"];
-  /** Set by tests that need the thread cleared between turns. */
-  const wipeThread = async () =>
-    sql`delete from assistant_messages where workspace_id = ${ws}`;
-
   /**
    * Run a turn to completion, collecting what a caller would observe.
    *
