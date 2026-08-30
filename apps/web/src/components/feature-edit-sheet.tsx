@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Maximize2 } from "lucide-react";
 
 import { ItemDetailView } from "@/components/item-detail-view";

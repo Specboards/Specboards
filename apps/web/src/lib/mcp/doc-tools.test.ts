@@ -27,7 +27,7 @@ let writable: string[];
 const store = {
   listProducts: vi.fn(async () => PRODUCTS),
   getDocSpace: vi.fn(async () => space),
-  setDocSpace: vi.fn(async (productId: string, area: string, input: { mode: string }) => {
+  setDocSpace: vi.fn(async (_productId: string, _area: string, input: { mode: string }) => {
     space = { ...space, mode: input.mode as DocSpace["mode"] };
     return space;
   }),

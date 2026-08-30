@@ -95,7 +95,6 @@ import {
   type FeatureDetail,
   type FeaturePatch,
   type FeatureRecord,
-  type FeatureRelation,
   type FeatureStore,
   type GithubLinkAggregate,
   IdeaError,

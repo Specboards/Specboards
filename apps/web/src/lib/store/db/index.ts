@@ -4256,7 +4256,6 @@ export class DbStore implements FeatureStore, DbStoreContext {
         canReadProductId(access, productById, r.productId),
       );
       if (visible.length === 0) return [];
-      const ids = visible.map((r) => r.id);
 
       const [voteRows, myVotes, authorRows, promotedRows] = await Promise.all([
         tx

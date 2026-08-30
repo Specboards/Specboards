@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
  * degrades to a bare theme toggle so dark mode still works.
  */
 export function SidebarProfile({ collapsed = false }: { collapsed?: boolean }) {
-  const { data, isPending, error } = useSession();
+  const { data, isPending } = useSession();
   const router = useRouter();
   const orgHref = useOrgPath();
   const [open, setOpen] = useState(false);
