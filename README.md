@@ -1,19 +1,29 @@
 # Specboards
 
-**Product management that lives in your repo specs.**
+**An end-to-end agentic harness for AI product teams.**
 
-Your specs stay canonical in the repo (versioned with your code, read by AI
-coding agents). Specboards layers the product-management work *on top* of them:
-status, priority, assignment, backlog order, roadmap, releases, dependencies,
-and epic/feature hierarchy. PM, UX, and engineering plan together without
-editing files in a terminal, and without copying every spec into Jira or Aha.
+Coding agents can already write the code. What they cannot do is decide what to
+build next, keep a team's plan straight, or hand work to one another. That part
+is still a person copying context between a tracker, a document, and a terminal.
 
-- **Open source.** Self-host the full app for free under the AGPL-3.0, modify it
-  as you like, or use the hosted SaaS.
+Specboards closes that gap. It is a product backlog that agents read, act on,
+and write back to, with each specification versioned in your repo next to the
+code it describes. One MCP connection covers the whole loop: an agent can take
+an idea off the board, write its spec, break it into epics and features, pick up
+what is ready, open the pull request, link it back, move the card, and draft the
+release notes. PM, UX, and engineering work the same backlog in the UI, without
+editing files in a terminal. The judgement stays with the people: what is worth
+building, and whether what came back is right.
+
+- **Coordinated, not single-shot.** Agents share one board and one validated
+  status workflow, so several can work a backlog at once, and you can see what
+  each of them did.
 - **Git-native.** No second source of truth. The specs in your repo *are* the
   backlog.
-- **Agent-ready.** An MCP server gives coding agents the same prioritized plan
-  your team works from.
+- **Governed.** Per-agent identities, scoped API keys, request and write quotas,
+  and an audit trail of every spec write.
+- **Open source.** Self-host the full app for free under the AGPL-3.0, modify it
+  as you like, or use the hosted SaaS.
 
 Specboards is a member of the [Studio Palouse](https://www.studiopalouse.com)
 family of apps.
@@ -26,38 +36,75 @@ family of apps.
 
 ## Why Specboards
 
-You already write specs. What you're missing is the layer on top of them.
+Your team already has a tracker, and your engineers already have agents. The
+missing piece is between the two.
 
-- **Not Jira / Aha** - no separate system of record to copy specs into and keep
-  in sync. The repo stays canonical.
-- **Not just an issue tracker** - your actual specification lives *with the
-  code* and is readable by your AI agents, not stranded in a ticket description.
+- **Not Jira / Aha** - those describe work to people. An agent gets a ticket
+  description rather than the specification, and nothing it does comes back
+  without someone retyping it.
+- **Not a tracker plugin** - reading and closing tickets covers one stage.
+  Defining the work, breaking it down, ordering it, and shipping it are the
+  stages where the time actually goes.
 - **Not a wiki** - specs move through a validated status workflow and ship
   inside pull requests, instead of drifting away from the code.
 - **Not plain markdown alone** - you get a backlog, board, roadmap, releases,
-  and ownership around the spec files you already have.
+  goals, and ownership around the spec files you already have.
 
-## Features
+## The loop
 
-- **Git-native specs.** Your `specs/**/spec.md` files stay the source of truth.
-  Specboards parses each spec, injects a stable UUID when one is missing, and
-  keeps a live, sha-tracked index. Renames and moves never orphan your data,
-  because every spec is keyed by its id, not its path.
-- **Ideas & intake.** Capture raw ideas and requests, then promote the ones
-  worth doing straight into the backlog as specs.
-- **Backlog & prioritization.** Rank, assign, tag, and prioritize in a fast
-  backlog. Drag to reorder, save custom views, filter by product/status/owner.
-- **Kanban board.** A status board with a validated workflow (backlog →
-  defining → ready → in progress → in review → done, plus archived). Each repo
-  can customize the stages in `.specboards/config.yml`.
-- **Roadmap & releases.** Group work into initiatives and epics, lay it out by
-  release and quarter, and track what ships when.
-- **One-click GitHub sync.** Connect a repo with a GitHub App (no secrets to
-  paste). Specboards imports specs, reconciles on every push, and links live PR,
-  issue, and branch state to your work.
-- **MCP for AI agents.** An MCP server exposes your prioritized, status-aware
-  backlog to coding agents. They can list products and items, read specs, follow
-  dependencies, update status and metadata, and write specs back to git.
+Grouped by the stage of work rather than by app screen. Each one is a surface a
+person drives in the UI and an agent drives over MCP, against the same data.
+
+- **Capture.** Raw ideas and requests land in an Ideas intake; promote the ones
+  worth doing straight into the backlog.
+- **Define.** The specification is written to `specs/**/spec.md` and committed
+  (`create_spec`, `update_spec_content`). Specboards parses each spec, injects a
+  stable UUID when one is missing, and keeps a live, sha-tracked index. Renames
+  and moves never orphan your data, because every spec is keyed by its id, not
+  its path.
+- **Break down.** Create work at any level of Initiative -> Epic -> Feature,
+  nest it, and roll a summary of the children back up into the parent.
+- **Prioritize.** Rank, assign, and tag in a fast backlog: drag to reorder, save
+  custom views, filter by product, status, or owner. Group work into releases
+  and cycles, and record what it ladders up to with goals and key results.
+- **Implement.** Pick up what is `ready` and walk a validated workflow (backlog
+  -> defining -> ready -> in progress -> in review -> done, plus archived), with
+  typed dependencies to say what is blocked. Each repo can customize the stages
+  in `.specboards/config.yml`.
+- **Review.** Connect a repo with a GitHub App (no secrets to paste). Specboards
+  imports specs, reconciles on every push, and links live PR, issue, and branch
+  state to your work.
+- **Release.** Lay work out by release and quarter on the roadmap, track what
+  ships when, and draft the customer-facing release notes.
+
+## Where this fits the AI-native SDLC
+
+Anthropic's [AI-native SDLC playbook](https://claude.com/blog/the-ai-native-sdlc-playbook)
+describes six stages (Plan, Design, Build, Test, Deploy, Maintain) and the
+version-controlled artifacts that carry work between them: `intent.md`,
+`spec.md`, `plan.md`, `CLAUDE.md`. It is the clearest published description of
+the shape this work is taking, and it is a useful vocabulary to argue in.
+
+Specboards is built to be **compatible with that model, not dependent on it**.
+Nothing here requires you to adopt the playbook, and none of it is ours: we did
+not write it, and describing how we line up with it is not a claim of
+endorsement. If the playbook changes, our product does not.
+
+The mapping below is deliberately specific, including the stages we do not
+serve. "Specboards supports the whole SDLC" would be worth nothing.
+
+| Playbook stage | What Specboards does | What it does not |
+| --- | --- | --- |
+| **Plan** | The Ideas intake is where an intent lands; promoting one creates the work item. `create_spec` commits the artifact into your repo, so it is version-controlled from the first line. | Run the brainstorming session that produces the intent. That is your agent, writing back to us over MCP. |
+| **Design** | `create_spec` / `update_spec_content` write `specs/**/spec.md` and commit, so a spec is reviewable as a diff. The `defining` stage is the gate that says design is still open. | Hold the org skills that constrain the spec. Those live in your agent's configuration. |
+| **Build** | The `ready` stage is the accepted-plan boundary: work is not picked up before it. Typed dependencies say what is blocked, and hierarchy says what a change belongs to. | Plan mode, `CLAUDE.md`, worktrees, and the coding session itself. We are what the session reads and writes, not the session. |
+| **Test** | Nothing. Your CI does this. | Everything. Specboards only records the outcome, through linked PR state. |
+| **Deploy** | `link_github` plus per-push reconciliation put live PR, issue, and branch state on the board. Agent identities, scoped keys, write quotas, and the spec-write audit trail are the governance surface. | The review passes themselves. |
+| **Maintain** | An unattended agent identity with a bearer key is exactly the "no person in the invocation path" shape, and what it finds is written back as an idea or an item. | The trigger. We are the destination and the identity, not the watcher. |
+
+The longer version, with the reasoning behind each row and where we expect to
+close the gaps, is in
+[`docs/AI-NATIVE-SDLC.md`](./docs/AI-NATIVE-SDLC.md).
 
 ## Quick start
 
@@ -90,16 +137,26 @@ system-of-record split in [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
 ### Self-host the full stack
 
+There is no published image yet, so this builds `infra/web.Dockerfile` from your
+clone. Expect the first `up` to take a few minutes.
+
 ```bash
-cp infra/.env.example infra/.env   # then set a strong POSTGRES_PASSWORD
+cp infra/.env.example infra/.env
+# then, in infra/.env:
+#   BETTER_AUTH_SECRET=$(openssl rand -hex 32)   # required, no default
+#   POSTGRES_PASSWORD=…                          # required before the first up
 docker compose -f infra/docker-compose.yml up   # web + Postgres
 ```
 
-Set the password before the first `up`: Postgres bakes it into the data volume
+Both values matter, for different reasons. `BETTER_AUTH_SECRET` has no default
+at all and compose refuses to start without one: it keys session signing and the
+AES-256-GCM encryption of secrets at rest, so treat rotating it as a migration
+rather than a config edit (everyone is signed out, and anything encrypted under
+the old key stops being readable). `POSTGRES_PASSWORD` defaults to the sample
+`postgres`, which is fine for a local trial and unsafe anywhere else, and it has
+to be set before the first `up`, because Postgres bakes it into the data volume
 on initialization. The database port is bound to loopback only; keep it that
-way (or drop the mapping) on any machine others can reach. Skipping the `.env`
-step falls back to the sample `postgres` password, which is fine for a local
-trial and unsafe anywhere else.
+way (or drop the mapping) on any machine others can reach.
 
 Optional environment flags for a hosted deployment:
 
@@ -216,7 +273,8 @@ Tools, by what they manage:
   `create_cycle` / `update_cycle` / `rollover_cycle`.
 - **Goals:** `list_goals`, `read_goal`, `create_goal`, `update_goal`,
   `delete_goal`, `create_key_result`, `update_key_result`,
-  `delete_key_result`, and `link_goal` to record that work ladders up.
+  `delete_key_result`, and `link_goal` / `unlink_goal` to record that work
+  ladders up.
 - **Strategy, Research and Architecture:** `list_docs`, `read_doc`,
   `create_doc`, `update_doc`, `delete_doc`. One set of tools whichever way the
   area is backed: pages Specboards holds, or Markdown in a connected GitHub
@@ -251,8 +309,9 @@ specboards status <specId> in_review --advance         # walk intermediate stage
 specboards link <specId> --pr 42
 ```
 
-Once published, the CLI installs without the monorepo via `npx @specboards/cli`,
-`npm i -g @specboards/cli`, or `brew install specboards/tap/specboards`. The full
+The CLI is published, so it installs without the monorepo via
+`npx @specboards/cli`, `npm i -g @specboards/cli`, or
+`brew install specboards/tap/specboards`. The full
 REST surface it drives is described by an OpenAPI document at
 `/api/v1/openapi.json`, and API keys can be scoped (`<resource>:read` /
 `<resource>:write`).
@@ -299,11 +358,21 @@ pnpm db:migrate                         # apply against $DATABASE_URL (incl. RLS
 Deployed environments apply migrations themselves: the container image carries a
 bundled runner (`migrate.mjs`) plus the SQL, and Fly runs it as the
 `release_command` before a new version takes traffic, aborting the release if it
-fails. Self-hosting the image works the same way:
+fails. Self-hosting works the same way, against the image
+`infra/docker-compose.yml` builds for you:
 
 ```bash
-docker run --rm -e DATABASE_URL=postgres://… ghcr.io/…/specboards node migrate.mjs
+# Against the compose stack's own Postgres (DATABASE_URL is already set for it):
+docker compose -f infra/docker-compose.yml run --rm web node migrate.mjs
+
+# Or point it at a database of your own:
+docker compose -f infra/docker-compose.yml run --rm \
+  -e DATABASE_URL=postgres://… web node migrate.mjs
 ```
+
+> **No prebuilt image yet.** Self-hosting currently means cloning this repo and
+> building `infra/web.Dockerfile` locally; we do not publish to a registry.
+> Changing that is tracked for v1.0.0.
 
 ## License
 
