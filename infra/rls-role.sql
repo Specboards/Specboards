@@ -7,7 +7,7 @@
 -- Run ONCE per database (test, then prod) as a superuser / the role that owns
 -- the tables. This is infrastructure, not a schema migration, so it lives here
 -- rather than in the drizzle journal: creating a role needs CREATEROLE, and the
--- login password must not be committed. See docs/PLAN-rls-role-cutover.md.
+-- login password must not be committed. See docs/RUNBOOK-db-role-cutover.md.
 --
 -- Idempotent: safe to re-run. It does NOT set a password or LOGIN; do that
 -- separately (see the runbook) so no secret lands in git.

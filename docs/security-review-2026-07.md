@@ -1,8 +1,20 @@
-# Security fixes backlog
+# Security review, July 2026
 
-This document records the findings from the July 2026 adversarial source review.
-It is an implementation backlog, ordered by security impact. No exploit testing
-against a deployed environment was performed.
+Findings from the July 2026 adversarial source review, ordered by security
+impact. No exploit testing against a deployed environment was performed.
+
+This is kept as the record of **why** the controls it describes exist. Several
+test files cite its findings by section as their rationale
+(`rls-isolation.int.test.ts`, `workspace-scope.int.test.ts`,
+`rate-limit.int.test.ts`, `security-headers.spec.ts`,
+`github-install-security.spec.ts`), so the risk analysis below is load-bearing
+documentation rather than history.
+
+Two items remain open, both deliberately: network-level egress enforcement
+(a platform task, see [`RUNBOOK-webhook-egress-policy.md`](./RUNBOOK-webhook-egress-policy.md))
+and narrowing `style-src`. Everything else shipped in the v0.2.0 hardening pass
+or later. Ongoing exceptions are tracked separately in
+[`security-audit-exceptions.md`](./security-audit-exceptions.md).
 
 ## P0: prevent GitHub installation binding takeover
 
@@ -83,10 +95,12 @@ predicate in an owner-backed query could expose or modify another tenant's data.
   `DATABASE_URL_APP` role is non-owner, non-superuser, without `BYPASSRLS`,
   and that RLS is enabled with policies present; a violation refuses startup,
   so platform health checks stop the rollout.
-- [ ] Separate authentication, migrations, and background worker duties into
-  narrowly scoped database roles. Partially in place (owner for
-  auth/migrations/ingestion, `specboard_app` for tenant data); a dedicated
-  worker role for the outbox drainer and webhook ingestion is a follow-up.
+- [x] Separate authentication, migrations, and background worker duties into
+  narrowly scoped database roles: owner for auth/migrations/ingestion,
+  `specboard_app` for tenant data (`infra/rls-role.sql`), and `specboards_worker`
+  for the outbox drainer and webhook ingestion (`infra/worker-role.sql`).
+  `assertWorkerIsolation` in `apps/web/src/lib/rls-guard.ts` refuses to boot a
+  multi-tenant deployment that has not provisioned the worker role.
 - [x] Ensure every tenant-data transaction sets the authenticated user context
   used by RLS before any query is run: `DbStore.scoped()` already refuses to
   run without a scope and sets `app.user_id` transaction-locally; the July

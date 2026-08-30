@@ -36,7 +36,7 @@ export async function assertTenantIsolation(): Promise<void> {
     console.warn(
       "[security] DATABASE_URL_APP is not set: tenant data uses the owner connection and " +
         "RLS is not enforced by the database. This is acceptable only for single-tenant " +
-        "self-host; see docs/archive/PLAN-rls-role-cutover.md.",
+        "self-host; see docs/RUNBOOK-db-role-cutover.md.",
     );
     return;
   }

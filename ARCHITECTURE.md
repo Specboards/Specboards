@@ -255,8 +255,9 @@ wrong about what works is worse than no list, because it is believed.
 
 Where to look instead:
 
-- **What is built and what is next:** the backlog itself, in Specboards. See
-  [`docs/BACKLOG.md`](docs/BACKLOG.md) for the pointer.
+- **What is built and what is next:** the backlog itself, in Specboards. We
+  dogfood the product, so the board at `app.specboards.ai` is the only backlog;
+  agents can read it over MCP with `list_items` / `read_item`.
 - **What shipped when:** [`CHANGELOG.md`](CHANGELOG.md), which is kept per
   release.
 - **How to set up GitHub sync:** [`docs/RUNBOOK-github-sync.md`](docs/RUNBOOK-github-sync.md).

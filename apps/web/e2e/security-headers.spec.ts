@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 /**
  * The production Content-Security-Policy must contain script injection: a
  * per-request nonce, `strict-dynamic`, and NO `'unsafe-inline'` in script-src
- * (docs/archive/security-fixes.md, P2 "strengthen browser XSS containment"). The E2E
+ * (docs/security-review-2026-07.md, P2 "strengthen browser XSS containment"). The E2E
  * server runs a production build, so this asserts the shipped policy.
  */
 test.describe("security headers", () => {
