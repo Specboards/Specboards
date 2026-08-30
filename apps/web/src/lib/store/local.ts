@@ -17,6 +17,7 @@ import {
   isPropertyType,
   isValidParentLevel,
   leafLevel,
+  DEFAULT_STATUSES,
   LOCAL_PRODUCT_ACCESS,
   parseSpec,
   productKeyFromName,
@@ -594,14 +595,22 @@ export class LocalFileStore implements FeatureStore {
   }
 
   private async loadAll(): Promise<FeatureDetail[]> {
-    const [files, meta, items, levels, defaultProductId] = await Promise.all([
-      this.walkSpecFiles(this.specsDir),
-      this.readMetadata(),
-      this.readItems(),
-      this.readLevels(),
-      this.defaultProductId(),
-    ]);
+    const [files, meta, items, levels, defaultProductId, statuses] =
+      await Promise.all([
+        this.walkSpecFiles(this.specsDir),
+        this.readMetadata(),
+        this.readItems(),
+        this.readLevels(),
+        this.defaultProductId(),
+        this.listStatuses(),
+      ]);
     const leafKey = leafLevel(levels).key;
+    // Where a spec sits before anyone moves it. The first configured stage
+    // rather than the literal "backlog": a workflow that renames or drops that
+    // stage would otherwise resolve every untouched spec to a column the board
+    // does not draw, and no amount of re-homing fixes it because there is no
+    // stored status to re-home.
+    const firstStage = statuses[0]?.key ?? "backlog";
     const features: FeatureDetail[] = [];
     for (const file of files) {
       const raw = await fs.readFile(file, "utf8");
@@ -619,7 +628,7 @@ export class LocalFileStore implements FeatureStore {
         level: leafKey,
         isDbNative: false,
         productId: m.productId ?? defaultProductId,
-        status: m.status ?? "backlog",
+        status: m.status ?? firstStage,
         rank: m.rank ?? null,
         tags: m.tags ?? [],
         releaseId: m.releaseId ?? null,
@@ -1469,9 +1478,44 @@ export class LocalFileStore implements FeatureStore {
       "utf8",
     );
 
+    // What is in force after the write. An empty set means no stages are
+    // configured, and the board falls back to the built-in vocabulary, so that
+    // is what the keys below have to be measured against. `archived` stays
+    // valid either way so archived items keep working.
+    const effective =
+      rows.length > 0
+        ? rows.map((r) => r.key)
+        : DEFAULT_STATUSES.filter((s) => s !== "archived");
+    const fallback = effective[0]!;
+    const validKeys = new Set<string>([...effective, "archived"]);
+
+    // Re-home any item left in a stage that no longer exists, matching the db
+    // store. Without this a removed stage leaves work on a board that draws no
+    // column for it, reachable only by editing the JSON by hand.
+    //
+    // Two places hold a status here and both have to be swept: DB-native items
+    // carry theirs in the items file, and a spec-backed item carries its own in
+    // the metadata map. `loadAll` resolves an absent entry to the first stage,
+    // so a spec that was never moved needs no row written for it.
+    const items = await this.readItems();
+    const movedItems = items.filter((i) => !validKeys.has(i.status));
+    if (movedItems.length > 0) {
+      for (const item of movedItems) item.status = fallback;
+      await this.writeItems(items);
+    }
+
+    const meta = await this.readMetadata();
+    let metaChanged = false;
+    for (const entry of Object.values(meta)) {
+      if (entry?.status !== undefined && !validKeys.has(entry.status)) {
+        entry.status = fallback;
+        metaChanged = true;
+      }
+    }
+    if (metaChanged) await this.writeMetadata(meta);
+
     // Drop gates (and their completions) whose stage was removed, mirroring the
-    // db store. `archived` stays valid so archived items keep working.
-    const validKeys = new Set([...stages.map((s) => s.key), "archived"]);
+    // db store.
     const gates = await this.listStageGates();
     const kept = gates.filter((g) => validKeys.has(g.stageKey));
     if (kept.length !== gates.length) {
