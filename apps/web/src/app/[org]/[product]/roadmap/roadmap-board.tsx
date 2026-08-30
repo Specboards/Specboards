@@ -20,6 +20,7 @@ import type {
   PropertyDef,
   PropertyType,
   StatusWorkflow,
+  WorkspaceLevel,
 } from "@specboards/core";
 
 import { useBoardPrefs } from "@/app/[org]/[product]/backlog/board-prefs";
@@ -91,6 +92,7 @@ export function RoadmapBoard({
   customFieldTypes,
   memberNames,
   releaseNames,
+  levels,
   allowDrag,
   editableReleaseIds,
   productNamesById,
@@ -110,6 +112,9 @@ export function RoadmapBoard({
   memberNames: Record<string, string>;
   /** Release name by id, for the release badge. */
   releaseNames: Record<string, string>;
+  /** The workspace's hierarchy levels, so cards can name the child and parent
+   * levels in their progress badges. */
+  levels: readonly WorkspaceLevel[];
   /** Whether items can be re-scheduled by dragging (editors, active view). */
   allowDrag: boolean;
   /** Ids of releases the viewer may edit (per-product / owner-for-portfolio). */
@@ -140,6 +145,7 @@ export function RoadmapBoard({
     customFieldTypes,
     memberNames,
     releaseNames,
+    levels,
   };
   const [placement, setPlacement] = useState<Record<string, string | null>>({});
   const [activeId, setActiveId] = useState<string | null>(null);

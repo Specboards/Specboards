@@ -380,6 +380,7 @@ export async function BoardView({
               customFieldLabels={customFieldLabels}
               memberNames={memberNames}
               releases={releases}
+              levels={levels}
               productsById={productsById}
               quickAdd={quickAdd}
               bulkOptions={

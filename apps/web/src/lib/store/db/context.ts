@@ -11,9 +11,21 @@
  * `FeatureStore` and this is below that line.
  */
 
-import { canReadProduct, canWriteProduct } from "@specboards/core";
+import {
+  DEFAULT_STATUSES,
+  canReadProduct,
+  canWriteProduct,
+  safeParseRepoConfig,
+  terminalStatus,
+} from "@specboards/core";
 
-import { type Database } from "@specboards/db";
+import {
+  asc,
+  eq,
+  repositories,
+  workspaceStatuses,
+  type Database,
+} from "@specboards/db";
 
 import type { ProductAccess, WorkspaceScope } from "../types";
 
@@ -63,7 +75,110 @@ export function canWriteProductId(
   return canWriteProduct(access, productId);
 }
 
-/** The terminal status used for hierarchy roll-up progress. */
-export function isDone(status: string): boolean {
-  return status === "done";
+/**
+ * Which status means "finished", per product, for one workspace.
+ *
+ * Every progress figure in the product (hierarchy roll-up, cycle burndown, goal
+ * delivery, release totals) asks the same question of a status key, and it used
+ * to be answered with `status === "done"`. That is only right for the built-in
+ * vocabulary. A workspace whose stages end in `shipped` reported every one of
+ * those figures as zero, which reads as "nothing is progressing" rather than
+ * "this metric does not apply here", and it silently emptied the roadmap bars
+ * too.
+ *
+ * Resolution mirrors `resolveWorkflowFor`: a product's own stage set if it has
+ * defined one, else the workspace default set, else the repo config's
+ * vocabulary, else the built-in one. The terminal stage of whichever set wins is
+ * the done status (see {@link terminalStatus}).
+ */
+export interface DoneStatuses {
+  /**
+   * Whether an item at `status` in `productId` is finished. Pass the item's own
+   * product: a cross-product aggregate can hold work from products whose stage
+   * sets disagree, and each row has to be judged by its own.
+   */
+  isDone(status: string, productId?: string | null): boolean;
+  /** The done status for `productId`, for callers that need the key itself. */
+  keyFor(productId?: string | null): string;
+  /**
+   * Every done status in the workspace, for the SQL-side filters that cannot
+   * ask per row. Products may disagree, so a query spanning them has to exclude
+   * all of their terminal stages, not just the default's.
+   */
+  allKeys(): string[];
+}
+
+/**
+ * Build the resolver for a workspace. Two small indexed reads, run in parallel;
+ * call it once per store operation and pass the result down rather than
+ * resolving per row.
+ */
+export async function doneStatusesIn(
+  tx: Tx,
+  workspaceId: string,
+): Promise<DoneStatuses> {
+  const [stageRows, repoRows] = await Promise.all([
+    tx
+      .select({
+        productId: workspaceStatuses.productId,
+        key: workspaceStatuses.key,
+      })
+      .from(workspaceStatuses)
+      .where(eq(workspaceStatuses.workspaceId, workspaceId))
+      .orderBy(asc(workspaceStatuses.position)),
+    tx
+      .select({ config: repositories.config })
+      .from(repositories)
+      .where(eq(repositories.workspaceId, workspaceId)),
+  ]);
+  return doneStatusesFrom(stageRows, repoRows);
+}
+
+/**
+ * The pure half of {@link doneStatusesIn}, so the resolution rules can be tested
+ * without a database and reused by any caller that already holds the rows.
+ */
+export function doneStatusesFrom(
+  stageRows: readonly { productId: string | null; key: string }[],
+  repoRows: readonly { config: unknown }[],
+): DoneStatuses {
+  const byProduct = new Map<string, string[]>();
+  const workspaceDefault: string[] = [];
+  for (const row of stageRows) {
+    if (row.productId === null) workspaceDefault.push(row.key);
+    else {
+      const own = byProduct.get(row.productId) ?? [];
+      own.push(row.key);
+      byProduct.set(row.productId, own);
+    }
+  }
+
+  // The config's vocabulary only matters when nothing is configured in the DB,
+  // matching how `resolveWorkflowFor` layers the two.
+  let configStatuses: readonly string[] = [];
+  for (const row of repoRows) {
+    const config = safeParseRepoConfig(row.config);
+    if (config?.statuses && config.statuses.length >= 2) {
+      configStatuses = config.statuses;
+      break;
+    }
+  }
+
+  const fallback =
+    terminalStatus(workspaceDefault) ??
+    terminalStatus(configStatuses) ??
+    terminalStatus(DEFAULT_STATUSES)!;
+  const resolved = new Map<string, string>();
+  for (const [productId, keys] of byProduct) {
+    resolved.set(productId, terminalStatus(keys) ?? fallback);
+  }
+
+  const keyFor = (productId?: string | null): string =>
+    (productId ? resolved.get(productId) : undefined) ?? fallback;
+  const allKeys = [...new Set([fallback, ...resolved.values()])];
+  return {
+    keyFor,
+    isDone: (status, productId) => status === keyFor(productId),
+    allKeys: () => [...allKeys],
+  };
 }

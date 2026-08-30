@@ -9,7 +9,7 @@ import {
 } from "@/components/card-field-badges";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
-import type { PropertyType } from "@specboards/core";
+import type { PropertyType, WorkspaceLevel } from "@specboards/core";
 
 import { formatRiceScore } from "@/lib/feature-helpers";
 import { productBadge } from "@/lib/product-color";
@@ -50,6 +50,7 @@ export function FeatureCard({
   customFieldTypes,
   memberNames,
   releaseNames,
+  levels,
   onOpen,
   clickToOpen = false,
   product,
@@ -64,6 +65,9 @@ export function FeatureCard({
   memberNames: Record<string, string>;
   /** Release name by id, for the release badge. */
   releaseNames: Record<string, string>;
+  /** The workspace's hierarchy levels, so the child-progress and parent badges
+   * can name the levels rather than assume the default ones. */
+  levels: readonly WorkspaceLevel[];
   onOpen: () => void;
   /** Make the whole card a click target for opening it. Only set where drag is
    * off (below md), so a tap anywhere still opens the item; wherever the card
@@ -80,6 +84,7 @@ export function FeatureCard({
     customFieldTypes,
     memberNames,
     releaseNames,
+    levels,
   };
   const badges = cardFieldBadges(fields, featured, feature, maps);
   const featuredEl = featuredBadge(featured, fields, feature, maps);

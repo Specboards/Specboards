@@ -13,8 +13,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { StatusWorkflow } from "@specboards/core";
+import type { StatusWorkflow, WorkspaceLevel } from "@specboards/core";
 
+import {
+  ChildProgressBadge,
+  childLevelLabel,
+} from "@/components/card-field-badges";
 import { type ProductTag } from "@/components/feature-card";
 import { StatusDot } from "@/components/status-dot";
 import { StatusSelect } from "@/components/status-select";
@@ -32,9 +36,9 @@ export interface BacklogRow {
 const STORAGE_KEY = "specboard:backlog:collapsed";
 
 /**
- * Backlog table with collapsible epics. Rows arrive pre-ordered as a
- * hierarchy (each epic followed by its children); collapsing an epic hides
- * its descendant rows. Collapsed epics persist in localStorage so the view
+ * Backlog table with collapsible parents. Rows arrive pre-ordered as a
+ * hierarchy (each parent followed by its children); collapsing a parent hides
+ * its descendant rows. Collapsed rows persist in localStorage so the view
  * survives navigation and refresh.
  */
 export function BacklogTable({
@@ -43,11 +47,15 @@ export function BacklogTable({
   workflow,
   productsById,
   releaseNames,
+  levels,
   bulkOptions,
 }: {
   rows: BacklogRow[];
   canEdit: boolean;
   workflow?: StatusWorkflow;
+  /** The workspace's hierarchy levels, so the progress badge and the collapse
+   * control name the child level rather than assume it is called "epic". */
+  levels: readonly WorkspaceLevel[];
   /** Product identity by id; when set, a Product column is shown (the
    * cross-product "All products" view). */
   productsById?: Record<string, ProductTag>;
@@ -166,8 +174,9 @@ export function BacklogTable({
         </TableHeader>
         <TableBody>
           {visible.map(({ feature: f, depth }) => {
-            const isEpic = f.childCount > 0;
+            const hasChildren = f.childCount > 0;
             const isCollapsed = collapsed.has(f.specId);
+            const childLabel = childLevelLabel(f.level, levels);
             return (
               <TableRow key={f.specId} data-selected={selected.has(f.specId)}>
                 {selectMode ? (
@@ -186,14 +195,14 @@ export function BacklogTable({
                     className="flex items-center gap-2"
                     style={depth > 0 ? { paddingLeft: depth * 16 } : undefined}
                   >
-                    {isEpic ? (
+                    {hasChildren ? (
                       <button
                         type="button"
                         onClick={() => toggle(f.specId)}
                         aria-expanded={!isCollapsed}
-                        aria-label={
-                          isCollapsed ? "Expand epic" : "Collapse epic"
-                        }
+                        aria-label={`${
+                          isCollapsed ? "Show" : "Hide"
+                        } the ${childLabel.toLowerCase()} under ${f.title}`}
                         className="-ml-1 flex size-6 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground"
                       >
                         {isCollapsed ? "▸" : "▾"}
@@ -207,15 +216,7 @@ export function BacklogTable({
                     >
                       {f.title}
                     </Link>
-                    {f.childCount > 0 && (
-                      <Badge
-                        variant="outline"
-                        size="sm"
-                        title={`${f.childDoneCount} of ${f.childCount} children done`}
-                      >
-                        epic {f.childDoneCount}/{f.childCount}
-                      </Badge>
-                    )}
+                    <ChildProgressBadge feature={f} levels={levels} />
                     {f.blockedByCount > 0 && (
                       <Badge
                         variant="destructive"

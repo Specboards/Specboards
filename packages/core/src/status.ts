@@ -160,6 +160,28 @@ export function workflowFromStages(
 }
 
 /**
+ * The stage that means "finished" in an ordered vocabulary: the last stage
+ * that isn't the system `archived` status. `null` when there is no such stage.
+ *
+ * Doneness has to be derived rather than looked up, because a workflow has no
+ * terminal flag: a team renames the vocabulary in Settings or pins one in
+ * `.specboards/config.yml`, and nothing records which of their stages means the
+ * work is over. Position does. The last stage before `archived` is the end of
+ * the pipeline by construction, in both transition modes.
+ *
+ * Archiving is deliberately not doneness. It is how a team says they are not
+ * doing something, so counting it as finished would let abandoning work look
+ * like delivering it.
+ */
+export function terminalStatus(statuses: readonly string[]): string | null {
+  for (let i = statuses.length - 1; i >= 0; i--) {
+    const key = statuses[i];
+    if (key && key !== "archived") return key;
+  }
+  return null;
+}
+
+/**
  * Whether `from -> to` advances the item *forward* through the workflow: `to`
  * sits at a later position than `from` in the stage order. Moving to `archived`
  * is never "forward" (it drops the item off the board, not down the pipeline),

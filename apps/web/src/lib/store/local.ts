@@ -19,6 +19,7 @@ import {
   leafLevel,
   DEFAULT_STATUSES,
   LOCAL_PRODUCT_ACCESS,
+  parseRepoConfigYaml,
   parseSpec,
   productKeyFromName,
   wouldCreateCycle,
@@ -28,6 +29,7 @@ import {
   resolveIdeaStages,
   resolveLevels,
   resolveLevelUpdate,
+  terminalStatus,
   todayDateOnly,
   validateCycleScheduleInput,
   validateCycleDates,
@@ -334,9 +336,16 @@ interface LocalMetadata {
   productId?: string | null;
 }
 
-/** The terminal status used for hierarchy roll-up progress. */
-function isDone(status: string): boolean {
-  return status === "done";
+/**
+ * Whether an item is finished, for every progress figure the store derives
+ * (hierarchy roll-up, cycle totals, goal delivery, release progress).
+ *
+ * `doneKey` is the workflow's terminal stage rather than the literal "done",
+ * which is only that workspace's terminal stage by default. See
+ * `LocalFileStore.doneStatusKey`.
+ */
+function isDone(status: string, doneKey: string): boolean {
+  return status === doneKey;
 }
 
 type MetadataFile = Record<string, LocalMetadata>;
@@ -594,7 +603,7 @@ export class LocalFileStore implements FeatureStore {
   }
 
   private async loadAll(): Promise<FeatureDetail[]> {
-    const [files, meta, items, levels, defaultProductId, statuses] =
+    const [files, meta, items, levels, defaultProductId, statuses, doneKey] =
       await Promise.all([
         this.walkSpecFiles(this.specsDir),
         this.readMetadata(),
@@ -602,6 +611,7 @@ export class LocalFileStore implements FeatureStore {
         this.readLevels(),
         this.defaultProductId(),
         this.listStatuses(),
+        this.doneStatusKey(),
       ]);
     const leafKey = leafLevel(levels).key;
     // Where a spec sits before anyone moves it. The first configured stage
@@ -699,12 +709,16 @@ export class LocalFileStore implements FeatureStore {
       });
     }
     this.attachRelations(features, meta);
-    this.attachHierarchy(features);
+    this.attachHierarchy(features, doneKey);
     return features;
   }
 
-  /** Resolve parent titles + direct children + roll-up counts. */
-  private attachHierarchy(features: FeatureDetail[]): void {
+  /**
+   * Resolve parent titles + direct children + roll-up counts. `doneKey` is the
+   * workflow's terminal stage (see {@link LocalFileStore.doneStatusKey}), so the
+   * roll-up counts what this workspace calls finished.
+   */
+  private attachHierarchy(features: FeatureDetail[], doneKey: string): void {
     const bySpec = new Map(features.map((f) => [f.specId, f]));
     for (const f of features) {
       // Drop a parent pointer to a spec that no longer exists.
@@ -720,7 +734,7 @@ export class LocalFileStore implements FeatureStore {
         status: f.status,
       });
       parent.childCount += 1;
-      if (isDone(f.status)) parent.childDoneCount += 1;
+      if (isDone(f.status, doneKey)) parent.childDoneCount += 1;
     }
   }
 
@@ -1461,6 +1475,35 @@ export class LocalFileStore implements FeatureStore {
     }
   }
 
+  /**
+   * The status that means "finished" here: the terminal stage of the configured
+   * stages, else of the repo config's vocabulary, else the built-in `done`.
+   *
+   * Mirrors `resolveWorkflowFor`'s layering, minus the per-product level, which
+   * local mode has no way to express (one repo, one stage set). Local mode is
+   * the only place the store reads `.specboards/config.yml` itself: in DB mode
+   * the config is synced into the `repositories` row the DB store reads.
+   */
+  private async doneStatusKey(): Promise<string> {
+    const stages = await this.listStatuses();
+    const configured = terminalStatus(stages.map((s) => s.key));
+    if (configured) return configured;
+    try {
+      const raw = await fs.readFile(
+        path.join(this.root, ".specboards", "config.yml"),
+        "utf8",
+      );
+      const statuses = parseRepoConfigYaml(raw)?.statuses;
+      if (statuses && statuses.length >= 2) {
+        const fromConfig = terminalStatus(statuses);
+        if (fromConfig) return fromConfig;
+      }
+    } catch {
+      // No config, or an unparseable one: fall through to the built-in stage.
+    }
+    return terminalStatus(DEFAULT_STATUSES)!;
+  }
+
   async replaceStatuses(
     stages: StatusStageInput[],
     _scope?: WorkspaceScope,
@@ -1877,13 +1920,17 @@ export class LocalFileStore implements FeatureStore {
   // ==========================================================================
 
   async listCycles(_scope?: WorkspaceScope): Promise<CycleRecord[]> {
-    const [rows, all] = await Promise.all([this.readCycles(), this.loadAll()]);
+    const [rows, all, doneKey] = await Promise.all([
+      this.readCycles(),
+      this.loadAll(),
+      this.doneStatusKey(),
+    ]);
     const totals = new Map<string, { items: number; done: number }>();
     for (const f of all) {
       if (!f.cycleId) continue;
       const acc = totals.get(f.cycleId) ?? { items: 0, done: 0 };
       acc.items += 1;
-      if (isDone(f.status)) acc.done += 1;
+      if (isDone(f.status, doneKey)) acc.done += 1;
       totals.set(f.cycleId, acc);
     }
     const today = todayDateOnly();
@@ -2121,9 +2168,11 @@ export class LocalFileStore implements FeatureStore {
 
   /** Map of specId -> is the item done, over every item in the workspace. */
   private async doneBySpecId(): Promise<Map<string, boolean>> {
-    return new Map(
-      (await this.loadAll()).map((f) => [f.specId, isDone(f.status)]),
-    );
+    const [all, doneKey] = await Promise.all([
+      this.loadAll(),
+      this.doneStatusKey(),
+    ]);
+    return new Map(all.map((f) => [f.specId, isDone(f.status, doneKey)]));
   }
 
   // ==========================================================================
@@ -2323,7 +2372,11 @@ export class LocalFileStore implements FeatureStore {
     goalId: string,
     _scope?: WorkspaceScope,
   ): Promise<GoalContribution[]> {
-    const [rows, all] = await Promise.all([this.readGoals(), this.loadAll()]);
+    const [rows, all, doneKey] = await Promise.all([
+      this.readGoals(),
+      this.loadAll(),
+      this.doneStatusKey(),
+    ]);
     const goal = await this.goalById(rows, goalId);
     const linked = new Set(goal.linkedSpecIds ?? []);
     return all
@@ -2334,7 +2387,7 @@ export class LocalFileStore implements FeatureStore {
         status: f.status,
         level: f.level,
         productId: f.productId,
-        done: isDone(f.status),
+        done: isDone(f.status, doneKey),
       }));
   }
 
@@ -2786,10 +2839,11 @@ export class LocalFileStore implements FeatureStore {
     options: WorkspaceSummaryOptions,
     _scope?: WorkspaceScope,
   ): Promise<WorkspaceSummary> {
-    const [products, allFeatures, releases] = await Promise.all([
+    const [products, allFeatures, releases, doneKey] = await Promise.all([
       this.readProducts(),
       this.loadAll(),
       this.listReleases(),
+      this.doneStatusKey(),
     ]);
 
     // Same aggregation as getGroupSummary, over every product rather than one
@@ -2817,7 +2871,7 @@ export class LocalFileStore implements FeatureStore {
         releaseTotals.set(f.productId, byRelease);
         const entry = byRelease.get(f.releaseId) ?? { total: 0, done: 0 };
         entry.total += 1;
-        if (isDone(f.status)) entry.done += 1;
+        if (isDone(f.status, doneKey)) entry.done += 1;
         byRelease.set(f.releaseId, entry);
       }
     }
@@ -2830,7 +2884,7 @@ export class LocalFileStore implements FeatureStore {
     }
 
     const live = allFeatures.filter(
-      (f) => f.status !== "archived" && !isDone(f.status),
+      (f) => f.status !== "archived" && !isDone(f.status, doneKey),
     );
     const signal = (f: (typeof live)[number]): SignalItem => ({
       specId: f.specId,

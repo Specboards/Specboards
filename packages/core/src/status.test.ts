@@ -5,6 +5,7 @@ import {
   defaultWorkflow,
   isForwardTransition,
   resolveWorkflow,
+  terminalStatus,
   transitionErrorMessage,
   workflowFromStages,
 } from "./status.js";
@@ -83,5 +84,23 @@ describe("isForwardTransition", () => {
   it("is false when either status is unknown to the workflow", () => {
     expect(isForwardTransition("mystery", "done")).toBe(false);
     expect(isForwardTransition("backlog", "mystery")).toBe(false);
+  });
+});
+
+describe("terminalStatus", () => {
+  it("is the last stage of the vocabulary", () => {
+    expect(terminalStatus(["todo", "doing", "shipped"])).toBe("shipped");
+  });
+
+  it("looks past archived, which is appended rather than reached", () => {
+    // Every built workflow ends in `archived`, so taking the last entry
+    // literally would make archiving the definition of finished.
+    expect(terminalStatus(defaultWorkflow.statuses)).toBe("done");
+    expect(terminalStatus(["todo", "shipped", "archived"])).toBe("shipped");
+  });
+
+  it("is null when there is no stage to be the last one", () => {
+    expect(terminalStatus([])).toBeNull();
+    expect(terminalStatus(["archived"])).toBeNull();
   });
 });

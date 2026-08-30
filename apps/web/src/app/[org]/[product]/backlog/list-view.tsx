@@ -377,6 +377,7 @@ export async function ListView({
                   workflow={workflow}
                   productsById={productsById}
                   releaseNames={releaseNames}
+                  levels={levels}
                   bulkOptions={{
                     statuses: options.statuses,
                     assignees: options.assignees,
