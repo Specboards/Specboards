@@ -749,6 +749,14 @@ export class LocalFileStore implements FeatureStore {
     }
   }
 
+  // ==========================================================================
+  // Items: read and update
+  //
+  // `updateFeature` is here rather than with the other writes below, which is
+  // the opposite of `db.ts`. The two implementations of one interface do not
+  // present their methods in the same order.
+  // ==========================================================================
+
   // The local store has a single implicit workspace, so `scope` is ignored.
   async listFeatures(_scope?: WorkspaceScope): Promise<FeatureRecord[]> {
     return this.loadAll();
@@ -809,6 +817,10 @@ export class LocalFileStore implements FeatureStore {
     await this.writeMetadata(meta);
   }
 
+  // ==========================================================================
+  // Workspace levels
+  // ==========================================================================
+
   async listLevels(_scope?: WorkspaceScope): Promise<WorkspaceLevel[]> {
     // Persisted config if present, else the default hierarchy.
     return resolveLevels(await this.readLevels());
@@ -857,6 +869,10 @@ export class LocalFileStore implements FeatureStore {
     await this.writeLevels(updated);
     return updated;
   }
+
+  // ==========================================================================
+  // Items: write, relations, GitHub links, and the event ledger
+  // ==========================================================================
 
   async createFeature(
     input: CreateFeatureInput,
@@ -1123,6 +1139,10 @@ export class LocalFileStore implements FeatureStore {
     );
   }
 
+  // ==========================================================================
+  // Saved views and board preferences
+  // ==========================================================================
+
   async listSavedViews(_scope?: WorkspaceScope): Promise<SavedView[]> {
     return this.readViews();
   }
@@ -1226,6 +1246,13 @@ export class LocalFileStore implements FeatureStore {
       "utf8",
     );
   }
+
+  // ==========================================================================
+  // Custom properties and detail templates
+  //
+  // `listPropertiesUnion` and `listStatusesUnion` are NOT here: they sit far
+  // below, next to `getTransitionMode`. In `db.ts` they are in this block.
+  // ==========================================================================
 
   async listProperties(
     _scope?: WorkspaceScope,
@@ -1407,6 +1434,10 @@ export class LocalFileStore implements FeatureStore {
     return updated;
   }
 
+  // ==========================================================================
+  // Statuses and stage gates
+  // ==========================================================================
+
   // Releases persist to `.specboards/local-releases.json`.
   async listStatuses(_scope?: WorkspaceScope): Promise<WorkspaceStatus[]> {
     try {
@@ -1577,6 +1608,10 @@ export class LocalFileStore implements FeatureStore {
       "utf8",
     );
   }
+
+  // ==========================================================================
+  // Releases
+  // ==========================================================================
 
   async listReleases(_scope?: WorkspaceScope): Promise<ReleaseRecord[]> {
     const [rows, all] = await Promise.all([
@@ -1793,6 +1828,10 @@ export class LocalFileStore implements FeatureStore {
     if (metaChanged) await this.writeMetadata(meta);
     return moved;
   }
+
+  // ==========================================================================
+  // Cycles
+  // ==========================================================================
 
   async listCycles(_scope?: WorkspaceScope): Promise<CycleRecord[]> {
     const [rows, all] = await Promise.all([this.readCycles(), this.loadAll()]);
@@ -2043,6 +2082,10 @@ export class LocalFileStore implements FeatureStore {
       (await this.loadAll()).map((f) => [f.specId, isDone(f.status)]),
     );
   }
+
+  // ==========================================================================
+  // Goals and key results
+  // ==========================================================================
 
   async listGoals(_scope?: WorkspaceScope): Promise<GoalRecord[]> {
     const [rows, doneMap] = await Promise.all([
@@ -2322,6 +2365,10 @@ export class LocalFileStore implements FeatureStore {
     }
   }
 
+  // ==========================================================================
+  // Comments
+  // ==========================================================================
+
   async listComments(
     specId: string,
     _scope?: WorkspaceScope,
@@ -2384,6 +2431,10 @@ export class LocalFileStore implements FeatureStore {
     );
   }
 
+  // ==========================================================================
+  // Notifications
+  // ==========================================================================
+
   // Notifications are a multi-user, @mention-driven concept; local file mode is
   // a single user with no members to mention, so the inbox is always empty.
   async listNotifications(_scope?: WorkspaceScope): Promise<NotificationList> {
@@ -2396,6 +2447,13 @@ export class LocalFileStore implements FeatureStore {
   ): Promise<void> {}
 
   async markAllNotificationsRead(_scope?: WorkspaceScope): Promise<void> {}
+
+  // ==========================================================================
+  // Products, product groups, members, and roll-up summaries
+  //
+  // `deleteProduct` is out of place: it sits after `getWorkspaceSummary` at the
+  // end of this block rather than with the other product mutations.
+  // ==========================================================================
 
   // Products. Local file mode is a single all-powerful user (see core
   // LOCAL_PRODUCT_ACCESS), so visibility/permissions aren't enforced; products
@@ -2852,6 +2910,10 @@ export class LocalFileStore implements FeatureStore {
     };
   }
 
+  // ==========================================================================
+  // Ideas
+  // ==========================================================================
+
   async listIdeas(_scope?: WorkspaceScope): Promise<IdeaRecord[]> {
     const [rows, all] = await Promise.all([this.readIdeas(), this.loadAll()]);
     const titleBySpec = new Map(all.map((f) => [f.specId, f.title] as const));
@@ -3039,6 +3101,10 @@ export class LocalFileStore implements FeatureStore {
     return rows;
   }
 
+  // ==========================================================================
+  // Transition mode, property unions, and card configuration
+  // ==========================================================================
+
   /**
    * Local file mode has no workspace row to hold the setting, and a solo
    * dogfooding session is the case that least wants a rigid pipeline, so it is
@@ -3104,6 +3170,10 @@ export class LocalFileStore implements FeatureStore {
     return mode;
   }
 
+  // ==========================================================================
+  // Idea settings
+  // ==========================================================================
+
   async getIdeaSettings(_scope?: WorkspaceScope): Promise<IdeaSettings> {
     try {
       const row = JSON.parse(
@@ -3164,6 +3234,10 @@ export class LocalFileStore implements FeatureStore {
     await fs.mkdir(path.dirname(file), { recursive: true });
     await fs.writeFile(file, JSON.stringify(rows, null, 2) + "\n", "utf8");
   }
+
+  // ==========================================================================
+  // Doc spaces and pages
+  // ==========================================================================
 
   async getDocSpace(
     productId: string,
