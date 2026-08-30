@@ -1,10 +1,6 @@
 # Homebrew distribution for the Specboards CLI
 
-`specboards.rb` here is the maintained source of the formula. The tap that users
-install from lives in a separate repo, `Specboards/homebrew-tap`, as
-`Formula/specboards.rb`.
-
-The tap is live, so users install with:
+Users install the CLI with:
 
 ```bash
 brew install specboards/tap/specboards
@@ -12,40 +8,40 @@ brew install specboards/tap/specboards
 
 (`specboards/tap` is shorthand for the `Specboards/homebrew-tap` repo.)
 
-## On each CLI release
+## The formula does not live here
 
-The npm publish happens first (push a `cli-v<version>` tag, which runs
-`.github/workflows/cli-release.yml`). Then update the formula:
+It lives in the tap, at
+[`Formula/specboards.rb`](https://github.com/Specboards/homebrew-tap/blob/main/Formula/specboards.rb),
+and that is the only copy. This directory used to hold a second one that had to
+be kept byte-identical and copied across on every release.
 
-1. Bump `url` to the new version's npm tarball:
-   `https://registry.npmjs.org/@specboards/cli/-/cli-<version>.tgz`
-2. Set `sha256` to the tarball's checksum:
+That arrangement stopped making sense once the bump was automated. The formula's
+`url` and `sha256` are now written by a job in the tap, so a copy here would be
+out of date within hours of every release, and two files that must agree but
+cannot are worse than one.
 
-   ```bash
-   tarball=$(npm view @specboards/cli@<version> dist.tarball)
-   curl -sL "$tarball" | shasum -a 256
-   ```
+## Releasing the CLI no longer involves this directory
 
-3. Copy the updated file into the tap repo as `Formula/specboards.rb`. Keep the
-   two byte-identical (`diff` them) so the tap never becomes a second source of
-   truth.
-4. Verify before pushing. The tap has no CI of its own, and Homebrew no longer
-   audits or installs a formula by file path, so point it at a local clone of
-   the tap instead. Commit in the tap first, then:
+Push a `cli-v<version>` tag. `.github/workflows/cli-release.yml` publishes to
+npm. Within six hours the tap's own
+[`bump-formula.yml`](https://github.com/Specboards/homebrew-tap/blob/main/.github/workflows/bump-formula.yml)
+notices the new version, downloads that exact tarball, computes the checksum
+from the bytes it fetched, installs and runs the result on a macOS runner, and
+commits only if all of that passed.
 
-   ```bash
-   brew untap specboards/tap 2>/dev/null   # if already tapped
-   brew tap specboards/tap /path/to/homebrew-tap
-   brew audit --strict --online specboards/tap/specboards
-   brew style specboards/tap/specboards
-   brew install specboards/tap/specboards
-   specboards version                      # expect: specboards <version>
-   brew test specboards
-   ```
+To skip the wait after a release:
 
-5. Push the tap to `main`, then re-run the install against the real remote:
-   `brew uninstall specboards && brew untap specboards/tap && brew install
-   specboards/tap/specboards`.
+```bash
+gh workflow run bump-formula.yml -R Specboards/homebrew-tap
+```
 
-A future improvement is to automate these steps from the release workflow with a
-bot commit to the tap; kept manual for now to avoid a cross-repo write token.
+## Why the tap updates itself rather than being pushed to
+
+The obvious design is for `cli-release.yml` to write the formula straight after
+publishing. It would need a credential in this repo that can write to the tap,
+sitting next to the npm publish token, so one leaked secret would get an
+attacker both the package and the formula that vouches for it.
+
+Pulling costs some latency and buys away that whole category of problem: the
+tap's job uses its own `GITHUB_TOKEN`, which cannot write anywhere else, and
+this repo holds no credential for the tap at all.

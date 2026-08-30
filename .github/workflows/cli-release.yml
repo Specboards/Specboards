@@ -11,6 +11,11 @@
 #     OTP-required message that CI has no way to answer.
 # Both failure modes cost us a release afternoon. A classic automation token
 # also works, but npm is phasing those out, so prefer granular.
+#
+# Homebrew needs nothing from here. The tap watches npm and updates its own
+# formula within six hours of a publish; see packaging/homebrew/README.md for
+# why it pulls rather than being pushed to. To not wait:
+#   gh workflow run bump-formula.yml -R Specboards/homebrew-tap
 name: Publish CLI
 
 on:
