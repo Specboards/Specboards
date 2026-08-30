@@ -59,16 +59,6 @@ export async function listWorkspaceMembers(
 }
 
 /**
- * Whether an org role grants *workspace-wide* write on its own. Only the
- * `owner` does; every other member (the org baseline) gets write only through
- * per-product grants, evaluated with `canWriteProduct`. Use this for
- * non-product-scoped writes; product-scoped edits must check `canWriteProduct`.
- */
-export function canWrite(role: MemberRole): boolean {
-  return role === "owner";
-}
-
-/**
  * Workspace + membership bootstrap. The hosted product runs one workspace per
  * Fly app (the "organization"), so "the active workspace" is simply the first
  * one created. The first user to sign up names it and becomes the `owner` (see
