@@ -14,7 +14,7 @@ npx @specboards/cli whoami
 npm install -g @specboards/cli
 specboards help
 
-# Homebrew (once the tap is published)
+# Homebrew
 brew install specboards/tap/specboards
 ```
 
