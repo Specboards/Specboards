@@ -1,18 +1,18 @@
 # Homebrew formula for the Specboards CLI.
 #
-# This is the maintained SOURCE of the formula. On each CLI release, copy it to
-# the tap repo `Specboards/homebrew-tap` as `Formula/specboards.rb` with `url`
-# and `sha256` updated for the new version (see packaging/homebrew/README.md),
-# so `brew install specboards/tap/specboards` picks it up.
-require "language/node"
+# The maintained SOURCE of this file is `packaging/homebrew/specboards.rb` in
+# Specboards/Specboards. The copy in the tap repo (Specboards/homebrew-tap, as
+# `Formula/specboards.rb`) is what `brew install specboards/tap/specboards`
+# actually reads. The two must stay byte-identical, so edit the source and copy
+# it over; never hand-edit the tap. packaging/homebrew/README.md has the steps.
 
 class Specboards < Formula
   desc "Command-line interface for Specboards (specs, status, GitHub links)"
   homepage "https://specboards.ai"
-  url "https://registry.npmjs.org/@specboards/cli/-/cli-0.21.0.tgz"
-  # Replace after `npm publish`: shasum -a 256 of the published tarball
-  # (`npm view @specboards/cli@0.21.0 dist.tarball` then curl | shasum -a 256).
-  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+  url "https://registry.npmjs.org/@specboards/cli/-/cli-0.27.3.tgz"
+  # shasum -a 256 of the published tarball. Recompute on every version bump:
+  # `npm view @specboards/cli@<version> dist.tarball` then curl | shasum -a 256.
+  sha256 "797d0ab5561d679dfda893b33cb3e610ebee774a1b2db7286b0f743bd11054b9"
   # The CLI is the deliberate Apache-2.0 exception to the AGPL codebase, so you
   # can script against it freely. See LICENSING.md and apps/cli/LICENSE; this
   # must stay in step with `license` in apps/cli/package.json.

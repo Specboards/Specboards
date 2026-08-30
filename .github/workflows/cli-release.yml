@@ -1,7 +1,16 @@
-# Publish @specboards/cli to npm when a `cli-v*` tag is pushed (e.g. cli-v0.21.0).
+# Publish @specboards/cli to npm when a `cli-v*` tag is pushed (e.g. cli-v0.27.3).
 # A dedicated tag prefix keeps the CLI's release cadence independent of the app's
-# `v*` release tags. Requires the NPM_TOKEN repo secret (an npm automation token
-# with publish rights to the @specboards scope).
+# `v*` release tags.
+#
+# Requires the NPM_TOKEN repo secret. When you mint a replacement, it must be a
+# granular access token with BOTH of:
+#   - Read and write on the @specboards scope (packages and scopes). Selecting
+#     only the package fails on a first publish, because the package does not
+#     exist yet: npm answers 404, not 403.
+#   - "Bypass 2FA" enabled. Without it the publish fails 403 with an
+#     OTP-required message that CI has no way to answer.
+# Both failure modes cost us a release afternoon. A classic automation token
+# also works, but npm is phasing those out, so prefer granular.
 name: Publish CLI
 
 on:
