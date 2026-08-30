@@ -1460,8 +1460,18 @@ export async function replaceStatuses(
  * label. A caller-supplied `key` is honored when it's a valid, unique slug (so
  * a stage's key stays stable across a rename); otherwise a key is derived from
  * the label. `archived` is reserved for the system status.
+ *
+ * `allowEmpty` additionally accepts `[]`, which is not a workflow but the
+ * signal that a product is giving up its own stages and going back to
+ * inheriting the workspace default (see `replaceStatuses`). Only the
+ * product-scoped caller passes it: at workspace scope an empty array is far
+ * more likely to be a client bug than a request to fall back to the built-in
+ * vocabulary, and rejecting it costs a real user nothing.
  */
-export function parseStatusStages(body: unknown): StatusStageInput[] {
+export function parseStatusStages(
+  body: unknown,
+  { allowEmpty = false }: { allowEmpty?: boolean } = {},
+): StatusStageInput[] {
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
     throw new InvalidPatchError("Request body must be a JSON object.");
   }
@@ -1469,6 +1479,7 @@ export function parseStatusStages(body: unknown): StatusStageInput[] {
   if (!Array.isArray(raw)) {
     throw new InvalidPatchError("statuses must be an array.");
   }
+  if (allowEmpty && raw.length === 0) return [];
   if (raw.length < 2 || raw.length > 30) {
     throw new InvalidPatchError("A workflow needs between 2 and 30 stages.");
   }
