@@ -42,7 +42,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "eslint src",
-    "prepublishOnly": "tsc -b"
+    "prepublishOnly": "rm -rf dist tsconfig.tsbuildinfo && tsc -b"
   },
   "devDependencies": {
     "@types/node": "^22.20.0",
