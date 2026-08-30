@@ -25,6 +25,51 @@ for how and when the version is bumped.
 > `pnpm deploy:prod` and the dispatched workflow. See
 > [VERSIONING.md](./VERSIONING.md).
 
+## [0.29.1] - 2026-08-30
+
+A workflow you can edit again, and the beginning of a much smaller store.
+
+### Fixed
+
+- **Settings > Cards can save your workflow stages again.** Renaming, adding,
+  reordering, or removing a board column, giving a product its own set of
+  stages, and reverting a product to the workspace default were all dead: the
+  browser sent a request the server had no handler for and got a 405 back. The
+  handler was removed by accident during the change that made these settings
+  per-product, and because the API description was updated to match the server
+  rather than the browser, nothing disagreed with anything and the feature sat
+  broken. It works again, with the same permissions as the rest of that page: a
+  product admin configures their own product, the workspace owner configures
+  any, and the workspace default stays owner-only.
+- **Removing a stage no longer leaves work with nowhere to sit.** An item in a
+  stage you delete is moved to the first stage, which is what was always
+  intended. Reverting a product to the workspace default is the case that was
+  wrong: items on a stage only that product had were left pointing at a column
+  the board no longer draws, invisible until someone went looking. Local file
+  mode never did this re-homing at all and now does.
+- **Local file mode puts new specs in your first stage**, not in a stage called
+  "backlog" that may not exist. A spec nobody had moved yet showed up under a
+  column that was not on the board if you had renamed or removed that stage.
+- **The dev server starts, and the build no longer dirties the tree.** Both
+  reported by anyone setting the repo up from scratch.
+
+### Changed
+
+- **The Postgres store is being taken apart.** `db.ts` was 6,700 lines with no
+  internal structure, and the interface behind it had 104 members implemented
+  twice over. It now has navigable sections, twelve domain interfaces instead of
+  one, its own directory, and the first domain (cycles) moved into a module of
+  its own. No behaviour changed: this is groundwork so that later changes to the
+  store are reviewable, and it continues one domain at a time.
+- **Unused code now fails the build in `apps/web`.** It was checked by nothing,
+  in the package that is most of the codebase, which is how the missing workflow
+  handler above went unnoticed: the imports it left behind were the only
+  evidence.
+- **A trimmed set of documents.** The progress-tracking files that had drifted
+  out of date are gone and `docs/` has an index, so what remains is what is
+  still true. The README leads with the agentic harness and maps it to the
+  AI-native SDLC.
+
 ## [0.29.0] - 2026-08-30
 
 The CLI stops being something you build from this repo and becomes something you
