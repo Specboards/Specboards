@@ -1371,13 +1371,10 @@ export const BOARD_KEYS = ["backlog", "roadmap"] as const;
 export type BoardKey = (typeof BOARD_KEYS)[number];
 
 /**
- * Storage boundary for the web app. Two implementations:
- * - `local`: reads specs from the filesystem, metadata in a JSON file —
- *   zero-setup local testing (scope ignored; single implicit workspace).
- * - `db`: Drizzle/Postgres (`DATABASE_URL`) — the real deployment shape;
- *   requires a `scope` and isolates every query to it.
+ * Reading items. `listFeatures` backs the board and deliberately carries no
+ * bodies; `listFeatureBodies` is the bulk read for callers that need them.
  */
-export interface FeatureStore {
+export interface ItemReadStore {
   listFeatures(scope?: WorkspaceScope): Promise<FeatureRecord[]>;
   /**
    * The Markdown bodies of many items at once, keyed by spec id.
@@ -1401,6 +1398,14 @@ export interface FeatureStore {
     specId: string,
     scope?: WorkspaceScope,
   ): Promise<FeatureDetail | null>;
+}
+
+/**
+ * The shape of a workspace: its hierarchy levels, the statuses and stage
+ * gates work moves through, admin-defined card properties, and the detail
+ * templates new items start from.
+ */
+export interface WorkspaceConfigStore {
   /**
    * The workspace's hierarchy levels, ordered top → leaf, with one product's
    * Cards overrides applied. The hierarchy itself is always workspace-wide;
@@ -1557,6 +1562,12 @@ export interface FeatureStore {
     scope?: WorkspaceScope,
     productId?: string | null,
   ): Promise<WorkspaceLevel[]>;
+}
+
+/**
+ * Releases: the ship vehicles work is scheduled into.
+ */
+export interface ReleaseStore {
   /** The workspace's releases, dated first (ascending), undated last. Each
    * record carries its `productId` (null for a workspace-wide portfolio
    * release); callers that want a single product's roadmap filter to that
@@ -1577,7 +1588,13 @@ export interface FeatureStore {
   ): Promise<ReleaseRecord>;
   /** Delete a release; its items are unscheduled, not deleted. */
   deleteRelease(id: string, scope?: WorkspaceScope): Promise<void>;
+}
 
+/**
+ * Cycles (sprints/iterations). Scheduled independently of releases: an item
+ * can be in both, one, or neither.
+ */
+export interface CycleStore {
   /** The workspace's cycles, ordered active → upcoming → most recently
    * complete. `state` on each is derived from its dates, never stored. */
   listCycles(scope?: WorkspaceScope): Promise<CycleRecord[]>;
@@ -1612,7 +1629,12 @@ export interface FeatureStore {
     toId: string,
     scope?: WorkspaceScope,
   ): Promise<CycleRolloverResult>;
+}
 
+/**
+ * Goals, key results, and the links that say what work ladders up to them.
+ */
+export interface GoalStore {
   /** The workspace's goals with their key results and computed progress,
    * ordered open first, then by soonest period end. */
   listGoals(scope?: WorkspaceScope): Promise<GoalRecord[]>;
@@ -1665,6 +1687,12 @@ export interface FeatureStore {
     specId: string,
     scope?: WorkspaceScope,
   ): Promise<void>;
+}
+
+/**
+ * Comments and the notifications they raise.
+ */
+export interface CollaborationStore {
   /** Comments on a feature (by stable specId), oldest first, author resolved.
    * Requires read access to the feature's product. */
   listComments(
@@ -1686,6 +1714,14 @@ export interface FeatureStore {
   markNotificationRead(id: string, scope?: WorkspaceScope): Promise<void>;
   /** Mark all of the caller's notifications read. */
   markAllNotificationsRead(scope?: WorkspaceScope): Promise<void>;
+}
+
+/**
+ * Products, product groups, per-product membership, and the roll-up
+ * summaries computed over them. `getProductAccess` is the read the
+ * authorization checks in both implementations are built on.
+ */
+export interface ProductStore {
   /** The acting user's effective product access (org-admin flag + per-product
    * grants), used for read-filtering and write authorization. */
   getProductAccess(scope?: WorkspaceScope): Promise<ProductAccess>;
@@ -1761,6 +1797,14 @@ export interface FeatureStore {
     userId: string,
     scope?: WorkspaceScope,
   ): Promise<void>;
+}
+
+/**
+ * Mutating items, plus the typed relations and GitHub links hung off them,
+ * plus the event ledger those writes populate. Every method here is an
+ * authorization boundary in the Postgres implementation.
+ */
+export interface ItemWriteStore {
   /** Create a DB-native work item (initiative/epic). Returns the new record.
    * `emitType`, when given, records an outbox event of that type (with data built
    * from the new row) in the same transaction. */
@@ -1839,6 +1883,13 @@ export interface FeatureStore {
     query: ActivityQuery,
     scope?: WorkspaceScope,
   ): Promise<ActivitySummary>;
+}
+
+/**
+ * Per-user presentation state: saved views and board preferences. Nothing
+ * here is shared between users.
+ */
+export interface ViewStore {
   /** The acting user's saved backlog views (personal, newest first). */
   listSavedViews(scope?: WorkspaceScope): Promise<SavedView[]>;
   /** Persist a new saved view for the acting user; returns it with its id. */
@@ -1873,6 +1924,13 @@ export interface FeatureStore {
     board?: BoardKey,
   ): Promise<void>;
   // ── Ideas ───────────────────────────────────────────────────────────────
+}
+
+/**
+ * The ideas intake: capture, voting, promotion into the backlog, and the
+ * stages an idea moves through.
+ */
+export interface IdeaStore {
   /** The workspace's ideas the acting user can see, most-voted first. */
   listIdeas(scope?: WorkspaceScope): Promise<IdeaRecord[]>;
   /** Capture a new idea; returns the new record. */
@@ -1911,6 +1969,18 @@ export interface FeatureStore {
     scope?: WorkspaceScope,
   ): Promise<IdeaStage[]>;
   /** The workspace's Ideas configuration (portal settings). */
+}
+
+/**
+ * Per-workspace and per-product settings: how strictly the status workflow
+ * is enforced, which card fields a product overrides, and the ideas portal's
+ * configuration.
+ *
+ * The idea settings arguably belong on `IdeaStore`. They are here because
+ * this split moves no declarations, only re-wraps contiguous ones, and they
+ * sit next to the transition mode in the original. Worth revisiting.
+ */
+export interface WorkspaceSettingsStore {
   /**
    * How freely items move between stages, for one product. Drives whether the
    * resolved workflow's transitions are a pipeline or fully open.
@@ -1961,6 +2031,13 @@ export interface FeatureStore {
     scope?: WorkspaceScope,
   ): Promise<IdeaSettings>;
   // ── Docs (Plan-section areas) ───────────────────────────────────────────
+}
+
+/**
+ * Doc spaces and the pages inside them, whether backed by Specboards or by
+ * a connected repository.
+ */
+export interface DocStore {
   /** The area's doc-source configuration; mode `unset` when never chosen. */
   getDocSpace(
     productId: string,
@@ -1994,6 +2071,33 @@ export interface FeatureStore {
   /** Delete a folder (contents cascade) or page. */
   deleteDocPage(id: string, scope?: WorkspaceScope): Promise<void>;
 }
+
+/**
+ * Storage boundary for the web app. Two implementations:
+ * - `local`: reads specs from the filesystem, metadata in a JSON file —
+ *   zero-setup local testing (scope ignored; single implicit workspace).
+ * - `db`: Drizzle/Postgres (`DATABASE_URL`) — the real deployment shape;
+ *   requires a `scope` and isolates every query to it.
+ *
+ * Composed from the per-domain interfaces above. This is deliberately an
+ * empty extension: the name and structural shape are unchanged, so every
+ * caller and both implementations are untouched. Narrow a dependency by
+ * accepting one of the parts instead of the whole surface.
+ */
+export interface FeatureStore
+  extends
+    ItemReadStore,
+    WorkspaceConfigStore,
+    ReleaseStore,
+    CycleStore,
+    GoalStore,
+    CollaborationStore,
+    ProductStore,
+    ItemWriteStore,
+    ViewStore,
+    IdeaStore,
+    WorkspaceSettingsStore,
+    DocStore {}
 
 /** Raised when a relation can't be created (self-link, cycle, unknown target). */
 export class RelationError extends DomainError {}
