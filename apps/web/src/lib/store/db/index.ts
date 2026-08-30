@@ -42,7 +42,6 @@ import { riceFields } from "@/lib/feature-helpers";
 import {
   and,
   asc,
-  boardPreferences,
   comments,
   cycles,
   goalLinks,
@@ -79,7 +78,6 @@ import {
   products,
   releases,
   repositories,
-  savedViews,
   sql,
   specIndex,
   users,
@@ -188,7 +186,6 @@ import {
   type WorkspaceStatus,
   type ResolvedGithubLink,
   type SavedView,
-  type SavedViewFilters,
   type SavedViewInput,
   type SavedViewPatch,
   type ActorType,
@@ -207,17 +204,7 @@ import {
   type Tx,
 } from "./context";
 import * as cycleStore from "./cycles";
-
-/** Normalize the jsonb filters column into the typed filter bundle. */
-function toSavedViewFilters(value: unknown): SavedViewFilters {
-  const out: SavedViewFilters = {};
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      if (typeof v === "string" || typeof v === "number") out[k] = v;
-    }
-  }
-  return out;
-}
+import * as viewStore from "./views";
 
 type LinkRow = {
   id: string;
@@ -2244,177 +2231,46 @@ export class DbStore implements FeatureStore, DbStoreContext {
   // ==========================================================================
   // Saved views and board preferences
   // ==========================================================================
+  //
+  // Implemented in ./views.ts. The bodies moved verbatim; these delegate so
+  // that `DbStore` stays the one thing callers hold.
 
-  async listSavedViews(scope?: WorkspaceScope): Promise<SavedView[]> {
-    return this.scoped(scope, async (tx) => {
-      const rows = await tx
-        .select({
-          id: savedViews.id,
-          name: savedViews.name,
-          view: savedViews.view,
-          filters: savedViews.filters,
-        })
-        .from(savedViews)
-        .where(
-          and(
-            eq(savedViews.workspaceId, scope!.workspaceId),
-            eq(savedViews.userId, scope!.userId),
-          ),
-        )
-        .orderBy(desc(savedViews.createdAt));
-      return rows.map((r) => ({
-        id: r.id,
-        name: r.name,
-        view: r.view,
-        filters: toSavedViewFilters(r.filters),
-      }));
-    });
+  listSavedViews(scope?: WorkspaceScope): Promise<SavedView[]> {
+    return viewStore.listSavedViews(this, scope);
   }
 
-  async createSavedView(
+  createSavedView(
     input: SavedViewInput,
     scope?: WorkspaceScope,
   ): Promise<SavedView> {
-    return this.scoped(scope, async (tx) => {
-      const [row] = await tx
-        .insert(savedViews)
-        .values({
-          workspaceId: scope!.workspaceId,
-          userId: scope!.userId,
-          name: input.name,
-          view: input.view,
-          filters: input.filters,
-        })
-        .returning({
-          id: savedViews.id,
-          name: savedViews.name,
-          view: savedViews.view,
-          filters: savedViews.filters,
-        });
-      if (!row) throw new Error("Failed to create saved view.");
-      return {
-        id: row.id,
-        name: row.name,
-        view: row.view,
-        filters: toSavedViewFilters(row.filters),
-      };
-    });
+    return viewStore.createSavedView(this, input, scope);
   }
 
-  async updateSavedView(
+  updateSavedView(
     id: string,
     patch: SavedViewPatch,
     scope?: WorkspaceScope,
   ): Promise<SavedView | null> {
-    return this.scoped(scope, async (tx) => {
-      const set: Partial<typeof savedViews.$inferInsert> = {};
-      if (patch.name !== undefined) set.name = patch.name;
-      if (patch.filters !== undefined) set.filters = patch.filters;
-      // Nothing to change: return the current row (or null if not owned).
-      if (Object.keys(set).length === 0) {
-        const [current] = await tx
-          .select({
-            id: savedViews.id,
-            name: savedViews.name,
-            view: savedViews.view,
-            filters: savedViews.filters,
-          })
-          .from(savedViews)
-          .where(
-            and(
-              eq(savedViews.id, id),
-              eq(savedViews.workspaceId, scope!.workspaceId),
-              eq(savedViews.userId, scope!.userId),
-            ),
-          );
-        return current
-          ? { ...current, filters: toSavedViewFilters(current.filters) }
-          : null;
-      }
-      const [row] = await tx
-        .update(savedViews)
-        .set(set)
-        .where(
-          and(
-            eq(savedViews.id, id),
-            eq(savedViews.workspaceId, scope!.workspaceId),
-            eq(savedViews.userId, scope!.userId),
-          ),
-        )
-        .returning({
-          id: savedViews.id,
-          name: savedViews.name,
-          view: savedViews.view,
-          filters: savedViews.filters,
-        });
-      return row ? { ...row, filters: toSavedViewFilters(row.filters) } : null;
-    });
+    return viewStore.updateSavedView(this, id, patch, scope);
   }
 
-  async deleteSavedView(id: string, scope?: WorkspaceScope): Promise<void> {
-    await this.scoped(scope, async (tx) => {
-      await tx
-        .delete(savedViews)
-        .where(
-          and(
-            eq(savedViews.id, id),
-            eq(savedViews.workspaceId, scope!.workspaceId),
-            eq(savedViews.userId, scope!.userId),
-          ),
-        );
-    });
+  deleteSavedView(id: string, scope?: WorkspaceScope): Promise<void> {
+    return viewStore.deleteSavedView(this, id, scope);
   }
 
-  async getBoardPreferences(
+  getBoardPreferences(
     scope?: WorkspaceScope,
-    board: BoardKey = "backlog",
+    board?: BoardKey,
   ): Promise<BoardPreferences | null> {
-    return this.scoped(scope, async (tx) => {
-      const row = await tx.query.boardPreferences.findFirst({
-        where: and(
-          eq(boardPreferences.workspaceId, scope!.workspaceId),
-          eq(boardPreferences.userId, scope!.userId),
-          eq(boardPreferences.board, board),
-        ),
-      });
-      if (!row) return null;
-      return {
-        cardFields: Array.isArray(row.cardFields)
-          ? (row.cardFields as string[])
-          : null,
-        featured: row.featured,
-      };
-    });
+    return viewStore.getBoardPreferences(this, scope, board);
   }
 
-  async setBoardPreferences(
+  setBoardPreferences(
     prefs: BoardPreferences,
     scope?: WorkspaceScope,
-    board: BoardKey = "backlog",
+    board?: BoardKey,
   ): Promise<void> {
-    await this.scoped(scope, async (tx) => {
-      await tx
-        .insert(boardPreferences)
-        .values({
-          workspaceId: scope!.workspaceId,
-          userId: scope!.userId,
-          board,
-          cardFields: prefs.cardFields ?? [],
-          featured: prefs.featured,
-        })
-        .onConflictDoUpdate({
-          target: [
-            boardPreferences.workspaceId,
-            boardPreferences.userId,
-            boardPreferences.board,
-          ],
-          set: {
-            cardFields: prefs.cardFields ?? [],
-            featured: prefs.featured,
-            updatedAt: new Date(),
-          },
-        });
-    });
+    return viewStore.setBoardPreferences(this, prefs, scope, board);
   }
 
   // ── Custom properties ─────────────────────────────────────────────────
