@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { resolveApiMembership } from "./workspace";
 
 /**
- * Multi-org API scoping (docs/archive/security-fixes.md, P1 "make the active
+ * Multi-org API scoping (docs/security-review-2026-07.md, P1 "make the active
  * organization explicit for all API requests"). A user who owns org A and is
  * only a read-only member of org B must never have a request silently resolve
  * to the wrong org: naming an org pins to THAT org, naming none is rejected as

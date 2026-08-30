@@ -7,7 +7,7 @@ import { getWorkspace, installationCount, resetBoard } from "./helpers/db";
  * from a live install-start flow on this session binds nothing, even for a
  * signed-in workspace owner. This is the regression guard for the takeover
  * where an owner substitutes another workspace's real installation_id into
- * the callback (see docs/archive/security-fixes.md, P0 installation binding).
+ * the callback (see docs/security-review-2026-07.md, P0 installation binding).
  */
 test.describe("github install flow: binding fails closed", () => {
   test("setup callback with a forged state binds nothing", async ({ page }) => {

@@ -1,8 +1,12 @@
-# Specboard: MCP connection auth (identity + workspace binding)
+# ADR 0004: MCP connection auth (identity + workspace binding)
+
+- **Status:** Accepted
+- **Date:** 2026-08-17
+- **Deciders:** Jonathan Butler
+- **Shipped in:** v0.17.0 (feature PR #128, release PR #129, migration `0037`)
 
 How an MCP client (Claude Code, etc.) authenticates to the hosted Specboard MCP
-endpoint, which identity it acts as, and which workspace it targets. Shipped in
-**v0.17.0** (feature PR #128, release PR #129, migration `0037`).
+endpoint, which identity it acts as, and which workspace it targets.
 
 ## Context
 
@@ -16,8 +20,7 @@ connection has to resolve two separate things on every request:
 
 "Two instances of Specboard" in day-to-day talk (e.g. the Specboard org vs the
 Palouse org) are really two **workspaces (tenants) on the same prod host**, not
-separate deployments. See [ADR 0001](../adr/0001-multi-tenancy-url-and-product-grouping.md) and
-`PLAN-multi-tenant-org-provisioning.md`.
+separate deployments. See [ADR 0001](./0001-multi-tenancy-url-and-product-grouping.md).
 
 ## Two ways to authenticate
 

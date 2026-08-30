@@ -337,8 +337,10 @@ infra/
 ```
 
 - **Design:** [`ARCHITECTURE.md`](./ARCHITECTURE.md)
-- **Backlog:** [`docs/BACKLOG.md`](./docs/BACKLOG.md) (tracked in Specboards)
-- **Archived plans:** [`docs/archive/`](./docs/archive/) (shipped work, kept for history)
+- **Everything else:** [`docs/`](./docs/README.md) - runbooks, decision records,
+  self-host security, and the AI-native SDLC mapping
+- **Backlog:** in Specboards itself, at `app.specboards.ai`. We dogfood the
+  product, so there is no backlog file in this repo.
 
 ## Develop
 

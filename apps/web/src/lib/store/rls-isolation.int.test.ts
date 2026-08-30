@@ -9,7 +9,7 @@ import { DbStore } from "./db";
 
 /**
  * Two-tenant RLS isolation suite: proves that tenant isolation FAILS CLOSED at
- * the database, not just in application filters (docs/archive/security-fixes.md, P0
+ * the database, not just in application filters (docs/security-review-2026-07.md, P0
  * "make database tenant isolation fail closed").
  *
  * Setup mirrors production: tables owned by the migration role, a non-owner
