@@ -25,6 +25,49 @@ for how and when the version is bumped.
 > `pnpm deploy:prod` and the dispatched workflow. See
 > [VERSIONING.md](./VERSIONING.md).
 
+## [0.29.2] - 2026-08-30
+
+Cards that say what they mean, and progress that counts your workflow rather
+than ours.
+
+### Fixed
+
+- **Cards name the level their children are actually at.** The badge on a card
+  with children read `epic 3/5` at every altitude. It is a count of finished
+  children, so on an Initiative it happened to be right and everywhere else it
+  was not: on an Epic it counted Features while calling them epics, and on a
+  renamed hierarchy it meant nothing at all. It now reads `3/5 Features done`,
+  naming whatever your child level is called, with the word "done" in it because
+  `3/5` on its own reads as an id or a position rather than as progress. The
+  companion badge on a child card says `↳ Epic` instead of `↳ sub`, naming the
+  real parent level. The board and the backlog table now draw this from one
+  component, so the two can no longer drift, and both agree with the item
+  drawer, which was already right.
+- **Progress counts your last stage, not a stage called "done".** Every derived
+  figure in the product asked whether an item's status was literally `done`,
+  which is only the last stage of the built-in workflow. A workspace whose
+  stages end in `shipped` therefore saw all of them sit at zero: child roll-up
+  on cards, cycle totals, goal delivery, release progress, and the roadmap
+  progress bars drawn from the roll-up. Nothing errored, so the effect was a
+  product that simply looked permanently stalled no matter how much work
+  finished. Doneness is now the last stage of whichever stage set applies,
+  resolved the same way the workflow itself is: the product's own stages, then
+  the workspace default, then `.specboards/config.yml`, then the built-in set.
+  Each item is judged by its own product, so a board spanning products whose
+  stages disagree stays honest about each. Archiving is still never doneness,
+  and rolling a cycle over still leaves finished work behind, now by that same
+  definition.
+- **Card display settings no longer describe themselves as epic-specific.**
+  "Epic progress" and "Sub-feature badge" are now "Child progress" and "Parent
+  level badge". Boards keep whichever fields they had turned on.
+
+### Changed
+
+- **The Postgres store split continues.** Saved views, releases, docs, and the
+  comment and notification methods each moved into a module of their own,
+  continuing the one-domain-at-a-time work started in 0.29.1. No behaviour
+  changed.
+
 ## [0.29.1] - 2026-08-30
 
 A workflow you can edit again, and the beginning of a much smaller store.

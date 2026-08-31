@@ -1,6 +1,6 @@
 {
   "name": "@specboards/cli",
-  "version": "0.29.1",
+  "version": "0.29.2",
   "type": "module",
   "description": "Command-line interface for Specboards (manage specs, status, and GitHub links from the terminal).",
   "license": "Apache-2.0",
