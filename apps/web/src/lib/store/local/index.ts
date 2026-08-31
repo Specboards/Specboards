@@ -48,6 +48,7 @@ import { riceFields } from "@/lib/feature-helpers";
 
 import { type LocalStoreContext } from "./context";
 import { localPath, specsDir } from "./paths";
+import * as settingsStore from "./settings";
 import * as collabStore from "./collaboration";
 import * as docStore from "./docs";
 import * as releaseStore from "./releases";
@@ -2812,17 +2813,31 @@ export class LocalFileStore implements FeatureStore, LocalStoreContext {
   // ==========================================================================
   // Transition mode, property unions, and card configuration
   // ==========================================================================
+  //
+  // Implemented in ./settings.ts. The bodies moved verbatim; these delegate
+  // so that `LocalFileStore` stays the one thing callers hold.
 
-  /**
-   * Local file mode has no workspace row to hold the setting, and a solo
-   * dogfooding session is the case that least wants a rigid pipeline, so it is
-   * always flexible. Teams that want a strict pipeline are running the DB mode.
-   */
-  async getTransitionMode(
-    _scope?: WorkspaceScope,
-    _productId?: string | null,
+  getTransitionMode(
+    scope?: WorkspaceScope,
+    productId?: string | null,
   ): Promise<TransitionMode> {
-    return "flexible";
+    return settingsStore.getTransitionMode(scope, productId);
+  }
+
+  listTransitionModes(scope?: WorkspaceScope): Promise<TransitionModeSettings> {
+    return settingsStore.listTransitionModes(scope);
+  }
+
+  cardsOverrides(): Promise<CardsOverrides> {
+    return settingsStore.cardsOverrides();
+  }
+
+  setTransitionMode(
+    mode: TransitionMode | null,
+    scope?: WorkspaceScope,
+    productId?: string | null,
+  ): Promise<TransitionMode> {
+    return settingsStore.setTransitionMode(mode, scope, productId);
   }
 
   /** Nothing to override, for the same reason the mode is fixed above. */
@@ -2844,38 +2859,6 @@ export class LocalFileStore implements FeatureStore, LocalStoreContext {
     _productIds: string[] | null,
   ): Promise<WorkspaceStatus[]> {
     return this.listStatuses(scope);
-  }
-
-  /** One product, nothing to inherit from: nothing is ever an override. */
-  async cardsOverrides(): Promise<CardsOverrides> {
-    return {
-      transitionMode: false,
-      stages: false,
-      stageGates: false,
-      properties: false,
-      detailTemplates: false,
-      cardFields: false,
-      levelTemplates: false,
-    };
-  }
-
-  async listTransitionModes(
-    _scope?: WorkspaceScope,
-  ): Promise<TransitionModeSettings> {
-    return { workspaceDefault: "flexible", overrides: {} };
-  }
-
-  async setTransitionMode(
-    mode: TransitionMode | null,
-    _scope?: WorkspaceScope,
-    _productId?: string | null,
-  ): Promise<TransitionMode> {
-    if (mode !== "flexible") {
-      throw new Error(
-        "Local file mode is always flexible; set transitions per workspace in the hosted app.",
-      );
-    }
-    return mode;
   }
 
   // ==========================================================================
