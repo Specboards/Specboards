@@ -46,7 +46,16 @@ import {
 
 import { riceFields } from "@/lib/feature-helpers";
 
+import { type LocalStoreContext } from "./context";
 import { localPath, specsDir } from "./paths";
+import * as viewStore from "./views";
+import {
+  LOCAL_USER,
+  type LocalItem,
+  type LocalLink,
+  type LocalLinkType,
+  type MetadataFile,
+} from "./types";
 import {
   compareReleases,
   DetailTemplateError,
@@ -147,33 +156,6 @@ import {
   type WorkspaceScope,
 } from "../types";
 
-/** A DB-native work item (initiative/epic) persisted in local file mode. */
-interface LocalItem {
-  /** Stable id, used as the public specId. */
-  id: string;
-  title: string;
-  level: string;
-  status: string;
-  assigneeId: string | null;
-  tags: string[];
-  parentSpecId: string | null;
-  /** Owning release id, or null when unscheduled. */
-  releaseId?: string | null;
-  /** Owning cycle id, or null when not in one. Orthogonal to releaseId. */
-  cycleId?: string | null;
-  /** Owning product id; defaults to the default product when absent. */
-  productId?: string | null;
-  /** Markdown details body, or null/absent for a blank body. */
-  details?: string | null;
-  /** Custom-property values keyed by property key. */
-  customFields?: Record<string, CustomFieldValue>;
-  /** RICE prioritization inputs (see RiceInputs). */
-  riceReach?: number | null;
-  riceImpact?: number | null;
-  riceConfidence?: number | null;
-  riceEffort?: number | null;
-}
-
 /** A release persisted in local file mode. */
 interface LocalRelease {
   id: string;
@@ -265,9 +247,6 @@ interface LocalIdeaSettings {
   portalTitle: string | null;
 }
 
-/** The single acting user in local (auth-disabled) file mode. */
-const LOCAL_USER = "local";
-
 /** A product (sibling backlog) persisted in local file mode. */
 interface LocalProduct {
   id: string;
@@ -307,37 +286,6 @@ function emptyGithubSummary(): GithubLinkAggregate {
   return { openPrs: 0, mergedPrs: 0, issues: 0, branches: 0, total: 0 };
 }
 
-type LocalLinkType = "blocks" | "relates_to" | "duplicates";
-
-/** A relation stored canonically on the `from` spec's metadata. */
-interface LocalLink {
-  to: string;
-  type: LocalLinkType;
-}
-
-interface LocalMetadata {
-  status?: string;
-  rank?: string | null;
-  tags?: string[];
-  /** Owning release id, or null when unscheduled. */
-  releaseId?: string | null;
-  /** Owning cycle id, or null when not in one. Orthogonal to releaseId. */
-  cycleId?: string | null;
-  assigneeId?: string | null;
-  customFields?: Record<string, CustomFieldValue>;
-  /** RICE prioritization inputs (see RiceInputs). */
-  riceReach?: number | null;
-  riceImpact?: number | null;
-  riceConfidence?: number | null;
-  riceEffort?: number | null;
-  /** Outgoing relations from this spec (see ./types FeatureRelation). */
-  links?: LocalLink[];
-  /** Parent feature (epic) spec id, or null when top-level. */
-  parentSpecId?: string | null;
-  /** Owning product id; defaults to the default product when absent. */
-  productId?: string | null;
-}
-
 /**
  * Whether an item is finished, for every progress figure the store derives
  * (hierarchy roll-up, cycle totals, goal delivery, release progress).
@@ -349,8 +297,6 @@ interface LocalMetadata {
 function isDone(status: string, doneKey: string): boolean {
   return status === doneKey;
 }
-
-type MetadataFile = Record<string, LocalMetadata>;
 
 /** A synthetic, stable id for a local relation (no DB rows to key on). */
 function localLinkId(fromSpec: string, link: LocalLink): string {
@@ -398,8 +344,13 @@ function toLocalEdge(
  * `.specboards/local-metadata.json`. Set `DATABASE_URL` to use Postgres
  * instead (see ./db.ts).
  */
-export class LocalFileStore implements FeatureStore {
-  constructor(private readonly root: string) {}
+export class LocalFileStore implements FeatureStore, LocalStoreContext {
+  /**
+   * Not private, because the domain modules in this directory reach for it
+   * through `LocalStoreContext`. Still not public: `store/index.ts` hands
+   * callers a `FeatureStore`, and that interface does not mention it.
+   */
+  constructor(readonly root: string) {}
 
   /** Persisted products, seeded with the default product when none exist. */
   private async readProducts(): Promise<LocalProduct[]> {
@@ -447,7 +398,7 @@ export class LocalFileStore implements FeatureStore {
   }
 
   /** The default product id (the seeded "default", or the first product). */
-  private async defaultProductId(): Promise<string> {
+  async defaultProductId(): Promise<string> {
     const products = await this.readProducts();
     return (
       products.find((p) => p.key === DEFAULT_PRODUCT_KEY)?.id ??
@@ -457,7 +408,7 @@ export class LocalFileStore implements FeatureStore {
   }
 
   /** The configured hierarchy levels, or null when none are persisted. */
-  private async readLevels(): Promise<WorkspaceLevel[] | null> {
+  async readLevels(): Promise<WorkspaceLevel[] | null> {
     try {
       return JSON.parse(
         await fs.readFile(localPath(this.root, "levels"), "utf8"),
@@ -467,7 +418,7 @@ export class LocalFileStore implements FeatureStore {
     }
   }
 
-  private async writeLevels(levels: WorkspaceLevel[]): Promise<void> {
+  async writeLevels(levels: WorkspaceLevel[]): Promise<void> {
     await fs.mkdir(path.dirname(localPath(this.root, "levels")), {
       recursive: true,
     });
@@ -479,7 +430,7 @@ export class LocalFileStore implements FeatureStore {
   }
 
   /** DB-native work items (initiatives/epics) persisted alongside metadata. */
-  private async readItems(): Promise<LocalItem[]> {
+  async readItems(): Promise<LocalItem[]> {
     try {
       return JSON.parse(
         await fs.readFile(localPath(this.root, "items"), "utf8"),
@@ -489,7 +440,7 @@ export class LocalFileStore implements FeatureStore {
     }
   }
 
-  private async writeItems(items: LocalItem[]): Promise<void> {
+  async writeItems(items: LocalItem[]): Promise<void> {
     await fs.mkdir(path.dirname(localPath(this.root, "items")), {
       recursive: true,
     });
@@ -500,7 +451,7 @@ export class LocalFileStore implements FeatureStore {
     );
   }
 
-  private async readMetadata(): Promise<MetadataFile> {
+  async readMetadata(): Promise<MetadataFile> {
     try {
       return JSON.parse(
         await fs.readFile(localPath(this.root, "metadata"), "utf8"),
@@ -510,7 +461,7 @@ export class LocalFileStore implements FeatureStore {
     }
   }
 
-  private async writeMetadata(meta: MetadataFile): Promise<void> {
+  async writeMetadata(meta: MetadataFile): Promise<void> {
     await fs.mkdir(path.dirname(localPath(this.root, "metadata")), {
       recursive: true,
     });
@@ -537,7 +488,7 @@ export class LocalFileStore implements FeatureStore {
     return files;
   }
 
-  private async loadAll(): Promise<FeatureDetail[]> {
+  async loadAll(): Promise<FeatureDetail[]> {
     const [files, meta, items, levels, defaultProductId, statuses, doneKey] =
       await Promise.all([
         this.walkSpecFiles(specsDir(this.root)),
@@ -1084,117 +1035,49 @@ export class LocalFileStore implements FeatureStore {
     };
   }
 
-  // Saved views persist to `.specboards/local-views.json`. There's a single
-  // implicit user in local mode, so no per-user scoping.
-  private async readViews(): Promise<SavedView[]> {
-    try {
-      return JSON.parse(
-        await fs.readFile(localPath(this.root, "views"), "utf8"),
-      ) as SavedView[];
-    } catch {
-      return [];
-    }
-  }
-
-  private async writeViews(views: SavedView[]): Promise<void> {
-    await fs.mkdir(path.dirname(localPath(this.root, "views")), {
-      recursive: true,
-    });
-    await fs.writeFile(
-      localPath(this.root, "views"),
-      JSON.stringify(views, null, 2) + "\n",
-      "utf8",
-    );
-  }
-
   // ==========================================================================
   // Saved views and board preferences
   // ==========================================================================
+  //
+  // Implemented in ./views.ts. The bodies moved verbatim; these delegate so
+  // that `LocalFileStore` stays the one thing callers hold.
 
-  async listSavedViews(_scope?: WorkspaceScope): Promise<SavedView[]> {
-    return this.readViews();
+  listSavedViews(scope?: WorkspaceScope): Promise<SavedView[]> {
+    return viewStore.listSavedViews(this, scope);
   }
 
-  async createSavedView(
+  createSavedView(
     input: SavedViewInput,
-    _scope?: WorkspaceScope,
+    scope?: WorkspaceScope,
   ): Promise<SavedView> {
-    const views = await this.readViews();
-    const view: SavedView = {
-      id: randomUUID(),
-      name: input.name,
-      view: input.view,
-      filters: input.filters,
-    };
-    await this.writeViews([view, ...views]); // newest first, matching db order
-    return view;
+    return viewStore.createSavedView(this, input, scope);
   }
 
-  async updateSavedView(
+  updateSavedView(
     id: string,
     patch: SavedViewPatch,
-    _scope?: WorkspaceScope,
+    scope?: WorkspaceScope,
   ): Promise<SavedView | null> {
-    const views = await this.readViews();
-    const existing = views.find((v) => v.id === id);
-    if (!existing) return null;
-    const updated: SavedView = {
-      ...existing,
-      ...(patch.name !== undefined ? { name: patch.name } : {}),
-      ...(patch.filters !== undefined ? { filters: patch.filters } : {}),
-    };
-    await this.writeViews(views.map((v) => (v.id === id ? updated : v)));
-    return updated;
+    return viewStore.updateSavedView(this, id, patch, scope);
   }
 
-  async deleteSavedView(id: string, _scope?: WorkspaceScope): Promise<void> {
-    const views = await this.readViews();
-    await this.writeViews(views.filter((v) => v.id !== id));
+  deleteSavedView(id: string, scope?: WorkspaceScope): Promise<void> {
+    return viewStore.deleteSavedView(this, id, scope);
   }
 
-  // Board preferences persist to `.specboards/local-board-prefs.json` as a map
-  // keyed by board ("backlog"/"roadmap"). Single implicit user in local mode,
-  // so no per-user scoping. A legacy flat file (pre per-board prefs) is read as
-  // the Backlog's prefs and rewritten into the map on the next save.
-  private async readBoardPrefsMap(): Promise<
-    Partial<Record<BoardKey, BoardPreferences>>
-  > {
-    try {
-      const parsed = JSON.parse(
-        await fs.readFile(localPath(this.root, "boardPrefs"), "utf8"),
-      ) as BoardPreferences | Partial<Record<BoardKey, BoardPreferences>>;
-      if (parsed && ("cardFields" in parsed || "featured" in parsed)) {
-        return { backlog: parsed as BoardPreferences };
-      }
-      return (parsed ?? {}) as Partial<Record<BoardKey, BoardPreferences>>;
-    } catch {
-      return {};
-    }
-  }
-
-  async getBoardPreferences(
-    _scope?: WorkspaceScope,
-    board: BoardKey = "backlog",
+  getBoardPreferences(
+    scope?: WorkspaceScope,
+    board?: BoardKey,
   ): Promise<BoardPreferences | null> {
-    const map = await this.readBoardPrefsMap();
-    return map[board] ?? null;
+    return viewStore.getBoardPreferences(this, scope, board);
   }
 
-  async setBoardPreferences(
+  setBoardPreferences(
     prefs: BoardPreferences,
-    _scope?: WorkspaceScope,
-    board: BoardKey = "backlog",
+    scope?: WorkspaceScope,
+    board?: BoardKey,
   ): Promise<void> {
-    const map = await this.readBoardPrefsMap();
-    map[board] = prefs;
-    await fs.mkdir(path.dirname(localPath(this.root, "boardPrefs")), {
-      recursive: true,
-    });
-    await fs.writeFile(
-      localPath(this.root, "boardPrefs"),
-      JSON.stringify(map, null, 2) + "\n",
-      "utf8",
-    );
+    return viewStore.setBoardPreferences(this, prefs, scope, board);
   }
 
   // Custom properties persist to `.specboards/local-properties.json`.
@@ -1436,7 +1319,7 @@ export class LocalFileStore implements FeatureStore {
    * the only place the store reads `.specboards/config.yml` itself: in DB mode
    * the config is synced into the `repositories` row the DB store reads.
    */
-  private async doneStatusKey(): Promise<string> {
+  async doneStatusKey(): Promise<string> {
     const stages = await this.listStatuses();
     const configured = terminalStatus(stages.map((s) => s.key));
     if (configured) return configured;
@@ -3298,7 +3181,7 @@ export class LocalFileStore implements FeatureStore {
   // ── Docs (Plan-section areas) ───────────────────────────────────────────
   // Doc spaces + pages persist to `.specboards/local-doc-*.json`.
 
-  private async readJsonFile<T>(file: string): Promise<T[]> {
+  async readJsonFile<T>(file: string): Promise<T[]> {
     try {
       return JSON.parse(await fs.readFile(file, "utf8")) as T[];
     } catch {
@@ -3306,7 +3189,7 @@ export class LocalFileStore implements FeatureStore {
     }
   }
 
-  private async writeJsonFile<T>(file: string, rows: T[]): Promise<void> {
+  async writeJsonFile<T>(file: string, rows: T[]): Promise<void> {
     await fs.mkdir(path.dirname(file), { recursive: true });
     await fs.writeFile(file, JSON.stringify(rows, null, 2) + "\n", "utf8");
   }
