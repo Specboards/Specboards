@@ -53,9 +53,12 @@ export interface LocalStoreContext {
    */
   loadAll(): Promise<FeatureDetail[]>;
 
-  /** The workspace hierarchy, or null when none has been customised. */
+  /**
+   * The workspace hierarchy, or null when none has been customised. The write
+   * is not here: only the workspace configuration ever changes the levels, so
+   * it keeps that half to itself.
+   */
   readLevels(): Promise<WorkspaceLevel[] | null>;
-  writeLevels(levels: WorkspaceLevel[]): Promise<void>;
 
   /** The product work lands in when the caller named none. */
   defaultProductId(): Promise<string>;

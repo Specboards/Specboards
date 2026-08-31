@@ -1,17 +1,9 @@
-import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
 import {
-  isPropertyType,
   leafLevel,
-  DEFAULT_STATUSES,
-  parseRepoConfigYaml,
   parseSpec,
-  propertyKeyFromLabel,
-  resolveLevels,
-  resolveLevelUpdate,
-  terminalStatus,
   type IdeaStage,
   type PropertyDef,
   type PropertyEntity,
@@ -33,6 +25,7 @@ import * as collabStore from "./collaboration";
 import * as docStore from "./docs";
 import * as releaseStore from "./releases";
 import * as viewStore from "./views";
+import * as configStore from "./workspace-config";
 import {
   type LocalItem,
   localDirection,
@@ -40,9 +33,6 @@ import {
   type MetadataFile,
 } from "./types";
 import {
-  DetailTemplateError,
-  LevelError,
-  PropertyError,
   type CommentInput,
   type CommentRecord,
   type NotificationList,
@@ -102,7 +92,6 @@ import {
   type ReleaseRecord,
   type StageGate,
   type StageGateInput,
-  StageGateError,
   type CardsOverrides,
   type StatusStageInput,
   type TransitionModeSettings,
@@ -143,26 +132,13 @@ export class LocalFileStore implements FeatureStore, LocalStoreContext {
     return productStore.defaultProductId(this);
   }
 
-  /** The configured hierarchy levels, or null when none are persisted. */
-  async readLevels(): Promise<WorkspaceLevel[] | null> {
-    try {
-      return JSON.parse(
-        await fs.readFile(localPath(this.root, "levels"), "utf8"),
-      ) as WorkspaceLevel[];
-    } catch {
-      return null;
-    }
-  }
-
-  async writeLevels(levels: WorkspaceLevel[]): Promise<void> {
-    await fs.mkdir(path.dirname(localPath(this.root, "levels")), {
-      recursive: true,
-    });
-    await fs.writeFile(
-      localPath(this.root, "levels"),
-      JSON.stringify(levels, null, 2) + "\n",
-      "utf8",
-    );
+  /**
+   * A `LocalStoreContext` member whose implementation lives with the rest of
+   * the workspace configuration, for the same reason `defaultProductId` lives
+   * with the products.
+   */
+  readLevels(): Promise<WorkspaceLevel[] | null> {
+    return configStore.readLevels(this);
   }
 
   /** DB-native work items (initiatives/epics) persisted alongside metadata. */
@@ -423,56 +399,152 @@ export class LocalFileStore implements FeatureStore, LocalStoreContext {
   }
 
   // ==========================================================================
-  // Workspace levels
+  // Workspace configuration: levels, detail templates, properties,
+  // statuses, and stage gates
   // ==========================================================================
+  //
+  // Implemented in ./workspace-config.ts. The bodies moved verbatim; these
+  // delegate so that `LocalFileStore` stays the one thing callers hold.
 
-  async listLevels(_scope?: WorkspaceScope): Promise<WorkspaceLevel[]> {
-    // Persisted config if present, else the default hierarchy.
-    return resolveLevels(await this.readLevels());
+  listLevels(scope?: WorkspaceScope): Promise<WorkspaceLevel[]> {
+    return configStore.listLevels(this, scope);
   }
 
-  async updateLevels(
+  updateLevels(
     updates: LevelUpdate[],
-    _scope?: WorkspaceScope,
+    scope?: WorkspaceScope,
   ): Promise<WorkspaceLevel[]> {
-    const current = resolveLevels(await this.readLevels());
-    let resolved;
-    try {
-      resolved = resolveLevelUpdate(current, updates);
-    } catch (err) {
-      throw new LevelError(
-        err instanceof Error ? err.message : "Invalid levels.",
-      );
-    }
-    if (resolved.removedKeys.length > 0) {
-      const items = await this.readItems();
-      const used = items.find((i) => resolved.removedKeys.includes(i.level));
-      if (used) {
-        throw new LevelError(
-          `Can't remove the "${used.level}" level while items still use it.`,
-        );
-      }
-    }
-    await this.writeLevels(resolved.levels);
-    return resolved.levels;
+    return configStore.updateLevels(this, updates, scope);
   }
 
-  async updateLevelFields(
+  updateLevelFields(
     fields: Record<string, string[] | null>,
-    _scope?: WorkspaceScope,
+    scope?: WorkspaceScope,
   ): Promise<WorkspaceLevel[]> {
-    const current = resolveLevels(await this.readLevels());
-    const known = new Set(current.map((l) => l.key));
-    for (const key of Object.keys(fields)) {
-      if (!known.has(key)) throw new LevelError(`Unknown level: ${key}`);
-    }
-    const updated = current.map((l) =>
-      Object.prototype.hasOwnProperty.call(fields, l.key)
-        ? { ...l, fields: fields[l.key] ?? null }
-        : l,
+    return configStore.updateLevelFields(this, fields, scope);
+  }
+
+  updateLevelTemplates(
+    templates: Record<string, string | null>,
+    scope?: WorkspaceScope,
+  ): Promise<WorkspaceLevel[]> {
+    return configStore.updateLevelTemplates(this, templates, scope);
+  }
+
+  listDetailTemplates(scope?: WorkspaceScope): Promise<DetailTemplate[]> {
+    return configStore.listDetailTemplates(this, scope);
+  }
+
+  createDetailTemplate(
+    input: DetailTemplateInput,
+    scope?: WorkspaceScope,
+  ): Promise<DetailTemplate> {
+    return configStore.createDetailTemplate(this, input, scope);
+  }
+
+  updateDetailTemplate(
+    id: string,
+    patch: DetailTemplatePatch,
+    scope?: WorkspaceScope,
+  ): Promise<DetailTemplate> {
+    return configStore.updateDetailTemplate(this, id, patch, scope);
+  }
+
+  deleteDetailTemplate(id: string, scope?: WorkspaceScope): Promise<void> {
+    return configStore.deleteDetailTemplate(this, id, scope);
+  }
+
+  listProperties(
+    scope?: WorkspaceScope,
+    entity?: PropertyEntity,
+  ): Promise<PropertyDef[]> {
+    return configStore.listProperties(this, scope, entity);
+  }
+
+  listPropertiesUnion(
+    scope: WorkspaceScope | undefined,
+    productIds: string[] | null,
+    entity?: PropertyEntity,
+  ): Promise<PropertyDef[]> {
+    return configStore.listPropertiesUnion(this, scope, productIds, entity);
+  }
+
+  createProperty(
+    input: PropertyInput,
+    scope?: WorkspaceScope,
+  ): Promise<PropertyDef> {
+    return configStore.createProperty(this, input, scope);
+  }
+
+  updateProperty(
+    id: string,
+    patch: PropertyPatch,
+    scope?: WorkspaceScope,
+  ): Promise<PropertyDef> {
+    return configStore.updateProperty(this, id, patch, scope);
+  }
+
+  deleteProperty(id: string, scope?: WorkspaceScope): Promise<void> {
+    return configStore.deleteProperty(this, id, scope);
+  }
+
+  listStatuses(scope?: WorkspaceScope): Promise<WorkspaceStatus[]> {
+    return configStore.listStatuses(this, scope);
+  }
+
+  listStatusesUnion(
+    scope: WorkspaceScope | undefined,
+    productIds: string[] | null,
+  ): Promise<WorkspaceStatus[]> {
+    return configStore.listStatusesUnion(this, scope, productIds);
+  }
+
+  /**
+   * A `LocalStoreContext` member, delegated like the rest of the domain: it is
+   * the last of the configured stages, so it belongs with them.
+   */
+  doneStatusKey(): Promise<string> {
+    return configStore.doneStatusKey(this);
+  }
+
+  replaceStatuses(
+    stages: StatusStageInput[],
+    scope?: WorkspaceScope,
+  ): Promise<WorkspaceStatus[]> {
+    return configStore.replaceStatuses(this, stages, scope);
+  }
+
+  listStageGates(scope?: WorkspaceScope): Promise<StageGate[]> {
+    return configStore.listStageGates(this, scope);
+  }
+
+  replaceStageGates(
+    gates: StageGateInput[],
+    scope?: WorkspaceScope,
+  ): Promise<StageGate[]> {
+    return configStore.replaceStageGates(this, gates, scope);
+  }
+
+  listGateCompletions(
+    specId: string,
+    scope?: WorkspaceScope,
+  ): Promise<string[]> {
+    return configStore.listGateCompletions(this, specId, scope);
+  }
+
+  setGateCompletion(
+    specId: string,
+    gateId: string,
+    completed: boolean,
+    scope?: WorkspaceScope,
+  ): Promise<void> {
+    return configStore.setGateCompletion(
+      this,
+      specId,
+      gateId,
+      completed,
+      scope,
     );
-    await this.writeLevels(updated);
-    return updated;
   }
 
   // ==========================================================================
@@ -602,443 +674,6 @@ export class LocalFileStore implements FeatureStore, LocalStoreContext {
     board?: BoardKey,
   ): Promise<void> {
     return viewStore.setBoardPreferences(this, prefs, scope, board);
-  }
-
-  // Custom properties persist to `.specboards/local-properties.json`.
-  private async readProperties(): Promise<PropertyDef[]> {
-    try {
-      return JSON.parse(
-        await fs.readFile(localPath(this.root, "properties"), "utf8"),
-      ) as PropertyDef[];
-    } catch {
-      return [];
-    }
-  }
-
-  private async writeProperties(rows: PropertyDef[]): Promise<void> {
-    await fs.mkdir(path.dirname(localPath(this.root, "properties")), {
-      recursive: true,
-    });
-    await fs.writeFile(
-      localPath(this.root, "properties"),
-      JSON.stringify(rows, null, 2) + "\n",
-      "utf8",
-    );
-  }
-
-  // ==========================================================================
-  // Custom properties and detail templates
-  //
-  // `listPropertiesUnion` and `listStatusesUnion` are NOT here: they sit far
-  // below, next to `getTransitionMode`. In `db.ts` they are in this block.
-  // ==========================================================================
-
-  async listProperties(
-    _scope?: WorkspaceScope,
-    entity?: PropertyEntity,
-  ): Promise<PropertyDef[]> {
-    // Default `entity` for rows written before the discriminator existed.
-    const rows = (await this.readProperties()).map((p) => ({
-      ...p,
-      entity: p.entity ?? "item",
-    }));
-    const filtered = entity ? rows.filter((p) => p.entity === entity) : rows;
-    return filtered.sort((a, b) => a.position - b.position);
-  }
-
-  async createProperty(
-    input: PropertyInput,
-    _scope?: WorkspaceScope,
-  ): Promise<PropertyDef> {
-    const label = input.label.trim();
-    if (!label) throw new PropertyError("Property label is required.");
-    if (!isPropertyType(input.type)) {
-      throw new PropertyError(`Unknown property type: ${String(input.type)}`);
-    }
-    const entity: PropertyEntity = input.entity ?? "item";
-    const rows = await this.readProperties();
-    // Keys and positions are scoped per entity (see the db store).
-    const sameEntity = rows.filter((p) => (p.entity ?? "item") === entity);
-    const property: PropertyDef = {
-      id: randomUUID(),
-      key: propertyKeyFromLabel(label, new Set(sameEntity.map((p) => p.key))),
-      label,
-      type: input.type,
-      entity,
-      options: localNormalizeOptions(input.type, input.options),
-      levels: entity === "release" ? null : (input.levels ?? null),
-      position: sameEntity.reduce((m, p) => Math.max(m, p.position), -1) + 1,
-    };
-    await this.writeProperties([...rows, property]);
-    return property;
-  }
-
-  async updateProperty(
-    id: string,
-    patch: PropertyPatch,
-    _scope?: WorkspaceScope,
-  ): Promise<PropertyDef> {
-    const rows = await this.readProperties();
-    const property = rows.find((p) => p.id === id);
-    if (!property) throw new PropertyError(`Unknown property: ${id}`);
-    if (patch.label !== undefined) {
-      const label = patch.label.trim();
-      if (!label) throw new PropertyError("Property label is required.");
-      property.label = label;
-    }
-    if (patch.options !== undefined) {
-      property.options = localNormalizeOptions(property.type, patch.options);
-    }
-    if (patch.levels !== undefined) property.levels = patch.levels;
-    if (patch.position !== undefined) property.position = patch.position;
-    await this.writeProperties(rows);
-    return property;
-  }
-
-  async deleteProperty(id: string, _scope?: WorkspaceScope): Promise<void> {
-    const rows = await this.readProperties();
-    if (!rows.some((p) => p.id === id))
-      throw new PropertyError(`Unknown property: ${id}`);
-    await this.writeProperties(rows.filter((p) => p.id !== id));
-  }
-
-  // Detail templates persist to `.specboards/local-detail-templates.json`.
-  private async readTemplates(): Promise<DetailTemplate[]> {
-    try {
-      return JSON.parse(
-        await fs.readFile(localPath(this.root, "detailTemplates"), "utf8"),
-      ) as DetailTemplate[];
-    } catch {
-      return [];
-    }
-  }
-
-  private async writeTemplates(rows: DetailTemplate[]): Promise<void> {
-    await fs.mkdir(path.dirname(localPath(this.root, "detailTemplates")), {
-      recursive: true,
-    });
-    await fs.writeFile(
-      localPath(this.root, "detailTemplates"),
-      JSON.stringify(rows, null, 2) + "\n",
-      "utf8",
-    );
-  }
-
-  async listDetailTemplates(
-    _scope?: WorkspaceScope,
-  ): Promise<DetailTemplate[]> {
-    const rows = await this.readTemplates();
-    return rows.sort((a, b) => a.name.localeCompare(b.name));
-  }
-
-  async createDetailTemplate(
-    input: DetailTemplateInput,
-    _scope?: WorkspaceScope,
-  ): Promise<DetailTemplate> {
-    const name = input.name.trim();
-    if (!name) throw new DetailTemplateError("Template name is required.");
-    const rows = await this.readTemplates();
-    if (rows.some((t) => t.name === name))
-      throw new DetailTemplateError(
-        `A template named "${name}" already exists.`,
-      );
-    const template: DetailTemplate = {
-      id: randomUUID(),
-      name,
-      body: input.body ?? "",
-    };
-    await this.writeTemplates([...rows, template]);
-    return template;
-  }
-
-  async updateDetailTemplate(
-    id: string,
-    patch: DetailTemplatePatch,
-    _scope?: WorkspaceScope,
-  ): Promise<DetailTemplate> {
-    const rows = await this.readTemplates();
-    const template = rows.find((t) => t.id === id);
-    if (!template) throw new DetailTemplateError(`Unknown template: ${id}`);
-    if (patch.name !== undefined) {
-      const name = patch.name.trim();
-      if (!name) throw new DetailTemplateError("Template name is required.");
-      if (rows.some((t) => t.id !== id && t.name === name))
-        throw new DetailTemplateError(
-          `A template named "${name}" already exists.`,
-        );
-      template.name = name;
-    }
-    if (patch.body !== undefined) template.body = patch.body;
-    await this.writeTemplates(rows);
-    return template;
-  }
-
-  async deleteDetailTemplate(
-    id: string,
-    _scope?: WorkspaceScope,
-  ): Promise<void> {
-    const rows = await this.readTemplates();
-    if (!rows.some((t) => t.id === id))
-      throw new DetailTemplateError(`Unknown template: ${id}`);
-    await this.writeTemplates(rows.filter((t) => t.id !== id));
-    // Clear the pointer from any level that referenced it.
-    const levels = resolveLevels(await this.readLevels());
-    if (levels.some((l) => l.detailTemplateId === id)) {
-      await this.writeLevels(
-        levels.map((l) =>
-          l.detailTemplateId === id ? { ...l, detailTemplateId: null } : l,
-        ),
-      );
-    }
-  }
-
-  async updateLevelTemplates(
-    templates: Record<string, string | null>,
-    _scope?: WorkspaceScope,
-  ): Promise<WorkspaceLevel[]> {
-    const current = resolveLevels(await this.readLevels());
-    const known = new Set(current.map((l) => l.key));
-    for (const key of Object.keys(templates)) {
-      if (!known.has(key)) throw new LevelError(`Unknown level: ${key}`);
-    }
-    const templateIds = new Set((await this.readTemplates()).map((t) => t.id));
-    for (const value of Object.values(templates)) {
-      if (value && !templateIds.has(value))
-        throw new LevelError(`Unknown detail template: ${value}`);
-    }
-    const updated = current.map((l) =>
-      Object.prototype.hasOwnProperty.call(templates, l.key)
-        ? { ...l, detailTemplateId: templates[l.key] ?? null }
-        : l,
-    );
-    await this.writeLevels(updated);
-    return updated;
-  }
-
-  // ==========================================================================
-  // Statuses and stage gates
-  // ==========================================================================
-
-  // Releases persist to `.specboards/local-releases.json`.
-  async listStatuses(_scope?: WorkspaceScope): Promise<WorkspaceStatus[]> {
-    try {
-      const rows = JSON.parse(
-        await fs.readFile(localPath(this.root, "statuses"), "utf8"),
-      ) as WorkspaceStatus[];
-      return rows
-        .slice()
-        .sort((a, b) => a.position - b.position)
-        .map((r, i) => ({ ...r, position: i }));
-    } catch {
-      return [];
-    }
-  }
-
-  /**
-   * The status that means "finished" here: the terminal stage of the configured
-   * stages, else of the repo config's vocabulary, else the built-in `done`.
-   *
-   * Mirrors `resolveWorkflowFor`'s layering, minus the per-product level, which
-   * local mode has no way to express (one repo, one stage set). Local mode is
-   * the only place the store reads `.specboards/config.yml` itself: in DB mode
-   * the config is synced into the `repositories` row the DB store reads.
-   */
-  async doneStatusKey(): Promise<string> {
-    const stages = await this.listStatuses();
-    const configured = terminalStatus(stages.map((s) => s.key));
-    if (configured) return configured;
-    try {
-      const raw = await fs.readFile(
-        path.join(this.root, ".specboards", "config.yml"),
-        "utf8",
-      );
-      const statuses = parseRepoConfigYaml(raw)?.statuses;
-      if (statuses && statuses.length >= 2) {
-        const fromConfig = terminalStatus(statuses);
-        if (fromConfig) return fromConfig;
-      }
-    } catch {
-      // No config, or an unparseable one: fall through to the built-in stage.
-    }
-    return terminalStatus(DEFAULT_STATUSES)!;
-  }
-
-  async replaceStatuses(
-    stages: StatusStageInput[],
-    _scope?: WorkspaceScope,
-  ): Promise<WorkspaceStatus[]> {
-    const rows: WorkspaceStatus[] = stages.map((s, i) => ({
-      key: s.key,
-      label: s.label,
-      position: i,
-    }));
-    await fs.mkdir(path.dirname(localPath(this.root, "statuses")), {
-      recursive: true,
-    });
-    await fs.writeFile(
-      localPath(this.root, "statuses"),
-      JSON.stringify(rows, null, 2) + "\n",
-      "utf8",
-    );
-
-    // What is in force after the write. An empty set means no stages are
-    // configured, and the board falls back to the built-in vocabulary, so that
-    // is what the keys below have to be measured against. `archived` stays
-    // valid either way so archived items keep working.
-    const effective =
-      rows.length > 0
-        ? rows.map((r) => r.key)
-        : DEFAULT_STATUSES.filter((s) => s !== "archived");
-    const fallback = effective[0]!;
-    const validKeys = new Set<string>([...effective, "archived"]);
-
-    // Re-home any item left in a stage that no longer exists, matching the db
-    // store. Without this a removed stage leaves work on a board that draws no
-    // column for it, reachable only by editing the JSON by hand.
-    //
-    // Two places hold a status here and both have to be swept: DB-native items
-    // carry theirs in the items file, and a spec-backed item carries its own in
-    // the metadata map. `loadAll` resolves an absent entry to the first stage,
-    // so a spec that was never moved needs no row written for it.
-    const items = await this.readItems();
-    const movedItems = items.filter((i) => !validKeys.has(i.status));
-    if (movedItems.length > 0) {
-      for (const item of movedItems) item.status = fallback;
-      await this.writeItems(items);
-    }
-
-    const meta = await this.readMetadata();
-    let metaChanged = false;
-    for (const entry of Object.values(meta)) {
-      if (entry?.status !== undefined && !validKeys.has(entry.status)) {
-        entry.status = fallback;
-        metaChanged = true;
-      }
-    }
-    if (metaChanged) await this.writeMetadata(meta);
-
-    // Drop gates (and their completions) whose stage was removed, mirroring the
-    // db store.
-    const gates = await this.listStageGates();
-    const kept = gates.filter((g) => validKeys.has(g.stageKey));
-    if (kept.length !== gates.length) {
-      await this.replaceStageGates(
-        kept.map((g) => ({ id: g.id, stageKey: g.stageKey, label: g.label })),
-      );
-    }
-    return rows;
-  }
-
-  // Stage gates persist to `.specboards/local-stage-gates.json`; per-item
-  // completions to `.specboards/local-gate-completions.json`.
-  async listStageGates(_scope?: WorkspaceScope): Promise<StageGate[]> {
-    try {
-      const rows = JSON.parse(
-        await fs.readFile(localPath(this.root, "stageGates"), "utf8"),
-      ) as StageGate[];
-      return rows
-        .slice()
-        .sort(
-          (a, b) =>
-            a.stageKey.localeCompare(b.stageKey) || a.position - b.position,
-        );
-    } catch {
-      return [];
-    }
-  }
-
-  async replaceStageGates(
-    gates: StageGateInput[],
-    _scope?: WorkspaceScope,
-  ): Promise<StageGate[]> {
-    // Reconcile by id so kept gates retain their ids (and completions); only
-    // gates dropped from the new set lose theirs.
-    const existingIds = new Set((await this.listStageGates()).map((g) => g.id));
-    const perStage = new Map<string, number>();
-    const rows: StageGate[] = gates.map((g) => {
-      const pos = perStage.get(g.stageKey) ?? 0;
-      perStage.set(g.stageKey, pos + 1);
-      const id = g.id && existingIds.has(g.id) ? g.id : randomUUID();
-      return { id, stageKey: g.stageKey, label: g.label, position: pos };
-    });
-    const sorted = rows
-      .slice()
-      .sort(
-        (a, b) =>
-          a.stageKey.localeCompare(b.stageKey) || a.position - b.position,
-      );
-    await fs.mkdir(path.dirname(localPath(this.root, "stageGates")), {
-      recursive: true,
-    });
-    await fs.writeFile(
-      localPath(this.root, "stageGates"),
-      JSON.stringify(sorted, null, 2) + "\n",
-      "utf8",
-    );
-    // Drop completions whose gate no longer exists.
-    const valid = new Set(sorted.map((r) => r.id));
-    const completions = await this.readGateCompletions();
-    let changed = false;
-    for (const [specId, ids] of Object.entries(completions)) {
-      const kept = ids.filter((id) => valid.has(id));
-      if (kept.length !== ids.length) {
-        changed = true;
-        if (kept.length === 0) delete completions[specId];
-        else completions[specId] = kept;
-      }
-    }
-    if (changed) await this.writeGateCompletions(completions);
-    return sorted;
-  }
-
-  private async readGateCompletions(): Promise<Record<string, string[]>> {
-    try {
-      return JSON.parse(
-        await fs.readFile(localPath(this.root, "gateCompletions"), "utf8"),
-      ) as Record<string, string[]>;
-    } catch {
-      return {};
-    }
-  }
-
-  private async writeGateCompletions(
-    map: Record<string, string[]>,
-  ): Promise<void> {
-    await fs.mkdir(path.dirname(localPath(this.root, "gateCompletions")), {
-      recursive: true,
-    });
-    await fs.writeFile(
-      localPath(this.root, "gateCompletions"),
-      JSON.stringify(map, null, 2) + "\n",
-      "utf8",
-    );
-  }
-
-  async listGateCompletions(
-    specId: string,
-    _scope?: WorkspaceScope,
-  ): Promise<string[]> {
-    const map = await this.readGateCompletions();
-    return map[specId] ?? [];
-  }
-
-  async setGateCompletion(
-    specId: string,
-    gateId: string,
-    completed: boolean,
-    _scope?: WorkspaceScope,
-  ): Promise<void> {
-    const gates = await this.listStageGates();
-    if (!gates.some((g) => g.id === gateId)) {
-      throw new StageGateError("Unknown stage gate.");
-    }
-    const map = await this.readGateCompletions();
-    const current = new Set(map[specId] ?? []);
-    if (completed) current.add(gateId);
-    else current.delete(gateId);
-    if (current.size === 0) delete map[specId];
-    else map[specId] = [...current];
-    await this.writeGateCompletions(map);
   }
 
   // ==========================================================================
@@ -1420,7 +1055,7 @@ export class LocalFileStore implements FeatureStore, LocalStoreContext {
   }
 
   // ==========================================================================
-  // Transition mode, property unions, and card configuration
+  // Transition mode and card configuration
   // ==========================================================================
   //
   // Implemented in ./settings.ts. The bodies moved verbatim; these delegate
@@ -1447,27 +1082,6 @@ export class LocalFileStore implements FeatureStore, LocalStoreContext {
     productId?: string | null,
   ): Promise<TransitionMode> {
     return settingsStore.setTransitionMode(mode, scope, productId);
-  }
-
-  /** Nothing to override, for the same reason the mode is fixed above. */
-  /** One product by construction, so every union is just the list itself. */
-  async listPropertiesUnion(
-    scope: WorkspaceScope | undefined,
-    _productIds: string[] | null,
-    entity?: PropertyEntity,
-  ): Promise<PropertyDef[]> {
-    return this.listProperties(scope, entity);
-  }
-
-  /**
-   * Local file mode has one product by construction, so a cross-product board
-   * is the same board and the union is just the stage list.
-   */
-  async listStatusesUnion(
-    scope: WorkspaceScope | undefined,
-    _productIds: string[] | null,
-  ): Promise<WorkspaceStatus[]> {
-    return this.listStatuses(scope);
   }
 
   // ── Docs (Plan-section areas) ───────────────────────────────────────────
@@ -1536,15 +1150,6 @@ export class LocalFileStore implements FeatureStore, LocalStoreContext {
   deleteDocPage(id: string, scope?: WorkspaceScope): Promise<void> {
     return docStore.deleteDocPage(this, id, scope);
   }
-}
-
-/** Options only make sense for select/multiselect; other types store none. */
-function localNormalizeOptions(
-  type: PropertyDef["type"],
-  options: string[] | undefined,
-): string[] {
-  if (type !== "select" && type !== "multiselect") return [];
-  return [...new Set((options ?? []).map((o) => o.trim()).filter(Boolean))];
 }
 
 /** Walk upward from cwd to find the repo root (the dir holding `specs/`). */
