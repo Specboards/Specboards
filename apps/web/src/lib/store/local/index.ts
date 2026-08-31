@@ -32,6 +32,7 @@ import { riceFields } from "@/lib/feature-helpers";
 
 import { isDone, type LocalStoreContext } from "./context";
 import { localPath, specsDir } from "./paths";
+import * as itemReadStore from "./items-read";
 import * as cycleStore from "./cycles";
 import * as goalStore from "./goals";
 import * as settingsStore from "./settings";
@@ -563,32 +564,26 @@ export class LocalFileStore implements FeatureStore, LocalStoreContext {
   // the opposite of `db.ts`. The two implementations of one interface do not
   // present their methods in the same order.
   // ==========================================================================
+  //
+  // Implemented in ./items-read.ts. The bodies moved verbatim; these delegate
+  // so that `LocalFileStore` stays the one thing callers hold.
 
-  // The local store has a single implicit workspace, so `scope` is ignored.
-  async listFeatures(_scope?: WorkspaceScope): Promise<FeatureRecord[]> {
-    return this.loadAll();
+  listFeatures(scope?: WorkspaceScope): Promise<FeatureRecord[]> {
+    return itemReadStore.listFeatures(this, scope);
   }
 
-  async listFeatureBodies(
+  listFeatureBodies(
     specIds: readonly string[],
-    _scope?: WorkspaceScope,
+    scope?: WorkspaceScope,
   ): Promise<Map<string, string>> {
-    if (specIds.length === 0) return new Map();
-    const wanted = new Set(specIds);
-    const all = await this.loadAll();
-    const out = new Map<string, string>();
-    for (const f of all) {
-      if (wanted.has(f.specId) && f.content) out.set(f.specId, f.content);
-    }
-    return out;
+    return itemReadStore.listFeatureBodies(this, specIds, scope);
   }
 
-  async getFeature(
+  getFeature(
     specId: string,
-    _scope?: WorkspaceScope,
+    scope?: WorkspaceScope,
   ): Promise<FeatureDetail | null> {
-    const all = await this.loadAll();
-    return all.find((f) => f.specId === specId) ?? null;
+    return itemReadStore.getFeature(this, specId, scope);
   }
 
   async updateFeature(
