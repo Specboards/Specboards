@@ -131,7 +131,8 @@ describe.skipIf(!OWNER_URL)("leaf work items without specs (ADR 0003)", () => {
 
   it("reports isDbNative from spec_index, not repo_id", async () => {
     const specId = randomUUID();
-    const parentRow = await owner`select id from features where spec_id = ${featureSpecId}`;
+    const parentRow =
+      await owner`select id from features where spec_id = ${featureSpecId}`;
     await insertSpecBackedItem(owner, {
       specId,
       title: "Agent spec",
@@ -175,11 +176,18 @@ describe.skipIf(!OWNER_URL)("leaf work items without specs (ADR 0003)", () => {
 
   it("renames and deletes a leaf item that has no spec", async () => {
     const item = await store.createFeature(
-      { title: "Disposable", level: "work", productId, parentSpecId: featureSpecId },
+      {
+        title: "Disposable",
+        level: "work",
+        productId,
+        parentSpecId: featureSpecId,
+      },
       asOwner,
     );
     await store.updateFeature(item.specId, { title: "Renamed" }, asOwner);
-    expect((await store.getFeature(item.specId, asOwner))!.title).toBe("Renamed");
+    expect((await store.getFeature(item.specId, asOwner))!.title).toBe(
+      "Renamed",
+    );
 
     await store.deleteFeature(item.specId, asOwner);
     expect(await store.getFeature(item.specId, asOwner)).toBeNull();
@@ -187,7 +195,8 @@ describe.skipIf(!OWNER_URL)("leaf work items without specs (ADR 0003)", () => {
 
   it("refuses to delete a spec-backed item until its file is gone", async () => {
     const specId = randomUUID();
-    const parentRow = await owner`select id from features where spec_id = ${featureSpecId}`;
+    const parentRow =
+      await owner`select id from features where spec_id = ${featureSpecId}`;
     await insertSpecBackedItem(owner, {
       specId,
       title: "Attached",
@@ -203,7 +212,9 @@ describe.skipIf(!OWNER_URL)("leaf work items without specs (ADR 0003)", () => {
     expect(await store.getFeature(specId, asOwner)).not.toBeNull();
 
     // With it (the caller having removed the file), the row and its index go.
-    await store.deleteFeature(specId, asOwner, undefined, { specRemoved: true });
+    await store.deleteFeature(specId, asOwner, undefined, {
+      specRemoved: true,
+    });
     expect(await store.getFeature(specId, asOwner)).toBeNull();
     const index = await owner`select 1 from spec_index si
       join features f on f.id = si.feature_id where f.spec_id = ${specId}`;
@@ -213,7 +224,12 @@ describe.skipIf(!OWNER_URL)("leaf work items without specs (ADR 0003)", () => {
   it("still enforces product-write access on a leaf create", async () => {
     await expect(
       store.createFeature(
-        { title: "Not allowed", level: "work", productId, parentSpecId: featureSpecId },
+        {
+          title: "Not allowed",
+          level: "work",
+          productId,
+          parentSpecId: featureSpecId,
+        },
         asViewer,
       ),
     ).rejects.toThrow(FeatureError);
@@ -225,7 +241,12 @@ describe.skipIf(!OWNER_URL)("leaf work items without specs (ADR 0003)", () => {
     )!;
     await expect(
       store.createFeature(
-        { title: "Too deep", level: "work", productId, parentSpecId: leaf.specId },
+        {
+          title: "Too deep",
+          level: "work",
+          productId,
+          parentSpecId: leaf.specId,
+        },
         asOwner,
       ),
     ).rejects.toThrow(FeatureError);

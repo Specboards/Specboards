@@ -300,6 +300,10 @@ describe.skipIf(!OWNER_URL)("per-product releases (store + RLS)", () => {
 
     // Its own product's release, and a portfolio release, are allowed.
     await store.updateFeature(item.specId, { releaseId: alphaRel.id }, asOwner);
-    await store.updateFeature(item.specId, { releaseId: portfolioRel.id }, asOwner);
+    await store.updateFeature(
+      item.specId,
+      { releaseId: portfolioRel.id },
+      asOwner,
+    );
   });
 });

@@ -169,13 +169,10 @@ describe.skipIf(!OWNER_URL)("pruneAutoGrouping (store + RLS)", () => {
       const grouping = await seedGrouping(`field-case-${i}`);
       const [column] = Object.keys(patch);
       const value = patch[column!];
-      await owner.unsafe(
-        `update features set ${column} = $1 where id = $2`,
-        [
-          column === "custom_fields" ? JSON.stringify(value) : (value as never),
-          grouping,
-        ] as never,
-      );
+      await owner.unsafe(`update features set ${column} = $1 where id = $2`, [
+        column === "custom_fields" ? JSON.stringify(value) : (value as never),
+        grouping,
+      ] as never);
 
       expect(
         await store.pruneAutoGrouping(grouping, asOwner),

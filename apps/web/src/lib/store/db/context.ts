@@ -37,7 +37,10 @@ import type {
 } from "../types";
 
 export type Tx = Parameters<Parameters<Database["transaction"]>[0]>[0];
-export type ProductVisibilityRow = { id: string; visibility: "org" | "private" };
+export type ProductVisibilityRow = {
+  id: string;
+  visibility: "org" | "private";
+};
 
 /** A stored relation edge, as both the read and the write side see it. */
 export type LinkRow = {

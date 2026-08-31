@@ -270,16 +270,28 @@ describe.skipIf(!OWNER_URL)("cycles (store + RLS)", () => {
       asOwner,
     );
     const a = await store.createFeature(
-      { title: "A", level: "epic", productId: product.alpha, cycleId: cycle.id },
+      {
+        title: "A",
+        level: "epic",
+        productId: product.alpha,
+        cycleId: cycle.id,
+      },
       asOwner,
     );
     await store.createFeature(
-      { title: "B", level: "epic", productId: product.alpha, cycleId: cycle.id },
+      {
+        title: "B",
+        level: "epic",
+        productId: product.alpha,
+        cycleId: cycle.id,
+      },
       asOwner,
     );
     await store.updateFeature(a.specId, { status: "done" }, asOwner);
 
-    const listed = (await store.listCycles(asOwner)).find((c) => c.id === cycle.id);
+    const listed = (await store.listCycles(asOwner)).find(
+      (c) => c.id === cycle.id,
+    );
     expect(listed!.itemCount).toBe(2);
     expect(listed!.doneCount).toBe(1);
   });
@@ -294,11 +306,21 @@ describe.skipIf(!OWNER_URL)("cycles (store + RLS)", () => {
       asOwner,
     );
     const unfinished = await store.createFeature(
-      { title: "Carry", level: "epic", productId: product.alpha, cycleId: from.id },
+      {
+        title: "Carry",
+        level: "epic",
+        productId: product.alpha,
+        cycleId: from.id,
+      },
       asOwner,
     );
     const finished = await store.createFeature(
-      { title: "Shipped", level: "epic", productId: product.alpha, cycleId: from.id },
+      {
+        title: "Shipped",
+        level: "epic",
+        productId: product.alpha,
+        cycleId: from.id,
+      },
       asOwner,
     );
     await store.updateFeature(finished.specId, { status: "done" }, asOwner);
@@ -309,8 +331,12 @@ describe.skipIf(!OWNER_URL)("cycles (store + RLS)", () => {
 
     // The unfinished item moved; the delivered one stayed, so the closed cycle
     // keeps an honest record of what it actually delivered.
-    expect((await store.getFeature(unfinished.specId, asOwner))!.cycleId).toBe(to.id);
-    expect((await store.getFeature(finished.specId, asOwner))!.cycleId).toBe(from.id);
+    expect((await store.getFeature(unfinished.specId, asOwner))!.cycleId).toBe(
+      to.id,
+    );
+    expect((await store.getFeature(finished.specId, asOwner))!.cycleId).toBe(
+      from.id,
+    );
   });
 
   it("refuses a rollover into the same cycle", async () => {

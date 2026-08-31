@@ -3,7 +3,10 @@ import { randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { probeTenantConnection, tenantIsolationViolations } from "@specboards/db";
+import {
+  probeTenantConnection,
+  tenantIsolationViolations,
+} from "@specboards/db";
 
 import { DbStore } from "./db";
 
@@ -125,10 +128,16 @@ describe.skipIf(!OWNER_URL)("RLS tenant isolation (two-tenant)", () => {
   });
 
   it("store reads return only the scoped tenant's rows", async () => {
-    const features = await store.listFeatures({ userId: user.alice, workspaceId: ws.a });
+    const features = await store.listFeatures({
+      userId: user.alice,
+      workspaceId: ws.a,
+    });
     expect(features.map((f) => f.title)).toEqual(["A: checkout flow"]);
 
-    const products = await store.listProducts({ userId: user.alice, workspaceId: ws.a });
+    const products = await store.listProducts({
+      userId: user.alice,
+      workspaceId: ws.a,
+    });
     expect(products.map((p) => p.key)).toContain("alpha");
     expect(products.map((p) => p.key)).not.toContain("beta");
   });
@@ -136,9 +145,15 @@ describe.skipIf(!OWNER_URL)("RLS tenant isolation (two-tenant)", () => {
   it("a scope for a workspace the user is not a member of sees nothing", async () => {
     // Alice claims workspace B: membership fails at the RLS layer, so even a
     // correctly-parameterized query comes back empty instead of leaking.
-    const features = await store.listFeatures({ userId: user.alice, workspaceId: ws.b });
+    const features = await store.listFeatures({
+      userId: user.alice,
+      workspaceId: ws.b,
+    });
     expect(features).toEqual([]);
-    const products = await store.listProducts({ userId: user.alice, workspaceId: ws.b });
+    const products = await store.listProducts({
+      userId: user.alice,
+      workspaceId: ws.b,
+    });
     expect(products).toEqual([]);
   });
 
@@ -151,21 +166,29 @@ describe.skipIf(!OWNER_URL)("RLS tenant isolation (two-tenant)", () => {
       { userId: user.alice, workspaceId: ws.a },
     ];
     for (const scope of attempts) {
-      await store.updateFeature(spec.b, { title: "pwned" }, scope).catch(() => {});
+      await store
+        .updateFeature(spec.b, { title: "pwned" }, scope)
+        .catch(() => {});
       await store.deleteFeature(spec.b, scope).catch(() => {});
     }
-    const [row] = await owner`select title from features where spec_id = ${spec.b}`;
+    const [row] =
+      await owner`select title from features where spec_id = ${spec.b}`;
     expect(row?.title).toBe("B: billing engine");
   });
 
   it("an unscoped store call is refused outright", async () => {
-    await expect(store.listFeatures(undefined)).rejects.toThrow(/workspace scope/i);
+    await expect(store.listFeatures(undefined)).rejects.toThrow(
+      /workspace scope/i,
+    );
   });
 
   it("a query with no RLS context sees zero tenant rows (fail closed)", async () => {
     // The intentionally-unscoped query from the acceptance criteria: on the
     // app connection with no app.user_id set, tenant tables must act empty.
-    const noContext = await asUser(null, (tx) => tx`select count(*)::int as n from features`);
+    const noContext = await asUser(
+      null,
+      (tx) => tx`select count(*)::int as n from features`,
+    );
     expect(noContext[0]?.n).toBe(0);
 
     const viaOwner = await owner`select count(*)::int as n from features`;
@@ -175,21 +198,30 @@ describe.skipIf(!OWNER_URL)("RLS tenant isolation (two-tenant)", () => {
   it("a workspace-unfiltered query still only returns the member's tenant", async () => {
     // Simulates the exact bug RLS exists to backstop: application code that
     // forgot the workspaceId predicate entirely.
-    const rows = await asUser(user.alice, (tx) => tx`select title from features`);
+    const rows = await asUser(
+      user.alice,
+      (tx) => tx`select title from features`,
+    );
     expect(rows.map((r) => r.title)).toEqual(["A: checkout flow"]);
 
-    const repos = await asUser(user.alice, (tx) => tx`select owner from repositories`);
+    const repos = await asUser(
+      user.alice,
+      (tx) => tx`select owner from repositories`,
+    );
     expect(repos.map((r) => r.owner)).toEqual(["tenant-a"]);
   });
 
   it("inserting into another tenant's workspace is rejected by policy", async () => {
     await expect(
-      asUser(user.alice, (tx) =>
-        tx`insert into features (spec_id, workspace_id, title)
+      asUser(
+        user.alice,
+        (tx) =>
+          tx`insert into features (spec_id, workspace_id, title)
            values (${randomUUID()}, ${ws.b}, 'smuggled')`,
       ),
     ).rejects.toThrow(/row-level security|violates/i);
-    const [row] = await owner`select count(*)::int as n from features where workspace_id = ${ws.b}`;
+    const [row] =
+      await owner`select count(*)::int as n from features where workspace_id = ${ws.b}`;
     expect(row?.n).toBe(1);
   });
 
@@ -202,8 +234,10 @@ describe.skipIf(!OWNER_URL)("RLS tenant isolation (two-tenant)", () => {
    * the assistant for every member in production.
    */
   it("a member can append to the usage ledger and read their own tenant's back", async () => {
-    await asUser(user.alice, (tx) =>
-      tx`insert into model_usage_events
+    await asUser(
+      user.alice,
+      (tx) =>
+        tx`insert into model_usage_events
            (workspace_id, user_id, feature, outcome, prompt_tokens, completion_tokens)
          values (${ws.a}, ${user.alice}, 'assistant_turn', 'ok', 10, 5)`,
     );
@@ -222,13 +256,16 @@ describe.skipIf(!OWNER_URL)("RLS tenant isolation (two-tenant)", () => {
 
     const rows = await asUser(
       user.alice,
-      (tx) => tx`select id from model_usage_events where workspace_id = ${ws.b}`,
+      (tx) =>
+        tx`select id from model_usage_events where workspace_id = ${ws.b}`,
     );
     expect(rows).toEqual([]);
 
     await expect(
-      asUser(user.alice, (tx) =>
-        tx`insert into model_usage_events (workspace_id, user_id, feature, outcome)
+      asUser(
+        user.alice,
+        (tx) =>
+          tx`insert into model_usage_events (workspace_id, user_id, feature, outcome)
            values (${ws.b}, ${user.alice}, 'assistant_turn', 'ok')`,
       ),
     ).rejects.toThrow(/row-level security|violates/i);
@@ -250,12 +287,16 @@ describe.skipIf(!OWNER_URL)("RLS tenant isolation (two-tenant)", () => {
         (workspace_id, user_id, feature, outcome, prompt_tokens)
       values (${ws.a}, ${user.alice}, 'breakdown', 'ok', 1000)`;
 
-    await asUser(user.alice, (tx) =>
-      tx`update model_usage_events set prompt_tokens = 0
+    await asUser(
+      user.alice,
+      (tx) =>
+        tx`update model_usage_events set prompt_tokens = 0
          where workspace_id = ${ws.a} and feature = 'breakdown'`,
     );
-    await asUser(user.alice, (tx) =>
-      tx`delete from model_usage_events where workspace_id = ${ws.a} and feature = 'breakdown'`,
+    await asUser(
+      user.alice,
+      (tx) =>
+        tx`delete from model_usage_events where workspace_id = ${ws.a} and feature = 'breakdown'`,
     );
 
     const [row] = await owner`select prompt_tokens from model_usage_events
@@ -280,8 +321,10 @@ describe.skipIf(!OWNER_URL)("RLS tenant isolation (two-tenant)", () => {
     // this has to refuse. A policy that does not admit the row filters the
     // UPDATE to nothing rather than raising, so the assertion is on the cap
     // afterwards.
-    await asUser(user.carol, (tx) =>
-      tx`update workspace_usage_limits set monthly_token_cap = 999999
+    await asUser(
+      user.carol,
+      (tx) =>
+        tx`update workspace_usage_limits set monthly_token_cap = 999999
          where workspace_id = ${ws.a}`,
     );
     const [after] =
@@ -290,8 +333,10 @@ describe.skipIf(!OWNER_URL)("RLS tenant isolation (two-tenant)", () => {
 
     // The workspace owner can, which is what says the policy gates on the role
     // rather than refusing everybody and looking correct while doing it.
-    await asUser(user.alice, (tx) =>
-      tx`update workspace_usage_limits set monthly_token_cap = 750
+    await asUser(
+      user.alice,
+      (tx) =>
+        tx`update workspace_usage_limits set monthly_token_cap = 750
          where workspace_id = ${ws.a}`,
     );
     const [raised] =

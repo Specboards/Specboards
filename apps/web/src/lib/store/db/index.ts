@@ -6,12 +6,7 @@ import {
   type WorkspaceLevel,
 } from "@specboards/core";
 
-import {
-  createDb,
-  outboxEvents,
-  sql,
-  type Database,
-} from "@specboards/db";
+import { createDb, outboxEvents, sql, type Database } from "@specboards/db";
 
 import {
   type CommentInput,
@@ -962,4 +957,3 @@ export class DbStore implements FeatureStore, DbStoreContext {
     return productStore.assertWorkspaceMember(this, tx, ws, userId);
   }
 }
-

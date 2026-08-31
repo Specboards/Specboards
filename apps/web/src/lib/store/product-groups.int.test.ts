@@ -89,7 +89,10 @@ describe.skipIf(!OWNER_URL)("product groups (store + RLS)", () => {
   });
 
   it("creates a group and lists it only in its own workspace", async () => {
-    const group = await store.createProductGroup({ name: "Payments Platform" }, scopeA);
+    const group = await store.createProductGroup(
+      { name: "Payments Platform" },
+      scopeA,
+    );
     expect(group.key).toBe("payments-platform");
 
     const inA = await store.listProductGroups(scopeA);
@@ -131,7 +134,10 @@ describe.skipIf(!OWNER_URL)("product groups (store + RLS)", () => {
   });
 
   it("rejects nesting a group inside its own subtree", async () => {
-    const parent = await store.createProductGroup({ name: "Cycle Parent" }, scopeA);
+    const parent = await store.createProductGroup(
+      { name: "Cycle Parent" },
+      scopeA,
+    );
     const child = await store.createProductGroup(
       { name: "Cycle Child", parentId: parent.id },
       scopeA,
@@ -181,20 +187,24 @@ describe.skipIf(!OWNER_URL)("product groups (store + RLS)", () => {
 
     // Restore for the delete-guard tests below.
     const payments = groups.find((g) => g.name === "Payments Platform")!;
-    await store.updateProduct(productId.alpha, { groupId: payments.id }, scopeA);
+    await store.updateProduct(
+      productId.alpha,
+      { groupId: payments.id },
+      scopeA,
+    );
   });
 
   it("blocks deleting a group that still has products or subgroups", async () => {
     const groups = await store.listProductGroups(scopeA);
     const populated = groups.find((g) => g.productCount > 0)!;
-    await expect(store.deleteProductGroup(populated.id, scopeA)).rejects.toThrow(
-      GroupError,
-    );
+    await expect(
+      store.deleteProductGroup(populated.id, scopeA),
+    ).rejects.toThrow(GroupError);
 
     const withChild = groups.find((g) => g.name === "Cycle Parent")!;
-    await expect(store.deleteProductGroup(withChild.id, scopeA)).rejects.toThrow(
-      GroupError,
-    );
+    await expect(
+      store.deleteProductGroup(withChild.id, scopeA),
+    ).rejects.toThrow(GroupError);
   });
 
   it("deletes an empty group and unassigns products cleanly", async () => {

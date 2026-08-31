@@ -32,7 +32,10 @@ const DB_URL = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
  * `infra/worker-role.sql` has to follow.
  */
 const WORKER_READS: { table: string; why: string }[] = [
-  { table: "repositories", why: "resolveRepositories: find connections for a push" },
+  {
+    table: "repositories",
+    why: "resolveRepositories: find connections for a push",
+  },
   { table: "features", why: "syncRepository: upsert synced specs" },
   { table: "spec_index", why: "syncRepository: blobSha drift detection" },
   { table: "products", why: "syncRepository: land specs in a product" },
@@ -43,10 +46,19 @@ const WORKER_READS: { table: string; why: string }[] = [
   { table: "workspace_levels", why: "syncRepository: resolve the leaf level" },
   { table: "workspaces", why: "envelope / scope context" },
   { table: "users", why: "envelope / scope context" },
-  { table: "github_installations", why: "resolveRepoClient: mint an install token" },
+  {
+    table: "github_installations",
+    why: "resolveRepoClient: mint an install token",
+  },
   { table: "github_app", why: "resolveRepoClient: app credentials" },
-  { table: "github_webhook_deliveries", why: "claimDelivery: process a delivery once" },
-  { table: "feature_github_links", why: "pull_request events: refresh link state" },
+  {
+    table: "github_webhook_deliveries",
+    why: "claimDelivery: process a delivery once",
+  },
+  {
+    table: "feature_github_links",
+    why: "pull_request events: refresh link state",
+  },
   { table: "item_events", why: "sync appends git-originated history" },
   { table: "notifications", why: "review-outcome notifications" },
   { table: "outbox_events", why: "webhook drainer" },

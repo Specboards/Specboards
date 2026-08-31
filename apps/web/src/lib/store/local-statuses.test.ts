@@ -46,7 +46,11 @@ describe("LocalFileStore.replaceStatuses re-homes stranded work", () => {
    * A spec on disk, which is how a git-backed item exists in local mode. The
    * walker only picks up files named `spec.md`, one per directory.
    */
-  async function writeSpec(id: string, slug: string, title: string): Promise<void> {
+  async function writeSpec(
+    id: string,
+    slug: string,
+    title: string,
+  ): Promise<void> {
     const dir = path.join(root, "specs", slug);
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(
@@ -62,9 +66,7 @@ describe("LocalFileStore.replaceStatuses re-homes stranded work", () => {
       level: "feature",
     });
     await store.updateFeature(item.specId, { status: "doing" });
-    expect(
-      (await store.getFeature(item.specId))?.status,
-    ).toBe("doing");
+    expect((await store.getFeature(item.specId))?.status).toBe("doing");
 
     // "doing" is gone from the workflow.
     await store.replaceStatuses([

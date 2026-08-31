@@ -141,7 +141,9 @@ describe.skipIf(!OWNER_URL)("transition mode (store)", () => {
     expect(await store.getTransitionMode(asOwner, alpha)).toBe("strict");
 
     // The revert reports what it now inherits, not the null it was given.
-    expect(await store.setTransitionMode(null, asOwner, alpha)).toBe("flexible");
+    expect(await store.setTransitionMode(null, asOwner, alpha)).toBe(
+      "flexible",
+    );
     expect(await store.getTransitionMode(asOwner, alpha)).toBe("flexible");
 
     // The row survives the revert, holding an explicit "no opinion", so the
@@ -221,12 +223,16 @@ describe.skipIf(!OWNER_URL)("transition mode (store)", () => {
 
   it("refuses to report a save that matched no row", async () => {
     const missing = { userId: ownerId, workspaceId: randomUUID() };
-    await expect(store.setTransitionMode("flexible", missing)).rejects.toThrow();
+    await expect(
+      store.setTransitionMode("flexible", missing),
+    ).rejects.toThrow();
   });
 
   it("refuses to read a missing workspace as strict", async () => {
     const missing = { userId: ownerId, workspaceId: randomUUID() };
-    await expect(store.getTransitionMode(missing)).rejects.toThrow(/not found/i);
+    await expect(store.getTransitionMode(missing)).rejects.toThrow(
+      /not found/i,
+    );
   });
 
   it("still falls back to strict for an unrecognized stored value", async () => {

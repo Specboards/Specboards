@@ -1669,10 +1669,7 @@ interface GoalStore {
    */
   listGoalLinks(scope?: WorkspaceScope): Promise<GoalLinkRef[]>;
   /** Goals an item ladders up to (many-to-many; any level can link). */
-  listItemGoals(
-    specId: string,
-    scope?: WorkspaceScope,
-  ): Promise<ItemGoalRef[]>;
+  listItemGoals(specId: string, scope?: WorkspaceScope): Promise<ItemGoalRef[]>;
   linkGoal(
     goalId: string,
     specId: string,
