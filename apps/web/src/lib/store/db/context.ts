@@ -71,6 +71,12 @@ export interface DbStoreContext {
   /** Verify a product id belongs to the workspace, returning it. */
   requireProductId(tx: Tx, ws: string, productId: string): Promise<string>;
   /**
+   * Assert a user id is an active member of the workspace, or throw. The one
+   * check that is about people rather than products: assigning work and
+   * granting product roles both have to refuse a stranger.
+   */
+  assertWorkspaceMember(tx: Tx, ws: string, userId: string): Promise<void>;
+  /**
    * The workspace's default product id, creating it if it is somehow missing.
    * Every domain that accepts an optional product id lands here when none was
    * given, which is why it is context rather than one domain's helper.
