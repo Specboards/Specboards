@@ -45,6 +45,8 @@ import {
 } from "@specboards/core";
 
 import { riceFields } from "@/lib/feature-helpers";
+
+import { localPath, specsDir } from "./paths";
 import {
   compareReleases,
   DetailTemplateError,
@@ -399,84 +401,11 @@ function toLocalEdge(
 export class LocalFileStore implements FeatureStore {
   constructor(private readonly root: string) {}
 
-  private get specsDir() {
-    return path.join(this.root, "specs");
-  }
-
-  private get metadataPath() {
-    return path.join(this.root, ".specboards", "local-metadata.json");
-  }
-
-  private get viewsPath() {
-    return path.join(this.root, ".specboards", "local-views.json");
-  }
-
-  private get boardPrefsPath() {
-    return path.join(this.root, ".specboards", "local-board-prefs.json");
-  }
-
-  private get itemsPath() {
-    return path.join(this.root, ".specboards", "local-items.json");
-  }
-
-  private get levelsPath() {
-    return path.join(this.root, ".specboards", "local-levels.json");
-  }
-
-  private get productsPath() {
-    return path.join(this.root, ".specboards", "local-products.json");
-  }
-
-  private get propertiesPath() {
-    return path.join(this.root, ".specboards", "local-properties.json");
-  }
-
-  private get releasesPath() {
-    return path.join(this.root, ".specboards", "local-releases.json");
-  }
-
-  private get cyclesPath() {
-    return path.join(this.root, ".specboards", "local-cycles.json");
-  }
-
-  private get commentsPath() {
-    return path.join(this.root, ".specboards", "local-comments.json");
-  }
-
-  private get statusesPath() {
-    return path.join(this.root, ".specboards", "local-statuses.json");
-  }
-
-  private get stageGatesPath() {
-    return path.join(this.root, ".specboards", "local-stage-gates.json");
-  }
-
-  /** Per-item gate completions: specId -> completed gate ids. */
-  private get gateCompletionsPath() {
-    return path.join(this.root, ".specboards", "local-gate-completions.json");
-  }
-
-  private get ideasPath() {
-    return path.join(this.root, ".specboards", "local-ideas.json");
-  }
-
-  private get ideaStatusesPath() {
-    return path.join(this.root, ".specboards", "local-idea-statuses.json");
-  }
-
-  private get ideaSettingsPath() {
-    return path.join(this.root, ".specboards", "local-idea-settings.json");
-  }
-
-  private get templatesPath() {
-    return path.join(this.root, ".specboards", "local-detail-templates.json");
-  }
-
   /** Persisted products, seeded with the default product when none exist. */
   private async readProducts(): Promise<LocalProduct[]> {
     try {
       const rows = JSON.parse(
-        await fs.readFile(this.productsPath, "utf8"),
+        await fs.readFile(localPath(this.root, "products"), "utf8"),
       ) as LocalProduct[];
       if (rows.length > 0) return rows;
     } catch {
@@ -486,22 +415,20 @@ export class LocalFileStore implements FeatureStore {
   }
 
   private async writeProducts(rows: LocalProduct[]): Promise<void> {
-    await fs.mkdir(path.dirname(this.productsPath), { recursive: true });
+    await fs.mkdir(path.dirname(localPath(this.root, "products")), {
+      recursive: true,
+    });
     await fs.writeFile(
-      this.productsPath,
+      localPath(this.root, "products"),
       JSON.stringify(rows, null, 2) + "\n",
       "utf8",
     );
   }
 
-  private get productGroupsPath() {
-    return path.join(this.root, ".specboards", "local-product-groups.json");
-  }
-
   private async readGroups(): Promise<LocalProductGroup[]> {
     try {
       return JSON.parse(
-        await fs.readFile(this.productGroupsPath, "utf8"),
+        await fs.readFile(localPath(this.root, "productGroups"), "utf8"),
       ) as LocalProductGroup[];
     } catch {
       return [];
@@ -509,9 +436,11 @@ export class LocalFileStore implements FeatureStore {
   }
 
   private async writeGroups(rows: LocalProductGroup[]): Promise<void> {
-    await fs.mkdir(path.dirname(this.productGroupsPath), { recursive: true });
+    await fs.mkdir(path.dirname(localPath(this.root, "productGroups")), {
+      recursive: true,
+    });
     await fs.writeFile(
-      this.productGroupsPath,
+      localPath(this.root, "productGroups"),
       JSON.stringify(rows, null, 2) + "\n",
       "utf8",
     );
@@ -531,7 +460,7 @@ export class LocalFileStore implements FeatureStore {
   private async readLevels(): Promise<WorkspaceLevel[] | null> {
     try {
       return JSON.parse(
-        await fs.readFile(this.levelsPath, "utf8"),
+        await fs.readFile(localPath(this.root, "levels"), "utf8"),
       ) as WorkspaceLevel[];
     } catch {
       return null;
@@ -539,9 +468,11 @@ export class LocalFileStore implements FeatureStore {
   }
 
   private async writeLevels(levels: WorkspaceLevel[]): Promise<void> {
-    await fs.mkdir(path.dirname(this.levelsPath), { recursive: true });
+    await fs.mkdir(path.dirname(localPath(this.root, "levels")), {
+      recursive: true,
+    });
     await fs.writeFile(
-      this.levelsPath,
+      localPath(this.root, "levels"),
       JSON.stringify(levels, null, 2) + "\n",
       "utf8",
     );
@@ -551,7 +482,7 @@ export class LocalFileStore implements FeatureStore {
   private async readItems(): Promise<LocalItem[]> {
     try {
       return JSON.parse(
-        await fs.readFile(this.itemsPath, "utf8"),
+        await fs.readFile(localPath(this.root, "items"), "utf8"),
       ) as LocalItem[];
     } catch {
       return [];
@@ -559,9 +490,11 @@ export class LocalFileStore implements FeatureStore {
   }
 
   private async writeItems(items: LocalItem[]): Promise<void> {
-    await fs.mkdir(path.dirname(this.itemsPath), { recursive: true });
+    await fs.mkdir(path.dirname(localPath(this.root, "items")), {
+      recursive: true,
+    });
     await fs.writeFile(
-      this.itemsPath,
+      localPath(this.root, "items"),
       JSON.stringify(items, null, 2) + "\n",
       "utf8",
     );
@@ -570,7 +503,7 @@ export class LocalFileStore implements FeatureStore {
   private async readMetadata(): Promise<MetadataFile> {
     try {
       return JSON.parse(
-        await fs.readFile(this.metadataPath, "utf8"),
+        await fs.readFile(localPath(this.root, "metadata"), "utf8"),
       ) as MetadataFile;
     } catch {
       return {};
@@ -578,9 +511,11 @@ export class LocalFileStore implements FeatureStore {
   }
 
   private async writeMetadata(meta: MetadataFile): Promise<void> {
-    await fs.mkdir(path.dirname(this.metadataPath), { recursive: true });
+    await fs.mkdir(path.dirname(localPath(this.root, "metadata")), {
+      recursive: true,
+    });
     await fs.writeFile(
-      this.metadataPath,
+      localPath(this.root, "metadata"),
       JSON.stringify(meta, null, 2) + "\n",
       "utf8",
     );
@@ -605,7 +540,7 @@ export class LocalFileStore implements FeatureStore {
   private async loadAll(): Promise<FeatureDetail[]> {
     const [files, meta, items, levels, defaultProductId, statuses, doneKey] =
       await Promise.all([
-        this.walkSpecFiles(this.specsDir),
+        this.walkSpecFiles(specsDir(this.root)),
         this.readMetadata(),
         this.readItems(),
         this.readLevels(),
@@ -1154,7 +1089,7 @@ export class LocalFileStore implements FeatureStore {
   private async readViews(): Promise<SavedView[]> {
     try {
       return JSON.parse(
-        await fs.readFile(this.viewsPath, "utf8"),
+        await fs.readFile(localPath(this.root, "views"), "utf8"),
       ) as SavedView[];
     } catch {
       return [];
@@ -1162,9 +1097,11 @@ export class LocalFileStore implements FeatureStore {
   }
 
   private async writeViews(views: SavedView[]): Promise<void> {
-    await fs.mkdir(path.dirname(this.viewsPath), { recursive: true });
+    await fs.mkdir(path.dirname(localPath(this.root, "views")), {
+      recursive: true,
+    });
     await fs.writeFile(
-      this.viewsPath,
+      localPath(this.root, "views"),
       JSON.stringify(views, null, 2) + "\n",
       "utf8",
     );
@@ -1224,7 +1161,7 @@ export class LocalFileStore implements FeatureStore {
   > {
     try {
       const parsed = JSON.parse(
-        await fs.readFile(this.boardPrefsPath, "utf8"),
+        await fs.readFile(localPath(this.root, "boardPrefs"), "utf8"),
       ) as BoardPreferences | Partial<Record<BoardKey, BoardPreferences>>;
       if (parsed && ("cardFields" in parsed || "featured" in parsed)) {
         return { backlog: parsed as BoardPreferences };
@@ -1250,9 +1187,11 @@ export class LocalFileStore implements FeatureStore {
   ): Promise<void> {
     const map = await this.readBoardPrefsMap();
     map[board] = prefs;
-    await fs.mkdir(path.dirname(this.boardPrefsPath), { recursive: true });
+    await fs.mkdir(path.dirname(localPath(this.root, "boardPrefs")), {
+      recursive: true,
+    });
     await fs.writeFile(
-      this.boardPrefsPath,
+      localPath(this.root, "boardPrefs"),
       JSON.stringify(map, null, 2) + "\n",
       "utf8",
     );
@@ -1262,7 +1201,7 @@ export class LocalFileStore implements FeatureStore {
   private async readProperties(): Promise<PropertyDef[]> {
     try {
       return JSON.parse(
-        await fs.readFile(this.propertiesPath, "utf8"),
+        await fs.readFile(localPath(this.root, "properties"), "utf8"),
       ) as PropertyDef[];
     } catch {
       return [];
@@ -1270,9 +1209,11 @@ export class LocalFileStore implements FeatureStore {
   }
 
   private async writeProperties(rows: PropertyDef[]): Promise<void> {
-    await fs.mkdir(path.dirname(this.propertiesPath), { recursive: true });
+    await fs.mkdir(path.dirname(localPath(this.root, "properties")), {
+      recursive: true,
+    });
     await fs.writeFile(
-      this.propertiesPath,
+      localPath(this.root, "properties"),
       JSON.stringify(rows, null, 2) + "\n",
       "utf8",
     );
@@ -1358,7 +1299,7 @@ export class LocalFileStore implements FeatureStore {
   private async readTemplates(): Promise<DetailTemplate[]> {
     try {
       return JSON.parse(
-        await fs.readFile(this.templatesPath, "utf8"),
+        await fs.readFile(localPath(this.root, "detailTemplates"), "utf8"),
       ) as DetailTemplate[];
     } catch {
       return [];
@@ -1366,9 +1307,11 @@ export class LocalFileStore implements FeatureStore {
   }
 
   private async writeTemplates(rows: DetailTemplate[]): Promise<void> {
-    await fs.mkdir(path.dirname(this.templatesPath), { recursive: true });
+    await fs.mkdir(path.dirname(localPath(this.root, "detailTemplates")), {
+      recursive: true,
+    });
     await fs.writeFile(
-      this.templatesPath,
+      localPath(this.root, "detailTemplates"),
       JSON.stringify(rows, null, 2) + "\n",
       "utf8",
     );
@@ -1473,7 +1416,7 @@ export class LocalFileStore implements FeatureStore {
   async listStatuses(_scope?: WorkspaceScope): Promise<WorkspaceStatus[]> {
     try {
       const rows = JSON.parse(
-        await fs.readFile(this.statusesPath, "utf8"),
+        await fs.readFile(localPath(this.root, "statuses"), "utf8"),
       ) as WorkspaceStatus[];
       return rows
         .slice()
@@ -1522,9 +1465,11 @@ export class LocalFileStore implements FeatureStore {
       label: s.label,
       position: i,
     }));
-    await fs.mkdir(path.dirname(this.statusesPath), { recursive: true });
+    await fs.mkdir(path.dirname(localPath(this.root, "statuses")), {
+      recursive: true,
+    });
     await fs.writeFile(
-      this.statusesPath,
+      localPath(this.root, "statuses"),
       JSON.stringify(rows, null, 2) + "\n",
       "utf8",
     );
@@ -1582,7 +1527,7 @@ export class LocalFileStore implements FeatureStore {
   async listStageGates(_scope?: WorkspaceScope): Promise<StageGate[]> {
     try {
       const rows = JSON.parse(
-        await fs.readFile(this.stageGatesPath, "utf8"),
+        await fs.readFile(localPath(this.root, "stageGates"), "utf8"),
       ) as StageGate[];
       return rows
         .slice()
@@ -1615,9 +1560,11 @@ export class LocalFileStore implements FeatureStore {
         (a, b) =>
           a.stageKey.localeCompare(b.stageKey) || a.position - b.position,
       );
-    await fs.mkdir(path.dirname(this.stageGatesPath), { recursive: true });
+    await fs.mkdir(path.dirname(localPath(this.root, "stageGates")), {
+      recursive: true,
+    });
     await fs.writeFile(
-      this.stageGatesPath,
+      localPath(this.root, "stageGates"),
       JSON.stringify(sorted, null, 2) + "\n",
       "utf8",
     );
@@ -1640,7 +1587,7 @@ export class LocalFileStore implements FeatureStore {
   private async readGateCompletions(): Promise<Record<string, string[]>> {
     try {
       return JSON.parse(
-        await fs.readFile(this.gateCompletionsPath, "utf8"),
+        await fs.readFile(localPath(this.root, "gateCompletions"), "utf8"),
       ) as Record<string, string[]>;
     } catch {
       return {};
@@ -1650,9 +1597,11 @@ export class LocalFileStore implements FeatureStore {
   private async writeGateCompletions(
     map: Record<string, string[]>,
   ): Promise<void> {
-    await fs.mkdir(path.dirname(this.gateCompletionsPath), { recursive: true });
+    await fs.mkdir(path.dirname(localPath(this.root, "gateCompletions")), {
+      recursive: true,
+    });
     await fs.writeFile(
-      this.gateCompletionsPath,
+      localPath(this.root, "gateCompletions"),
       JSON.stringify(map, null, 2) + "\n",
       "utf8",
     );
@@ -1688,7 +1637,7 @@ export class LocalFileStore implements FeatureStore {
   private async readReleases(): Promise<LocalRelease[]> {
     try {
       return JSON.parse(
-        await fs.readFile(this.releasesPath, "utf8"),
+        await fs.readFile(localPath(this.root, "releases"), "utf8"),
       ) as LocalRelease[];
     } catch {
       return [];
@@ -1696,9 +1645,11 @@ export class LocalFileStore implements FeatureStore {
   }
 
   private async writeReleases(rows: LocalRelease[]): Promise<void> {
-    await fs.mkdir(path.dirname(this.releasesPath), { recursive: true });
+    await fs.mkdir(path.dirname(localPath(this.root, "releases")), {
+      recursive: true,
+    });
     await fs.writeFile(
-      this.releasesPath,
+      localPath(this.root, "releases"),
       JSON.stringify(rows, null, 2) + "\n",
       "utf8",
     );
@@ -1884,13 +1835,15 @@ export class LocalFileStore implements FeatureStore {
   // on delete, done work staying put on rollover) is the same.
 
   private async readCycles(): Promise<LocalCycle[]> {
-    return this.readJsonFile<LocalCycle>(this.cyclesPath);
+    return this.readJsonFile<LocalCycle>(localPath(this.root, "cycles"));
   }
 
   private async writeCycles(rows: LocalCycle[]): Promise<void> {
-    await fs.mkdir(path.dirname(this.cyclesPath), { recursive: true });
+    await fs.mkdir(path.dirname(localPath(this.root, "cycles")), {
+      recursive: true,
+    });
     await fs.writeFile(
-      this.cyclesPath,
+      localPath(this.root, "cycles"),
       JSON.stringify(rows, null, 2) + "\n",
       "utf8",
     );
@@ -2129,18 +2082,16 @@ export class LocalFileStore implements FeatureStore {
   // absent; every other rule is the same, including the two progress figures
   // being computed on read rather than stored.
 
-  private get goalsPath() {
-    return path.join(this.root, ".specboards", "local-goals.json");
-  }
-
   private async readGoals(): Promise<LocalGoal[]> {
-    return this.readJsonFile<LocalGoal>(this.goalsPath);
+    return this.readJsonFile<LocalGoal>(localPath(this.root, "goals"));
   }
 
   private async writeGoals(rows: LocalGoal[]): Promise<void> {
-    await fs.mkdir(path.dirname(this.goalsPath), { recursive: true });
+    await fs.mkdir(path.dirname(localPath(this.root, "goals")), {
+      recursive: true,
+    });
     await fs.writeFile(
-      this.goalsPath,
+      localPath(this.root, "goals"),
       JSON.stringify(rows, null, 2) + "\n",
       "utf8",
     );
@@ -2471,7 +2422,7 @@ export class LocalFileStore implements FeatureStore {
   // records, so every comment is authored by LOCAL_USER with a null name.
 
   private async readComments(): Promise<LocalComment[]> {
-    return this.readJsonFile<LocalComment>(this.commentsPath);
+    return this.readJsonFile<LocalComment>(localPath(this.root, "comments"));
   }
 
   private async assertItemExists(specId: string): Promise<void> {
@@ -2521,7 +2472,10 @@ export class LocalFileStore implements FeatureStore {
       body,
       createdAt: new Date().toISOString(),
     };
-    await this.writeJsonFile(this.commentsPath, [...rows, comment]);
+    await this.writeJsonFile(localPath(this.root, "comments"), [
+      ...rows,
+      comment,
+    ]);
     return {
       id: comment.id,
       featureId: specId,
@@ -2542,7 +2496,7 @@ export class LocalFileStore implements FeatureStore {
       throw new CommentError(`Unknown comment: ${commentId}`);
     }
     await this.writeJsonFile(
-      this.commentsPath,
+      localPath(this.root, "comments"),
       rows.filter((c) => c.id !== commentId),
     );
   }
@@ -2998,7 +2952,7 @@ export class LocalFileStore implements FeatureStore {
   private async readIdeas(): Promise<LocalIdea[]> {
     try {
       return JSON.parse(
-        await fs.readFile(this.ideasPath, "utf8"),
+        await fs.readFile(localPath(this.root, "ideas"), "utf8"),
       ) as LocalIdea[];
     } catch {
       return [];
@@ -3006,9 +2960,11 @@ export class LocalFileStore implements FeatureStore {
   }
 
   private async writeIdeas(rows: LocalIdea[]): Promise<void> {
-    await fs.mkdir(path.dirname(this.ideasPath), { recursive: true });
+    await fs.mkdir(path.dirname(localPath(this.root, "ideas")), {
+      recursive: true,
+    });
     await fs.writeFile(
-      this.ideasPath,
+      localPath(this.root, "ideas"),
       JSON.stringify(rows, null, 2) + "\n",
       "utf8",
     );
@@ -3178,7 +3134,7 @@ export class LocalFileStore implements FeatureStore {
   private async readIdeaStages(): Promise<IdeaStage[]> {
     try {
       const rows = JSON.parse(
-        await fs.readFile(this.ideaStatusesPath, "utf8"),
+        await fs.readFile(localPath(this.root, "ideaStatuses"), "utf8"),
       ) as IdeaStage[];
       return rows
         .slice()
@@ -3216,9 +3172,11 @@ export class LocalFileStore implements FeatureStore {
       }
       if (changed) await this.writeIdeas(ideas);
     }
-    await fs.mkdir(path.dirname(this.ideaStatusesPath), { recursive: true });
+    await fs.mkdir(path.dirname(localPath(this.root, "ideaStatuses")), {
+      recursive: true,
+    });
     await fs.writeFile(
-      this.ideaStatusesPath,
+      localPath(this.root, "ideaStatuses"),
       JSON.stringify(rows, null, 2) + "\n",
       "utf8",
     );
@@ -3301,7 +3259,7 @@ export class LocalFileStore implements FeatureStore {
   async getIdeaSettings(_scope?: WorkspaceScope): Promise<IdeaSettings> {
     try {
       const row = JSON.parse(
-        await fs.readFile(this.ideaSettingsPath, "utf8"),
+        await fs.readFile(localPath(this.root, "ideaSettings"), "utf8"),
       ) as LocalIdeaSettings;
       return {
         portalEnabled: row.portalEnabled ?? false,
@@ -3326,9 +3284,11 @@ export class LocalFileStore implements FeatureStore {
             : null
           : current.portalTitle,
     };
-    await fs.mkdir(path.dirname(this.ideaSettingsPath), { recursive: true });
+    await fs.mkdir(path.dirname(localPath(this.root, "ideaSettings")), {
+      recursive: true,
+    });
     await fs.writeFile(
-      this.ideaSettingsPath,
+      localPath(this.root, "ideaSettings"),
       JSON.stringify(next, null, 2) + "\n",
       "utf8",
     );
@@ -3337,14 +3297,6 @@ export class LocalFileStore implements FeatureStore {
 
   // ── Docs (Plan-section areas) ───────────────────────────────────────────
   // Doc spaces + pages persist to `.specboards/local-doc-*.json`.
-
-  private get docSpacesPath() {
-    return path.join(this.root, ".specboards", "local-doc-spaces.json");
-  }
-
-  private get docPagesPath() {
-    return path.join(this.root, ".specboards", "local-doc-pages.json");
-  }
 
   private async readJsonFile<T>(file: string): Promise<T[]> {
     try {
@@ -3368,7 +3320,9 @@ export class LocalFileStore implements FeatureStore {
     area: DocArea,
     _scope?: WorkspaceScope,
   ): Promise<DocSpace> {
-    const rows = await this.readJsonFile<DocSpace>(this.docSpacesPath);
+    const rows = await this.readJsonFile<DocSpace>(
+      localPath(this.root, "docSpaces"),
+    );
     return (
       rows.find((r) => r.productId === productId && r.area === area) ?? {
         productId,
@@ -3400,11 +3354,16 @@ export class LocalFileStore implements FeatureStore {
       externalUrl,
       repoId: input.mode === "github" ? (input.repoId ?? null) : null,
     };
-    const rows = await this.readJsonFile<DocSpace>(this.docSpacesPath);
+    const rows = await this.readJsonFile<DocSpace>(
+      localPath(this.root, "docSpaces"),
+    );
     const rest = rows.filter(
       (r) => !(r.productId === productId && r.area === area),
     );
-    await this.writeJsonFile(this.docSpacesPath, [...rest, next]);
+    await this.writeJsonFile(localPath(this.root, "docSpaces"), [
+      ...rest,
+      next,
+    ]);
     return next;
   }
 
@@ -3413,7 +3372,9 @@ export class LocalFileStore implements FeatureStore {
     area: DocArea,
     _scope?: WorkspaceScope,
   ): Promise<DocPageRecord[]> {
-    const rows = await this.readJsonFile<DocPageRecord>(this.docPagesPath);
+    const rows = await this.readJsonFile<DocPageRecord>(
+      localPath(this.root, "docPages"),
+    );
     return rows
       .filter((r) => r.productId === productId && r.area === area)
       .sort(
@@ -3427,7 +3388,9 @@ export class LocalFileStore implements FeatureStore {
   ): Promise<DocPageRecord> {
     const title = input.title.trim();
     if (!title) throw new DocError("A title is required.");
-    const rows = await this.readJsonFile<DocPageRecord>(this.docPagesPath);
+    const rows = await this.readJsonFile<DocPageRecord>(
+      localPath(this.root, "docPages"),
+    );
     const parentId = input.parentId ?? null;
     if (parentId)
       this.assertLocalFolder(rows, parentId, input.productId, input.area);
@@ -3447,7 +3410,7 @@ export class LocalFileStore implements FeatureStore {
       createdAt: now,
       updatedAt: now,
     };
-    await this.writeJsonFile(this.docPagesPath, [...rows, page]);
+    await this.writeJsonFile(localPath(this.root, "docPages"), [...rows, page]);
     return page;
   }
 
@@ -3456,7 +3419,9 @@ export class LocalFileStore implements FeatureStore {
     patch: DocPagePatch,
     _scope?: WorkspaceScope,
   ): Promise<DocPageRecord> {
-    const rows = await this.readJsonFile<DocPageRecord>(this.docPagesPath);
+    const rows = await this.readJsonFile<DocPageRecord>(
+      localPath(this.root, "docPages"),
+    );
     const page = rows.find((r) => r.id === id);
     if (!page) throw new DocError(`Unknown page: ${id}`);
     if (patch.title !== undefined) {
@@ -3490,12 +3455,14 @@ export class LocalFileStore implements FeatureStore {
       }
     }
     page.updatedAt = new Date().toISOString();
-    await this.writeJsonFile(this.docPagesPath, rows);
+    await this.writeJsonFile(localPath(this.root, "docPages"), rows);
     return page;
   }
 
   async deleteDocPage(id: string, _scope?: WorkspaceScope): Promise<void> {
-    const rows = await this.readJsonFile<DocPageRecord>(this.docPagesPath);
+    const rows = await this.readJsonFile<DocPageRecord>(
+      localPath(this.root, "docPages"),
+    );
     if (!rows.some((r) => r.id === id))
       throw new DocError(`Unknown page: ${id}`);
     // Remove the row and everything beneath it (folders cascade).
@@ -3511,7 +3478,7 @@ export class LocalFileStore implements FeatureStore {
       }
     }
     await this.writeJsonFile(
-      this.docPagesPath,
+      localPath(this.root, "docPages"),
       rows.filter((r) => !doomed.has(r.id)),
     );
   }
