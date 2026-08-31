@@ -107,3 +107,14 @@ services:
 
 volumes:
   specboard_db:
+    # Pinned, so the volume's real name never again depends on the project
+    # name. Compose otherwise prefixes it (`<project>_specboard_db`), which
+    # means renaming the project silently points the stack at a different,
+    # empty database while the old one sits on disk untouched: the app comes
+    # up healthy with everyone's data apparently gone. Setting the project's
+    # `name:` above would have done exactly that to existing self-hosters.
+    #
+    # Upgrading from a stack that predates this: your data is in
+    # `infra_specboard_db`. ./setup.sh detects it and offers to adopt it
+    # rather than starting empty.
+    name: specboard_db

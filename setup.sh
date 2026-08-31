@@ -21,9 +21,24 @@ cd "$root"
 compose=(docker compose -f infra/docker-compose.yml)
 env_file="infra/.env"
 
+# The database volume, and the name it had before the compose project was
+# given one. See the `volumes:` block in infra/docker-compose.yml.
+volume="specboard_db"
+legacy_volume="infra_specboard_db"
+
+adopt_legacy=false
+# --start is "I know about the old volume, start fresh anyway". Without it a
+# bare run stops rather than silently ignoring a database someone may want.
+skip_legacy=false
 case "${1:-}" in
   --stop)
     exec "${compose[@]}" down
+    ;;
+  --adopt-legacy-volume)
+    adopt_legacy=true
+    ;;
+  --start)
+    skip_legacy=true
     ;;
   --destroy)
     # -v drops the named volume, which is the database. Ask first: this is the
@@ -33,9 +48,9 @@ case "${1:-}" in
     [ "$reply" = "destroy" ] || { echo "Aborted."; exit 1; }
     exec "${compose[@]}" down -v
     ;;
-  "" | --start) ;;
+  "") ;;
   *)
-    echo "usage: ./setup.sh [--stop|--destroy]" >&2
+    echo "usage: ./setup.sh [--start|--stop|--destroy|--adopt-legacy-volume]" >&2
     exit 64
     ;;
 esac
@@ -145,6 +160,113 @@ EOF
 else
   echo "Using existing $env_file."
 fi
+
+# --- legacy volume ----------------------------------------------------------
+# Before the compose project was named, the database volume was called
+# `infra_specboard_db` after the directory this file's compose config lives in.
+# Anyone who installed then still has their data under that name. Starting
+# clean on top of it is silent: compose creates the new empty volume, the
+# migrate service fills it with 63 empty tables, the app comes up healthy, and
+# the operator sees every account and every spec gone. Their data is fine and
+# nothing says so.
+#
+# So: refuse to be silent. Adopt the old volume, or make the operator say they
+# do not want it.
+volume_exists() { docker volume inspect "$1" >/dev/null 2>&1; }
+
+if [ "$skip_legacy" = true ]; then
+  : # --start: the operator has already been told and chose to start fresh.
+elif ! volume_exists "$volume" && volume_exists "$legacy_volume"; then
+  if [ "$adopt_legacy" != true ]; then
+    echo
+    echo "Found a database from an older Specboards install."
+    echo
+    echo "  It lives in the Docker volume '$legacy_volume'. This version uses"
+    echo "  '$volume', so starting now would bring up an EMPTY instance and"
+    echo "  leave your existing accounts and specs untouched but unreachable."
+    echo
+    echo "  Copy the old database into the new volume?"
+    echo "  Nothing is deleted either way: '$legacy_volume' is left exactly as it is."
+    echo
+    # Prompt on a terminal when there is one. Piped, or in CI, there is not,
+    # and the safe answer is to stop and let a human choose rather than guess
+    # at what happens to their database.
+    reply=""
+    if [ -t 0 ]; then
+      read -r -p "Copy it? [y/N] " reply || reply=""
+    elif { exec 3</dev/tty; } 2>/dev/null; then
+      read -r -p "Copy it? [y/N] " reply <&3 || reply=""
+      exec 3<&-
+    fi
+    case "$reply" in
+      [yY] | [yY][eE][sS]) adopt_legacy=true ;;
+      *)
+        echo
+        echo "Not copying. Start fresh with:   ./setup.sh --start"
+        echo "Copy it later with:              ./setup.sh --adopt-legacy-volume"
+        exit 1
+        ;;
+    esac
+  fi
+
+  echo "Copying '$legacy_volume' -> '$volume'…"
+  # Let compose create the volume rather than `docker volume create`, so it
+  # carries compose's own labels. A hand-made volume works, but compose warns
+  # "already exists but was not created by Docker Compose" on every subsequent
+  # up, which is an alarming thing to read in the middle of moving your
+  # database. `create` only makes the container and its volume; the db service
+  # is a plain image, so this pulls at worst and never builds.
+  "${compose[@]}" create db >/dev/null 2>&1 || true
+  if ! volume_exists "$volume"; then
+    docker volume create "$volume" >/dev/null
+  fi
+  # cp -a inside a throwaway container: the only way to move a volume's
+  # contents without knowing where the driver put them on disk. Postgres is not
+  # running against either volume at this point, so the copy is consistent.
+  if docker run --rm \
+    -v "$legacy_volume":/from:ro \
+    -v "$volume":/to \
+    alpine sh -c 'cd /from && cp -a . /to'; then
+    echo "  copied. '$legacy_volume' is untouched if you need to go back."
+  else
+    # Do not leave a half-copied volume behind to be mistaken for a database.
+    docker volume rm "$volume" >/dev/null 2>&1 || true
+    echo "Copy failed; nothing was changed. '$legacy_volume' is intact." >&2
+    exit 1
+  fi
+
+  # Postgres bakes the superuser password into the data directory when it
+  # initializes and ignores POSTGRES_PASSWORD forever after, so the copy still
+  # answers to the password the old install used. If infra/.env was generated
+  # fresh (a new clone adopting an old volume) those differ, and the stack comes
+  # up with the database refusing every connection: "password authentication
+  # failed for user postgres", which reads like the copy failed when it did not.
+  #
+  # Single-user mode bypasses authentication entirely, which is the supported
+  # way to reset a password you no longer know. Nothing is listening on a socket
+  # while this runs.
+  target_password="$(sed -n 's/^POSTGRES_PASSWORD=//p' "$env_file" | tr -d '"' | head -1)"
+  if [ -n "$target_password" ]; then
+    echo "  aligning the copied database's password with ${env_file}…"
+    if ! printf "ALTER USER postgres PASSWORD '%s';\n" "$target_password" |
+      docker run --rm -i --user postgres \
+        -v "$volume":/var/lib/postgresql/data postgres:16-alpine \
+        postgres --single -D /var/lib/postgresql/data postgres >/dev/null 2>&1; then
+      echo "Could not reset the password on the copied database." >&2
+      echo "Set POSTGRES_PASSWORD in $env_file to the value your old install used." >&2
+      exit 1
+    fi
+  fi
+elif [ "$adopt_legacy" = true ]; then
+  if volume_exists "$volume"; then
+    echo "'$volume' already exists; not overwriting it." >&2
+    echo "Remove it first if you really mean to replace it with '$legacy_volume'." >&2
+  else
+    echo "No '$legacy_volume' volume found; nothing to adopt." >&2
+  fi
+  exit 1
+fi
+
 
 # --- build, migrate, start --------------------------------------------------
 # There is no published image yet, so the first run builds one and takes a few
