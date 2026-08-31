@@ -21,6 +21,9 @@ at the repo root for what Specboards is and how to install it, and
 - [`RUNBOOK-github-sync.md`](./RUNBOOK-github-sync.md) - connecting a repository
   so Specboards imports its specs and stays in sync on every push. Written for
   our instance, but the mechanism is the same on yours.
+- [`GUIDE-webhooks.md`](./GUIDE-webhooks.md) - the outbound webhook contract:
+  the envelope, every event payload, how to verify the signature, and what
+  delivery guarantees. Written for whoever builds the receiver.
 
 ## Why the system is the way it is
 
