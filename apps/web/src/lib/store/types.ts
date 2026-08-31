@@ -617,8 +617,10 @@ export interface ReleaseRecord {
   startDate: string | null;
   /** Target ship date as YYYY-MM-DD, or null when undated. */
   targetDate: string | null;
-  /** The date the release actually shipped (YYYY-MM-DD), stamped when it first
-   * transitions to `shipped` and cleared on reopen. Null while unshipped. */
+  /** The date the release actually shipped (YYYY-MM-DD). Stamped with today
+   * when it first ships unless the caller names one, which is how a release
+   * that shipped in the past is recorded; cleared on reopen. Null while
+   * unshipped. See core `shippedDateAfterWrite`. */
   shippedDate: string | null;
   /** Internal planning notes (Markdown), or null. Distinct from the
    * customer-facing release notes below. */
@@ -645,6 +647,12 @@ export interface ReleaseInput {
   status?: ReleaseStatus;
   startDate?: string | null;
   targetDate?: string | null;
+  /**
+   * The date it actually shipped (YYYY-MM-DD). Only meaningful with
+   * `status: "shipped"`, where it records a release that shipped before it was
+   * entered here. Omit it and a shipped release is stamped with today.
+   */
+  shippedDate?: string | null;
   notes?: string | null;
   releaseNotesMode?: ReleaseNotesMode;
   releaseNotesBody?: string | null;
@@ -658,6 +666,8 @@ export type ReleasePatch = Partial<{
   status: ReleaseStatus;
   startDate: string | null;
   targetDate: string | null;
+  /** Correct the actual ship date, or set one on a release being shipped. */
+  shippedDate: string | null;
   notes: string | null;
   releaseNotesMode: ReleaseNotesMode;
   releaseNotesBody: string | null;

@@ -912,7 +912,9 @@ export const TOOLS: McpTool[] = [
       "to a product (omit or pass null for a workspace-wide portfolio release " +
       "spanning every product), `status` (planned/in_progress/shipped, default " +
       "planned), `startDate` and `targetDate` (YYYY-MM-DD), and `notes` " +
-      "(Markdown). A product release requires admin/contributor access to that " +
+      "(Markdown). Creating one as `shipped` stamps today as its ship date; " +
+      "pass `shippedDate` to record a release that shipped in the past. " +
+      "A product release requires admin/contributor access to that " +
       "product; a portfolio release requires the workspace owner. Returns the " +
       "new release id, which you pass to update_item's `releaseId` to schedule " +
       "items into it.",
@@ -940,6 +942,13 @@ export const TOOLS: McpTool[] = [
         targetDate: {
           type: ["string", "null"],
           description: "Target ship date, YYYY-MM-DD.",
+        },
+        shippedDate: {
+          type: ["string", "null"],
+          description:
+            "The date it actually shipped, YYYY-MM-DD. Only valid with " +
+            "status `shipped`, where it records a release that shipped " +
+            "before it was entered here. Omit it and today is stamped.",
         },
         notes: {
           type: ["string", "null"],
@@ -1006,7 +1015,8 @@ export const TOOLS: McpTool[] = [
       "Pass the release `id` (from list_releases) plus any of `name`, " +
       "`productId` (move to a product, or null for a workspace-wide portfolio " +
       "release), `status` (planned/in_progress/shipped), " +
-      "`startDate`/`targetDate` (YYYY-MM-DD, or null to clear), and `notes` " +
+      "`startDate`/`targetDate` (YYYY-MM-DD, or null to clear), " +
+      "`shippedDate` to correct the date it actually shipped, and `notes` " +
       "(Markdown, or null to clear). Requires admin/contributor access to the " +
       "release's product (owner for a portfolio release). At least one field " +
       "must change. Returns the updated release.",
@@ -1038,6 +1048,13 @@ export const TOOLS: McpTool[] = [
         targetDate: {
           type: ["string", "null"],
           description: "Target ship date, YYYY-MM-DD, or null to clear.",
+        },
+        shippedDate: {
+          type: ["string", "null"],
+          description:
+            "The date it actually shipped, YYYY-MM-DD. Set it to correct a " +
+            "wrong date, or alongside status `shipped` to record a past " +
+            "release. Only a shipped release can carry one.",
         },
         notes: {
           type: ["string", "null"],

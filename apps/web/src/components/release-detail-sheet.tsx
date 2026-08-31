@@ -289,13 +289,22 @@ export function ReleaseDetailSheet({
                 </Field>
               </div>
 
-              {/* Actual ship date: read-only, stamped when the release shipped.
-                  The planned dates above are retained for comparison. */}
+              {/* Actual ship date: stamped when the release shipped, and
+                  editable because the stamp is only right when the release was
+                  recorded on the day it shipped. The planned dates above are
+                  retained for comparison. Empty is not offered: a shipped
+                  release always has a ship date, so clearing it is rejected. */}
               {shipped ? (
                 <Field label="Actual ship date">
-                  <div className="flex h-8 items-center px-2 text-sm">
-                    {current.shippedDate ?? "—"}
-                  </div>
+                  <Input
+                    type="date"
+                    defaultValue={current.shippedDate ?? ""}
+                    className={INLINE_CONTROL}
+                    onChange={(e) => {
+                      const shippedDate = e.target.value || null;
+                      if (shippedDate) commit({ shippedDate });
+                    }}
+                  />
                 </Field>
               ) : null}
 
