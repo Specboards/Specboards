@@ -15,9 +15,7 @@ import {
   productKeyFromName,
   wouldCreateCycle,
   wouldExceedDepth,
-  promotedIdeaStatus,
   propertyKeyFromLabel,
-  resolveIdeaStages,
   resolveLevels,
   resolveLevelUpdate,
   terminalStatus,
@@ -31,6 +29,7 @@ import { riceFields } from "@/lib/feature-helpers";
 
 import { emptyGithubSummary, isDone, type LocalStoreContext } from "./context";
 import { localPath, specsDir } from "./paths";
+import * as ideaStore from "./ideas";
 import * as itemWriteStore from "./items-write";
 import * as itemReadStore from "./items-read";
 import * as cycleStore from "./cycles";
@@ -41,7 +40,6 @@ import * as docStore from "./docs";
 import * as releaseStore from "./releases";
 import * as viewStore from "./views";
 import {
-  LOCAL_USER,
   type LocalItem,
   localDirection,
   localLinkId,
@@ -89,7 +87,6 @@ import {
   type FeaturePatch,
   type FeatureRecord,
   type FeatureStore,
-  IdeaError,
   type IdeaInput,
   type IdeaPatch,
   type IdeaRecord,
@@ -133,27 +130,6 @@ import {
   type ItemEvent,
   type WorkspaceScope,
 } from "../types";
-
-/** An idea / feature request persisted in local file mode. */
-interface LocalIdea {
-  id: string;
-  title: string;
-  description: string | null;
-  status: string;
-  productId: string | null;
-  submitterName: string | null;
-  /** Feature specId this idea was promoted into, or null. */
-  promotedFeatureSpecId: string | null;
-  /** User ids that voted; local mode has a single user (LOCAL_USER). */
-  voters: string[];
-  createdAt: string;
-}
-
-/** Ideas configuration persisted in local file mode. */
-interface LocalIdeaSettings {
-  portalEnabled: boolean;
-  portalTitle: string | null;
-}
 
 /** A product (sibling backlog) persisted in local file mode. */
 interface LocalProduct {
@@ -1795,239 +1771,68 @@ export class LocalFileStore implements FeatureStore, LocalStoreContext {
     // Nothing to remove in file mode.
   }
 
-  // Ideas persist to `.specboards/local-ideas.json` (+ statuses/settings files).
-  private async readIdeas(): Promise<LocalIdea[]> {
-    try {
-      return JSON.parse(
-        await fs.readFile(localPath(this.root, "ideas"), "utf8"),
-      ) as LocalIdea[];
-    } catch {
-      return [];
-    }
-  }
-
-  private async writeIdeas(rows: LocalIdea[]): Promise<void> {
-    await fs.mkdir(path.dirname(localPath(this.root, "ideas")), {
-      recursive: true,
-    });
-    await fs.writeFile(
-      localPath(this.root, "ideas"),
-      JSON.stringify(rows, null, 2) + "\n",
-      "utf8",
-    );
-  }
-
-  private toIdeaRecord(
-    row: LocalIdea,
-    promotedTitle: string | null,
-  ): IdeaRecord {
-    return {
-      id: row.id,
-      title: row.title,
-      description: row.description,
-      status: row.status,
-      productId: row.productId,
-      authorName: null,
-      submitterName: row.submitterName,
-      voteCount: row.voters.length,
-      viewerHasVoted: row.voters.includes(LOCAL_USER),
-      promotedFeatureSpecId: row.promotedFeatureSpecId,
-      promotedFeatureTitle: promotedTitle,
-      createdAt: row.createdAt,
-    };
-  }
-
   // ==========================================================================
   // Ideas
   // ==========================================================================
+  //
+  // Implemented in ./ideas.ts. The bodies moved verbatim; these delegate
+  // so that `LocalFileStore` stays the one thing callers hold.
 
-  async listIdeas(_scope?: WorkspaceScope): Promise<IdeaRecord[]> {
-    const [rows, all] = await Promise.all([this.readIdeas(), this.loadAll()]);
-    const titleBySpec = new Map(all.map((f) => [f.specId, f.title] as const));
-    return rows
-      .map((r) =>
-        this.toIdeaRecord(
-          r,
-          r.promotedFeatureSpecId
-            ? (titleBySpec.get(r.promotedFeatureSpecId) ?? null)
-            : null,
-        ),
-      )
-      .sort(
-        (a, b) =>
-          b.voteCount - a.voteCount ||
-          (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0),
-      );
+  listIdeas(scope?: WorkspaceScope): Promise<IdeaRecord[]> {
+    return ideaStore.listIdeas(this, scope);
   }
 
-  async createIdea(
-    input: IdeaInput,
-    _scope?: WorkspaceScope,
-  ): Promise<IdeaRecord> {
-    const title = input.title.trim();
-    if (!title) throw new IdeaError("Idea title is required.");
-    const productId = input.productId ?? (await this.defaultProductId());
-    const idea: LocalIdea = {
-      id: randomUUID(),
-      title,
-      description: input.description?.trim() ? input.description.trim() : null,
-      status: "new",
-      productId,
-      submitterName: null,
-      promotedFeatureSpecId: null,
-      voters: [],
-      createdAt: new Date().toISOString(),
-    };
-    const rows = await this.readIdeas();
-    await this.writeIdeas([...rows, idea]);
-    return this.toIdeaRecord(idea, null);
+  createIdea(input: IdeaInput, scope?: WorkspaceScope): Promise<IdeaRecord> {
+    return ideaStore.createIdea(this, input, scope);
   }
 
-  async updateIdea(
+  updateIdea(
     id: string,
     patch: IdeaPatch,
-    _scope?: WorkspaceScope,
+    scope?: WorkspaceScope,
   ): Promise<IdeaRecord> {
-    const rows = await this.readIdeas();
-    const idea = rows.find((r) => r.id === id);
-    if (!idea) throw new IdeaError(`Unknown idea: ${id}`);
-    if (patch.title !== undefined) {
-      const title = patch.title.trim();
-      if (!title) throw new IdeaError("Idea title is required.");
-      idea.title = title;
-    }
-    if (patch.description !== undefined) {
-      idea.description = patch.description?.trim()
-        ? patch.description.trim()
-        : null;
-    }
-    if (patch.status !== undefined) {
-      const stages = resolveIdeaStages(await this.readIdeaStages());
-      if (!stages.some((s) => s.key === patch.status)) {
-        throw new IdeaError(`Unknown idea status: ${patch.status}`);
-      }
-      idea.status = patch.status;
-    }
-    if (patch.productId !== undefined) {
-      idea.productId = patch.productId ?? (await this.defaultProductId());
-    }
-    await this.writeIdeas(rows);
-    const title = idea.promotedFeatureSpecId
-      ? ((await this.loadAll()).find(
-          (f) => f.specId === idea.promotedFeatureSpecId,
-        )?.title ?? null)
-      : null;
-    return this.toIdeaRecord(idea, title);
+    return ideaStore.updateIdea(this, id, patch, scope);
   }
 
-  async deleteIdea(id: string, _scope?: WorkspaceScope): Promise<void> {
-    const rows = await this.readIdeas();
-    if (!rows.some((r) => r.id === id))
-      throw new IdeaError(`Unknown idea: ${id}`);
-    await this.writeIdeas(rows.filter((r) => r.id !== id));
+  deleteIdea(id: string, scope?: WorkspaceScope): Promise<void> {
+    return ideaStore.deleteIdea(this, id, scope);
   }
 
-  async voteIdea(id: string, _scope?: WorkspaceScope): Promise<IdeaRecord> {
-    const rows = await this.readIdeas();
-    const idea = rows.find((r) => r.id === id);
-    if (!idea) throw new IdeaError(`Unknown idea: ${id}`);
-    if (!idea.voters.includes(LOCAL_USER)) idea.voters.push(LOCAL_USER);
-    await this.writeIdeas(rows);
-    return this.toIdeaRecord(idea, null);
+  voteIdea(id: string, scope?: WorkspaceScope): Promise<IdeaRecord> {
+    return ideaStore.voteIdea(this, id, scope);
   }
 
-  async unvoteIdea(id: string, _scope?: WorkspaceScope): Promise<IdeaRecord> {
-    const rows = await this.readIdeas();
-    const idea = rows.find((r) => r.id === id);
-    if (!idea) throw new IdeaError(`Unknown idea: ${id}`);
-    idea.voters = idea.voters.filter((v) => v !== LOCAL_USER);
-    await this.writeIdeas(rows);
-    return this.toIdeaRecord(idea, null);
+  unvoteIdea(id: string, scope?: WorkspaceScope): Promise<IdeaRecord> {
+    return ideaStore.unvoteIdea(this, id, scope);
   }
 
-  async promoteIdea(
+  promoteIdea(
     id: string,
     scope?: WorkspaceScope,
   ): Promise<{ idea: IdeaRecord; feature: FeatureRecord }> {
-    const rows = await this.readIdeas();
-    const idea = rows.find((r) => r.id === id);
-    if (!idea) throw new IdeaError(`Unknown idea: ${id}`);
-    if (idea.promotedFeatureSpecId) {
-      throw new IdeaError("This idea has already been promoted.");
-    }
-    const levels = resolveLevels();
-    const target = [...levels].reverse().find((l) => !l.isLeaf);
-    if (!target) {
-      throw new IdeaError(
-        "This workspace has no non-leaf level to promote an idea into.",
-      );
-    }
-    const feature = await this.createFeature(
-      {
-        title: idea.title,
-        level: target.key,
-        productId: idea.productId,
-        details: idea.description,
-      },
-      scope,
-    );
-    const stages = resolveIdeaStages(await this.readIdeaStages());
-    idea.promotedFeatureSpecId = feature.specId;
-    idea.status = promotedIdeaStatus(idea.status, stages);
-    await this.writeIdeas(rows);
-    return { idea: this.toIdeaRecord(idea, feature.title), feature };
+    return ideaStore.promoteIdea(this, id, scope);
   }
 
-  private async readIdeaStages(): Promise<IdeaStage[]> {
-    try {
-      const rows = JSON.parse(
-        await fs.readFile(localPath(this.root, "ideaStatuses"), "utf8"),
-      ) as IdeaStage[];
-      return rows
-        .slice()
-        .sort((a, b) => a.position - b.position)
-        .map((r, i) => ({ ...r, position: i }));
-    } catch {
-      return [];
-    }
+  listIdeaStatuses(scope?: WorkspaceScope): Promise<IdeaStage[]> {
+    return ideaStore.listIdeaStatuses(this, scope);
   }
 
-  async listIdeaStatuses(_scope?: WorkspaceScope): Promise<IdeaStage[]> {
-    return this.readIdeaStages();
-  }
-
-  async replaceIdeaStatuses(
+  replaceIdeaStatuses(
     stages: StatusStageInput[],
-    _scope?: WorkspaceScope,
+    scope?: WorkspaceScope,
   ): Promise<IdeaStage[]> {
-    const rows: IdeaStage[] = stages.map((s, i) => ({
-      key: s.key,
-      label: s.label,
-      position: i,
-    }));
-    const validKeys = new Set(rows.map((r) => r.key));
-    const fallback = rows[0]?.key;
-    // Re-home orphaned ideas onto the first stage, mirroring the DB store.
-    if (fallback) {
-      const ideas = await this.readIdeas();
-      let changed = false;
-      for (const idea of ideas) {
-        if (!validKeys.has(idea.status)) {
-          idea.status = fallback;
-          changed = true;
-        }
-      }
-      if (changed) await this.writeIdeas(ideas);
-    }
-    await fs.mkdir(path.dirname(localPath(this.root, "ideaStatuses")), {
-      recursive: true,
-    });
-    await fs.writeFile(
-      localPath(this.root, "ideaStatuses"),
-      JSON.stringify(rows, null, 2) + "\n",
-      "utf8",
-    );
-    return rows;
+    return ideaStore.replaceIdeaStatuses(this, stages, scope);
+  }
+
+  getIdeaSettings(scope?: WorkspaceScope): Promise<IdeaSettings> {
+    return ideaStore.getIdeaSettings(this, scope);
+  }
+
+  updateIdeaSettings(
+    patch: IdeaSettingsPatch,
+    scope?: WorkspaceScope,
+  ): Promise<IdeaSettings> {
+    return ideaStore.updateIdeaSettings(this, patch, scope);
   }
 
   // ==========================================================================
@@ -2079,49 +1884,6 @@ export class LocalFileStore implements FeatureStore, LocalStoreContext {
     _productIds: string[] | null,
   ): Promise<WorkspaceStatus[]> {
     return this.listStatuses(scope);
-  }
-
-  // ==========================================================================
-  // Idea settings
-  // ==========================================================================
-
-  async getIdeaSettings(_scope?: WorkspaceScope): Promise<IdeaSettings> {
-    try {
-      const row = JSON.parse(
-        await fs.readFile(localPath(this.root, "ideaSettings"), "utf8"),
-      ) as LocalIdeaSettings;
-      return {
-        portalEnabled: row.portalEnabled ?? false,
-        portalTitle: row.portalTitle ?? null,
-      };
-    } catch {
-      return { portalEnabled: false, portalTitle: null };
-    }
-  }
-
-  async updateIdeaSettings(
-    patch: IdeaSettingsPatch,
-    _scope?: WorkspaceScope,
-  ): Promise<IdeaSettings> {
-    const current = await this.getIdeaSettings();
-    const next: IdeaSettings = {
-      portalEnabled: patch.portalEnabled ?? current.portalEnabled,
-      portalTitle:
-        patch.portalTitle !== undefined
-          ? patch.portalTitle?.trim()
-            ? patch.portalTitle.trim()
-            : null
-          : current.portalTitle,
-    };
-    await fs.mkdir(path.dirname(localPath(this.root, "ideaSettings")), {
-      recursive: true,
-    });
-    await fs.writeFile(
-      localPath(this.root, "ideaSettings"),
-      JSON.stringify(next, null, 2) + "\n",
-      "utf8",
-    );
-    return next;
   }
 
   // ── Docs (Plan-section areas) ───────────────────────────────────────────
