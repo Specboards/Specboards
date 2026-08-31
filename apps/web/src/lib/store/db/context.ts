@@ -39,6 +39,14 @@ import type {
 export type Tx = Parameters<Parameters<Database["transaction"]>[0]>[0];
 export type ProductVisibilityRow = { id: string; visibility: "org" | "private" };
 
+/** A stored relation edge, as both the read and the write side see it. */
+export type LinkRow = {
+  id: string;
+  fromFeatureId: string;
+  toFeatureId: string;
+  type: "blocks" | "relates_to" | "duplicates";
+};
+
 /**
  * What a domain module may ask of the store it belongs to.
  *
