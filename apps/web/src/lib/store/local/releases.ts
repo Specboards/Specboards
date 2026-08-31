@@ -15,6 +15,8 @@ import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
+import { todayDateOnly } from "@specboards/core";
+
 import {
   type CustomFieldValue,
   type OutboxEmit,
@@ -81,7 +83,10 @@ export async function createRelease(
     status,
     startDate: input.startDate ?? null,
     targetDate: input.targetDate ?? null,
-    shippedDate: null,
+    // Stamped on create as well as on transition: the date describes the
+    // shipped state, so a release created already shipped has one. See
+    // db/releases.ts, which had the same gap.
+    shippedDate: status === "shipped" ? todayDateOnly() : null,
     notes: input.notes ?? null,
     releaseNotesMode: input.releaseNotesMode ?? "none",
     releaseNotesBody: input.releaseNotesBody ?? null,
@@ -127,7 +132,7 @@ export async function updateRelease(
     // dates are retained.
     if (patch.status === "shipped" && prevStatus !== "shipped") {
       if (!release.shippedDate) {
-        release.shippedDate = new Date().toISOString().slice(0, 10);
+        release.shippedDate = todayDateOnly();
       }
     } else if (patch.status !== "shipped" && prevStatus === "shipped") {
       release.shippedDate = null;
