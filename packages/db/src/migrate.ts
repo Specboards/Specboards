@@ -13,16 +13,43 @@
  * It is bundled into a single file at build time (see infra/web.Dockerfile), so
  * it carries no dependency on the runtime image's node_modules layout.
  */
+import { existsSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
 
 /**
- * Where the SQL files and their journal live inside the runtime image. The repo
- * keeps them in infra/migrations (drizzle.config.ts `out`); the Dockerfile
- * copies that directory next to this script.
+ * Where the SQL files and their journal live.
+ *
+ * Two layouts, because this runs in two places. In the runtime image the
+ * Dockerfile copies `infra/migrations` next to the bundled `migrate.mjs` at
+ * /app, so `./migrations` resolves. Run from the repo (`pnpm db:migrate`) the
+ * working directory is `packages/db` and the SQL is up at `infra/migrations`,
+ * which is what `drizzle-kit` used to find via drizzle.config.ts before this
+ * became the single runner for both.
+ *
+ * Resolved from this module's own location rather than the working directory
+ * wherever possible, so it does not depend on where the process was launched.
+ * MIGRATIONS_FOLDER overrides everything for anyone with a third layout.
  */
-const MIGRATIONS_FOLDER = process.env.MIGRATIONS_FOLDER ?? "./migrations";
+function migrationsFolder(): string {
+  const override = process.env.MIGRATIONS_FOLDER;
+  if (override) return override;
+
+  const here = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    // Runtime image: bundled script and SQL side by side.
+    resolve(here, "migrations"),
+    // Repo: packages/db/src -> infra/migrations.
+    resolve(here, "../../../infra/migrations"),
+  ];
+  return candidates.find((path) => existsSync(path)) ?? "./migrations";
+}
+
+const MIGRATIONS_FOLDER = migrationsFolder();
 
 /**
  * Key for the advisory lock below. Any constant works as long as every deploy
