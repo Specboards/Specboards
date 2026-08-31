@@ -63,9 +63,9 @@ than ours.
 
 ### Changed
 
-- **The Postgres store split continues.** Saved views, releases, docs, and the
-  comment and notification methods each moved into a module of their own,
-  continuing the one-domain-at-a-time work started in 0.29.1. No behaviour
+- **The Postgres store split continues.** Saved views, releases, docs, goals,
+  and the comment and notification methods each moved into a module of their
+  own, continuing the one-domain-at-a-time work started in 0.29.1. No behaviour
   changed.
 
 ## [0.29.1] - 2026-08-30
