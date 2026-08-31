@@ -940,7 +940,9 @@ export class LocalFileStore implements FeatureStore {
     }
     // Cycles follow the same rule on their own axis.
     if (input.cycleId) {
-      const cycle = (await this.readCycles()).find((c) => c.id === input.cycleId);
+      const cycle = (await this.readCycles()).find(
+        (c) => c.id === input.cycleId,
+      );
       if (!cycle) throw new FeatureError(`Unknown cycle: ${input.cycleId}`);
       const cycleProductId = cycle.productId ?? null;
       if (cycleProductId !== null && cycleProductId !== productId) {
@@ -1137,7 +1139,14 @@ export class LocalFileStore implements FeatureStore {
     _query: ActivityQuery,
     _scope?: WorkspaceScope,
   ): Promise<ActivitySummary> {
-    return { since: null, total: 0, byActor: [], byField: [], byDay: [], stageTime: [] };
+    return {
+      since: null,
+      total: 0,
+      byActor: [],
+      byField: [],
+      byDay: [],
+      stageTime: [],
+    };
   }
 
   // Saved views persist to `.specboards/local-views.json`. There's a single
@@ -1733,7 +1742,9 @@ export class LocalFileStore implements FeatureStore {
     const productId = input.productId ?? null;
     const rows = await this.readReleases();
     // Names are unique within a product (and within the portfolio scope).
-    if (rows.some((r) => r.name === name && (r.productId ?? null) === productId)) {
+    if (
+      rows.some((r) => r.name === name && (r.productId ?? null) === productId)
+    ) {
       throw new ReleaseError(`A release named "${name}" already exists.`);
     }
     const status = input.status ?? "planned";
@@ -1959,7 +1970,9 @@ export class LocalFileStore implements FeatureStore {
     if (dateError) throw new CycleError(dateError);
     const productId = input.productId ?? null;
     const rows = await this.readCycles();
-    if (rows.some((c) => c.name === name && (c.productId ?? null) === productId)) {
+    if (
+      rows.some((c) => c.name === name && (c.productId ?? null) === productId)
+    ) {
       throw new CycleError(`A cycle named "${name}" already exists.`);
     }
     const cycle: LocalCycle = {
@@ -2140,7 +2153,9 @@ export class LocalFileStore implements FeatureStore {
   ): GoalRecord {
     const measures = (goal.keyResults ?? [])
       .slice()
-      .sort((a, b) => a.position - b.position || a.title.localeCompare(b.title));
+      .sort(
+        (a, b) => a.position - b.position || a.title.localeCompare(b.title),
+      );
     // Links to items that no longer exist are ignored rather than counted as
     // not-done, which would drag delivery progress down for no reason.
     const links = (goal.linkedSpecIds ?? [])
@@ -2232,9 +2247,13 @@ export class LocalFileStore implements FeatureStore {
     if (!goal) throw new GoalError(`Unknown goal: ${id}`);
 
     const periodStart =
-      patch.periodStart !== undefined ? patch.periodStart : goal.periodStart ?? null;
+      patch.periodStart !== undefined
+        ? patch.periodStart
+        : (goal.periodStart ?? null);
     const periodEnd =
-      patch.periodEnd !== undefined ? patch.periodEnd : goal.periodEnd ?? null;
+      patch.periodEnd !== undefined
+        ? patch.periodEnd
+        : (goal.periodEnd ?? null);
     const periodError = validateGoalPeriod(periodStart, periodEnd);
     if (periodError) throw new GoalError(periodError);
 
@@ -2286,10 +2305,7 @@ export class LocalFileStore implements FeatureStore {
   }
 
   /** Resolve a goal by id from the stored set, or throw. */
-  private async goalById(
-    rows: LocalGoal[],
-    id: string,
-  ): Promise<LocalGoal> {
+  private async goalById(rows: LocalGoal[], id: string): Promise<LocalGoal> {
     const goal = rows.find((g) => g.id === id);
     if (!goal) throw new GoalError(`Unknown goal: ${id}`);
     return goal;
@@ -2332,7 +2348,9 @@ export class LocalFileStore implements FeatureStore {
     _scope?: WorkspaceScope,
   ): Promise<GoalRecord> {
     const rows = await this.readGoals();
-    const goal = rows.find((g) => (g.keyResults ?? []).some((k) => k.id === id));
+    const goal = rows.find((g) =>
+      (g.keyResults ?? []).some((k) => k.id === id),
+    );
     if (!goal) throw new GoalError(`Unknown key result: ${id}`);
     const kr = goal.keyResults!.find((k) => k.id === id)!;
 
@@ -2361,7 +2379,9 @@ export class LocalFileStore implements FeatureStore {
     _scope?: WorkspaceScope,
   ): Promise<GoalRecord> {
     const rows = await this.readGoals();
-    const goal = rows.find((g) => (g.keyResults ?? []).some((k) => k.id === id));
+    const goal = rows.find((g) =>
+      (g.keyResults ?? []).some((k) => k.id === id),
+    );
     if (!goal) throw new GoalError(`Unknown key result: ${id}`);
     goal.keyResults = goal.keyResults!.filter((k) => k.id !== id);
     await this.writeGoals(rows);
@@ -2747,7 +2767,9 @@ export class LocalFileStore implements FeatureStore {
       throw new GroupError(`Unknown product group: ${id}`);
     }
     if (groups.some((g) => g.parentId === id)) {
-      throw new GroupError("Can't delete a group while it still has subgroups.");
+      throw new GroupError(
+        "Can't delete a group while it still has subgroups.",
+      );
     }
     const products = await this.readProducts();
     if (products.some((p) => p.groupId === id)) {
@@ -2776,13 +2798,17 @@ export class LocalFileStore implements FeatureStore {
         { productId: p.id, itemCount: 0, statusCounts: {}, releases: [] },
       ]),
     );
-    const releaseTotals = new Map<string, Map<string, { total: number; done: number }>>();
+    const releaseTotals = new Map<
+      string,
+      Map<string, { total: number; done: number }>
+    >();
     for (const f of allFeatures) {
       if (!f.productId) continue;
       const summary = summaries.get(f.productId);
       if (!summary) continue;
       summary.itemCount += 1;
-      summary.statusCounts[f.status] = (summary.statusCounts[f.status] ?? 0) + 1;
+      summary.statusCounts[f.status] =
+        (summary.statusCounts[f.status] ?? 0) + 1;
       if (f.releaseId) {
         const byRelease =
           releaseTotals.get(f.productId) ??
@@ -2863,7 +2889,8 @@ export class LocalFileStore implements FeatureStore {
       const summary = summaries.get(f.productId);
       if (!summary) continue;
       summary.itemCount += 1;
-      summary.statusCounts[f.status] = (summary.statusCounts[f.status] ?? 0) + 1;
+      summary.statusCounts[f.status] =
+        (summary.statusCounts[f.status] ?? 0) + 1;
       if (f.releaseId) {
         const byRelease =
           releaseTotals.get(f.productId) ??
