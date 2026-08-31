@@ -330,15 +330,19 @@ export async function rolloverCycle(
         endDate: cycles.endDate,
       })
       .from(cycles)
-      .where(and(eq(cycles.workspaceId, ws), inArray(cycles.id, [fromId, toId])));
+      .where(
+        and(eq(cycles.workspaceId, ws), inArray(cycles.id, [fromId, toId])),
+      );
     const from = rows.find((r) => r.id === fromId);
     const to = rows.find((r) => r.id === toId);
     if (!from) throw new CycleError(`Unknown cycle: ${fromId}`);
     if (!to) throw new CycleError(`Unknown cycle: ${toId}`);
     const access = await ctx.accessIn(tx, scope!);
     // Both ends are written to, so both need write access.
-    if (!canWriteProductId(access, from.productId) ||
-        !canWriteProductId(access, to.productId)) {
+    if (
+      !canWriteProductId(access, from.productId) ||
+      !canWriteProductId(access, to.productId)
+    ) {
       throw new CycleError(
         "Your role does not permit moving work between these cycles.",
       );
@@ -346,9 +350,7 @@ export async function rolloverCycle(
     // A product cycle can only take work from that product. A workspace-wide
     // destination takes anything, matching the scheduling rule.
     const productGuard =
-      to.productId === null
-        ? undefined
-        : eq(features.productId, to.productId);
+      to.productId === null ? undefined : eq(features.productId, to.productId);
 
     const done = await doneStatusesIn(tx, ws);
     const moved = await tx

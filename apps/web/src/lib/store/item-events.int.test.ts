@@ -169,7 +169,11 @@ describe.skipIf(!OWNER_URL)("item change ledger", () => {
   it("returns the history newest first", async () => {
     const item = await newItem("Ledger: order");
     await store.updateFeature(item.specId, { status: "in_progress" }, asOwner);
-    await store.updateFeature(item.specId, { title: "Ledger: renamed" }, asOwner);
+    await store.updateFeature(
+      item.specId,
+      { title: "Ledger: renamed" },
+      asOwner,
+    );
 
     const events = await store.listItemEvents(item.specId, asOwner);
     expect(events.map((e) => e.field)).toEqual(["title", "status"]);
@@ -196,22 +200,35 @@ describe.skipIf(!OWNER_URL)("item change ledger", () => {
     expect(await store.listItemEvents(item.specId, stranger)).toEqual([]);
   });
   describe("activity reporting", () => {
-    const WIDE = { from: "2000-01-01T00:00:00.000Z", to: "2999-01-01T00:00:00.000Z" };
+    const WIDE = {
+      from: "2000-01-01T00:00:00.000Z",
+      to: "2999-01-01T00:00:00.000Z",
+    };
 
     it("says when history begins, so a quiet window is not read as quiet work", async () => {
       const item = await newItem("Report: since");
-      await store.updateFeature(item.specId, { status: "in_progress" }, asOwner);
+      await store.updateFeature(
+        item.specId,
+        { status: "in_progress" },
+        asOwner,
+      );
 
       const summary = await store.itemActivitySummary(WIDE, asOwner);
       // The ledger starts when it was deployed. A report that omits this makes
       // a period of no *recording* look like a period of no *work*.
       expect(summary.since).not.toBeNull();
-      expect(new Date(summary.since!).getTime()).toBeLessThanOrEqual(Date.now());
+      expect(new Date(summary.since!).getTime()).toBeLessThanOrEqual(
+        Date.now(),
+      );
     });
 
     it("counts nothing outside the window it was asked about", async () => {
       const item = await newItem("Report: window");
-      await store.updateFeature(item.specId, { status: "in_progress" }, asOwner);
+      await store.updateFeature(
+        item.specId,
+        { status: "in_progress" },
+        asOwner,
+      );
 
       const past = await store.itemActivitySummary(
         { from: "2000-01-01T00:00:00.000Z", to: "2000-02-01T00:00:00.000Z" },
@@ -226,8 +243,16 @@ describe.skipIf(!OWNER_URL)("item change ledger", () => {
 
     it("separates people from automations", async () => {
       const item = await newItem("Report: actors");
-      await store.updateFeature(item.specId, { status: "in_progress" }, asOwner);
-      await store.updateFeature(item.specId, { assigneeId: user.mate }, asAgent);
+      await store.updateFeature(
+        item.specId,
+        { status: "in_progress" },
+        asOwner,
+      );
+      await store.updateFeature(
+        item.specId,
+        { assigneeId: user.mate },
+        asAgent,
+      );
 
       const summary = await store.itemActivitySummary(WIDE, asOwner);
       const kinds = summary.byActor.map((a) => a.actorType);
@@ -239,8 +264,16 @@ describe.skipIf(!OWNER_URL)("item change ledger", () => {
 
     it("groups by what changed", async () => {
       const item = await newItem("Report: fields");
-      await store.updateFeature(item.specId, { status: "in_progress" }, asOwner);
-      await store.updateFeature(item.specId, { title: "Report: renamed" }, asOwner);
+      await store.updateFeature(
+        item.specId,
+        { status: "in_progress" },
+        asOwner,
+      );
+      await store.updateFeature(
+        item.specId,
+        { title: "Report: renamed" },
+        asOwner,
+      );
 
       const summary = await store.itemActivitySummary(WIDE, asOwner);
       const fields = summary.byField.map((f) => f.field);
@@ -252,14 +285,22 @@ describe.skipIf(!OWNER_URL)("item change ledger", () => {
       const item = await newItem("Report: stage time");
       // One status change: we know when it left this stage, but not when it
       // entered, so there is no completed span to average yet.
-      await store.updateFeature(item.specId, { status: "in_progress" }, asOwner);
+      await store.updateFeature(
+        item.specId,
+        { status: "in_progress" },
+        asOwner,
+      );
       const first = await store.itemActivitySummary(WIDE, asOwner);
-      expect(first.stageTime.find((s) => s.status === "backlog")).toBeUndefined();
+      expect(
+        first.stageTime.find((s) => s.status === "backlog"),
+      ).toBeUndefined();
 
       // A second change closes the span for the stage in between.
       await store.updateFeature(item.specId, { status: "in_review" }, asOwner);
       const second = await store.itemActivitySummary(WIDE, asOwner);
-      const inProgress = second.stageTime.find((s) => s.status === "in_progress");
+      const inProgress = second.stageTime.find(
+        (s) => s.status === "in_progress",
+      );
       expect(inProgress?.samples).toBeGreaterThanOrEqual(1);
       // Never negative, and measured in hours from a span of seconds.
       expect(inProgress!.averageHours).toBeGreaterThanOrEqual(0);
@@ -267,7 +308,11 @@ describe.skipIf(!OWNER_URL)("item change ledger", () => {
 
     it("narrows to the products asked for, and reports nothing for none", async () => {
       const item = await newItem("Report: product scope");
-      await store.updateFeature(item.specId, { status: "in_progress" }, asOwner);
+      await store.updateFeature(
+        item.specId,
+        { status: "in_progress" },
+        asOwner,
+      );
 
       const mine = await store.itemActivitySummary(
         { ...WIDE, productIds: [product.alpha] },
@@ -295,7 +340,11 @@ describe.skipIf(!OWNER_URL)("item change ledger", () => {
 
     it("reports nothing to a workspace it does not belong to", async () => {
       const item = await newItem("Report: tenancy");
-      await store.updateFeature(item.specId, { status: "in_progress" }, asOwner);
+      await store.updateFeature(
+        item.specId,
+        { status: "in_progress" },
+        asOwner,
+      );
 
       const stranger = { userId: randomUUID(), workspaceId: randomUUID() };
       const summary = await store.itemActivitySummary(WIDE, stranger);

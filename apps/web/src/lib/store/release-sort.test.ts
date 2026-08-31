@@ -58,9 +58,16 @@ describe("compareShippedReleases (newest-first)", () => {
       shipped("b", "2026-08-01"),
       shipped("c", "2026-09-01"),
     ];
-    const newestFirst = [...releases].sort(compareShippedReleases).map((r) => r.name);
+    const newestFirst = [...releases]
+      .sort(compareShippedReleases)
+      .map((r) => r.name);
     const oldestFirst = [...releases]
-      .sort((x, y) => compareReleases({ name: x.name, targetDate: x.shippedDate }, { name: y.name, targetDate: y.shippedDate }))
+      .sort((x, y) =>
+        compareReleases(
+          { name: x.name, targetDate: x.shippedDate },
+          { name: y.name, targetDate: y.shippedDate },
+        ),
+      )
       .map((r) => r.name);
     expect(newestFirst).toEqual([...oldestFirst].reverse());
   });

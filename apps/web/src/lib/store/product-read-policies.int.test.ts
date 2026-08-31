@@ -51,7 +51,9 @@ describe.skipIf(!DB_URL)("reading across a product boundary", () => {
    * does it: the owner connection bypasses RLS entirely, so a query that did
    * not switch role would pass no matter what the policies said.
    */
-  async function asOutsider<T>(fn: (tx: postgres.TransactionSql) => Promise<T>): Promise<T> {
+  async function asOutsider<T>(
+    fn: (tx: postgres.TransactionSql) => Promise<T>,
+  ): Promise<T> {
     return sql.begin(async (tx) => {
       await tx`select set_config('app.user_id', ${outsider}, true)`;
       await tx`set local role specboards_app`;
@@ -102,12 +104,16 @@ describe.skipIf(!DB_URL)("reading across a product boundary", () => {
   it("hides an item on a product the member holds no grant on", async () => {
     // The control that always worked, here to prove the fixture is right: if
     // this ever fails, the two below prove nothing.
-    const rows = await asOutsider((tx) => tx`select title from features where id = ${privateItem}`);
+    const rows = await asOutsider(
+      (tx) => tx`select title from features where id = ${privateItem}`,
+    );
     expect(rows).toHaveLength(0);
   });
 
   it("hides that item's comments", async () => {
-    const rows = await asOutsider((tx) => tx`select body from comments where feature_id = ${privateItem}`);
+    const rows = await asOutsider(
+      (tx) => tx`select body from comments where feature_id = ${privateItem}`,
+    );
     expect(rows).toHaveLength(0);
   });
 
@@ -116,7 +122,8 @@ describe.skipIf(!DB_URL)("reading across a product boundary", () => {
     // the item's content through the back door", which is exactly what an
     // assistant answer about an item contains.
     const rows = await asOutsider(
-      (tx) => tx`select content from assistant_messages where feature_id = ${privateItem}`,
+      (tx) =>
+        tx`select content from assistant_messages where feature_id = ${privateItem}`,
     );
     expect(rows).toHaveLength(0);
   });
@@ -140,7 +147,8 @@ describe.skipIf(!DB_URL)("reading across a product boundary", () => {
     await asOutsider(async (tx) => {
       await tx`insert into assistant_messages (id, workspace_id, feature_id, author_id, role, content)
         values (${asked}, ${ws}, ${openItem}, ${outsider}, 'user', 'members can still ask')`;
-      const rows = await tx`select content from assistant_messages where id = ${asked}`;
+      const rows =
+        await tx`select content from assistant_messages where id = ${asked}`;
       expect(rows[0]!.content).toBe("members can still ask");
       await tx`delete from assistant_messages where id = ${asked}`;
     });

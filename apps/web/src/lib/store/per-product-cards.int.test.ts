@@ -131,17 +131,13 @@ describe.skipIf(!OWNER_URL)("per-product Cards settings (store)", () => {
         alpha,
       );
 
-      expect((await store.listStatuses(asOwner, alpha)).map((s) => s.key)).toEqual([
-        "backlog",
-        "triage",
-        "shipped",
-      ]);
+      expect(
+        (await store.listStatuses(asOwner, alpha)).map((s) => s.key),
+      ).toEqual(["backlog", "triage", "shipped"]);
       // Beta never opted out, so it still follows the workspace.
-      expect((await store.listStatuses(asOwner, beta)).map((s) => s.key)).toEqual([
-        "backlog",
-        "doing",
-        "done",
-      ]);
+      expect(
+        (await store.listStatuses(asOwner, beta)).map((s) => s.key),
+      ).toEqual(["backlog", "doing", "done"]);
     });
 
     it("unions the stages in view for a cross-product board", async () => {
@@ -231,16 +227,14 @@ describe.skipIf(!OWNER_URL)("per-product Cards settings (store)", () => {
         asOwner,
         alpha,
       );
-      expect((await store.listStatuses(asOwner, alpha)).map((s) => s.key)).toEqual([
-        "solo",
-      ]);
+      expect(
+        (await store.listStatuses(asOwner, alpha)).map((s) => s.key),
+      ).toEqual(["solo"]);
 
       await store.replaceStatuses([], asOwner, alpha);
-      expect((await store.listStatuses(asOwner, alpha)).map((s) => s.key)).toEqual([
-        "backlog",
-        "doing",
-        "done",
-      ]);
+      expect(
+        (await store.listStatuses(asOwner, alpha)).map((s) => s.key),
+      ).toEqual(["backlog", "doing", "done"]);
     });
 
     it("lets a product admin edit their own product and refuses another", async () => {
@@ -289,12 +283,12 @@ describe.skipIf(!OWNER_URL)("per-product Cards settings (store)", () => {
         alpha,
       );
 
-      expect((await store.listStageGates(asOwner, alpha)).map((g) => g.label)).toEqual(
-        ["Alpha gate"],
-      );
-      expect((await store.listStageGates(asOwner, beta)).map((g) => g.label)).toEqual(
-        ["Workspace gate"],
-      );
+      expect(
+        (await store.listStageGates(asOwner, alpha)).map((g) => g.label),
+      ).toEqual(["Alpha gate"]);
+      expect(
+        (await store.listStageGates(asOwner, beta)).map((g) => g.label),
+      ).toEqual(["Workspace gate"]);
     });
 
     it("keeps completions attached across an edit that keeps the gate", async () => {
@@ -356,10 +350,14 @@ describe.skipIf(!OWNER_URL)("per-product Cards settings (store)", () => {
       );
 
       expect(
-        (await store.listProperties(asOwner, undefined, alpha)).map((p) => p.label),
+        (await store.listProperties(asOwner, undefined, alpha)).map(
+          (p) => p.label,
+        ),
       ).toEqual(["Alpha only"]);
       expect(
-        (await store.listProperties(asOwner, undefined, beta)).map((p) => p.label),
+        (await store.listProperties(asOwner, undefined, beta)).map(
+          (p) => p.label,
+        ),
       ).toEqual(["Shared"]);
     });
 
@@ -376,14 +374,21 @@ describe.skipIf(!OWNER_URL)("per-product Cards settings (store)", () => {
           ${owner.json({ [prop.key]: "platform" })})`;
 
       // Alpha takes over its property set and does not include Squad.
-      await store.createProperty({ label: "Risk", type: "text" }, asOwner, alpha);
+      await store.createProperty(
+        { label: "Risk", type: "text" },
+        asOwner,
+        alpha,
+      );
       expect(
-        (await store.listProperties(asOwner, undefined, alpha)).map((p) => p.label),
+        (await store.listProperties(asOwner, undefined, alpha)).map(
+          (p) => p.label,
+        ),
       ).toEqual(["Risk"]);
 
       // The value is still on the row, ready to light back up if the property
       // is re-added. An admin tidying a settings list must not destroy work.
-      const [row] = await owner`select custom_fields from features where id = ${item}`;
+      const [row] =
+        await owner`select custom_fields from features where id = ${item}`;
       expect((row!.custom_fields as Record<string, unknown>)[prop.key]).toBe(
         "platform",
       );
@@ -443,7 +448,9 @@ describe.skipIf(!OWNER_URL)("per-product Cards settings (store)", () => {
 
       const forAlpha = await store.listLevels(asOwner, alpha);
       const forBeta = await store.listLevels(asOwner, beta);
-      expect(forAlpha.find((l) => l.key === "epic")?.fields).toEqual(["assignee"]);
+      expect(forAlpha.find((l) => l.key === "epic")?.fields).toEqual([
+        "assignee",
+      ]);
       // Beta inherits, which for an unconfigured level is "every field".
       expect(forBeta.find((l) => l.key === "epic")?.fields).toBeNull();
     });
@@ -465,8 +472,12 @@ describe.skipIf(!OWNER_URL)("per-product Cards settings (store)", () => {
       await store.updateLevelFields({ feature: ["release"] }, asOwner, alpha);
 
       const levels = await store.listLevels(asOwner, alpha);
-      expect(levels.find((l) => l.key === "epic")?.fields).toEqual(["assignee"]);
-      expect(levels.find((l) => l.key === "feature")?.fields).toEqual(["release"]);
+      expect(levels.find((l) => l.key === "epic")?.fields).toEqual([
+        "assignee",
+      ]);
+      expect(levels.find((l) => l.key === "feature")?.fields).toEqual([
+        "release",
+      ]);
     });
 
     it("refuses a product admin on another product, and a member anywhere", async () => {

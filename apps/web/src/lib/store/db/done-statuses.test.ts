@@ -89,12 +89,14 @@ describe("resolving the done status", () => {
 
   it("ignores a config it cannot parse, or one too short to be a workflow", () => {
     expect(doneStatusesFrom([], [{ config: null }]).keyFor(null)).toBe("done");
-    expect(doneStatusesFrom([], [{ config: { version: 9 } }]).keyFor(null)).toBe(
-      "done",
-    );
     expect(
-      doneStatusesFrom([], [{ config: { version: 1, statuses: ["only"] } }])
-        .keyFor(null),
+      doneStatusesFrom([], [{ config: { version: 9 } }]).keyFor(null),
+    ).toBe("done");
+    expect(
+      doneStatusesFrom(
+        [],
+        [{ config: { version: 1, statuses: ["only"] } }],
+      ).keyFor(null),
     ).toBe("done");
   });
 });

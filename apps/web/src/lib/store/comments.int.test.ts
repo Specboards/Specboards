@@ -95,7 +95,11 @@ describe.skipIf(!OWNER_URL)("comments (store + RLS)", () => {
   });
 
   it("lets a member comment and resolves the author for display", async () => {
-    const created = await store.createComment(specId, { body: "  first!  " }, asAlice);
+    const created = await store.createComment(
+      specId,
+      { body: "  first!  " },
+      asAlice,
+    );
     expect(created.body).toBe("first!"); // trimmed
     expect(created.authorId).toBe(user.alice);
     expect(created.authorName).toBe("Alice");
@@ -153,19 +157,26 @@ describe.skipIf(!OWNER_URL)("comments (store + RLS)", () => {
       where recipient_id = ${user.bob}`;
     await store.createComment(
       specId,
-      { body: "@Bob @Bob @Bob", mentionedUserIds: [user.bob, user.bob, user.bob] },
+      {
+        body: "@Bob @Bob @Bob",
+        mentionedUserIds: [user.bob, user.bob, user.bob],
+      },
       asAlice,
     );
     const after = await owner`select count(*)::int as n from notifications
       where recipient_id = ${user.bob}`;
-    expect((after[0] as { n: number }).n - (before[0] as { n: number }).n).toBe(1);
+    expect((after[0] as { n: number }).n - (before[0] as { n: number }).n).toBe(
+      1,
+    );
   });
 
   it("lets only the author or the owner delete a comment", async () => {
     const c = await store.createComment(specId, { body: "delete me" }, asAlice);
 
     // A different member (not author, not owner) cannot delete it.
-    await expect(store.deleteComment(c.id, asBob)).rejects.toThrow(CommentError);
+    await expect(store.deleteComment(c.id, asBob)).rejects.toThrow(
+      CommentError,
+    );
 
     // The workspace owner can delete anyone's comment.
     await store.deleteComment(c.id, asOwner);
