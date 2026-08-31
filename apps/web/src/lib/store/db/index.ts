@@ -494,10 +494,6 @@ export class DbStore implements FeatureStore, DbStoreContext {
     return viewStore.setBoardPreferences(this, prefs, scope, board);
   }
 
-  // ── Custom properties ─────────────────────────────────────────────────
-
-  // ── Releases ──────────────────────────────────────────────────────────
-
   // ==========================================================================
   // Releases
   // ==========================================================================
@@ -652,10 +648,8 @@ export class DbStore implements FeatureStore, DbStoreContext {
     return goalStore.unlinkGoal(this, goalId, specId, scope);
   }
 
-  // ── Comments ──────────────────────────────────────────────────────────
-
   // ==========================================================================
-  // Comments
+  // Comments and notifications
   // ==========================================================================
   //
   // Implemented in ./collaboration.ts. The bodies moved verbatim; these
@@ -680,12 +674,6 @@ export class DbStore implements FeatureStore, DbStoreContext {
     return collabStore.deleteComment(this, commentId, scope);
   }
 
-  // ── Notifications ─────────────────────────────────────────────────────
-
-  // ==========================================================================
-  // Notifications
-  // ==========================================================================
-
   listNotifications(scope?: WorkspaceScope): Promise<NotificationList> {
     return collabStore.listNotifications(this, scope);
   }
@@ -698,14 +686,23 @@ export class DbStore implements FeatureStore, DbStoreContext {
     return collabStore.markAllNotificationsRead(this, scope);
   }
 
-  // ── Ideas ─────────────────────────────────────────────────────────────
-
   // ==========================================================================
   // Ideas
   // ==========================================================================
   //
   // Implemented in ./ideas.ts. The bodies moved verbatim; these delegate so
   // that `DbStore` stays the one thing callers hold.
+
+  getIdeaSettings(scope?: WorkspaceScope): Promise<IdeaSettings> {
+    return ideaStore.getIdeaSettings(this, scope);
+  }
+
+  updateIdeaSettings(
+    patch: IdeaSettingsPatch,
+    scope?: WorkspaceScope,
+  ): Promise<IdeaSettings> {
+    return ideaStore.updateIdeaSettings(this, patch, scope);
+  }
 
   listIdeas(scope?: WorkspaceScope): Promise<IdeaRecord[]> {
     return ideaStore.listIdeas(this, scope);
@@ -787,25 +784,6 @@ export class DbStore implements FeatureStore, DbStoreContext {
   }
 
   // ==========================================================================
-  // Idea settings
-  // ==========================================================================
-  //
-  // Implemented in ./ideas.ts, alongside the ideas they configure.
-
-  getIdeaSettings(scope?: WorkspaceScope): Promise<IdeaSettings> {
-    return ideaStore.getIdeaSettings(this, scope);
-  }
-
-  updateIdeaSettings(
-    patch: IdeaSettingsPatch,
-    scope?: WorkspaceScope,
-  ): Promise<IdeaSettings> {
-    return ideaStore.updateIdeaSettings(this, patch, scope);
-  }
-
-  // ── Docs (Plan-section areas) ───────────────────────────────────────────
-
-  // ==========================================================================
   // Doc spaces and pages
   // ==========================================================================
   //
@@ -855,8 +833,6 @@ export class DbStore implements FeatureStore, DbStoreContext {
   deleteDocPage(id: string, scope?: WorkspaceScope): Promise<void> {
     return docStore.deleteDocPage(this, id, scope);
   }
-
-  // ── Products ────────────────────────────────────────────────────────────
 
   // ==========================================================================
   // Products, product groups, members, and roll-up summaries
