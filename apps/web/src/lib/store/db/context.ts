@@ -94,13 +94,13 @@ export interface DbStoreContext {
   writeOutbox(tx: Tx, scope: WorkspaceScope, emit: OutboxEmit): Promise<void>;
 }
 
-export /**
+/**
  * Read a level-keyed override map off a jsonb column. Anything that is not a
  * plain object (null, an array, a hand-edited scalar) reads as "no overrides",
  * so a malformed row degrades to inheriting rather than throwing on every page
  * that renders a card.
  */
-function asLevelMap<T>(value: unknown): Record<string, T> {
+export function asLevelMap<T>(value: unknown): Record<string, T> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return value as Record<string, T>;
 }
