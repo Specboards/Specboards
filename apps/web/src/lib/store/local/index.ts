@@ -141,6 +141,25 @@ export class LocalFileStore implements FeatureStore, LocalStoreContext {
     return configStore.readLevels(this);
   }
 
+  /**
+   * The generic half of the file layer, for the domains whose state is one
+   * plain JSON array. The file each of them reads comes from ./paths.ts.
+   * Missing and unparseable both read as empty, which is what lets a fresh
+   * checkout work with no `.specboards/` directory at all.
+   */
+  async readJsonFile<T>(file: string): Promise<T[]> {
+    try {
+      return JSON.parse(await fs.readFile(file, "utf8")) as T[];
+    } catch {
+      return [];
+    }
+  }
+
+  async writeJsonFile<T>(file: string, rows: T[]): Promise<void> {
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await fs.writeFile(file, JSON.stringify(rows, null, 2) + "\n", "utf8");
+  }
+
   /** DB-native work items (initiatives/epics) persisted alongside metadata. */
   async readItems(): Promise<LocalItem[]> {
     try {
@@ -370,11 +389,7 @@ export class LocalFileStore implements FeatureStore, LocalStoreContext {
   }
 
   // ==========================================================================
-  // Items: read and update
-  //
-  // `updateFeature` is here rather than with the other writes below, which is
-  // the opposite of `db.ts`. The two implementations of one interface do not
-  // present their methods in the same order.
+  // Items: read
   // ==========================================================================
   //
   // Implemented in ./items-read.ts. The bodies moved verbatim; these delegate
@@ -707,12 +722,6 @@ export class LocalFileStore implements FeatureStore, LocalStoreContext {
     return releaseStore.deleteRelease(this, id, scope);
   }
 
-  // ── Cycles ────────────────────────────────────────────────────────────
-  // Persisted to `.specboards/local-cycles.json`. File mode has no product
-  // roles, so the per-product write checks the DB store makes are absent here;
-  // every other rule (name uniqueness per scope, date validation, unscheduling
-  // on delete, done work staying put on rollover) is the same.
-
   // ==========================================================================
   // Cycles
   // ==========================================================================
@@ -754,13 +763,6 @@ export class LocalFileStore implements FeatureStore, LocalStoreContext {
   ): Promise<CycleRolloverResult> {
     return cycleStore.rolloverCycle(this, fromId, toId, scope);
   }
-
-  // ── Goals ─────────────────────────────────────────────────────────────
-  // Persisted to `.specboards/local-goals.json` (goals with their key results
-  // and links nested, since file mode has no joins to do). File mode has no
-  // product roles, so the per-product write checks the DB store makes are
-  // absent; every other rule is the same, including the two progress figures
-  // being computed on read rather than stored.
 
   // ==========================================================================
   // Goals and key results
@@ -843,12 +845,8 @@ export class LocalFileStore implements FeatureStore, LocalStoreContext {
     return goalStore.unlinkGoal(this, goalId, specId, scope);
   }
 
-  // ── Comments ──────────────────────────────────────────────────────────
-  // Persisted to `.specboards/local-comments.json`. File mode has no user
-  // records, so every comment is authored by LOCAL_USER with a null name.
-
   // ==========================================================================
-  // Comments
+  // Comments and notifications
   // ==========================================================================
   //
   // Implemented in ./collaboration.ts. The bodies moved verbatim; these delegate
@@ -887,9 +885,6 @@ export class LocalFileStore implements FeatureStore, LocalStoreContext {
 
   // ==========================================================================
   // Products, product groups, members, and roll-up summaries
-  //
-  // `deleteProduct` is out of place: it sits after `getWorkspaceSummary` at the
-  // end of this block rather than with the other product mutations.
   // ==========================================================================
   //
   // Implemented in ./products.ts. The bodies moved verbatim; these delegate
@@ -1082,22 +1077,6 @@ export class LocalFileStore implements FeatureStore, LocalStoreContext {
     productId?: string | null,
   ): Promise<TransitionMode> {
     return settingsStore.setTransitionMode(mode, scope, productId);
-  }
-
-  // ── Docs (Plan-section areas) ───────────────────────────────────────────
-  // Doc spaces + pages persist to `.specboards/local-doc-*.json`.
-
-  async readJsonFile<T>(file: string): Promise<T[]> {
-    try {
-      return JSON.parse(await fs.readFile(file, "utf8")) as T[];
-    } catch {
-      return [];
-    }
-  }
-
-  async writeJsonFile<T>(file: string, rows: T[]): Promise<void> {
-    await fs.mkdir(path.dirname(file), { recursive: true });
-    await fs.writeFile(file, JSON.stringify(rows, null, 2) + "\n", "utf8");
   }
 
   // ==========================================================================
