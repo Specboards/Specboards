@@ -25,7 +25,6 @@ import {
   resolveIdeaStages,
   resolveLevels,
   resolveLevelUpdate,
-  todayDateOnly,
   validateGoalPeriod,
   validateKeyResult,
   wouldCreateGoalCycle,
@@ -51,8 +50,6 @@ import {
   createDb,
   desc,
   detailTemplates,
-  docPages,
-  docSpaces,
   eq,
   featureGithubLinks,
   featureLinks,
@@ -91,7 +88,6 @@ import {
 } from "@specboards/db";
 
 import {
-  compareReleases,
   DetailTemplateError,
   FeatureError,
   GroupError,
@@ -99,8 +95,6 @@ import {
   ProductError,
   PropertyError,
   RelationError,
-  ReleaseError,
-  RELEASE_STATUSES,
   CommentError,
   type CommentInput,
   type CommentRecord,
@@ -127,8 +121,6 @@ import {
   type DetailTemplate,
   type DetailTemplateInput,
   type DetailTemplatePatch,
-  DocError,
-  validateExternalDocUrl,
   type DocArea,
   type DocPageInput,
   type DocPagePatch,
@@ -137,7 +129,6 @@ import {
   type DocSpaceInput,
   type LevelUpdate,
   type OutboxEmit,
-  type CustomFieldValue,
   type FeatureDetail,
   type FeaturePatch,
   type FeatureRecord,
@@ -174,9 +165,7 @@ import {
   type RelationInput,
   type ReleaseInput,
   type ReleasePatch,
-  type ReleaseNotesMode,
   type ReleaseRecord,
-  type ReleaseStatus,
   type StageGate,
   type StageGateInput,
   StageGateError,
@@ -199,11 +188,14 @@ import {
   canReadProductId,
   canWriteProductId,
   doneStatusesIn,
+  toCustomFields,
   type DbStoreContext,
   type ProductVisibilityRow,
   type Tx,
 } from "./context";
 import * as cycleStore from "./cycles";
+import * as docStore from "./docs";
+import * as releaseStore from "./releases";
 import * as viewStore from "./views";
 
 type LinkRow = {
@@ -224,13 +216,6 @@ function directionFor(link: LinkRow, featureId: string): RelationDirection {
     case "relates_to":
       return "relates_to";
   }
-}
-
-/** Normalize the jsonb custom-fields column into the UI's value map. */
-function toCustomFields(value: unknown): Record<string, CustomFieldValue> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, CustomFieldValue>)
-    : {};
 }
 
 function emptyAgg(): GithubLinkAggregate {
@@ -410,7 +395,7 @@ export class DbStore implements FeatureStore, DbStoreContext {
    * produced it. `actorId`/`workspaceId` come from the scope; the rest is the
    * caller's opaque event.
    */
-  private async writeOutbox(
+  async writeOutbox(
     tx: Tx,
     scope: WorkspaceScope,
     emit: OutboxEmit,
@@ -2957,245 +2942,32 @@ export class DbStore implements FeatureStore, DbStoreContext {
   // ==========================================================================
   // Releases
   // ==========================================================================
+  //
+  // Implemented in ./releases.ts. The bodies moved verbatim; these delegate
+  // so that `DbStore` stays the one thing callers hold.
 
-  async listReleases(scope?: WorkspaceScope): Promise<ReleaseRecord[]> {
-    return this.scoped(scope, async (tx) => {
-      const ws = scope!.workspaceId;
-      const [rows, counts] = await Promise.all([
-        tx.select().from(releases).where(eq(releases.workspaceId, ws)),
-        tx
-          .select({ releaseId: features.releaseId, n: count() })
-          .from(features)
-          .where(eq(features.workspaceId, ws))
-          .groupBy(features.releaseId),
-      ]);
-      const countById = new Map<string, number>();
-      for (const c of counts) {
-        if (c.releaseId) countById.set(c.releaseId, Number(c.n));
-      }
-      return rows
-        .map((r) => toReleaseRecord(r, countById.get(r.id) ?? 0))
-        .sort(compareReleases);
-    });
+  listReleases(scope?: WorkspaceScope): Promise<ReleaseRecord[]> {
+    return releaseStore.listReleases(this, scope);
   }
 
-  async createRelease(
+  createRelease(
     input: ReleaseInput,
     scope?: WorkspaceScope,
   ): Promise<ReleaseRecord> {
-    return this.scoped(scope, async (tx) => {
-      const ws = scope!.workspaceId;
-      const name = input.name.trim();
-      if (!name) throw new ReleaseError("Release name is required.");
-      const productId = input.productId ?? null;
-      const access = await this.accessIn(tx, scope!);
-      // Product releases need write access to that product; portfolio
-      // (null-product) releases are owner-only (canWriteProductId handles both).
-      if (!canWriteProductId(access, productId)) {
-        throw new ReleaseError(
-          productId === null
-            ? "Only the workspace owner can create portfolio releases."
-            : "Your role does not permit creating releases for this product.",
-        );
-      }
-      if (productId !== null) {
-        await this.requireProductId(tx, ws, productId);
-      }
-      // Names are unique within a product (and within the portfolio scope).
-      // Pre-check rather than ON CONFLICT: the partial unique indexes can't be
-      // named as an arbiter without their predicate, which drizzle omits.
-      const clash = await tx
-        .select({ id: releases.id })
-        .from(releases)
-        .where(
-          and(
-            eq(releases.workspaceId, ws),
-            eq(releases.name, name),
-            productId === null
-              ? isNull(releases.productId)
-              : eq(releases.productId, productId),
-          ),
-        )
-        .limit(1);
-      if (clash[0]) {
-        throw new ReleaseError(`A release named "${name}" already exists.`);
-      }
-      const [row] = await tx
-        .insert(releases)
-        .values({
-          workspaceId: ws,
-          productId,
-          name,
-          status: normalizeReleaseStatus(input.status),
-          startDate: input.startDate ?? null,
-          targetDate: input.targetDate ?? null,
-          notes: input.notes ?? null,
-          releaseNotesMode: input.releaseNotesMode ?? "none",
-          releaseNotesBody: input.releaseNotesBody ?? null,
-          releaseNotesUrl: input.releaseNotesUrl ?? null,
-          customFields: input.customFields ?? {},
-        })
-        .returning();
-      if (!row) throw new ReleaseError(`A release named "${name}" already exists.`);
-      return toReleaseRecord(row, 0);
-    });
+    return releaseStore.createRelease(this, input, scope);
   }
 
-  async updateRelease(
+  updateRelease(
     id: string,
     patch: ReleasePatch,
     scope?: WorkspaceScope,
     emit?: OutboxEmit,
   ): Promise<ReleaseRecord> {
-    return this.scoped(scope, async (tx) => {
-      const ws = scope!.workspaceId;
-      const current = await tx
-        .select({
-          productId: releases.productId,
-          name: releases.name,
-          status: releases.status,
-          shippedDate: releases.shippedDate,
-        })
-        .from(releases)
-        .where(and(eq(releases.id, id), eq(releases.workspaceId, ws)))
-        .limit(1);
-      if (!current[0]) throw new ReleaseError(`Unknown release: ${id}`);
-      const access = await this.accessIn(tx, scope!);
-      if (!canWriteProductId(access, current[0].productId)) {
-        throw new ReleaseError(
-          current[0].productId === null
-            ? "Only the workspace owner can edit portfolio releases."
-            : "Your role does not permit editing releases for this product.",
-        );
-      }
-
-      const set: Record<string, unknown> = { updatedAt: new Date() };
-      if (patch.name !== undefined) {
-        const name = patch.name.trim();
-        if (!name) throw new ReleaseError("Release name is required.");
-        set.name = name;
-      }
-      if (patch.status !== undefined) {
-        const nextStatus = normalizeReleaseStatus(patch.status);
-        set.status = nextStatus;
-        // Stamp the actual ship date the first time a release ships (server date,
-        // date-only), and clear it if the release is reopened, so shipped_date
-        // always reflects the current shipped state. The planned target_date is
-        // left untouched.
-        if (nextStatus === "shipped" && current[0].status !== "shipped") {
-          if (!current[0].shippedDate) set.shippedDate = todayDateOnly();
-        } else if (nextStatus !== "shipped" && current[0].status === "shipped") {
-          set.shippedDate = null;
-        }
-      }
-      if (patch.startDate !== undefined) set.startDate = patch.startDate;
-      if (patch.targetDate !== undefined) set.targetDate = patch.targetDate;
-      if (patch.notes !== undefined) set.notes = patch.notes;
-      if (patch.releaseNotesMode !== undefined)
-        set.releaseNotesMode = patch.releaseNotesMode;
-      if (patch.releaseNotesBody !== undefined)
-        set.releaseNotesBody = patch.releaseNotesBody;
-      if (patch.releaseNotesUrl !== undefined)
-        set.releaseNotesUrl = patch.releaseNotesUrl;
-      // Custom fields replace the whole map (mirrors features): the caller sends
-      // the complete, merged set of release-scoped values.
-      if (patch.customFields !== undefined)
-        set.customFields = patch.customFields;
-
-      // Reassigning to a different product (or to portfolio) also needs write
-      // access to the destination, and unschedules items that no longer match.
-      let targetProductId = current[0].productId;
-      if (
-        patch.productId !== undefined &&
-        patch.productId !== current[0].productId
-      ) {
-        targetProductId = patch.productId;
-        if (!canWriteProductId(access, targetProductId)) {
-          throw new ReleaseError(
-            targetProductId === null
-              ? "Only the workspace owner can move a release to the portfolio."
-              : "Your role does not permit moving a release to that product.",
-          );
-        }
-        if (targetProductId !== null) {
-          await this.requireProductId(tx, ws, targetProductId);
-        }
-        set.productId = targetProductId;
-      }
-
-      // Guard the scoped unique name (a rename or product move can collide).
-      if (set.name !== undefined || set.productId !== undefined) {
-        const effectiveName = (set.name as string | undefined) ?? current[0].name;
-        const clash = await tx
-          .select({ id: releases.id })
-          .from(releases)
-          .where(
-            and(
-              eq(releases.workspaceId, ws),
-              eq(releases.name, effectiveName),
-              targetProductId === null
-                ? isNull(releases.productId)
-                : eq(releases.productId, targetProductId),
-              ne(releases.id, id),
-            ),
-          )
-          .limit(1);
-        if (clash[0]) {
-          throw new ReleaseError(
-            `A release named "${effectiveName}" already exists.`,
-          );
-        }
-      }
-
-      const [row] = await tx
-        .update(releases)
-        .set(set)
-        .where(and(eq(releases.id, id), eq(releases.workspaceId, ws)))
-        .returning();
-      if (!row) throw new ReleaseError(`Unknown release: ${id}`);
-      // Moving to a specific product drops items that belong to other products,
-      // preserving the invariant that a scheduled item shares the release's product.
-      if (set.productId !== undefined && targetProductId !== null) {
-        await tx
-          .update(features)
-          .set({ releaseId: null, updatedAt: new Date() })
-          .where(
-            and(
-              eq(features.workspaceId, ws),
-              eq(features.releaseId, id),
-              ne(features.productId, targetProductId),
-            ),
-          );
-      }
-      const items = await tx
-        .select({ n: count() })
-        .from(features)
-        .where(and(eq(features.workspaceId, ws), eq(features.releaseId, id)));
-      if (emit) await this.writeOutbox(tx, scope!, emit);
-      return toReleaseRecord(row, Number(items[0]?.n ?? 0));
-    });
+    return releaseStore.updateRelease(this, id, patch, scope, emit);
   }
 
-  async deleteRelease(id: string, scope?: WorkspaceScope): Promise<void> {
-    await this.scoped(scope, async (tx) => {
-      const ws = scope!.workspaceId;
-      const current = await tx
-        .select({ productId: releases.productId })
-        .from(releases)
-        .where(and(eq(releases.id, id), eq(releases.workspaceId, ws)))
-        .limit(1);
-      if (!current[0]) throw new ReleaseError(`Unknown release: ${id}`);
-      const access = await this.accessIn(tx, scope!);
-      if (!canWriteProductId(access, current[0].productId)) {
-        throw new ReleaseError(
-          current[0].productId === null
-            ? "Only the workspace owner can delete portfolio releases."
-            : "Your role does not permit deleting releases for this product.",
-        );
-      }
-      // features.release_id is ON DELETE SET NULL, so items are unscheduled.
-      await tx.delete(releases).where(and(eq(releases.id, id), eq(releases.workspaceId, ws)));
-    });
+  deleteRelease(id: string, scope?: WorkspaceScope): Promise<void> {
+    return releaseStore.deleteRelease(this, id, scope);
   }
 
   // ==========================================================================
@@ -4814,299 +4586,55 @@ export class DbStore implements FeatureStore, DbStoreContext {
 
   // ── Docs (Plan-section areas) ───────────────────────────────────────────
 
-  /** Assert the acting user can read `productId`'s docs, returning nothing. */
-  private async requireDocRead(
-    tx: Tx,
-    scope: WorkspaceScope,
-    productId: string,
-  ): Promise<void> {
-    await this.requireProductId(tx, scope.workspaceId, productId);
-    const [access, productById] = await Promise.all([
-      this.accessIn(tx, scope),
-      this.productVisibilityIn(tx, scope.workspaceId),
-    ]);
-    if (!canReadProductId(access, productById, productId)) {
-      throw new DocError("Unknown product.");
-    }
-  }
-
-  /** Assert the acting user can edit `productId`'s docs. */
-  private async requireDocWrite(
-    tx: Tx,
-    scope: WorkspaceScope,
-    productId: string,
-  ): Promise<void> {
-    await this.requireDocRead(tx, scope, productId);
-    const access = await this.accessIn(tx, scope);
-    if (!canWriteProductId(access, productId)) {
-      throw new DocError("Your role does not permit editing these docs.");
-    }
-  }
-
-  private toDocPageRecord(row: typeof docPages.$inferSelect): DocPageRecord {
-    return {
-      id: row.id,
-      productId: row.productId,
-      area: row.area as DocArea,
-      parentId: row.parentId,
-      kind: row.kind === "folder" ? "folder" : "page",
-      title: row.title,
-      content: row.content,
-      position: row.position,
-      createdAt: row.createdAt.toISOString(),
-      updatedAt: row.updatedAt.toISOString(),
-    };
-  }
-
   // ==========================================================================
   // Doc spaces and pages
   // ==========================================================================
+  //
+  // Implemented in ./docs.ts. The bodies moved verbatim; these delegate so
+  // that `DbStore` stays the one thing callers hold.
 
-  async getDocSpace(
+  getDocSpace(
     productId: string,
     area: DocArea,
     scope?: WorkspaceScope,
   ): Promise<DocSpace> {
-    return this.scoped(scope, async (tx) => {
-      await this.requireDocRead(tx, scope!, productId);
-      const [row] = await tx
-        .select()
-        .from(docSpaces)
-        .where(
-          and(eq(docSpaces.productId, productId), eq(docSpaces.area, area)),
-        )
-        .limit(1);
-      if (!row)
-        return {
-          productId,
-          area,
-          mode: "unset" as const,
-          externalUrl: null,
-          repoId: null,
-        };
-      return {
-        productId,
-        area,
-        mode: row.mode as DocSpace["mode"],
-        externalUrl: row.externalUrl,
-        repoId: row.repoId,
-      };
-    });
+    return docStore.getDocSpace(this, productId, area, scope);
   }
 
-  async setDocSpace(
+  setDocSpace(
     productId: string,
     area: DocArea,
     input: DocSpaceInput,
     scope?: WorkspaceScope,
   ): Promise<DocSpace> {
-    return this.scoped(scope, async (tx) => {
-      const ws = scope!.workspaceId;
-      await this.requireDocWrite(tx, scope!, productId);
-      let externalUrl: string | null = null;
-      let repoId: string | null = null;
-      if (input.mode === "external") {
-        externalUrl = validateExternalDocUrl(input.externalUrl);
-      } else if (input.mode === "github") {
-        if (!input.repoId) throw new DocError("Choose a repository.");
-        const [repo] = await tx
-          .select({ id: repositories.id })
-          .from(repositories)
-          .where(
-            and(
-              eq(repositories.id, input.repoId),
-              eq(repositories.workspaceId, ws),
-            ),
-          )
-          .limit(1);
-        if (!repo) throw new DocError("Unknown repository.");
-        repoId = repo.id;
-      }
-      await tx
-        .insert(docSpaces)
-        .values({
-          workspaceId: ws,
-          productId,
-          area,
-          mode: input.mode,
-          externalUrl,
-          repoId,
-        })
-        .onConflictDoUpdate({
-          target: [docSpaces.productId, docSpaces.area],
-          set: { mode: input.mode, externalUrl, repoId, updatedAt: new Date() },
-        });
-      return { productId, area, mode: input.mode, externalUrl, repoId };
-    });
+    return docStore.setDocSpace(this, productId, area, input, scope);
   }
 
-  async listDocPages(
+  listDocPages(
     productId: string,
     area: DocArea,
     scope?: WorkspaceScope,
   ): Promise<DocPageRecord[]> {
-    return this.scoped(scope, async (tx) => {
-      await this.requireDocRead(tx, scope!, productId);
-      const rows = await tx
-        .select()
-        .from(docPages)
-        .where(and(eq(docPages.productId, productId), eq(docPages.area, area)))
-        .orderBy(asc(docPages.position), asc(docPages.title));
-      return rows.map((r) => this.toDocPageRecord(r));
-    });
+    return docStore.listDocPages(this, productId, area, scope);
   }
 
-  async createDocPage(
+  createDocPage(
     input: DocPageInput,
     scope?: WorkspaceScope,
   ): Promise<DocPageRecord> {
-    return this.scoped(scope, async (tx) => {
-      const ws = scope!.workspaceId;
-      await this.requireDocWrite(tx, scope!, input.productId);
-      const title = input.title.trim();
-      if (!title) throw new DocError("A title is required.");
-      const parentId = input.parentId ?? null;
-      if (parentId) {
-        await this.requireDocFolder(tx, parentId, input.productId, input.area);
-      }
-      const [max] = await tx
-        .select({ n: count() })
-        .from(docPages)
-        .where(
-          and(
-            eq(docPages.productId, input.productId),
-            eq(docPages.area, input.area),
-          ),
-        );
-      const [row] = await tx
-        .insert(docPages)
-        .values({
-          workspaceId: ws,
-          productId: input.productId,
-          area: input.area,
-          parentId,
-          kind: input.kind === "folder" ? "folder" : "page",
-          title,
-          content: input.content ?? "",
-          position: Number(max?.n ?? 0),
-        })
-        .returning();
-      if (!row) throw new DocError("Failed to create the page.");
-      return this.toDocPageRecord(row);
-    });
+    return docStore.createDocPage(this, input, scope);
   }
 
-  async updateDocPage(
+  updateDocPage(
     id: string,
     patch: DocPagePatch,
     scope?: WorkspaceScope,
   ): Promise<DocPageRecord> {
-    return this.scoped(scope, async (tx) => {
-      const ws = scope!.workspaceId;
-      const [current] = await tx
-        .select()
-        .from(docPages)
-        .where(and(eq(docPages.id, id), eq(docPages.workspaceId, ws)))
-        .limit(1);
-      if (!current) throw new DocError(`Unknown page: ${id}`);
-      await this.requireDocWrite(tx, scope!, current.productId);
-      const set: Record<string, unknown> = { updatedAt: new Date() };
-      if (patch.title !== undefined) {
-        const title = patch.title.trim();
-        if (!title) throw new DocError("A title is required.");
-        set.title = title;
-      }
-      if (patch.content !== undefined) {
-        if (current.kind === "folder") {
-          throw new DocError("Folders have no content.");
-        }
-        set.content = patch.content;
-      }
-      if (patch.parentId !== undefined) {
-        if (patch.parentId === null) {
-          set.parentId = null;
-        } else {
-          if (patch.parentId === id) {
-            throw new DocError("A folder cannot contain itself.");
-          }
-          await this.requireDocFolder(
-            tx,
-            patch.parentId,
-            current.productId,
-            current.area as DocArea,
-          );
-          // Refuse moving a folder under its own descendant (would orphan the
-          // subtree into a cycle).
-          if (current.kind === "folder") {
-            let cursor: string | null = patch.parentId;
-            while (cursor) {
-              const [anc] = await tx
-                .select({ parentId: docPages.parentId })
-                .from(docPages)
-                .where(eq(docPages.id, cursor))
-                .limit(1);
-              const next: string | null = anc?.parentId ?? null;
-              if (next === id) {
-                throw new DocError("A folder cannot move inside itself.");
-              }
-              cursor = next;
-            }
-          }
-          set.parentId = patch.parentId;
-        }
-      }
-      await tx
-        .update(docPages)
-        .set(set)
-        .where(and(eq(docPages.id, id), eq(docPages.workspaceId, ws)));
-      const [row] = await tx
-        .select()
-        .from(docPages)
-        .where(eq(docPages.id, id))
-        .limit(1);
-      if (!row) throw new DocError(`Unknown page: ${id}`);
-      return this.toDocPageRecord(row);
-    });
+    return docStore.updateDocPage(this, id, patch, scope);
   }
 
-  async deleteDocPage(id: string, scope?: WorkspaceScope): Promise<void> {
-    await this.scoped(scope, async (tx) => {
-      const ws = scope!.workspaceId;
-      const [current] = await tx
-        .select({ productId: docPages.productId })
-        .from(docPages)
-        .where(and(eq(docPages.id, id), eq(docPages.workspaceId, ws)))
-        .limit(1);
-      if (!current) throw new DocError(`Unknown page: ${id}`);
-      await this.requireDocWrite(tx, scope!, current.productId);
-      // Children cascade on the parent FK.
-      await tx
-        .delete(docPages)
-        .where(and(eq(docPages.id, id), eq(docPages.workspaceId, ws)));
-    });
-  }
-
-  /** Assert `folderId` is a folder in the same product + area. */
-  private async requireDocFolder(
-    tx: Tx,
-    folderId: string,
-    productId: string,
-    area: DocArea,
-  ): Promise<void> {
-    const [row] = await tx
-      .select({ kind: docPages.kind })
-      .from(docPages)
-      .where(
-        and(
-          eq(docPages.id, folderId),
-          eq(docPages.productId, productId),
-          eq(docPages.area, area),
-        ),
-      )
-      .limit(1);
-    if (!row) throw new DocError("Unknown folder.");
-    if (row.kind !== "folder")
-      throw new DocError("Pages cannot contain pages.");
+  deleteDocPage(id: string, scope?: WorkspaceScope): Promise<void> {
+    return docStore.deleteDocPage(this, id, scope);
   }
 
   // ── Products ────────────────────────────────────────────────────────────
@@ -5226,7 +4754,7 @@ export class DbStore implements FeatureStore, DbStoreContext {
   }
 
   /** Product visibility by id for owner-connection app-side RLS mirroring. */
-  private async productVisibilityIn(
+  async productVisibilityIn(
     tx: Tx,
     workspaceId: string,
   ): Promise<Map<string, ProductVisibilityRow>> {
@@ -6061,14 +5589,6 @@ function normalizeOptions(
   return [...new Set((options ?? []).map((o) => o.trim()).filter(Boolean))];
 }
 
-function normalizeReleaseStatus(status: string | undefined): ReleaseStatus {
-  if (status === undefined) return "planned";
-  if (!(RELEASE_STATUSES as readonly string[]).includes(status)) {
-    throw new ReleaseError(`Unknown release status: ${status}`);
-  }
-  return status as ReleaseStatus;
-}
-
 /**
  * Map a goals row (+ its key results and readable links) to the record the UI
  * consumes. Both progress figures are computed here and never stored: the
@@ -6128,40 +5648,6 @@ function toGoalRecord(
     progress: goalProgress(measures),
     linkedItemCount: links.length,
     deliveryProgress: deliveryProgress(links),
-  };
-}
-
-function toReleaseRecord(
-  row: {
-    id: string;
-    name: string;
-    productId: string | null;
-    status: string;
-    startDate: string | null;
-    targetDate: string | null;
-    shippedDate: string | null;
-    notes: string | null;
-    releaseNotesMode: string;
-    releaseNotesBody: string | null;
-    releaseNotesUrl: string | null;
-    customFields: unknown;
-  },
-  itemCount: number,
-): ReleaseRecord {
-  return {
-    id: row.id,
-    name: row.name,
-    productId: row.productId,
-    status: row.status as ReleaseStatus,
-    startDate: row.startDate,
-    targetDate: row.targetDate,
-    shippedDate: row.shippedDate,
-    notes: row.notes,
-    releaseNotesMode: row.releaseNotesMode as ReleaseNotesMode,
-    releaseNotesBody: row.releaseNotesBody,
-    releaseNotesUrl: row.releaseNotesUrl,
-    customFields: toCustomFields(row.customFields),
-    itemCount,
   };
 }
 
