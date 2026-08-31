@@ -48,6 +48,7 @@ import { riceFields } from "@/lib/feature-helpers";
 
 import { type LocalStoreContext } from "./context";
 import { localPath, specsDir } from "./paths";
+import * as releaseStore from "./releases";
 import * as viewStore from "./views";
 import {
   LOCAL_USER,
@@ -57,7 +58,6 @@ import {
   type MetadataFile,
 } from "./types";
 import {
-  compareReleases,
   DetailTemplateError,
   FeatureError,
   GroupError,
@@ -65,8 +65,6 @@ import {
   ProductError,
   PropertyError,
   RelationError,
-  ReleaseError,
-  RELEASE_STATUSES,
   CommentError,
   type CommentInput,
   type CommentRecord,
@@ -104,7 +102,6 @@ import {
   type DocSpace,
   type DocSpaceInput,
   type LevelUpdate,
-  type CustomFieldValue,
   type FeatureDetail,
   type FeaturePatch,
   type FeatureRecord,
@@ -155,26 +152,6 @@ import {
   type ItemEvent,
   type WorkspaceScope,
 } from "../types";
-
-/** A release persisted in local file mode. */
-interface LocalRelease {
-  id: string;
-  name: string;
-  /** Product this release belongs to, or null for a portfolio release. */
-  productId?: string | null;
-  status: "planned" | "in_progress" | "shipped";
-  startDate: string | null;
-  targetDate: string | null;
-  /** Actual ship date (YYYY-MM-DD), stamped on ship and cleared on reopen. */
-  shippedDate?: string | null;
-  notes?: string | null;
-  /** Customer-facing release-notes mode (default none when absent). */
-  releaseNotesMode?: "none" | "in_app" | "external";
-  releaseNotesBody?: string | null;
-  releaseNotesUrl?: string | null;
-  /** Release-scoped custom-property values (default empty when absent). */
-  customFields?: Record<string, CustomFieldValue>;
-}
 
 /** A cycle (sprint/iteration) persisted in local file mode. No status field:
  * the state is derived from the dates on read, exactly as in the DB store. */
@@ -813,7 +790,7 @@ export class LocalFileStore implements FeatureStore, LocalStoreContext {
     // Mirror the DB store: a release must exist and be a portfolio release or
     // one scoped to this item's product.
     if (input.releaseId) {
-      const release = (await this.readReleases()).find(
+      const release = (await releaseStore.readReleases(this)).find(
         (r) => r.id === input.releaseId,
       );
       if (!release) {
@@ -1517,198 +1494,35 @@ export class LocalFileStore implements FeatureStore, LocalStoreContext {
     await this.writeGateCompletions(map);
   }
 
-  private async readReleases(): Promise<LocalRelease[]> {
-    try {
-      return JSON.parse(
-        await fs.readFile(localPath(this.root, "releases"), "utf8"),
-      ) as LocalRelease[];
-    } catch {
-      return [];
-    }
-  }
-
-  private async writeReleases(rows: LocalRelease[]): Promise<void> {
-    await fs.mkdir(path.dirname(localPath(this.root, "releases")), {
-      recursive: true,
-    });
-    await fs.writeFile(
-      localPath(this.root, "releases"),
-      JSON.stringify(rows, null, 2) + "\n",
-      "utf8",
-    );
-  }
-
   // ==========================================================================
   // Releases
   // ==========================================================================
+  //
+  // Implemented in ./releases.ts. The bodies moved verbatim; these delegate
+  // so that `LocalFileStore` stays the one thing callers hold.
 
-  async listReleases(_scope?: WorkspaceScope): Promise<ReleaseRecord[]> {
-    const [rows, all] = await Promise.all([
-      this.readReleases(),
-      this.loadAll(),
-    ]);
-    const counts = new Map<string, number>();
-    for (const f of all) {
-      if (f.releaseId)
-        counts.set(f.releaseId, (counts.get(f.releaseId) ?? 0) + 1);
-    }
-    return rows
-      .map((r) => ({
-        ...r,
-        productId: r.productId ?? null,
-        shippedDate: r.shippedDate ?? null,
-        notes: r.notes ?? null,
-        releaseNotesMode: r.releaseNotesMode ?? "none",
-        releaseNotesBody: r.releaseNotesBody ?? null,
-        releaseNotesUrl: r.releaseNotesUrl ?? null,
-        customFields: r.customFields ?? {},
-        itemCount: counts.get(r.id) ?? 0,
-      }))
-      .sort(compareReleases);
+  listReleases(scope?: WorkspaceScope): Promise<ReleaseRecord[]> {
+    return releaseStore.listReleases(this, scope);
   }
 
-  async createRelease(
+  createRelease(
     input: ReleaseInput,
-    _scope?: WorkspaceScope,
+    scope?: WorkspaceScope,
   ): Promise<ReleaseRecord> {
-    const name = input.name.trim();
-    if (!name) throw new ReleaseError("Release name is required.");
-    const productId = input.productId ?? null;
-    const rows = await this.readReleases();
-    // Names are unique within a product (and within the portfolio scope).
-    if (
-      rows.some((r) => r.name === name && (r.productId ?? null) === productId)
-    ) {
-      throw new ReleaseError(`A release named "${name}" already exists.`);
-    }
-    const status = input.status ?? "planned";
-    if (!(RELEASE_STATUSES as readonly string[]).includes(status)) {
-      throw new ReleaseError(`Unknown release status: ${status}`);
-    }
-    const release: LocalRelease = {
-      id: randomUUID(),
-      name,
-      productId,
-      status,
-      startDate: input.startDate ?? null,
-      targetDate: input.targetDate ?? null,
-      shippedDate: null,
-      notes: input.notes ?? null,
-      releaseNotesMode: input.releaseNotesMode ?? "none",
-      releaseNotesBody: input.releaseNotesBody ?? null,
-      releaseNotesUrl: input.releaseNotesUrl ?? null,
-      customFields: input.customFields ?? {},
-    };
-    await this.writeReleases([...rows, release]);
-    return {
-      ...release,
-      productId,
-      shippedDate: release.shippedDate ?? null,
-      notes: release.notes ?? null,
-      releaseNotesMode: release.releaseNotesMode ?? "none",
-      releaseNotesBody: release.releaseNotesBody ?? null,
-      releaseNotesUrl: release.releaseNotesUrl ?? null,
-      customFields: release.customFields ?? {},
-      itemCount: 0,
-    };
+    return releaseStore.createRelease(this, input, scope);
   }
 
-  async updateRelease(
+  updateRelease(
     id: string,
     patch: ReleasePatch,
-    _scope?: WorkspaceScope,
-    _emit?: OutboxEmit, // webhooks are DB-only; ignored in local file mode
+    scope?: WorkspaceScope,
+    emit?: OutboxEmit, // webhooks are DB-only; ignored in local file mode
   ): Promise<ReleaseRecord> {
-    const rows = await this.readReleases();
-    const release = rows.find((r) => r.id === id);
-    if (!release) throw new ReleaseError(`Unknown release: ${id}`);
-    if (patch.name !== undefined) {
-      const name = patch.name.trim();
-      if (!name) throw new ReleaseError("Release name is required.");
-      release.name = name;
-    }
-    if (patch.status !== undefined) {
-      if (!(RELEASE_STATUSES as readonly string[]).includes(patch.status)) {
-        throw new ReleaseError(`Unknown release status: ${patch.status}`);
-      }
-      const prevStatus = release.status;
-      release.status = patch.status;
-      // Stamp the actual ship date on first ship; clear it on reopen. Planned
-      // dates are retained.
-      if (patch.status === "shipped" && prevStatus !== "shipped") {
-        if (!release.shippedDate) {
-          release.shippedDate = new Date().toISOString().slice(0, 10);
-        }
-      } else if (patch.status !== "shipped" && prevStatus === "shipped") {
-        release.shippedDate = null;
-      }
-    }
-    if (patch.startDate !== undefined) release.startDate = patch.startDate;
-    if (patch.targetDate !== undefined) release.targetDate = patch.targetDate;
-    if (patch.notes !== undefined) release.notes = patch.notes;
-    if (patch.releaseNotesMode !== undefined)
-      release.releaseNotesMode = patch.releaseNotesMode;
-    if (patch.releaseNotesBody !== undefined)
-      release.releaseNotesBody = patch.releaseNotesBody;
-    if (patch.releaseNotesUrl !== undefined)
-      release.releaseNotesUrl = patch.releaseNotesUrl;
-    if (patch.customFields !== undefined)
-      release.customFields = patch.customFields;
-    if (patch.productId !== undefined) {
-      const targetProductId = patch.productId;
-      if (
-        rows.some(
-          (r) =>
-            r.id !== id &&
-            r.name === release.name &&
-            (r.productId ?? null) === targetProductId,
-        )
-      ) {
-        throw new ReleaseError(
-          `A release named "${release.name}" already exists.`,
-        );
-      }
-      release.productId = targetProductId;
-    }
-    await this.writeReleases(rows);
-    const all = await this.loadAll();
-    return {
-      ...release,
-      productId: release.productId ?? null,
-      shippedDate: release.shippedDate ?? null,
-      notes: release.notes ?? null,
-      releaseNotesMode: release.releaseNotesMode ?? "none",
-      releaseNotesBody: release.releaseNotesBody ?? null,
-      releaseNotesUrl: release.releaseNotesUrl ?? null,
-      customFields: release.customFields ?? {},
-      itemCount: all.filter((f) => f.releaseId === id).length,
-    };
+    return releaseStore.updateRelease(this, id, patch, scope, emit);
   }
 
-  async deleteRelease(id: string, _scope?: WorkspaceScope): Promise<void> {
-    const rows = await this.readReleases();
-    if (!rows.some((r) => r.id === id))
-      throw new ReleaseError(`Unknown release: ${id}`);
-    await this.writeReleases(rows.filter((r) => r.id !== id));
-    // Unschedule the deleted release's items (mirrors the DB's SET NULL).
-    const items = await this.readItems();
-    let itemsChanged = false;
-    for (const item of items) {
-      if (item.releaseId === id) {
-        item.releaseId = null;
-        itemsChanged = true;
-      }
-    }
-    if (itemsChanged) await this.writeItems(items);
-    const meta = await this.readMetadata();
-    let metaChanged = false;
-    for (const m of Object.values(meta)) {
-      if (m.releaseId === id) {
-        m.releaseId = null;
-        metaChanged = true;
-      }
-    }
-    if (metaChanged) await this.writeMetadata(meta);
+  deleteRelease(id: string, scope?: WorkspaceScope): Promise<void> {
+    return releaseStore.deleteRelease(this, id, scope);
   }
 
   // ── Cycles ────────────────────────────────────────────────────────────
