@@ -25,6 +25,77 @@ for how and when the version is bumped.
 > `pnpm deploy:prod` and the dispatched workflow. See
 > [VERSIONING.md](./VERSIONING.md).
 
+## [0.30.0] - 2026-08-31
+
+A release can now say when it actually shipped, rather than only when someone
+pressed the button. Both halves of that arrived from the same place: recording
+the previous release through the MCP tool produced a shipped release with no
+ship date, and fixing it made obvious that there was no way to enter a past one
+either.
+
+### Added
+
+- **A release can carry a historical ship date.** `shippedDate` is accepted when
+  a release is created and when it is edited, so a release that shipped in July
+  can say so, and a date stamped on the wrong day can be corrected without
+  reopening the release and shipping it a second time. It is reachable
+  everywhere the rest of a release is: both API request shapes, the
+  `create_release` and `update_release` MCP tools, and the release detail sheet,
+  where "Actual ship date" was a read-only line of text and is now an editable
+  date.
+- **The rule about ship dates is stated once instead of four times.** A release
+  has a ship date if and only if it is shipped; a caller-named date wins and may
+  be in the past, otherwise a release that has just shipped is stamped today and
+  one already shipped keeps what it had. That now lives in
+  `@specboards/core` alongside the cycle-date rule, because two stores and two
+  request parsers all have to reach the same answer, and the previous way they
+  stopped agreeing was that only one of them knew the rule. Both ends are
+  enforced rather than assumed: an unshipped release cannot be given a ship
+  date, and a shipped one cannot have its date cleared.
+
+### Fixed
+
+- **A release created already shipped is no longer stored without a ship date.**
+  Both stores only ever stamped `shippedDate` on the transition into `shipped`,
+  so a release created with that status went in with none, and nothing
+  downstream could recover: the roadmap draws a shipped release's bar from that
+  date, the detail sheet prints it, the dashboard appends it, and release
+  sorting reads it before falling back to the target date. Such a release sorted
+  as though it had no date and rendered as though it had never shipped. The only
+  workaround was to flip the status to in-progress and back so the transition
+  would fire. No data repair was needed: of the 33 shipped releases in
+  production, the single affected row had already been corrected by hand.
+- **Local file mode and the Postgres store agree on what "today" is.** Local
+  mode was computing it inline while the Postgres store used core's
+  `todayDateOnly`. One definition per codebase now.
+
+### Documentation
+
+- **The outbound webhook delivery contract is written down.** Webhooks have been
+  live since 0.29.x with no documentation a receiver author could use; the only
+  description of the envelope, payloads and signing scheme was a planning
+  document that had gone stale enough to be deleted, since it still called the
+  durable outbox "V2 only" after the drainer had shipped. `docs/GUIDE-webhooks.md`
+  replaces it, written for a consumer rather than for us, with every claim
+  checked against the source. It gives the most room to the parts most easily
+  got wrong: verify the signature against the raw body before any parse and
+  re-serialize, delivery is at least once and both causes are named, dedupe on
+  the envelope id (which identifies a delivery, not a change, so one change
+  fanned out to two endpoints has two), there is no ordering guarantee, and a
+  delivery is abandoned after six attempts over about 8h36m with no way to
+  replay it.
+
+### Internal
+
+- **The store directory is prettier-clean.** The twenty files in
+  `apps/web/src/lib/store/` that the split left unformatted, the `db/` modules,
+  `types.ts`, and the test suites, reformatted on their own so the reflow is not
+  sitting underneath the next real change to them. `pnpm format` is a command
+  someone runs rather than a gate, so an unformatted file stays that way until
+  something else touches it. Nothing in the diff is more than a line break bar
+  106 characters of inert punctuation, confirmed by stripping all whitespace
+  from every file before and after and comparing character by character.
+
 ## [0.29.3] - 2026-08-31
 
 Nothing in the product behaves differently in this release, and that is the
