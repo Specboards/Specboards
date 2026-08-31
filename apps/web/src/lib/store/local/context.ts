@@ -20,7 +20,7 @@
 
 import type { WorkspaceLevel } from "@specboards/core";
 
-import type { FeatureDetail } from "../types";
+import type { FeatureDetail, GithubLinkAggregate } from "../types";
 import type { LocalItem, MetadataFile } from "./types";
 
 /**
@@ -78,4 +78,9 @@ export interface LocalStoreContext {
  */
 export function isDone(status: string, doneKey: string): boolean {
   return status === doneKey;
+}
+
+/** Zero GitHub-link aggregate; file mode has no GitHub connection. */
+export function emptyGithubSummary(): GithubLinkAggregate {
+  return { openPrs: 0, mergedPrs: 0, issues: 0, branches: 0, total: 0 };
 }
