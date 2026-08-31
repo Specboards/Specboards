@@ -15,7 +15,11 @@ import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import { todayDateOnly } from "@specboards/core";
+import {
+  shippedDateAfterWrite,
+  shippedDateError,
+  todayDateOnly,
+} from "@specboards/core";
 
 import {
   type CustomFieldValue,
@@ -76,6 +80,13 @@ export async function createRelease(
   if (!(RELEASE_STATUSES as readonly string[]).includes(status)) {
     throw new ReleaseError(`Unknown release status: ${status}`);
   }
+  // Same rule as db/releases.ts, from the same place, so the two stores cannot
+  // disagree about when a ship date is stamped or accepted. See core/releases.
+  const createDateError = shippedDateError(
+    input.shippedDate,
+    status === "shipped",
+  );
+  if (createDateError) throw new ReleaseError(createDateError);
   const release: LocalRelease = {
     id: randomUUID(),
     name,
@@ -83,10 +94,12 @@ export async function createRelease(
     status,
     startDate: input.startDate ?? null,
     targetDate: input.targetDate ?? null,
-    // Stamped on create as well as on transition: the date describes the
-    // shipped state, so a release created already shipped has one. See
-    // db/releases.ts, which had the same gap.
-    shippedDate: status === "shipped" ? todayDateOnly() : null,
+    shippedDate: shippedDateAfterWrite({
+      shipped: status === "shipped",
+      previous: null,
+      explicit: input.shippedDate,
+      today: todayDateOnly(),
+    }),
     notes: input.notes ?? null,
     releaseNotesMode: input.releaseNotesMode ?? "none",
     releaseNotesBody: input.releaseNotesBody ?? null,
@@ -126,17 +139,21 @@ export async function updateRelease(
     if (!(RELEASE_STATUSES as readonly string[]).includes(patch.status)) {
       throw new ReleaseError(`Unknown release status: ${patch.status}`);
     }
-    const prevStatus = release.status;
     release.status = patch.status;
-    // Stamp the actual ship date on first ship; clear it on reopen. Planned
-    // dates are retained.
-    if (patch.status === "shipped" && prevStatus !== "shipped") {
-      if (!release.shippedDate) {
-        release.shippedDate = todayDateOnly();
-      }
-    } else if (patch.status !== "shipped" && prevStatus === "shipped") {
-      release.shippedDate = null;
-    }
+  }
+  // Recomputed when the status or the date itself is in the patch, left alone
+  // otherwise so an unrelated edit cannot move it. Planned dates are a
+  // different fact and are retained. Rule shared with db/releases.ts.
+  if (patch.status !== undefined || patch.shippedDate !== undefined) {
+    const shipped = release.status === "shipped";
+    const dateError = shippedDateError(patch.shippedDate, shipped);
+    if (dateError) throw new ReleaseError(dateError);
+    release.shippedDate = shippedDateAfterWrite({
+      shipped,
+      previous: release.shippedDate ?? null,
+      explicit: patch.shippedDate,
+      today: todayDateOnly(),
+    });
   }
   if (patch.startDate !== undefined) release.startDate = patch.startDate;
   if (patch.targetDate !== undefined) release.targetDate = patch.targetDate;

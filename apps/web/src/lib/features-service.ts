@@ -1594,6 +1594,8 @@ export function parseReleaseInput(body: unknown): ReleaseInput {
   if ("status" in raw) input.status = parseReleaseStatus(raw.status);
   if ("startDate" in raw) input.startDate = parseDate(raw.startDate, "startDate");
   if ("targetDate" in raw) input.targetDate = parseDate(raw.targetDate, "targetDate");
+  if ("shippedDate" in raw)
+    input.shippedDate = parseDate(raw.shippedDate, "shippedDate");
   if ("notes" in raw) input.notes = parseReleaseNotes(raw.notes);
   if ("releaseNotesMode" in raw)
     input.releaseNotesMode = parseReleaseNotesMode(raw.releaseNotesMode);
@@ -1623,6 +1625,8 @@ export function parseReleasePatch(body: unknown): ReleasePatch {
   if ("status" in raw) patch.status = parseReleaseStatus(raw.status);
   if ("startDate" in raw) patch.startDate = parseDate(raw.startDate, "startDate");
   if ("targetDate" in raw) patch.targetDate = parseDate(raw.targetDate, "targetDate");
+  if ("shippedDate" in raw)
+    patch.shippedDate = parseDate(raw.shippedDate, "shippedDate");
   if ("notes" in raw) patch.notes = parseReleaseNotes(raw.notes);
   if ("releaseNotesMode" in raw)
     patch.releaseNotesMode = parseReleaseNotesMode(raw.releaseNotesMode);
@@ -1635,8 +1639,8 @@ export function parseReleasePatch(body: unknown): ReleasePatch {
   if (Object.keys(patch).length === 0) {
     throw new InvalidPatchError(
       "Patch must set at least one of: name, productId, status, " +
-        "startDate, targetDate, notes, releaseNotesMode, releaseNotesBody, " +
-        "releaseNotesUrl, customFields.",
+        "startDate, targetDate, shippedDate, notes, releaseNotesMode, " +
+        "releaseNotesBody, releaseNotesUrl, customFields.",
     );
   }
   return patch;

@@ -18,7 +18,11 @@
  * moved. See ./context.ts.
  */
 
-import { todayDateOnly } from "@specboards/core";
+import {
+  shippedDateAfterWrite,
+  shippedDateError,
+  todayDateOnly,
+} from "@specboards/core";
 
 import { and, count, eq, features, isNull, ne, releases } from "@specboards/db";
 
@@ -107,13 +111,15 @@ export async function createRelease(
     if (clash[0]) {
       throw new ReleaseError(`A release named "${name}" already exists.`);
     }
-    // `shipped_date` describes the state, not the transition that reached it,
-    // so a release created already shipped is stamped here for the same reason
-    // `updateRelease` stamps one that ships later. Leaving it null produced a
-    // shipped release with no ship date, which every reader treats as
-    // authoritative: the roadmap draws its bar from it, the detail sheet prints
-    // it, and `compareReleases` sorts on it before falling back to the target.
+    // `shipped_date` describes the state rather than the transition that
+    // reached it, so a release created already shipped gets one here. The rule
+    // is core's, shared with updateRelease and the local store, so all three
+    // agree on when today is stamped and when a named date wins. See
+    // core/releases.ts.
     const status = normalizeReleaseStatus(input.status);
+    const shipped = status === "shipped";
+    const dateError = shippedDateError(input.shippedDate, shipped);
+    if (dateError) throw new ReleaseError(dateError);
     const [row] = await tx
       .insert(releases)
       .values({
@@ -121,7 +127,12 @@ export async function createRelease(
         productId,
         name,
         status,
-        shippedDate: status === "shipped" ? todayDateOnly() : null,
+        shippedDate: shippedDateAfterWrite({
+          shipped,
+          previous: null,
+          explicit: input.shippedDate,
+          today: todayDateOnly(),
+        }),
         startDate: input.startDate ?? null,
         targetDate: input.targetDate ?? null,
         notes: input.notes ?? null,
@@ -173,17 +184,28 @@ export async function updateRelease(
       set.name = name;
     }
     if (patch.status !== undefined) {
-      const nextStatus = normalizeReleaseStatus(patch.status);
-      set.status = nextStatus;
-      // Stamp the actual ship date the first time a release ships (server date,
-      // date-only), and clear it if the release is reopened, so shipped_date
-      // always reflects the current shipped state. The planned target_date is
-      // left untouched.
-      if (nextStatus === "shipped" && current[0].status !== "shipped") {
-        if (!current[0].shippedDate) set.shippedDate = todayDateOnly();
-      } else if (nextStatus !== "shipped" && current[0].status === "shipped") {
-        set.shippedDate = null;
-      }
+      set.status = normalizeReleaseStatus(patch.status);
+    }
+    // The ship date is recomputed whenever the status or the date itself is in
+    // the patch, and left alone otherwise so an unrelated edit cannot move it.
+    // Everything the rule decides (stamp today on first ship, keep the stored
+    // date across edits, take a named date so a past release can be recorded or
+    // a wrong one corrected, clear on reopen) is in core/releases.ts, shared
+    // with createRelease and with the local store. The planned target_date is a
+    // different fact and is never touched here.
+    if (patch.status !== undefined || patch.shippedDate !== undefined) {
+      const shipped =
+        (patch.status !== undefined
+          ? normalizeReleaseStatus(patch.status)
+          : current[0].status) === "shipped";
+      const dateError = shippedDateError(patch.shippedDate, shipped);
+      if (dateError) throw new ReleaseError(dateError);
+      set.shippedDate = shippedDateAfterWrite({
+        shipped,
+        previous: current[0].shippedDate,
+        explicit: patch.shippedDate,
+        today: todayDateOnly(),
+      });
     }
     if (patch.startDate !== undefined) set.startDate = patch.startDate;
     if (patch.targetDate !== undefined) set.targetDate = patch.targetDate;

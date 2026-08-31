@@ -226,6 +226,63 @@ describe.skipIf(!OWNER_URL)("per-product releases (store + RLS)", () => {
     }
   });
 
+  it("records and corrects a historical ship date", async () => {
+    // A release that shipped before it was entered here: the stamp would
+    // otherwise be the day someone got round to recording it.
+    const past = await store.createRelease(
+      {
+        name: "v-historical",
+        productId: product.alpha,
+        status: "shipped",
+        shippedDate: "2026-07-13",
+      },
+      asAdmin,
+    );
+    expect(past.shippedDate).toBe("2026-07-13");
+
+    // Correcting a date stamped on the wrong day, without touching the status.
+    const wrong = await store.createRelease(
+      { name: "v-wrong", productId: product.alpha, status: "shipped" },
+      asAdmin,
+    );
+    expect(wrong.shippedDate).not.toBe("2026-07-13");
+    const fixed = await store.updateRelease(
+      wrong.id,
+      { shippedDate: "2026-07-13" },
+      asAdmin,
+    );
+    expect(fixed.status).toBe("shipped");
+    expect(fixed.shippedDate).toBe("2026-07-13");
+
+    // Shipping with a past date in one call: the named date beats today.
+    const late = await store.createRelease(
+      { name: "v-late-entry", productId: product.alpha },
+      asAdmin,
+    );
+    const shipped = await store.updateRelease(
+      late.id,
+      { status: "shipped", shippedDate: "2026-07-13" },
+      asAdmin,
+    );
+    expect(shipped.shippedDate).toBe("2026-07-13");
+
+    // The invariant holds from both ends: only a shipped release carries a
+    // ship date, and a shipped one always does.
+    await expect(
+      store.createRelease(
+        {
+          name: "v-not-shipped",
+          productId: product.alpha,
+          shippedDate: "2026-07-13",
+        },
+        asAdmin,
+      ),
+    ).rejects.toThrow(ReleaseError);
+    await expect(
+      store.updateRelease(late.id, { shippedDate: null }, asAdmin),
+    ).rejects.toThrow(ReleaseError);
+  });
+
   it("only schedules an item into a release from its product or portfolio", async () => {
     const item = await store.createFeature(
       { title: "Alpha epic", level: "epic", productId: product.alpha },

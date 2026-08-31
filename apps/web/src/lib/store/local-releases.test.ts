@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { LocalFileStore } from "./local";
+import { ReleaseError } from "./types";
 
 /**
  * Local file mode's half of the ship-date contract.
@@ -59,6 +60,66 @@ describe("LocalFileStore release ship dates", () => {
     const bare = await store.createRelease({ name: "v-bare" });
     expect(bare.status).toBe("planned");
     expect(bare.shippedDate).toBeNull();
+  });
+
+  it("records a release that shipped in the past", async () => {
+    const rel = await store.createRelease({
+      name: "v-historical",
+      status: "shipped",
+      shippedDate: "2026-07-13",
+    });
+    expect(rel.shippedDate).toBe("2026-07-13");
+
+    const listed = (await store.listReleases()).find((r) => r.id === rel.id)!;
+    expect(listed.shippedDate).toBe("2026-07-13");
+  });
+
+  it("corrects a ship date that was stamped on the wrong day", async () => {
+    const rel = await store.createRelease({
+      name: "v-wrong",
+      status: "shipped",
+    });
+    const stampedToday = rel.shippedDate;
+
+    const fixed = await store.updateRelease(rel.id, {
+      shippedDate: "2026-07-13",
+    });
+    expect(fixed.shippedDate).toBe("2026-07-13");
+    expect(fixed.shippedDate).not.toBe(stampedToday);
+    // Correcting the date does not disturb the status.
+    expect(fixed.status).toBe("shipped");
+  });
+
+  it("ships a release with a past date in one call", async () => {
+    const rel = await store.createRelease({ name: "v-late-entry" });
+    const shipped = await store.updateRelease(rel.id, {
+      status: "shipped",
+      shippedDate: "2026-07-13",
+    });
+    expect(shipped.status).toBe("shipped");
+    // The named date wins over today's stamp.
+    expect(shipped.shippedDate).toBe("2026-07-13");
+  });
+
+  it("refuses a ship date on a release that has not shipped", async () => {
+    await expect(
+      store.createRelease({ name: "v-not-shipped", shippedDate: "2026-07-13" }),
+    ).rejects.toThrow(ReleaseError);
+
+    const rel = await store.createRelease({ name: "v-planned" });
+    await expect(
+      store.updateRelease(rel.id, { shippedDate: "2026-07-13" }),
+    ).rejects.toThrow(ReleaseError);
+  });
+
+  it("refuses to clear the ship date of a shipped release", async () => {
+    const rel = await store.createRelease({
+      name: "v-clear",
+      status: "shipped",
+    });
+    await expect(
+      store.updateRelease(rel.id, { shippedDate: null }),
+    ).rejects.toThrow(ReleaseError);
   });
 
   it("stamps on ship, keeps the stamp across edits, and clears it on reopen", async () => {
