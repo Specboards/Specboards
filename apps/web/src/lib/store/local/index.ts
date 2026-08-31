@@ -48,6 +48,7 @@ import { riceFields } from "@/lib/feature-helpers";
 
 import { type LocalStoreContext } from "./context";
 import { localPath, specsDir } from "./paths";
+import * as collabStore from "./collaboration";
 import * as docStore from "./docs";
 import * as releaseStore from "./releases";
 import * as viewStore from "./views";
@@ -66,7 +67,6 @@ import {
   ProductError,
   PropertyError,
   RelationError,
-  CommentError,
   type CommentInput,
   type CommentRecord,
   type NotificationList,
@@ -189,17 +189,6 @@ interface LocalKeyResult {
   targetValue: number;
   currentValue: number;
   position: number;
-}
-
-/** A comment persisted in local file mode. Keyed to the feature's stable
- * specId (local mode has no separate internal id) and authored by LOCAL_USER,
- * since file mode has no user records. */
-interface LocalComment {
-  id: string;
-  specId: string;
-  authorId: string;
-  body: string;
-  createdAt: string;
 }
 
 /** An idea / feature request persisted in local file mode. */
@@ -2117,102 +2106,43 @@ export class LocalFileStore implements FeatureStore, LocalStoreContext {
   // Persisted to `.specboards/local-comments.json`. File mode has no user
   // records, so every comment is authored by LOCAL_USER with a null name.
 
-  private async readComments(): Promise<LocalComment[]> {
-    return this.readJsonFile<LocalComment>(localPath(this.root, "comments"));
-  }
-
-  private async assertItemExists(specId: string): Promise<void> {
-    const all = await this.loadAll();
-    if (!all.some((f) => f.specId === specId)) {
-      throw new CommentError(`Unknown item: ${specId}`);
-    }
-  }
-
   // ==========================================================================
   // Comments
   // ==========================================================================
+  //
+  // Implemented in ./collaboration.ts. The bodies moved verbatim; these delegate
+  // so that `LocalFileStore` stays the one thing callers hold.
 
-  async listComments(
+  listComments(
     specId: string,
-    _scope?: WorkspaceScope,
+    scope?: WorkspaceScope,
   ): Promise<CommentRecord[]> {
-    await this.assertItemExists(specId);
-    const rows = await this.readComments();
-    return rows
-      .filter((c) => c.specId === specId)
-      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-      .map((c) => ({
-        id: c.id,
-        featureId: c.specId,
-        authorId: c.authorId,
-        authorName: null,
-        authorImage: null,
-        body: c.body,
-        createdAt: c.createdAt,
-      }));
+    return collabStore.listComments(this, specId, scope);
   }
 
-  async createComment(
+  createComment(
     specId: string,
     input: CommentInput,
-    _scope?: WorkspaceScope,
+    scope?: WorkspaceScope,
   ): Promise<CommentRecord> {
-    const body = input.body.trim();
-    if (!body) throw new CommentError("Comment body is required.");
-    await this.assertItemExists(specId);
-    const rows = await this.readComments();
-    const comment: LocalComment = {
-      id: randomUUID(),
-      specId,
-      authorId: LOCAL_USER,
-      body,
-      createdAt: new Date().toISOString(),
-    };
-    await this.writeJsonFile(localPath(this.root, "comments"), [
-      ...rows,
-      comment,
-    ]);
-    return {
-      id: comment.id,
-      featureId: specId,
-      authorId: comment.authorId,
-      authorName: null,
-      authorImage: null,
-      body: comment.body,
-      createdAt: comment.createdAt,
-    };
+    return collabStore.createComment(this, specId, input, scope);
   }
 
-  async deleteComment(
-    commentId: string,
-    _scope?: WorkspaceScope,
-  ): Promise<void> {
-    const rows = await this.readComments();
-    if (!rows.some((c) => c.id === commentId)) {
-      throw new CommentError(`Unknown comment: ${commentId}`);
-    }
-    await this.writeJsonFile(
-      localPath(this.root, "comments"),
-      rows.filter((c) => c.id !== commentId),
-    );
+  deleteComment(commentId: string, scope?: WorkspaceScope): Promise<void> {
+    return collabStore.deleteComment(this, commentId, scope);
   }
 
-  // ==========================================================================
-  // Notifications
-  // ==========================================================================
-
-  // Notifications are a multi-user, @mention-driven concept; local file mode is
-  // a single user with no members to mention, so the inbox is always empty.
-  async listNotifications(_scope?: WorkspaceScope): Promise<NotificationList> {
-    return { items: [], unreadCount: 0 };
+  listNotifications(scope?: WorkspaceScope): Promise<NotificationList> {
+    return collabStore.listNotifications(scope);
   }
 
-  async markNotificationRead(
-    _id: string,
-    _scope?: WorkspaceScope,
-  ): Promise<void> {}
+  markNotificationRead(id: string, scope?: WorkspaceScope): Promise<void> {
+    return collabStore.markNotificationRead(id, scope);
+  }
 
-  async markAllNotificationsRead(_scope?: WorkspaceScope): Promise<void> {}
+  markAllNotificationsRead(scope?: WorkspaceScope): Promise<void> {
+    return collabStore.markAllNotificationsRead(scope);
+  }
 
   // ==========================================================================
   // Products, product groups, members, and roll-up summaries
