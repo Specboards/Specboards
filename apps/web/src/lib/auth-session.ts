@@ -319,14 +319,14 @@ export function resolveReadScope(req: Request): Promise<ScopeResult> {
  * key's grants. `scopes: []` means unrestricted: either a browser session or a
  * legacy full-access key.
  */
-export interface CredentialInfo {
+interface CredentialInfo {
   /** True when the caller authenticated with an API key (vs a browser session). */
   viaKey: boolean;
   /** The key's granted scopes; `[]` is unrestricted. */
   scopes: string[];
 }
 
-export type ReadAccessResult =
+type ReadAccessResult =
   | {
       ok: true;
       access: (WorkspaceScope & { role: MemberRole }) | null;

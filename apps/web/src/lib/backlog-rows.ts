@@ -7,13 +7,13 @@
  */
 
 /** The shape the row builder needs; `FeatureRecord` satisfies it. */
-export interface LevelledItem {
+interface LevelledItem {
   specId: string;
   level: string;
   parentSpecId: string | null;
 }
 
-export interface LevelRow<T> {
+interface LevelRow<T> {
   feature: T;
   depth: number;
 }

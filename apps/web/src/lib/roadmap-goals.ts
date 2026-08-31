@@ -110,7 +110,7 @@ export interface GoalTimelineModel {
   unlinked: TimelineItem[];
 }
 
-export interface GoalTimelineInput {
+interface GoalTimelineInput {
   goals: TimelineGoal[];
   /** Items in scope at every level, not just the active one (see the header). */
   items: TimelineItem[];

@@ -39,7 +39,7 @@ export const PROPOSAL_OPEN = "<<<BEGIN PROPOSED SPEC>>>";
 /** Closes it. */
 export const PROPOSAL_CLOSE = "<<<END PROPOSED SPEC>>>";
 
-export interface ParsedAnswer {
+interface ParsedAnswer {
   /** Everything the model said outside the block, which is what gets rendered
    * as the message. Empty when the answer was nothing but a proposal. */
   prose: string;

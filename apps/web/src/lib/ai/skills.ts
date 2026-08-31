@@ -265,7 +265,7 @@ export const BUILT_IN_SKILLS: readonly SkillDef[] = [
 ];
 
 /** The built-in with this key, if there is one. */
-export function builtInSkill(key: string): SkillDef | undefined {
+function builtInSkill(key: string): SkillDef | undefined {
   return BUILT_IN_SKILLS.find((b) => b.key === key);
 }
 
@@ -441,7 +441,7 @@ export class SkillInputError extends Error {}
  * Returns the cleaned definition rather than mutating in place, so the caller
  * cannot accidentally store the untrimmed original alongside the checked one.
  */
-export function parseSkill(raw: unknown, taken: readonly string[]): SkillRow {
+function parseSkill(raw: unknown, taken: readonly string[]): SkillRow {
   if (!raw || typeof raw !== "object") {
     throw new SkillInputError("Each skill must be an object.");
   }

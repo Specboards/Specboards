@@ -38,7 +38,7 @@ import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useOrgProductPath } from "@/lib/use-org";
 
-export interface ConnectedRepo {
+interface ConnectedRepo {
   id: string;
   owner: string;
   name: string;
@@ -55,7 +55,7 @@ export interface ConnectedRepo {
 export type SetupNotice = { kind: "ok" | "error"; message: string } | null;
 
 /** A product option for the per-repo link editor. */
-export interface RepoProductOption {
+interface RepoProductOption {
   id: string;
   name: string;
 }

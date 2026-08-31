@@ -9,7 +9,7 @@ import { useSyncExternalStore } from "react";
  * enabled), and prefer CSS breakpoints for layout so nothing flashes at the
  * wrong width on first paint.
  */
-export function useMediaQuery(query: string): boolean {
+function useMediaQuery(query: string): boolean {
   return useSyncExternalStore(
     (onChange) => {
       if (typeof window === "undefined") return () => {};

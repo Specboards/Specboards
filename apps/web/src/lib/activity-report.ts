@@ -27,9 +27,9 @@ export const RANGES = [
   { key: "90", days: 90, label: "90 days" },
 ] as const;
 
-export type RangeKey = (typeof RANGES)[number]["key"];
+type RangeKey = (typeof RANGES)[number]["key"];
 
-export const DEFAULT_RANGE: RangeKey = "30";
+const DEFAULT_RANGE: RangeKey = "30";
 
 /** Resolve the `?range=` param, falling back rather than erroring on junk. */
 export function resolveRange(raw: string | string[] | undefined) {

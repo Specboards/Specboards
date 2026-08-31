@@ -38,22 +38,6 @@ export function isWebhookEventType(v: unknown): v is WebhookEventType {
   );
 }
 
-/** Who triggered the event; null for system/unattributable actions. */
-export type EventActor = { id: string; name: string } | null;
-
-/**
- * A domain event handed to `dispatchEvent` by the service layer. It carries only
- * what the emit site knows: the type, the owning product (for routing + the
- * envelope; null for workspace-level events like `release.shipped`), and the
- * per-type `data`. The dispatcher enriches it into a full envelope (id,
- * timestamp, workspace/product context, actor).
- */
-export type DomainEvent = {
-  type: WebhookEventType;
-  productId: string | null;
-  data: Record<string, unknown>;
-};
-
 /** The signed JSON body delivered to an endpoint. */
 export type WebhookEnvelope = {
   id: string; // "evt_..." unique per delivery; consumers dedupe on this

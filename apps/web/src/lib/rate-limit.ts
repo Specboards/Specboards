@@ -11,7 +11,7 @@ import { logSecurityEvent } from "@/lib/security-log";
  * limit holds across instances, unlike an in-process map.
  */
 
-export interface QuotaResult {
+interface QuotaResult {
   ok: boolean;
   /** Seconds until the window resets (only meaningful when `ok` is false). */
   retryAfter: number;
@@ -59,7 +59,7 @@ export async function consumeQuota(
 }
 
 /** A named quota (limit per window), applied by {@link enforceQuota}. */
-export interface Quota {
+interface Quota {
   op: string;
   limit: number;
   windowSec: number;

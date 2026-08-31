@@ -10,7 +10,7 @@ import {
 } from "@/lib/roadmap-timeline";
 
 /** A `date`-typed workspace property the timeline can plot by. */
-export interface DateFieldOption {
+interface DateFieldOption {
   key: string;
   label: string;
 }

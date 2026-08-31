@@ -34,7 +34,7 @@ export class ServiceAccountError extends Error {}
 
 const NAME_MAX = 80;
 
-export interface ProductGrant {
+interface ProductGrant {
   productId: string;
   role: ProductRole;
 }
@@ -55,12 +55,12 @@ export interface ProductGrant {
  * Making the policy a named value rather than an `undefined` check keeps the
  * choice visible at the call site instead of buried in a default.
  */
-export type ProductGrantPolicy =
+type ProductGrantPolicy =
   | { kind: "explicit"; grants: ProductGrant[] }
   | { kind: "every-product-contributor" };
 
 /** The live API key behind an agent, without any secret material. */
-export interface ServiceAccountKeyView {
+interface ServiceAccountKeyView {
   id: string;
   prefix: string;
   lastUsedAt: string | null;
@@ -68,7 +68,7 @@ export interface ServiceAccountKeyView {
   createdAt: string;
 }
 
-export interface ServiceAccountSummary {
+interface ServiceAccountSummary {
   userId: string;
   name: string;
   email: string;
@@ -84,7 +84,7 @@ export interface ServiceAccountSummary {
   key: ServiceAccountKeyView | null;
 }
 
-export interface CreateServiceAccountInput {
+interface CreateServiceAccountInput {
   name: string;
   /** Validated resource scopes, never empty. `["*"]` is how full access is asked for. */
   scopes: string[];

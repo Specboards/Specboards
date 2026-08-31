@@ -36,7 +36,7 @@ export const RICE_IMPACT_VALUES: readonly number[] = RICE_IMPACT_OPTIONS.map(
 );
 
 /** The four RICE inputs on a feature (any may be unset). */
-export interface RiceInputs {
+interface RiceInputs {
   riceReach: number | null;
   riceImpact: number | null;
   riceConfidence: number | null;
@@ -94,7 +94,7 @@ export const CUSTOM_SORT_PREFIX = "cf:";
  * `user` are excluded: a set of tags has no natural order, and a user id sorts
  * by an opaque uuid rather than a name.
  */
-export const SORTABLE_PROPERTY_TYPES: readonly PropertyType[] = [
+const SORTABLE_PROPERTY_TYPES: readonly PropertyType[] = [
   "date",
   "number",
   "text",
@@ -103,7 +103,7 @@ export const SORTABLE_PROPERTY_TYPES: readonly PropertyType[] = [
 ];
 
 /** Whether a property can back a `cf:` sort mode. */
-export function isSortableProperty(p: Pick<PropertyDef, "type">): boolean {
+function isSortableProperty(p: Pick<PropertyDef, "type">): boolean {
   return SORTABLE_PROPERTY_TYPES.includes(p.type);
 }
 

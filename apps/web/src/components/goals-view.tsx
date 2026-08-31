@@ -45,7 +45,7 @@ import {
 import { cn } from "@/lib/utils";
 
 /** An item the link picker can attach to a goal. */
-export interface GoalLinkCandidate {
+interface GoalLinkCandidate {
   specId: string;
   title: string;
   level: string;

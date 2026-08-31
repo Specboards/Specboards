@@ -10,7 +10,6 @@ import type { ModelErrorKind } from "@/lib/ai/provider";
 import {
   canEditItem,
   resolveAssistantItem,
-  AssistantItemError,
 } from "@/lib/assistant-service";
 import { statusLabel } from "@/lib/feature-helpers";
 import { completeWithWorkspaceModel } from "@/lib/model-provider-service";
@@ -58,14 +57,14 @@ import type { FeatureDetail, WorkspaceScope } from "@/lib/store/types";
  * thing the product can be asked to do, and until now the check reserved the
  * prompt and treated the generated list as free.
  */
-export const BREAKDOWN_MAX_TOKENS = 4_000;
+const BREAKDOWN_MAX_TOKENS = 4_000;
 
 /** The item cannot be broken down: it is already at the lowest level. */
 export class BreakdownLevelError extends Error {}
 /** The caller may read the item but not add children to it. Routes map to 403. */
 export class BreakdownForbiddenError extends Error {}
 
-export type BreakdownOutcome =
+type BreakdownOutcome =
   | {
       ok: true;
       /** The model's sentence about how it divided the work. */
@@ -275,4 +274,3 @@ async function buildContext(
   );
 }
 
-export { AssistantItemError };

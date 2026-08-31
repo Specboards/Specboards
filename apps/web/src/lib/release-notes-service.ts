@@ -7,7 +7,6 @@ import {
   assembleReleaseContext,
   type AssembledReleaseContext,
 } from "@/lib/ai/release-context";
-import { parseAnswer } from "@/lib/ai/proposals";
 import { skillsForSurface, type Skill } from "@/lib/ai/skills";
 import type { ModelErrorKind, ModelMessage, TokenUsage } from "@/lib/ai/provider";
 import {
@@ -93,6 +92,10 @@ export type ReleaseAssistantEvent =
  * into an answer that stops. It also feeds the spend check, which is asked about
  * prompt plus this, so a call is admitted on what it could cost rather than on
  * what it probably will.
+ *
+ * @public Reached only through `await import(...)` in the integration suite,
+ * which loads this module after its environment is set up. knip cannot follow a
+ * dynamic namespace import to a named member, so without this it reads as dead.
  */
 export const ANSWER_MAX_TOKENS = 2_000;
 
@@ -141,7 +144,7 @@ async function resolveRelease(scope: WorkspaceScope, releaseId: string) {
  * text the model was actually shown. Recomputing it later, from a fresh read,
  * answers a different question: see the note in `run()` below.
  */
-export interface AssembledReleaseTurnContext extends AssembledReleaseContext {
+interface AssembledReleaseTurnContext extends AssembledReleaseContext {
   /**
    * `contentVersion` of the notes body that went into `systemPrompt`. What a
    * proposal drafted from this context is checked against on accept.
@@ -156,7 +159,7 @@ export interface AssembledReleaseTurnContext extends AssembledReleaseContext {
  * spending anything: "here is what asking would send" is a question the panel
  * needs to answer before, not after.
  */
-export async function buildReleaseContext(
+async function buildReleaseContext(
   scope: WorkspaceScope,
   releaseId: string,
   skill: Skill | null = null,
@@ -227,7 +230,7 @@ export async function buildReleaseContext(
 }
 
 /** Everything the panel needs to render, in one release resolution. */
-export interface ReleaseAssistantPanelData {
+interface ReleaseAssistantPanelData {
   messages: AssistantMessageView[];
   context: ContextField[];
   modelConnected: boolean;
@@ -481,9 +484,4 @@ export async function startReleaseTurn(
       ),
     };
   }
-}
-
-/** Whether an answer carried a proposal, for callers that only have the text. */
-export function answerHasProposal(answer: string): boolean {
-  return parseAnswer(answer).proposal !== null;
 }

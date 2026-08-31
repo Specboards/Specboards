@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 
-export interface ApiKeyView {
+interface ApiKeyView {
   id: string;
   name: string;
   prefix: string;

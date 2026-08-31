@@ -33,7 +33,7 @@ export interface GeneratedApiKey {
 }
 
 /** Public (non-secret) view of a stored key, for listing in settings. */
-export interface ApiKeySummary {
+interface ApiKeySummary {
   id: string;
   name: string;
   prefix: string;
@@ -119,7 +119,7 @@ export function extractApiKey(req: Request): string | null {
 }
 
 /** A verified API key: the user it authenticates as and the scopes it carries. */
-export interface VerifiedApiKey {
+interface VerifiedApiKey {
   user: SessionUser;
   /** Resource scopes; empty = a full-access (legacy) key. */
   scopes: string[];

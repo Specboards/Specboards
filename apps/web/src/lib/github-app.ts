@@ -13,7 +13,7 @@ import { isE2E } from "@/lib/e2e";
  */
 
 /** Decrypted credentials for the deployment's App. */
-export interface GithubAppCredentials {
+interface GithubAppCredentials {
   appId: string;
   slug: string;
   clientId: string | null;
@@ -68,12 +68,12 @@ let credentialsCache: {
 } | null = null;
 
 /** Drop the memoized credentials. Exported for tests and for saves. */
-export function clearCredentialsCache(): void {
+function clearCredentialsCache(): void {
   credentialsCache = null;
 }
 
 /** Load + decrypt the stored App credentials, or null if none saved. */
-export async function getStoredCredentials(
+async function getStoredCredentials(
   db: Database,
 ): Promise<GithubAppCredentials | null> {
   const now = Date.now();

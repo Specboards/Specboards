@@ -108,7 +108,7 @@ export function ParentLevelBadge({
   );
 }
 
-export function customFieldText(value: CustomFieldValue): string {
+function customFieldText(value: CustomFieldValue): string {
   if (value === null || value === undefined) return "";
   if (Array.isArray(value)) return value.join(", ");
   return String(value);
@@ -167,7 +167,7 @@ export function customFieldDisplay(
 }
 
 /** Render one card field as a badge (or null when there's nothing to show). */
-export function renderCardField(
+function renderCardField(
   key: string,
   f: FeatureRecord,
   maps: CardFieldMaps,

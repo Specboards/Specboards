@@ -26,7 +26,7 @@ import type { WorkspaceScope } from "@/lib/store/types";
  * renders nothing. Accepts any tenant-scoped value (PageAccess or
  * WorkspaceScope); only `workspaceId` is used.
  */
-export async function resolveRepoConfig(
+async function resolveRepoConfig(
   scope: { workspaceId: string } | null,
 ): Promise<RepoConfig | null> {
   if (scope) {

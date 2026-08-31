@@ -155,7 +155,7 @@ function assertNotStale(
   );
 }
 
-export interface ProposalResult {
+interface ProposalResult {
   /** The turn as it now reads, so the panel can re-render from the answer. */
   message: AssistantMessageView;
   /** The item's description after the change; unchanged text on a reject. */

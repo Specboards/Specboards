@@ -175,9 +175,6 @@ Optional environment flags for a hosted deployment:
   `SPECBOARDS_SIGNUP_CODE_REQUIRED` is on: there is no default, and the app
   refuses to start with the gate on and no code set. Choose a value only the
   people you are admitting know, and rotate it by changing this variable.
-- `SPECBOARDS_INVITE_ONLY` - legacy gate: close public sign-up so only addresses
-  with a pending org invitation can create an account. Superseded by
-  `SPECBOARDS_SIGNUP_CODE_REQUIRED`; leave unset when the code gate is on.
 - `ACCESS_REQUEST_NOTIFY_EMAIL` - where `POST /api/access-request` submissions
   are sent for review (default `contact@specboard.ai`). Submissions are also
   recorded in the `access_requests` table, which is the queue an operator works

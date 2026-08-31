@@ -24,7 +24,7 @@ import { isMultiTenant } from "@/lib/tenancy";
  */
 
 /** A pending install flow row, as read back by the callbacks. */
-export interface InstallStateRow {
+interface InstallStateRow {
   id: string;
   nonce: string;
   workspaceId: string;
@@ -162,18 +162,8 @@ function warnHeaderOrigin(): void {
   );
 }
 
-/** The App slug, e.g. `specboard-test`, used to build the install URL. */
-export function githubAppSlug(): string | null {
-  return process.env.NEXT_PUBLIC_GITHUB_APP_SLUG?.trim() || null;
-}
-
 /** Where to send a user to install an App with the given slug, or null. */
-export function installUrlFromSlug(slug: string | null): string | null {
+function installUrlFromSlug(slug: string | null): string | null {
   return slug ? `https://github.com/apps/${slug}/installations/new` : null;
-}
-
-/** Where to send a user to install the App (env slug), or null if unset. */
-export function githubAppInstallUrl(): string | null {
-  return installUrlFromSlug(githubAppSlug());
 }
 

@@ -21,8 +21,7 @@ export const SOURCE_REPO_URL = (
 export const COPYRIGHT_HOLDER = "Studio Palouse";
 export const COPYRIGHT_YEAR = "2026";
 
-/** Short SPDX id and canonical URLs for the license. */
-export const LICENSE_SPDX = "AGPL-3.0-or-later";
+/** The license, as the in-app notice names and links it. */
 export const LICENSE_NAME = "GNU Affero General Public License v3.0";
 export const LICENSE_URL = `${SOURCE_REPO_URL}/blob/main/LICENSE`;
 
@@ -31,7 +30,7 @@ export const LICENSE_URL = `${SOURCE_REPO_URL}/blob/main/LICENSE`;
  * build arg (see infra/web.Dockerfile). Empty in local dev and any build that
  * doesn't pass it; callers fall back to the repo root.
  */
-export const GIT_SHA = (process.env.NEXT_PUBLIC_GIT_SHA ?? "").trim();
+const GIT_SHA = (process.env.NEXT_PUBLIC_GIT_SHA ?? "").trim();
 
 /** A human-facing version label: the commit when known, else "development". */
 export function versionLabel(): string {

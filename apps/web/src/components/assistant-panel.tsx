@@ -105,7 +105,7 @@ export const RECENT_TURNS = 4;
  * before it snaps shut. Characters are a coarse proxy and the cost of getting
  * it slightly wrong is one extra "Show more" on a message that did not need it.
  */
-export const LONG_MESSAGE_CHARS = 1_200;
+const LONG_MESSAGE_CHARS = 1_200;
 
 /**
  * The slice of the thread to render, and how much is being held back.
@@ -451,7 +451,7 @@ function AssistantTurn({
  * review are the same job whatever is being discussed, which is why this is a
  * prop and not a second component.
  */
-export type AssistantSubject =
+type AssistantSubject =
   | { kind: "item"; specId: string }
   | { kind: "release"; releaseId: string };
 

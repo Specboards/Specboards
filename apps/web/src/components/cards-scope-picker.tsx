@@ -7,7 +7,7 @@ import { Select } from "@/components/ui/select";
 import type { ProductRecord } from "@/lib/store/types";
 
 /** `?product=` value for the workspace default. Empty so the param drops out. */
-export const WORKSPACE_SCOPE = "";
+const WORKSPACE_SCOPE = "";
 
 /**
  * Which product the Cards settings page is configuring.

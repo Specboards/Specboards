@@ -17,7 +17,7 @@ import { SCOPE_RESOURCES } from "@/lib/api-scopes";
 
 export type ConnectionGrantId = "read" | "author" | "full";
 
-export interface ConnectionGrant {
+interface ConnectionGrant {
   id: ConnectionGrantId;
   label: string;
   describe: string;

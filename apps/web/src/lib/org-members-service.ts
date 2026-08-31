@@ -23,12 +23,11 @@ import { listWorkspaceMembers, type MemberRole, type WorkspaceMember } from "@/l
 /** The org roles, in privilege order, for validation and pickers. `owner` is
  * the workspace admin; `member` is the read-only org baseline (product access
  * comes from per-product grants). */
-export const MEMBER_ROLES: readonly MemberRole[] = ["owner", "member"];
+const MEMBER_ROLES: readonly MemberRole[] = ["owner", "member"];
 
 /** Raised for a member action that can't proceed (unknown member, last owner). */
 export class OrgMemberError extends Error {}
 
-export type { WorkspaceMember };
 
 /** List the org's members (with role + deactivation state), ordered by name. */
 export function listMembers(db: Database, workspaceId: string): Promise<WorkspaceMember[]> {

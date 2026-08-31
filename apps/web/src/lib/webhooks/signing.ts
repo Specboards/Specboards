@@ -9,7 +9,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
  */
 
 /** Hex HMAC-SHA256 of `"{timestamp}.{rawBody}"` under `secret`. */
-export function signPayload(
+function signPayload(
   secret: string,
   rawBody: string,
   timestampSeconds: number,

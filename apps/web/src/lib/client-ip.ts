@@ -29,7 +29,7 @@
  * pretend they can tell visitors apart.
  */
 
-export type ClientIp =
+type ClientIp =
   | { known: true; ip: string; source: "fly-client-ip" | "x-forwarded-for" }
   | { known: false };
 

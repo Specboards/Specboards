@@ -15,7 +15,7 @@ export class ApiError extends Error {
   }
 }
 
-export interface Me {
+interface Me {
   mode: "workspace" | "local";
   user: { id: string; name: string; email: string } | null;
   workspace: { id: string; name: string; slug: string } | null;
@@ -36,18 +36,18 @@ export interface Feature {
   path: string;
 }
 
-export interface Product {
+interface Product {
   id: string;
   key: string;
   name: string;
 }
 
-export interface Workflow {
+interface Workflow {
   statuses: string[];
   transitions: Record<string, string[]>;
 }
 
-export type GithubLinkKind = "pull_request" | "issue" | "branch";
+type GithubLinkKind = "pull_request" | "issue" | "branch";
 
 export interface FeaturePatch {
   status?: string;

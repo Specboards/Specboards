@@ -24,7 +24,7 @@ export interface RiceStrings {
   effort: string;
 }
 
-export const EMPTY_RICE: RiceStrings = {
+const EMPTY_RICE: RiceStrings = {
   reach: "",
   impact: "",
   confidence: "",

@@ -43,7 +43,7 @@ import {
 import { cn } from "@/lib/utils";
 
 /** One item scheduled into a cycle, as the page hands it over. */
-export interface CycleItem {
+interface CycleItem {
   specId: string;
   title: string;
   status: string;

@@ -58,7 +58,7 @@ export async function recordMcpWorkspaceBinding(
 }
 
 /** What an OAuth connection resolved to: where it acts and what it may do. */
-export interface McpConnectionBinding {
+interface McpConnectionBinding {
   /**
    * Workspace slug, so the caller can feed it straight into
    * `resolveApiMembership`, which re-validates membership on every request: a
@@ -184,7 +184,7 @@ export async function oauthClientName(
 }
 
 /** One OAuth connection, for the "Connected agents" list in settings. */
-export interface McpConnectionView {
+interface McpConnectionView {
   clientId: string;
   /** The name the client registered under, or null (optional in RFC 7591). */
   clientName: string | null;
@@ -271,7 +271,7 @@ export async function revokeMcpConnection(
 }
 
 /** A workspace the user can act in, for the consent-screen picker. */
-export interface ConsentWorkspaceOption {
+interface ConsentWorkspaceOption {
   id: string;
   name: string;
   slug: string;

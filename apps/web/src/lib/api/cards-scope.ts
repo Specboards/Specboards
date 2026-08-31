@@ -24,7 +24,7 @@ import type { WorkspaceScope } from "@/lib/store/types";
  * the check that actually holds; see migrations 0064 and 0065.
  */
 
-export type CardsWriteScope =
+type CardsWriteScope =
   | { ok: true; scope: WorkspaceScope | undefined; productId: string | null; body: unknown }
   | { ok: false; response: Response };
 

@@ -39,7 +39,7 @@ function isUuid(value: unknown): value is string {
 }
 
 /** The acting user's effective product access (for route authorization). */
-export async function getProductAccess(
+async function getProductAccess(
   scope?: WorkspaceScope,
 ): Promise<ProductAccess> {
   const store = await getStore();

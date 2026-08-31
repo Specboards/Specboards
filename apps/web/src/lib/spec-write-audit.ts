@@ -14,8 +14,8 @@ import { specWriteAudit, type Database } from "@specboards/db";
  * six weeks later is an answer; a missing row is not.
  */
 
-export type SpecWriteAction = "create" | "update" | "remove";
-export type SpecWriteOutcome = "committed" | "proposed" | "refused" | "failed";
+type SpecWriteAction = "create" | "update" | "remove";
+type SpecWriteOutcome = "committed" | "proposed" | "refused" | "failed";
 
 /**
  * How the change was credited.
@@ -24,9 +24,9 @@ export type SpecWriteOutcome = "committed" | "proposed" | "refused" | "failed";
  * repository full of app-authored commits looks identical whether attribution
  * is working or has quietly stopped, and this column is the difference.
  */
-export type SpecWriteAttribution = "author" | "co_author" | "none";
+type SpecWriteAttribution = "author" | "co_author" | "none";
 
-export interface SpecWriteRecord {
+interface SpecWriteRecord {
   workspaceId: string;
   actorId?: string | null;
   actorLabel?: string | null;

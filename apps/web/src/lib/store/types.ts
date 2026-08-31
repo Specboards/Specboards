@@ -1,7 +1,6 @@
 import type {
   CycleScheduleInput,
   CycleState,
-  PlannedCycle,
   GoalStatus,
   MetricKind,
   DetailTemplate,
@@ -24,7 +23,6 @@ import { DomainError } from "@/lib/errors";
 export type {
   CycleScheduleInput,
   CycleState,
-  PlannedCycle,
   GoalStatus,
   MetricKind,
   DetailTemplate,
@@ -922,40 +920,28 @@ export interface NotificationList {
 // alongside releasesForProduct / selectableReleases below.
 export {
   buildGoalTree,
-  compareGoals,
-  deliveryProgress,
   flattenGoalTree,
   formatMetric,
-  goalProgress,
   goalStatusLabel,
   goalsForProduct,
-  isGoalClosed,
   isGoalStatus,
-  keyResultProgress,
   metricKindLabel,
   DEFAULT_NEW_METRIC_KIND,
   GOAL_STATUSES,
   METRIC_KINDS,
 } from "@specboards/core";
-export type { GoalTreeNode, GoalTreeRow } from "@specboards/core";
 
 export {
-  addDaysDateOnly,
-  compareCycles,
   cycleDaysRemaining,
-  cycleLengthDays,
   cycleScheduleRemainderDays,
-  cycleState,
   cycleStateLabel,
   cyclesForProduct,
   generateCycleSchedule,
-  isCycleActive,
   nextCycleNumber,
   selectableCycles,
   todayDateOnly,
   validateCycleScheduleInput,
   CYCLE_NUMBER_TOKEN,
-  MAX_GENERATED_CYCLES,
 } from "@specboards/core";
 
 /** The releases a single product's roadmap should show: that product's own
@@ -1374,7 +1360,7 @@ export type BoardKey = (typeof BOARD_KEYS)[number];
  * Reading items. `listFeatures` backs the board and deliberately carries no
  * bodies; `listFeatureBodies` is the bulk read for callers that need them.
  */
-export interface ItemReadStore {
+interface ItemReadStore {
   listFeatures(scope?: WorkspaceScope): Promise<FeatureRecord[]>;
   /**
    * The Markdown bodies of many items at once, keyed by spec id.
@@ -1405,7 +1391,7 @@ export interface ItemReadStore {
  * gates work moves through, admin-defined card properties, and the detail
  * templates new items start from.
  */
-export interface WorkspaceConfigStore {
+interface WorkspaceConfigStore {
   /**
    * The workspace's hierarchy levels, ordered top → leaf, with one product's
    * Cards overrides applied. The hierarchy itself is always workspace-wide;
@@ -1567,7 +1553,7 @@ export interface WorkspaceConfigStore {
 /**
  * Releases: the ship vehicles work is scheduled into.
  */
-export interface ReleaseStore {
+interface ReleaseStore {
   /** The workspace's releases, dated first (ascending), undated last. Each
    * record carries its `productId` (null for a workspace-wide portfolio
    * release); callers that want a single product's roadmap filter to that
@@ -1594,7 +1580,7 @@ export interface ReleaseStore {
  * Cycles (sprints/iterations). Scheduled independently of releases: an item
  * can be in both, one, or neither.
  */
-export interface CycleStore {
+interface CycleStore {
   /** The workspace's cycles, ordered active → upcoming → most recently
    * complete. `state` on each is derived from its dates, never stored. */
   listCycles(scope?: WorkspaceScope): Promise<CycleRecord[]>;
@@ -1634,7 +1620,7 @@ export interface CycleStore {
 /**
  * Goals, key results, and the links that say what work ladders up to them.
  */
-export interface GoalStore {
+interface GoalStore {
   /** The workspace's goals with their key results and computed progress,
    * ordered open first, then by soonest period end. */
   listGoals(scope?: WorkspaceScope): Promise<GoalRecord[]>;
@@ -1692,7 +1678,7 @@ export interface GoalStore {
 /**
  * Comments and the notifications they raise.
  */
-export interface CollaborationStore {
+interface CollaborationStore {
   /** Comments on a feature (by stable specId), oldest first, author resolved.
    * Requires read access to the feature's product. */
   listComments(
@@ -1721,7 +1707,7 @@ export interface CollaborationStore {
  * summaries computed over them. `getProductAccess` is the read the
  * authorization checks in both implementations are built on.
  */
-export interface ProductStore {
+interface ProductStore {
   /** The acting user's effective product access (org-admin flag + per-product
    * grants), used for read-filtering and write authorization. */
   getProductAccess(scope?: WorkspaceScope): Promise<ProductAccess>;
@@ -1804,7 +1790,7 @@ export interface ProductStore {
  * plus the event ledger those writes populate. Every method here is an
  * authorization boundary in the Postgres implementation.
  */
-export interface ItemWriteStore {
+interface ItemWriteStore {
   /** Create a DB-native work item (initiative/epic). Returns the new record.
    * `emitType`, when given, records an outbox event of that type (with data built
    * from the new row) in the same transaction. */
@@ -1889,7 +1875,7 @@ export interface ItemWriteStore {
  * Per-user presentation state: saved views and board preferences. Nothing
  * here is shared between users.
  */
-export interface ViewStore {
+interface ViewStore {
   /** The acting user's saved backlog views (personal, newest first). */
   listSavedViews(scope?: WorkspaceScope): Promise<SavedView[]>;
   /** Persist a new saved view for the acting user; returns it with its id. */
@@ -1930,7 +1916,7 @@ export interface ViewStore {
  * The ideas intake: capture, voting, promotion into the backlog, and the
  * stages an idea moves through.
  */
-export interface IdeaStore {
+interface IdeaStore {
   /** The workspace's Ideas configuration (portal on/off, title, product). */
   getIdeaSettings(scope?: WorkspaceScope): Promise<IdeaSettings>;
   /** Update the workspace's Ideas configuration. Returns the updated settings. */
@@ -1987,7 +1973,7 @@ export interface IdeaStore {
  * this split moves no declarations, only re-wraps contiguous ones, and they
  * sit next to the transition mode in the original. Worth revisiting.
  */
-export interface WorkspaceSettingsStore {
+interface WorkspaceSettingsStore {
   /**
    * How freely items move between stages, for one product. Drives whether the
    * resolved workflow's transitions are a pipeline or fully open.
@@ -2038,7 +2024,7 @@ export interface WorkspaceSettingsStore {
  * Doc spaces and the pages inside them, whether backed by Specboards or by
  * a connected repository.
  */
-export interface DocStore {
+interface DocStore {
   /** The area's doc-source configuration; mode `unset` when never chosen. */
   getDocSpace(
     productId: string,

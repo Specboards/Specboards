@@ -24,7 +24,6 @@ import type {
   DocPagePatch,
   DocPageRecord,
   DocSpace,
-  FeatureDetail,
   FeaturePatch,
   FeatureRecord,
   FeatureRelation,
@@ -277,7 +276,7 @@ export class ProposalStaleError extends Error {
 }
 
 /** What a create returned: the spec, plus anything that partly went wrong. */
-export interface SpecCreateResult {
+interface SpecCreateResult {
   spec: SpecWriteResult;
   /**
    * Set when the spec was committed but nesting it under the requested parent
@@ -328,20 +327,6 @@ export async function createSpec(input: {
   return { spec: body.spec, parentWarning: body.parentWarning };
 }
 
-/** Load a feature's full detail (metadata + spec content) for in-context edit. */
-export async function getFeature(specId: string): Promise<FeatureDetail> {
-  const res = await apiFetch(`/api/v1/features/${encodeURIComponent(specId)}`);
-  if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as {
-    feature?: FeatureDetail;
-    error?: string;
-  } | null;
-  if (!res.ok || !body?.feature) {
-    throw new Error(body?.error ?? `Failed to load feature (${res.status}).`);
-  }
-  return body.feature;
-}
-
 export async function patchFeature(
   specId: string,
   patch: FeaturePatch,
@@ -361,13 +346,13 @@ export async function patchFeature(
 }
 
 /** One item's outcome in a bulk edit (mirrors the server's BulkPatchItemResult). */
-export interface BulkPatchItemResult {
+interface BulkPatchItemResult {
   specId: string;
   ok: boolean;
   error?: string;
 }
 
-export interface BulkPatchResult {
+interface BulkPatchResult {
   results: BulkPatchItemResult[];
   okCount: number;
   failCount: number;
@@ -490,26 +475,6 @@ export async function getAssistantThread(specId: string): Promise<{
 }
 
 /**
- * The workspace's assistant skills, built-ins included.
- *
- * Its own resource rather than a path under `assistant`, so that an API key
- * granted permission to ask questions is not thereby granted permission to
- * rewrite what the assistant is told. See the route.
- */
-export async function getAssistantSkills(): Promise<Skill[]> {
-  const res = await apiFetch("/api/v1/assistant-skills");
-  if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as {
-    skills?: Skill[];
-    error?: string;
-  } | null;
-  if (!res.ok || !body?.skills) {
-    throw new Error(body?.error ?? `Failed to load skills (${res.status}).`);
-  }
-  return body.skills;
-}
-
-/**
  * Replace the workspace's skills with this set. Admin-only; 422 on a skill that
  * would do nothing (no name, no instructions) or a set that is too large.
  */
@@ -531,12 +496,12 @@ export async function saveAssistantSkills(skills: SkillRow[]): Promise<Skill[]> 
 }
 
 /** One child the assistant suggested, before anybody has agreed to it. */
-export interface ProposedChild {
+interface ProposedChild {
   title: string;
   details: string;
 }
 
-export type BreakdownSuggestion =
+type BreakdownSuggestion =
   | {
       ok: true;
       prose: string;
@@ -605,7 +570,7 @@ export async function estimateBreakdown(specId: string): Promise<number | null> 
 }
 
 /** What came back from accepting or rejecting a proposed edit. */
-export interface ProposalOutcome {
+interface ProposalOutcome {
   message: AssistantMessageView;
   /** The item's description afterwards, so the diff baseline moves with it. */
   body: string;
@@ -712,7 +677,7 @@ async function readNdjson<T>(
 }
 
 /** One line of the assistant's NDJSON stream, as the browser sees it. */
-export type AssistantStreamEvent =
+type AssistantStreamEvent =
   | { kind: "delta"; text: string }
   | { kind: "done"; turns: AssistantMessageView[] }
   | { kind: "error"; error: { kind: string; message: string } };
@@ -1087,19 +1052,6 @@ export async function deleteWorkItem(
   }
 }
 
-/** The workspace's hierarchy levels, ordered top → leaf. */
-export async function listLevels(): Promise<WorkspaceLevel[]> {
-  const res = await apiFetch("/api/v1/levels");
-  if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as {
-    levels?: WorkspaceLevel[];
-    error?: string;
-  } | null;
-  if (!res.ok)
-    throw new Error(body?.error ?? `Failed to load levels (${res.status}).`);
-  return body?.levels ?? [];
-}
-
 /** Replace the workspace's hierarchy levels (admin-only); returns the new set. */
 export async function updateLevels(
   levels: LevelUpdate[],
@@ -1230,19 +1182,6 @@ export async function deleteDetailTemplate(id: string): Promise<void> {
 
 // ── Workflow stages ─────────────────────────────────────────────────────
 
-/** The workspace's workflow stages ([] = built-in default workflow). */
-export async function listStatuses(): Promise<WorkspaceStatus[]> {
-  const res = await apiFetch("/api/v1/statuses");
-  if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as {
-    statuses?: WorkspaceStatus[];
-    error?: string;
-  } | null;
-  if (!res.ok)
-    throw new Error(body?.error ?? `Failed to load workflow (${res.status}).`);
-  return body?.statuses ?? [];
-}
-
 /**
  * Replace a product's workflow stages, or the workspace default's when
  * `productId` is omitted; returns the new set. An empty list reverts a product
@@ -1295,22 +1234,6 @@ export async function updateTransitionMode(
     );
   }
   return body.transitionMode;
-}
-
-/** The workspace's stage gates (checklist items per stage). */
-export async function listStageGates(): Promise<StageGate[]> {
-  const res = await apiFetch("/api/v1/stage-gates");
-  if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as {
-    gates?: StageGate[];
-    error?: string;
-  } | null;
-  if (!res.ok) {
-    throw new Error(
-      body?.error ?? `Failed to load stage gates (${res.status}).`,
-    );
-  }
-  return body?.gates ?? [];
 }
 
 /** Replace the workspace's stage gates (admin-only); returns the new set. */
@@ -1993,27 +1916,6 @@ export async function saveView(input: SavedViewInput): Promise<SavedView> {
   return body.view;
 }
 
-/** Rename or re-filter a saved view; returns the updated record. */
-export async function updateView(
-  id: string,
-  patch: Partial<Pick<SavedViewInput, "name" | "filters">>,
-): Promise<SavedView> {
-  const res = await apiFetch(`/api/v1/views/${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(patch),
-  });
-  if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as {
-    view?: SavedView;
-    error?: string;
-  } | null;
-  if (!res.ok || !body?.view) {
-    throw new Error(body?.error ?? `Update view failed with ${res.status}`);
-  }
-  return body.view;
-}
-
 /** Delete a saved view by id. */
 export async function deleteView(id: string): Promise<void> {
   const res = await apiFetch(`/api/v1/views/${encodeURIComponent(id)}`, {
@@ -2075,7 +1977,7 @@ export interface SyncResult {
   unparented: number;
 }
 
-export interface ConnectRepoInput {
+interface ConnectRepoInput {
   installationId: string;
   owner: string;
   name: string;
@@ -2218,7 +2120,7 @@ export async function importWorkspaceSpecs(): Promise<ImportResult> {
 }
 
 /** A connected repository as the API returns it (subset of the DB row). */
-export interface ConnectedRepository {
+interface ConnectedRepository {
   id: string;
   owner: string;
   name: string;
@@ -2227,20 +2129,6 @@ export interface ConnectedRepository {
   githubInstallationId: string;
   /** Admin override of the repo config's writeMode; null means "use the config". */
   writeModeOverride?: "pr" | "direct" | null;
-}
-
-/** Fetch one connected repo in the caller's workspace; throws if not found. */
-export async function getRepository(id: string): Promise<ConnectedRepository> {
-  const res = await apiFetch(`/api/v1/repositories/${encodeURIComponent(id)}`);
-  if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as {
-    repository?: ConnectedRepository;
-    error?: string;
-  } | null;
-  if (!res.ok || !body?.repository) {
-    throw new Error(body?.error ?? `Failed to load repository (${res.status}).`);
-  }
-  return body.repository;
 }
 
 /**
@@ -2378,33 +2266,6 @@ export async function createSpecRepository(input: {
 
 // ── Products ────────────────────────────────────────────────────────────
 
-/** List the products (sibling backlogs) the caller can see. */
-export async function listProducts(): Promise<ProductRecord[]> {
-  const res = await apiFetch("/api/v1/products");
-  if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as {
-    products?: ProductRecord[];
-    error?: string;
-  } | null;
-  if (!res.ok)
-    throw new Error(body?.error ?? `Failed to load products (${res.status}).`);
-  return body?.products ?? [];
-}
-
-/** Fetch one product the caller can see; throws if it is unknown/not visible. */
-export async function getProduct(id: string): Promise<ProductRecord> {
-  const res = await apiFetch(`/api/v1/products/${encodeURIComponent(id)}`);
-  if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as {
-    product?: ProductRecord;
-    error?: string;
-  } | null;
-  if (!res.ok || !body?.product) {
-    throw new Error(body?.error ?? `Failed to load product (${res.status}).`);
-  }
-  return body.product;
-}
-
 /** Create a product (org-admin only on the server); returns the new record. */
 export async function createProduct(
   input: CreateProductInput,
@@ -2491,19 +2352,6 @@ export async function setRepositoryProducts(
 }
 
 // ── Product groups ──────────────────────────────────────────────────────
-
-/** List the workspace's product groups. */
-export async function listProductGroups(): Promise<ProductGroupRecord[]> {
-  const res = await apiFetch("/api/v1/product-groups");
-  if (res.status === 401) throw new AuthRequiredError();
-  const body = (await res.json().catch(() => null)) as {
-    groups?: ProductGroupRecord[];
-    error?: string;
-  } | null;
-  if (!res.ok)
-    throw new Error(body?.error ?? `Failed to load groups (${res.status}).`);
-  return body?.groups ?? [];
-}
 
 /** Create a product group (org-admin only); returns the new record. */
 export async function createProductGroup(

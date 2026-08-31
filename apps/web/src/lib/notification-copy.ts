@@ -12,7 +12,7 @@ import type { NotificationRecord } from "@/lib/store/types";
  * snippet renders under a blank or wrong heading is worse than a generic one,
  * and this list will grow faster than every reader's deployment updates.
  */
-export interface NotificationHeadline {
+interface NotificationHeadline {
   /**
    * The person whose action this was, rendered emphasised, or null when there
    * isn't one. An outcome has no actor on purpose: naming whoever clicked the

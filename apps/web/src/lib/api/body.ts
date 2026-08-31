@@ -31,7 +31,7 @@ import { logSecurityEvent } from "@/lib/security-log";
  */
 export const DEFAULT_MAX_BODY_BYTES = 1_000_000; // 1 MB
 
-export type JsonBodyResult =
+type JsonBodyResult =
   | { ok: true; body: unknown }
   | { ok: false; response: Response };
 

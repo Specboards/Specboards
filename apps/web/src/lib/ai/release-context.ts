@@ -68,7 +68,7 @@ export interface ReleaseContextGroup {
   items: ReleaseContextItem[];
 }
 
-export interface ReleaseContextInput {
+interface ReleaseContextInput {
   name: string;
   /** The workflow's label for the release's state, for the same reason the
    * level label is a label. */
@@ -161,7 +161,7 @@ export const MAX_ITEM_DESCRIPTION_CHARS = 2_000;
  * mid-sentence, and a model handed three hundred sentence fragments writes
  * confident nonsense from them. Titles at least do not pretend to be complete.
  */
-export const MIN_ITEM_DESCRIPTION_CHARS = 240;
+const MIN_ITEM_DESCRIPTION_CHARS = 240;
 
 /** Per-description cost beyond its own characters: indent, ellipsis, newline. */
 const DESCRIPTION_OVERHEAD_CHARS = 4;

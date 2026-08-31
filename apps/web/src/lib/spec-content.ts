@@ -304,7 +304,7 @@ async function describeConflict(
   );
 }
 
-export interface SpecWriteResult {
+interface SpecWriteResult {
   specId: string;
   path: string;
   commitSha: string;

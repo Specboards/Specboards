@@ -30,7 +30,7 @@ export interface ProposedChild {
   details: string;
 }
 
-export interface ParsedBreakdown {
+interface ParsedBreakdown {
   /** What the model said outside the block, shown above the list. */
   prose: string;
   /** The proposed children, in the order given. Empty when there is none. */
@@ -49,7 +49,7 @@ export interface ParsedBreakdown {
 export const MAX_PROPOSED_CHILDREN = 20;
 
 /** Longest title accepted, matching what a card can sensibly show. */
-export const MAX_CHILD_TITLE_CHARS = 200;
+const MAX_CHILD_TITLE_CHARS = 200;
 
 /** A bullet or a numbered item: `- x`, `* x`, `+ x`, `1. x`, `1) x`. */
 const ITEM_LINE = /^\s*(?:[-*+]|\d+[.)])\s+(.*)$/;

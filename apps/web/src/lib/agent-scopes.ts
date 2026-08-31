@@ -17,7 +17,7 @@ import { SCOPE_RESOURCES, type ScopeResource } from "@/lib/api-scopes";
 
 export type ScopeLevel = "none" | "read" | "write";
 
-export interface ScopeGroup {
+interface ScopeGroup {
   title: string;
   /** Why an owner would grant anything in this group. */
   hint: string;

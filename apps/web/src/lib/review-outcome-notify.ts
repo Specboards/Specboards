@@ -28,8 +28,8 @@ import { getGithubApp } from "@/lib/github-app";
  */
 
 /** Notification types this raises. */
-export const MERGED = "spec_change_merged";
-export const CLOSED = "spec_change_closed";
+const MERGED = "spec_change_merged";
+const CLOSED = "spec_change_closed";
 
 /** How much of a reviewer's comment is carried into the inbox row. */
 const SNIPPET_LIMIT = 280;

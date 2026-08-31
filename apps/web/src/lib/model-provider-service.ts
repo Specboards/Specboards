@@ -42,7 +42,7 @@ import {
 export class ModelProviderInputError extends Error {}
 
 /** Safe-to-serialize view. Deliberately has no field that could hold a key. */
-export interface ModelProviderView {
+interface ModelProviderView {
   id: string;
   kind: string;
   baseUrl: string;
@@ -55,7 +55,7 @@ export interface ModelProviderView {
   updatedAt: string;
 }
 
-export interface ModelProviderInput {
+interface ModelProviderInput {
   baseUrl: string;
   model: string;
   /** Omit to keep the stored key; null to remove it; a string to replace it. */
@@ -111,7 +111,7 @@ async function validate(input: ModelProviderInput): Promise<{
  * change. The `workspaceId` predicates are kept as well: the policy decides
  * what a caller MAY touch, the predicate says what this query is FOR.
  */
-export interface ProviderScope {
+interface ProviderScope {
   userId: string;
   workspaceId: string;
 }
@@ -329,7 +329,7 @@ async function resolveConfig(
   });
 }
 
-export interface ModelListInput {
+interface ModelListInput {
   /** Probe this endpoint instead of the stored one, so the picker works while
    * the connection form is still being filled in. Defaults to the stored URL. */
   baseUrl?: string;
@@ -338,7 +338,7 @@ export interface ModelListInput {
 }
 
 /** No connection saved and none supplied, so there is nothing to ask. */
-export type WorkspaceModelListOutcome =
+type WorkspaceModelListOutcome =
   | ModelListOutcome
   | { ok: false; error: { kind: "not_configured"; message: string } };
 
@@ -433,13 +433,13 @@ function budgetFor(req: {
  * number nobody chose, applied to a feature whose right ceiling depends on what
  * it generates; making it a compile error means a new caller has to decide.
  */
-export type WorkspaceModelRequest<T> = Omit<T, "maxTokens"> & {
+type WorkspaceModelRequest<T> = Omit<T, "maxTokens"> & {
   /** Upper bound on generated tokens. Counted against the cap before egress. */
   maxTokens: number;
 };
 
 /** Refused by this workspace's own spend cap, before anything was sent. */
-export interface CappedOutcome {
+interface CappedOutcome {
   kind: "capped";
   message: string;
 }

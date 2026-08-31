@@ -51,7 +51,7 @@ import { Textarea } from "@/components/ui/textarea";
  * enough that nobody navigates away in the gap without noticing. The unmount
  * flush covers them if they do.
  */
-export const ORDER_SAVE_DELAY_MS = 700;
+const ORDER_SAVE_DELAY_MS = 700;
 
 /**
  * Below this many skills, the A-to-Z control is not offered.

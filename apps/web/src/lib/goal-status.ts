@@ -22,7 +22,7 @@ import {
  */
 
 /** Text tone per status, from the shared semantic tokens. */
-export const GOAL_STATUS_TONE: Record<GoalStatus, string> = {
+const GOAL_STATUS_TONE: Record<GoalStatus, string> = {
   on_track: "text-[var(--success)]",
   at_risk: "text-[var(--warning)]",
   off_track: "text-destructive",

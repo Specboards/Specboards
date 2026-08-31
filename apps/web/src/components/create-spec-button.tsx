@@ -24,7 +24,7 @@ import type { LinkableRepo } from "@/lib/github-links-service";
  *   gains a document, it does not become a second card.
  * - `child` creates a brand-new spec and item, nested under the given card.
  */
-export type SpecCreateTarget =
+type SpecCreateTarget =
   | { kind: "attach"; workItemId: string; itemTitle: string }
   | { kind: "child"; parentSpecId: string; parentTitle: string };
 
