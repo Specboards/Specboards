@@ -49,6 +49,15 @@ export interface DbStoreContext {
   /** Verify a product id belongs to the workspace, returning it. */
   requireProductId(tx: Tx, ws: string, productId: string): Promise<string>;
   /**
+   * Every product in the workspace with its visibility, keyed by id. The other
+   * half of a read check: `accessIn` says what the caller may reach and this
+   * says what there is to reach, and `canReadProductId` needs both.
+   */
+  productVisibilityIn(
+    tx: Tx,
+    workspaceId: string,
+  ): Promise<Map<string, ProductVisibilityRow>>;
+  /**
    * Append a transactional-outbox row inside the caller's own transaction, so
    * the event commits atomically with the change that produced it. Shared by
    * every domain that emits: items, releases and goals.
