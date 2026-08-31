@@ -12,7 +12,7 @@ import type { GoalRecord } from "@/lib/store/types";
  */
 
 /** One labelled progress figure. `null` reads as "not measured", not 0%. */
-export function ProgressReadout({
+function ProgressReadout({
   label,
   hint,
   value,

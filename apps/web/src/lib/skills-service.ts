@@ -26,7 +26,7 @@ import {
  */
 
 /** Who is asking, and about which workspace. Both are needed: see the note above. */
-export interface SkillScope {
+interface SkillScope {
   userId: string;
   workspaceId: string;
 }

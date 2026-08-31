@@ -1,19 +1,18 @@
 import { and, eq, invitations, sql, users, type Database } from "@specboards/db";
 
 /**
- * Pre-v1 the hosted service is invite-only: public sign-up is closed and access
- * is granted by sending an org invitation (see invitations-service). This gate
- * enforces that at the auth layer so someone can't bypass the marketing site's
- * "Request access" flow by navigating straight to /sign-up.
+ * Who may open the door, pre-v1.
  *
- * Enabled on the hosted SaaS via `SPECBOARDS_INVITE_ONLY`; off by default so
- * self-host deployments keep open sign-up. Independent of
- * `SPECBOARDS_BLOCK_PUBLIC_EMAIL_DOMAINS` (which only restricts *which* domains).
+ * The hosted service is not open to the public yet. The gate in force is the
+ * sign-up code: only the *first* person from a company (email domain) has to
+ * present one, and every teammate after them signs up without it. A live org
+ * invitation is the other way in. Both are checked in auth.ts's `before` hook
+ * on `/sign-up/email`, and `assertSignUpCodeConfigured` refuses to boot a
+ * deployment that turns the gate on without setting a code.
+ *
+ * Self-host keeps open sign-up: everything here is off unless
+ * `SPECBOARDS_SIGNUP_CODE_REQUIRED` says otherwise.
  */
-export function inviteOnlyEnabled(): boolean {
-  const value = process.env.SPECBOARDS_INVITE_ONLY?.trim().toLowerCase();
-  return value === "1" || value === "true" || value === "yes";
-}
 
 /**
  * True when `email` has at least one invitation that is still redeemable: status

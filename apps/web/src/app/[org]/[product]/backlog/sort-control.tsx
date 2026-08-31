@@ -7,7 +7,7 @@ import { Select } from "@/components/ui/select";
 import type { SortMode } from "@/lib/feature-helpers";
 
 /** A selectable custom-field sort: `cf:<key>` value and its display label. */
-export interface CustomSortOption {
+interface CustomSortOption {
   value: string;
   label: string;
 }

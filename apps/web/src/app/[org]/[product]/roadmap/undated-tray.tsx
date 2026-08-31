@@ -8,7 +8,7 @@ import { StatusDot } from "@/components/status-dot";
 import { cn } from "@/lib/utils";
 
 /** One item that could not be placed on the axis. */
-export type UndatedItem = {
+type UndatedItem = {
   /** Stable key and link target for the item. */
   specId: string;
   title: string;

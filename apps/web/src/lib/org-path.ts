@@ -37,7 +37,6 @@ export function itemPath(
 // re-exported here since callers already import slug concerns from org-path.
 export {
   ORG_SLUG_MAX,
-  RESERVED_ORG_SLUGS,
   isReservedOrgSlug,
   slugifyOrg,
 } from "@specboards/core";

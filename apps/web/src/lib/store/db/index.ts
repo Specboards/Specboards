@@ -10,7 +10,6 @@ import {
   createDb,
   outboxEvents,
   sql,
-  specIndex,
   type Database,
 } from "@specboards/db";
 
@@ -988,4 +987,3 @@ export class DbStore implements FeatureStore, DbStoreContext {
   }
 }
 
-export { specIndex };

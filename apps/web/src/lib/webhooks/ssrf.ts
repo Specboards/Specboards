@@ -1,7 +1,6 @@
 import {
   isBlockedIp,
   resolveTarget,
-  type PinnedAddress,
   type TargetResolution,
   type UrlCheck,
 } from "@/lib/egress";
@@ -19,7 +18,6 @@ import { isMultiTenant } from "@/lib/tenancy";
  * target is not.
  */
 
-export type { PinnedAddress, TargetResolution, UrlCheck };
 export { isBlockedIp };
 
 /**

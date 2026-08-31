@@ -11,7 +11,7 @@
  * Uses Postmark's HTTP API directly — no SDK dependency.
  */
 
-export interface OutboundEmail {
+interface OutboundEmail {
   to: string;
   subject: string;
   textBody: string;

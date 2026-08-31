@@ -60,7 +60,7 @@ const FEATURE_LABELS: Record<string, string> = {
   connection_test: "Connection tests",
 };
 
-export function usageFeatureLabel(feature: string): string {
+function usageFeatureLabel(feature: string): string {
   return FEATURE_LABELS[feature] ?? feature;
 }
 
@@ -76,7 +76,7 @@ export interface UsageAttribution {
 }
 
 /** One recorded call. `null` tokens mean the endpoint reported nothing. */
-export interface UsageRecord extends UsageAttribution {
+interface UsageRecord extends UsageAttribution {
   workspaceId: string;
   model: string | null;
   promptTokens: number | null;
@@ -126,7 +126,7 @@ export async function recordUsage(
  * are member-level, the ledger is member-append, and the caps are org-admin
  * write.
  */
-export interface UsageScope {
+interface UsageScope {
   userId: string;
   workspaceId: string;
 }
@@ -139,7 +139,7 @@ export interface UsageLimits {
 }
 
 /** No row means nobody has ever set a cap, which is uncapped. */
-export const NO_LIMITS: UsageLimits = {
+const NO_LIMITS: UsageLimits = {
   monthlyTokenCap: null,
   dailyUserTokenCap: null,
   updatedAt: null,
@@ -175,7 +175,7 @@ export class UsageLimitInputError extends Error {}
  * number has stopped being a guardrail and is almost certainly a typo, and a
  * typo here is the difference between a cap and no cap at all.
  */
-export const MAX_TOKEN_CAP = 1_000_000_000;
+const MAX_TOKEN_CAP = 1_000_000_000;
 
 function parseCap(raw: unknown, field: string): number | null {
   if (raw === null || raw === undefined || raw === "") return null;
@@ -191,7 +191,7 @@ function parseCap(raw: unknown, field: string): number | null {
   return n;
 }
 
-export interface UsageLimitsInput {
+interface UsageLimitsInput {
   /** Blank, null or omitted all mean "no cap". */
   monthlyTokenCap?: number | string | null;
   dailyUserTokenCap?: number | string | null;
@@ -239,12 +239,12 @@ export async function saveUsageLimits(
 }
 
 /** Start of the current calendar month, UTC. */
-export function monthStart(now: Date = new Date()): Date {
+function monthStart(now: Date = new Date()): Date {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 }
 
 /** Start of the current day, UTC. */
-export function dayStart(now: Date = new Date()): Date {
+function dayStart(now: Date = new Date()): Date {
   return new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
   );
@@ -281,7 +281,7 @@ async function tokensSince(
 }
 
 /** Allowed, or refused with something a person can act on. */
-export type AllowanceDecision =
+type AllowanceDecision =
   | { allowed: true }
   | { allowed: false; scope: "workspace" | "user"; message: string };
 

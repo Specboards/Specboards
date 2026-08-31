@@ -42,7 +42,7 @@ export interface AgentView {
   } | null;
 }
 
-export interface AgentProduct {
+interface AgentProduct {
   id: string;
   name: string;
 }

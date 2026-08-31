@@ -281,7 +281,7 @@ export function assertCustomFieldTypes(
 }
 
 /** Options that change how a patch is applied, rather than what it sets. */
-export interface PatchOptions {
+interface PatchOptions {
   /**
    * Walk the item through the shortest legal chain of intermediate stages when
    * the requested status isn't reachable in one move. Without this, a strict
@@ -467,21 +467,21 @@ const BULK_PATCH_KEYS = ["status", "assigneeId", "releaseId", "cycleId"] as cons
 const BULK_MAX_ITEMS = 200;
 
 /** Tag mutations applied per item as a merge (not a wholesale replace). */
-export interface BulkTagOps {
+interface BulkTagOps {
   /** Tags to add to each item, deduped against its existing tags. */
   addTags?: string[];
   /** Remove every tag from each selected item. */
   clearTags?: boolean;
 }
 
-export interface BulkPatchRequest {
+interface BulkPatchRequest {
   specIds: string[];
   patch: FeaturePatch;
   tagOps: BulkTagOps;
 }
 
 /** A validated spec-body write: the Markdown, plus an optional commit message. */
-export interface SpecContentInput {
+interface SpecContentInput {
   content: string;
   message?: string;
   /**
@@ -538,7 +538,7 @@ export function parseSpecContentInput(body: unknown): SpecContentInput {
  * `parentSpecId`, which the route applies as a follow-up patch so the caller
  * gets "create it and nest it" as one action.
  */
-export interface SpecCreateInput {
+interface SpecCreateInput {
   title: string;
   body?: string;
   /** Existing leaf work item to attach the spec to (keeps its identity). */
@@ -616,14 +616,14 @@ export function parseSpecCreateInput(body: unknown): SpecCreateInput {
 }
 
 /** Outcome for one item in a bulk edit. */
-export interface BulkPatchItemResult {
+interface BulkPatchItemResult {
   specId: string;
   ok: boolean;
   /** Failure reason when `ok` is false (e.g. an illegal status transition). */
   error?: string;
 }
 
-export interface BulkPatchResult {
+interface BulkPatchResult {
   results: BulkPatchItemResult[];
   okCount: number;
   failCount: number;

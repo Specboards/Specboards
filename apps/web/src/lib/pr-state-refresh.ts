@@ -58,7 +58,7 @@ const MAX_PER_VIEW = 3;
  * to fail, and a stale state is a strictly better outcome than an error.
  */
 /** A pending spec change whose state is due to be confirmed again. */
-export interface StalePendingChange {
+interface StalePendingChange {
   id: string;
   number: number | null;
   state: string | null;

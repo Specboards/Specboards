@@ -28,7 +28,7 @@ import { useOrgProductPath } from "@/lib/use-org";
 import { cn } from "@/lib/utils";
 import { BulkActionBar, type BulkOptions } from "./bulk-action-bar";
 
-export interface BacklogRow {
+interface BacklogRow {
   feature: FeatureRecord;
   depth: number;
 }

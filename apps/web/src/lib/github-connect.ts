@@ -5,17 +5,17 @@ import { isE2E } from "@/lib/e2e";
 import { getGithubApp } from "@/lib/github-app";
 
 /** A GitHub App installation bound to the workspace. */
-export interface WorkspaceInstallation {
+interface WorkspaceInstallation {
   installationId: string;
   accountLogin: string;
   accountType: string;
 }
 
 /** A repo the workspace can connect, tagged with the installation it's from. */
-export type ConnectableRepo = InstallationRepo & { installationId: string };
+type ConnectableRepo = InstallationRepo & { installationId: string };
 
 /** The workspace's installations and every repo they can access. */
-export interface InstallationConnectState {
+interface InstallationConnectState {
   installations: WorkspaceInstallation[];
   repositories: ConnectableRepo[];
   /** Set when some repo lists couldn't be loaded (partial data is possible). */

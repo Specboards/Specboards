@@ -13,7 +13,7 @@ import { inferAdditionalFields } from "better-auth/client/plugins";
  * in sync with `user.additionalFields` in auth.ts) so `updateUser` is typed to
  * accept them — e.g. the profile `timezone`.
  */
-export const authClient = createAuthClient({
+const authClient = createAuthClient({
   plugins: [
     inferAdditionalFields({
       user: { timezone: { type: "string", required: false } },

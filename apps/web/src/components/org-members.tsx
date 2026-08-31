@@ -27,7 +27,7 @@ import type {
 } from "@/lib/store/types";
 
 /** A product the owner can grant invitees access to. */
-export interface InviteProduct {
+interface InviteProduct {
   id: string;
   name: string;
 }

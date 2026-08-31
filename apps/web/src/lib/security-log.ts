@@ -7,7 +7,7 @@
  * always one log line.
  */
 
-export type SecurityEvent =
+type SecurityEvent =
   | "rate-limit-exceeded"
   | "request-oversized"
   | "batch-oversized"

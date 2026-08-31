@@ -26,7 +26,7 @@ const RETENTION_HOURS = 24;
 /** Prune roughly this often, as a fraction of calls. */
 const PRUNE_PROBABILITY = 0.01;
 
-export type DeliveryClaim =
+type DeliveryClaim =
   | { ok: true }
   | { ok: false; reason: "duplicate" | "missing-id" };
 

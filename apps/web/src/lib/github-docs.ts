@@ -36,7 +36,7 @@ import { DocError, type DocSpace } from "@/lib/store/types";
  */
 const DOC_GLOBS = ["**/*.md"];
 
-export interface GithubDocFile {
+interface GithubDocFile {
   path: string;
   /** Raw Markdown at the default branch. */
   content: string;
@@ -45,7 +45,7 @@ export interface GithubDocFile {
 }
 
 /** One doc page as the repo tree describes it, without its Markdown. */
-export interface GithubDocEntry {
+interface GithubDocEntry {
   path: string;
   blobSha: string;
   /** Blob size in bytes, off the tree entry rather than the file's length. */
@@ -62,7 +62,7 @@ export interface GithubDocEntry {
  */
 const DOC_LIST_LIMIT = 500;
 
-export interface GithubDocRepo {
+interface GithubDocRepo {
   id: string;
   owner: string;
   name: string;
@@ -71,7 +71,7 @@ export interface GithubDocRepo {
 }
 
 /** The doc space's backing repositories row, or a DocError when unbound/gone. */
-export async function requireDocRepo(
+async function requireDocRepo(
   db: Database,
   workspaceId: string,
   space: DocSpace,

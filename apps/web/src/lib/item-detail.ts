@@ -40,7 +40,7 @@ import { canEditProducts } from "@/lib/workspace-access";
  * to fetch data and decide edit rights. Satisfied by both a page's `PageAccess`
  * and the API route's resolved read access. `null` is local file mode.
  */
-export type ItemDetailAccess = (WorkspaceScope & { role: MemberRole }) | null;
+type ItemDetailAccess = (WorkspaceScope & { role: MemberRole }) | null;
 
 /** A lightweight {specId,title} pick used by the parent/relation selectors. */
 export interface ItemRef {
@@ -288,7 +288,7 @@ export async function getItemDetailData(
 }
 
 /** Spec ids of all features below `rootSpecId` in the parent/child tree. */
-export function descendantSpecIds(
+function descendantSpecIds(
   rootSpecId: string,
   features: { specId: string; parentSpecId: string | null }[],
 ): Set<string> {

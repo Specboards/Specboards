@@ -62,7 +62,7 @@ export function parseDay(day: string | null | undefined): number | null {
 }
 
 /** The date fields a release contributes to the axis. */
-export interface ReleaseDates {
+interface ReleaseDates {
   startDate: string | null;
   targetDate: string | null;
   shippedDate: string | null;
@@ -506,7 +506,7 @@ export interface TimelineGroup {
 }
 
 /** Options that do not change the geometry, only what is drawn and how it fills. */
-export interface TimelineOptions {
+interface TimelineOptions {
   /**
    * Workflow statuses in order (archived excluded), for leaf progress. Omitted,
    * every bar reads 0% and the UI simply draws no fill.

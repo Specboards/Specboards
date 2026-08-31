@@ -184,7 +184,7 @@ function featureKeyFor(frontmatterFeature: string | undefined, path: string, spe
 export type ParentSetBy = "system" | "user" | null;
 
 /** What a re-sync should do with one spec's Feature parent (see decideReparent). */
-export type ReparentAction =
+type ReparentAction =
   /** Assign a system parent under the current grouping key (first import). */
   | { kind: "home" }
   /** Move the system parent to the grouping the frontmatter now points at. */
@@ -300,7 +300,7 @@ export async function getWorkspaceRepoConfig(
 }
 
 /** A spec file found in a repo during a read-only scan (no import performed). */
-export interface SpecScanItem {
+interface SpecScanItem {
   /** Path to the spec file within the repo. */
   path: string;
   /** Best-effort display title (frontmatter title, first heading, or folder name). */
@@ -310,7 +310,7 @@ export interface SpecScanItem {
 }
 
 /** The scan result for one connected repository. */
-export interface RepoScan {
+interface RepoScan {
   repoId: string;
   owner: string;
   name: string;
@@ -335,7 +335,7 @@ function titleFromPath(path: string): string {
  * so it never injects ids or writes to git/DB. Powers the onboarding "found N
  * specs, import them?" prompt before any cards are created.
  */
-export async function scanRepositorySpecs(db: Database, repo: RepoRecord): Promise<SpecScanItem[]> {
+async function scanRepositorySpecs(db: Database, repo: RepoRecord): Promise<SpecScanItem[]> {
   const client = await resolveRepoClient(db, repo);
   // Read globs from git config when present, but do not persist anything here.
   const config = await readRepoConfigFromGit(client);
@@ -412,7 +412,7 @@ What are we building?
 }
 
 /** Outcome of seeding a starter spec into a repo. */
-export interface StarterSpecResult {
+interface StarterSpecResult {
   /** Path of the spec file committed to the repo. */
   path: string;
   /** The import summary from syncing the repo after the commit. */

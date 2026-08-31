@@ -30,7 +30,7 @@ import { getGithubOauthCredentials } from "@/lib/github-app";
 const REFRESH_MARGIN_MS = 60_000;
 
 /** What a caller learns about a stored connection, minus the secret. */
-export interface GithubConnection {
+interface GithubConnection {
   githubLogin: string;
   connectedAt: string;
 }

@@ -22,7 +22,7 @@ export const CUSTOM_FIELD_PREFIX = "cf:";
  * which is name a card's children and its parent at whatever levels the
  * workspace has configured.
  */
-export const BUILTIN_CARD_FIELDS: CardFieldDef[] = [
+const BUILTIN_CARD_FIELDS: CardFieldDef[] = [
   { key: "assignee", label: "Assignee" },
   { key: "blocked", label: "Blocked badge" },
   { key: "epic", label: "Child progress" },
@@ -33,9 +33,7 @@ export const BUILTIN_CARD_FIELDS: CardFieldDef[] = [
 ];
 
 /** Fields shown when a user hasn't customized (matches the original board). */
-export const DEFAULT_CARD_FIELDS = ["blocked", "epic", "sub", "tags"];
-
-const BUILTIN_KEYS = new Set(BUILTIN_CARD_FIELDS.map((f) => f.key));
+const DEFAULT_CARD_FIELDS = ["blocked", "epic", "sub", "tags"];
 
 /** The full set of selectable fields, including the workspace's custom properties. */
 export function cardFieldCatalog(
@@ -62,11 +60,6 @@ export function resolveCardFields(
     fields: chosen.filter((k) => known.has(k)),
     featured: prefs?.featured ?? null,
   };
-}
-
-/** Whether a field key is one of the built-ins (vs a `cf:` custom property). */
-export function isBuiltinCardField(key: string): boolean {
-  return BUILTIN_KEYS.has(key);
 }
 
 /**

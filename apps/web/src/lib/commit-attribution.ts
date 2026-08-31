@@ -25,7 +25,7 @@ import { eq, users, type Database } from "@specboards/db";
  */
 
 /** Who to credit, resolved from the acting user. */
-export interface CommitAuthor {
+interface CommitAuthor {
   name: string;
   /**
    * A minted, non-routable address, never the user's real one.
@@ -76,7 +76,7 @@ export function attributionAddress(userId: string, name: string): string {
 }
 
 /** What the write is doing, which decides the verb in the subject. */
-export type SpecCommitAction = "update" | "create" | "remove";
+type SpecCommitAction = "update" | "create" | "remove";
 
 const VERB: Record<SpecCommitAction, { withAuthor: string; plain: string }> = {
   update: { withAuthor: "updated", plain: "update" },

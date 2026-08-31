@@ -71,7 +71,6 @@ import {
  * `doc-tools.ts` and are appended to `TOOLS` below.
  */
 
-export type { McpContext, McpTool } from "./types";
 
 /** Shared JSON Schema fragment for a spec id argument. */
 const specIdSchema = {

@@ -280,7 +280,7 @@ export function sseDataLines(buffer: string): { data: string[]; rest: string } {
 }
 
 /** What one streamed chunk contributes. Any field may be absent. */
-export interface StreamChunk {
+interface StreamChunk {
   text: string | null;
   model: string | null;
   usage: TokenUsage | null;

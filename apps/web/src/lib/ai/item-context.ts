@@ -71,7 +71,7 @@ export interface ItemContextInput {
   tags: string[];
 }
 
-export interface AssembledContext {
+interface AssembledContext {
   /** The system turn. Built from `fields` and nothing else. */
   systemPrompt: string;
   /** Exactly what the prompt was built from, in the order it appears in it. */

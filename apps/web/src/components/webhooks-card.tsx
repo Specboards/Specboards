@@ -22,7 +22,7 @@ import {
 } from "@/lib/webhooks/types";
 
 /** Endpoint shape the settings page serializes down (mirrors the store summary). */
-export interface WebhookEndpointView {
+interface WebhookEndpointView {
   id: string;
   url: string;
   productId: string | null;

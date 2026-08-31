@@ -13,9 +13,9 @@
  * pages, which is the normal, accepted trade-off for cursor pagination.
  */
 
-export const MAX_PAGE_LIMIT = 200;
+const MAX_PAGE_LIMIT = 200;
 
-export interface PageRequest {
+interface PageRequest {
   /** Page size (1..MAX_PAGE_LIMIT), or null when the caller wants everything. */
   limit: number | null;
   /** The decoded key to resume after, or null to start from the beginning. */

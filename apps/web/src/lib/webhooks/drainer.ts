@@ -68,7 +68,7 @@ export function startDrainer(): void {
 }
 
 /** Delete processed outbox events past the retention window, in bounded batches. */
-export async function pruneOnce(): Promise<void> {
+async function pruneOnce(): Promise<void> {
   if (RETENTION_DAYS <= 0) return;
   const db = getWorkerDb();
   if (!db) return;
@@ -102,7 +102,7 @@ export function drainSoon(): void {
  * kicks) never run concurrently; a trigger arriving mid-pass sets `rerun` so we
  * immediately sweep again, which drains a backlog larger than one batch.
  */
-export async function drainOnce(): Promise<void> {
+async function drainOnce(): Promise<void> {
   if (draining) {
     rerun = true;
     return;

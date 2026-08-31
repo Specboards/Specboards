@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
  * path with SPECBOARDS_CONFIG). Environment variables SPECBOARDS_URL and
  * SPECBOARDS_TOKEN take precedence over the file, so CI can run keyless of disk.
  */
-export interface CliConfig {
+interface CliConfig {
   baseUrl?: string;
   apiKey?: string;
   /**
@@ -19,7 +19,7 @@ export interface CliConfig {
   orgSlug?: string;
 }
 
-export function configPath(): string {
+function configPath(): string {
   return process.env.SPECBOARDS_CONFIG ?? join(homedir(), ".specboards", "config.json");
 }
 

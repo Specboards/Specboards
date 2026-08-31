@@ -102,13 +102,6 @@ export interface AssistantMessageView {
  */
 export type AssistantErrorKind = ModelErrorKind | "not_configured" | "capped";
 
-export type AssistantSendOutcome =
-  | { ok: true; turns: AssistantMessageView[] }
-  | {
-      ok: false;
-      error: { kind: AssistantErrorKind; message: string };
-    };
-
 /**
  * How many past turns are replayed to the model.
  *
@@ -140,6 +133,10 @@ export const MAX_TURN_CHARS = 8_000;
  * runs longer than that has stopped answering, and the bound turns "the model
  * decided to write an essay" from a surprise on the invoice into a reply that
  * stops.
+ *
+ * @public Reached only through `await import(...)` in the integration suite,
+ * which loads this module after its environment is set up. knip cannot follow a
+ * dynamic namespace import to a named member, so without this it reads as dead.
  */
 export const ANSWER_MAX_TOKENS = 2_000;
 
@@ -250,7 +247,7 @@ export async function resolveAssistantItem(
  * estimating what it costs are all the same job whatever it is about, and the
  * moment they are not is the moment two copies of them start disagreeing.
  */
-export type ThreadSubject =
+type ThreadSubject =
   | { kind: "item"; featureId: string }
   | { kind: "release"; releaseId: string };
 
@@ -308,7 +305,13 @@ export async function readThread(
   return rows.map(toView);
 }
 
-/** The whole thread for an item, oldest first. Empty when nobody has asked. */
+/**
+ * The whole thread for an item, oldest first. Empty when nobody has asked.
+ *
+ * @public Reached only through `await import(...)` in the integration suite,
+ * which loads this module after its environment is set up. knip cannot follow a
+ * dynamic namespace import to a named member, so without this it reads as dead.
+ */
 export async function listAssistantThread(
   db: Database,
   scope: WorkspaceScope,
@@ -319,7 +322,7 @@ export async function listAssistantThread(
 }
 
 /** Everything the panel needs to render, in one item resolution. */
-export interface AssistantPanelData {
+interface AssistantPanelData {
   messages: AssistantMessageView[];
   context: ContextField[];
   modelConnected: boolean;

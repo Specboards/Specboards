@@ -28,7 +28,7 @@ const SCOPE_COPY: Record<string, string> = {
 };
 
 /** A workspace the signed-in user may authorize the connection for. */
-export interface ConsentWorkspace {
+interface ConsentWorkspace {
   id: string;
   name: string;
   slug: string;

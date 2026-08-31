@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
  * `ideaStageColors` token map; custom stages fall back to a neutral gray.
  * Render as a decorative, label-paired swatch via inline `background-color`.
  */
-export function ideaDotColor(status: string): string {
+function ideaDotColor(status: string): string {
   return ideaStageColors[status]?.dot ?? "#a1a1aa";
 }
 

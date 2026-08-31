@@ -25,7 +25,7 @@ import {
 } from "@/lib/org-path";
 import { isMultiTenant } from "@/lib/tenancy";
 
-export type Workspace = typeof workspaces.$inferSelect;
+type Workspace = typeof workspaces.$inferSelect;
 export type Member = typeof members.$inferSelect;
 export type MemberRole = Member["role"];
 
@@ -179,7 +179,7 @@ export type ApiMembershipError =
   | { code: "not_a_member" }
   | { code: "org_ambiguous" };
 
-export type ApiMembershipResult =
+type ApiMembershipResult =
   | { ok: true; membership: Member }
   | { ok: false; error: ApiMembershipError };
 
@@ -266,7 +266,7 @@ export async function workspaceSlug(
 }
 
 /** Look up a workspace by its URL slug, or null when no such org exists. */
-export async function getWorkspaceBySlug(
+async function getWorkspaceBySlug(
   db: Database,
   slug: string,
 ): Promise<Workspace | null> {
@@ -364,7 +364,7 @@ function isUniqueViolation(err: unknown): boolean {
 }
 
 /** Why a chosen org slug can't be used, so the setup form can react precisely. */
-export type WorkspaceSlugErrorCode = "slug_taken" | "slug_invalid";
+type WorkspaceSlugErrorCode = "slug_taken" | "slug_invalid";
 
 /**
  * A requested org slug is unavailable (already taken, reserved, or empty).

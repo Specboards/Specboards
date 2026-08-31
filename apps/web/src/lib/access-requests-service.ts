@@ -12,7 +12,7 @@ import { accessRequests, sql, type Database } from "@specboards/db";
  * pre-release beta.
  */
 
-export interface AccessRequestInput {
+interface AccessRequestInput {
   name: string;
   email: string;
   company: string;
@@ -20,7 +20,7 @@ export interface AccessRequestInput {
   useCase: string;
 }
 
-export interface AccessRequestRow {
+interface AccessRequestRow {
   id: string;
   name: string;
   email: string;

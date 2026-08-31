@@ -17,7 +17,7 @@ export const GROUP_SLUG_PREFIX = "~";
  * What the `/{org}/{product}/…` segment resolves to: every product ("all"),
  * one product, or a product group (with the products in its subtree).
  */
-export type ActiveScope =
+type ActiveScope =
   | { kind: "all" }
   | { kind: "product"; product: ProductRecord }
   | {

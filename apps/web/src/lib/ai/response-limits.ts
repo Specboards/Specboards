@@ -71,7 +71,7 @@ export const MAX_STREAM_BYTES = 1_000_000 * 8;
 export const MAX_STREAM_MS = 10 * 60_000;
 
 /** Which ceiling a stream hit, or null while it is behaving. */
-export type StreamLimit = "line" | "total" | "time";
+type StreamLimit = "line" | "total" | "time";
 
 /**
  * The stream ceilings as one decision, separate from the reading loop.
@@ -125,7 +125,7 @@ export function describeStreamLimit(limit: StreamLimit): string {
  * satisfy this, and so does a hand-rolled stub in a test, which is the point:
  * the limits are worth exercising without a live endpoint.
  */
-export interface BoundedResponse {
+interface BoundedResponse {
   body: {
     getReader(): {
       read(): Promise<{ done: boolean; value?: Uint8Array }>;

@@ -18,7 +18,7 @@ import { InvalidPatchError } from "@/lib/features-service";
  */
 
 /** One repo's product links as the settings UI consumes them. */
-export interface RepoProductLinks {
+interface RepoProductLinks {
   repoId: string;
   productIds: string[];
   /** The product sync assigns new specs to, or null when link-less (the

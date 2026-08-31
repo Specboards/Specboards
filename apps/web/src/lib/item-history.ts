@@ -26,7 +26,7 @@ export interface HistoryContext {
 }
 
 /** One history entry, ready to render. */
-export interface HistoryEntry {
+interface HistoryEntry {
   id: string;
   /** Who made the change, already allowing for automations. */
   actor: string;

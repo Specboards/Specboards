@@ -26,7 +26,7 @@ import {
 /** A bad request body (invalid URL, unknown event type, etc.). Routes map to 422. */
 export class WebhookInputError extends Error {}
 
-export type CreatedEndpoint = {
+type CreatedEndpoint = {
   endpoint: WebhookEndpointSummary;
   /** Plaintext signing secret, shown to the admin exactly once. */
   secret: string;

@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/card";
 import { describeStoredGrant } from "@/lib/mcp/connection-grants";
 
-export interface ConnectedAgentView {
+interface ConnectedAgentView {
   clientId: string;
   clientName: string | null;
   workspaceName: string;

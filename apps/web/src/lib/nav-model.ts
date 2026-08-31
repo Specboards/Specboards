@@ -31,12 +31,12 @@ export interface NavItem {
   productScoped?: boolean;
 }
 
-export interface NavGroup {
+interface NavGroup {
   label?: string;
   items: NavItem[];
 }
 
-export const GROUPS: NavGroup[] = [
+const GROUPS: NavGroup[] = [
   {
     // Sits above Plan: where you look to see how the work is actually going,
     // before drilling into a single product's plan. Dashboard is the state of
