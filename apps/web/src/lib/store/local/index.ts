@@ -143,7 +143,7 @@ import {
   type ActivitySummary,
   type ItemEvent,
   type WorkspaceScope,
-} from "./types";
+} from "../types";
 
 /** A DB-native work item (initiative/epic) persisted in local file mode. */
 interface LocalItem {
