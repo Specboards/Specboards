@@ -3,18 +3,11 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 
 import {
-  DEFAULT_PRODUCT_KEY,
-  descendantGroupIds,
-  groupKeyFromName,
   isPropertyType,
   leafLevel,
   DEFAULT_STATUSES,
-  LOCAL_PRODUCT_ACCESS,
   parseRepoConfigYaml,
   parseSpec,
-  productKeyFromName,
-  wouldCreateCycle,
-  wouldExceedDepth,
   propertyKeyFromLabel,
   resolveLevels,
   resolveLevelUpdate,
@@ -29,6 +22,7 @@ import { riceFields } from "@/lib/feature-helpers";
 
 import { emptyGithubSummary, isDone, type LocalStoreContext } from "./context";
 import { localPath, specsDir } from "./paths";
+import * as productStore from "./products";
 import * as ideaStore from "./ideas";
 import * as itemWriteStore from "./items-write";
 import * as itemReadStore from "./items-read";
@@ -47,9 +41,7 @@ import {
 } from "./types";
 import {
   DetailTemplateError,
-  GroupError,
   LevelError,
-  ProductError,
   PropertyError,
   type CommentInput,
   type CommentRecord,
@@ -93,10 +85,7 @@ import {
   type IdeaSettings,
   type IdeaSettingsPatch,
   type BlockingEdge,
-  type GroupProductSummary,
   type GroupSummary,
-  SIGNAL_SAMPLE_LIMIT,
-  type SignalItem,
   type WorkspaceSummary,
   type WorkspaceSummaryOptions,
   type ProductAccess,
@@ -131,40 +120,6 @@ import {
   type WorkspaceScope,
 } from "../types";
 
-/** A product (sibling backlog) persisted in local file mode. */
-interface LocalProduct {
-  id: string;
-  key: string;
-  name: string;
-  description: string | null;
-  visibility: "org" | "private";
-  position: number;
-  color?: string | null;
-  groupId?: string | null;
-}
-
-/** A product group persisted in local file mode. */
-interface LocalProductGroup {
-  id: string;
-  key: string;
-  name: string;
-  description: string | null;
-  color: string | null;
-  parentId: string | null;
-  position: number;
-}
-
-/** The default product seeded when none is persisted (id is stable). */
-const LOCAL_DEFAULT_PRODUCT: LocalProduct = {
-  id: "default",
-  key: DEFAULT_PRODUCT_KEY,
-  name: "General",
-  description: null,
-  visibility: "org",
-  position: 0,
-  color: null,
-};
-
 /**
  * Zero-setup store for local testing: specs are read straight from the
  * repository's `specs/` directory and PM metadata is persisted to
@@ -179,59 +134,13 @@ export class LocalFileStore implements FeatureStore, LocalStoreContext {
    */
   constructor(readonly root: string) {}
 
-  /** Persisted products, seeded with the default product when none exist. */
-  private async readProducts(): Promise<LocalProduct[]> {
-    try {
-      const rows = JSON.parse(
-        await fs.readFile(localPath(this.root, "products"), "utf8"),
-      ) as LocalProduct[];
-      if (rows.length > 0) return rows;
-    } catch {
-      /* fall through to the seed */
-    }
-    return [{ ...LOCAL_DEFAULT_PRODUCT }];
-  }
-
-  private async writeProducts(rows: LocalProduct[]): Promise<void> {
-    await fs.mkdir(path.dirname(localPath(this.root, "products")), {
-      recursive: true,
-    });
-    await fs.writeFile(
-      localPath(this.root, "products"),
-      JSON.stringify(rows, null, 2) + "\n",
-      "utf8",
-    );
-  }
-
-  private async readGroups(): Promise<LocalProductGroup[]> {
-    try {
-      return JSON.parse(
-        await fs.readFile(localPath(this.root, "productGroups"), "utf8"),
-      ) as LocalProductGroup[];
-    } catch {
-      return [];
-    }
-  }
-
-  private async writeGroups(rows: LocalProductGroup[]): Promise<void> {
-    await fs.mkdir(path.dirname(localPath(this.root, "productGroups")), {
-      recursive: true,
-    });
-    await fs.writeFile(
-      localPath(this.root, "productGroups"),
-      JSON.stringify(rows, null, 2) + "\n",
-      "utf8",
-    );
-  }
-
-  /** The default product id (the seeded "default", or the first product). */
-  async defaultProductId(): Promise<string> {
-    const products = await this.readProducts();
-    return (
-      products.find((p) => p.key === DEFAULT_PRODUCT_KEY)?.id ??
-      products[0]?.id ??
-      LOCAL_DEFAULT_PRODUCT.id
-    );
+  /**
+   * A `LocalStoreContext` member whose implementation lives with the products,
+   * so there is one of it rather than two. Same pattern as `levelsIn` on the
+   * Postgres side.
+   */
+  defaultProductId(): Promise<string> {
+    return productStore.defaultProductId(this);
   }
 
   /** The configured hierarchy levels, or null when none are persisted. */
@@ -1347,428 +1256,103 @@ export class LocalFileStore implements FeatureStore, LocalStoreContext {
   // `deleteProduct` is out of place: it sits after `getWorkspaceSummary` at the
   // end of this block rather than with the other product mutations.
   // ==========================================================================
+  //
+  // Implemented in ./products.ts. The bodies moved verbatim; these delegate
+  // so that `LocalFileStore` stays the one thing callers hold.
 
-  // Products. Local file mode is a single all-powerful user (see core
-  // LOCAL_PRODUCT_ACCESS), so visibility/permissions aren't enforced; products
-  // persist to `.specboards/local-products.json` for switcher parity.
-  async getProductAccess(_scope?: WorkspaceScope): Promise<ProductAccess> {
-    return LOCAL_PRODUCT_ACCESS;
+  getProductAccess(scope?: WorkspaceScope): Promise<ProductAccess> {
+    return productStore.getProductAccess(scope);
   }
 
-  /** Item counts per product, derived from all features (specs + items). */
-  private async productItemCounts(): Promise<Map<string, number>> {
-    const features = await this.loadAll();
-    const out = new Map<string, number>();
-    for (const f of features) {
-      if (f.productId) out.set(f.productId, (out.get(f.productId) ?? 0) + 1);
-    }
-    return out;
+  listProducts(scope?: WorkspaceScope): Promise<ProductRecord[]> {
+    return productStore.listProducts(this, scope);
   }
 
-  private toProductRecord(
-    p: LocalProduct,
-    counts: Map<string, number>,
-  ): ProductRecord {
-    return {
-      id: p.id,
-      key: p.key,
-      name: p.name,
-      description: p.description,
-      visibility: p.visibility,
-      position: p.position,
-      color: p.color ?? null,
-      groupId: p.groupId ?? null,
-      itemCount: counts.get(p.id) ?? 0,
-      viewerRole: null,
-    };
-  }
-
-  async listProducts(_scope?: WorkspaceScope): Promise<ProductRecord[]> {
-    const [products, counts] = await Promise.all([
-      this.readProducts(),
-      this.productItemCounts(),
-    ]);
-    return products
-      .sort((a, b) => a.position - b.position || a.name.localeCompare(b.name))
-      .map((p) => this.toProductRecord(p, counts));
-  }
-
-  async getProduct(
+  getProduct(
     key: string,
-    _scope?: WorkspaceScope,
+    scope?: WorkspaceScope,
   ): Promise<ProductRecord | null> {
-    const products = await this.readProducts();
-    const p = products.find((x) => x.key === key);
-    if (!p) return null;
-    return this.toProductRecord(p, await this.productItemCounts());
+    return productStore.getProduct(this, key, scope);
   }
 
-  async createProduct(
+  createProduct(
     input: CreateProductInput,
-    _scope?: WorkspaceScope,
+    scope?: WorkspaceScope,
   ): Promise<ProductRecord> {
-    const name = input.name.trim();
-    if (!name) throw new ProductError("Product name is required.");
-    const products = await this.readProducts();
-    const key = productKeyFromName(name, new Set(products.map((p) => p.key)));
-    const product: LocalProduct = {
-      id: randomUUID(),
-      key,
-      name,
-      description: input.description ?? null,
-      visibility: input.visibility ?? "org",
-      color: input.color ?? null,
-      position: products.reduce((m, p) => Math.max(m, p.position), -1) + 1,
-    };
-    await this.writeProducts([...products, product]);
-    return this.toProductRecord(product, new Map());
+    return productStore.createProduct(this, input, scope);
   }
 
-  async updateProduct(
+  updateProduct(
     id: string,
     patch: ProductPatch,
-    _scope?: WorkspaceScope,
+    scope?: WorkspaceScope,
   ): Promise<ProductRecord> {
-    const products = await this.readProducts();
-    const p = products.find((x) => x.id === id);
-    if (!p) throw new ProductError(`Unknown product: ${id}`);
-    if (patch.name !== undefined) {
-      const name = patch.name.trim();
-      if (!name) throw new ProductError("Product name is required.");
-      p.name = name;
-    }
-    if (patch.description !== undefined) p.description = patch.description;
-    if (patch.visibility !== undefined) p.visibility = patch.visibility;
-    if (patch.position !== undefined) p.position = patch.position;
-    if (patch.color !== undefined) p.color = patch.color;
-    if (patch.groupId !== undefined) {
-      if (patch.groupId !== null) {
-        const groups = await this.readGroups();
-        if (!groups.some((g) => g.id === patch.groupId)) {
-          throw new GroupError(`Unknown product group: ${patch.groupId}`);
-        }
-      }
-      p.groupId = patch.groupId;
-    }
-    await this.writeProducts(products);
-    return this.toProductRecord(p, await this.productItemCounts());
+    return productStore.updateProduct(this, id, patch, scope);
   }
 
-  async listProductGroups(
-    _scope?: WorkspaceScope,
-  ): Promise<ProductGroupRecord[]> {
-    const [groups, products] = await Promise.all([
-      this.readGroups(),
-      this.readProducts(),
-    ]);
-    return groups
-      .sort((a, b) => a.position - b.position || a.name.localeCompare(b.name))
-      .map((g) => ({
-        ...g,
-        productCount: products.filter((p) => p.groupId === g.id).length,
-      }));
+  deleteProduct(id: string, scope?: WorkspaceScope): Promise<void> {
+    return productStore.deleteProduct(this, id, scope);
   }
 
-  async createProductGroup(
+  listProductGroups(scope?: WorkspaceScope): Promise<ProductGroupRecord[]> {
+    return productStore.listProductGroups(this, scope);
+  }
+
+  createProductGroup(
     input: CreateProductGroupInput,
-    _scope?: WorkspaceScope,
+    scope?: WorkspaceScope,
   ): Promise<ProductGroupRecord> {
-    const name = input.name.trim();
-    if (!name) throw new GroupError("Group name is required.");
-    const groups = await this.readGroups();
-    const parentId = input.parentId ?? null;
-    if (parentId) {
-      if (!groups.some((g) => g.id === parentId)) {
-        throw new GroupError(`Unknown product group: ${parentId}`);
-      }
-      if (wouldExceedDepth(groups, "new-group", parentId)) {
-        throw new GroupError("Groups can only be nested a few levels deep.");
-      }
-    }
-    const group: LocalProductGroup = {
-      id: randomUUID(),
-      key: groupKeyFromName(name, new Set(groups.map((g) => g.key))),
-      name,
-      description: input.description ?? null,
-      color: input.color ?? null,
-      parentId,
-      position: groups.reduce((m, g) => Math.max(m, g.position), -1) + 1,
-    };
-    await this.writeGroups([...groups, group]);
-    return { ...group, productCount: 0 };
+    return productStore.createProductGroup(this, input, scope);
   }
 
-  async updateProductGroup(
+  updateProductGroup(
     id: string,
     patch: ProductGroupPatch,
-    _scope?: WorkspaceScope,
+    scope?: WorkspaceScope,
   ): Promise<ProductGroupRecord> {
-    const groups = await this.readGroups();
-    const g = groups.find((x) => x.id === id);
-    if (!g) throw new GroupError(`Unknown product group: ${id}`);
-    if (patch.name !== undefined) {
-      const name = patch.name.trim();
-      if (!name) throw new GroupError("Group name is required.");
-      g.name = name;
-    }
-    if (patch.description !== undefined) g.description = patch.description;
-    if (patch.color !== undefined) g.color = patch.color;
-    if (patch.position !== undefined) g.position = patch.position;
-    if (patch.parentId !== undefined) {
-      if (patch.parentId !== null) {
-        if (!groups.some((x) => x.id === patch.parentId)) {
-          throw new GroupError(`Unknown product group: ${patch.parentId}`);
-        }
-        if (wouldCreateCycle(groups, id, patch.parentId)) {
-          throw new GroupError(
-            "A group can't be nested inside itself or its own subgroups.",
-          );
-        }
-        if (wouldExceedDepth(groups, id, patch.parentId)) {
-          throw new GroupError("Groups can only be nested a few levels deep.");
-        }
-      }
-      g.parentId = patch.parentId;
-    }
-    await this.writeGroups(groups);
-    const products = await this.readProducts();
-    return {
-      ...g,
-      productCount: products.filter((p) => p.groupId === g.id).length,
-    };
+    return productStore.updateProductGroup(this, id, patch, scope);
   }
 
-  async deleteProductGroup(id: string, _scope?: WorkspaceScope): Promise<void> {
-    const groups = await this.readGroups();
-    if (!groups.some((g) => g.id === id)) {
-      throw new GroupError(`Unknown product group: ${id}`);
-    }
-    if (groups.some((g) => g.parentId === id)) {
-      throw new GroupError(
-        "Can't delete a group while it still has subgroups.",
-      );
-    }
-    const products = await this.readProducts();
-    if (products.some((p) => p.groupId === id)) {
-      throw new GroupError("Can't delete a group while it still has products.");
-    }
-    await this.writeGroups(groups.filter((g) => g.id !== id));
+  deleteProductGroup(id: string, scope?: WorkspaceScope): Promise<void> {
+    return productStore.deleteProductGroup(this, id, scope);
   }
 
-  async getGroupSummary(
-    id: string,
-    _scope?: WorkspaceScope,
-  ): Promise<GroupSummary> {
-    const [groups, products, allFeatures] = await Promise.all([
-      this.readGroups(),
-      this.readProducts(),
-      this.loadAll(),
-    ]);
-    const group = groups.find((g) => g.id === id);
-    if (!group) throw new GroupError(`Unknown product group: ${id}`);
-
-    const subtree = descendantGroupIds(groups, id);
-    const member = products.filter((p) => p.groupId && subtree.has(p.groupId));
-    const summaries = new Map<string, GroupProductSummary>(
-      member.map((p) => [
-        p.id,
-        { productId: p.id, itemCount: 0, statusCounts: {}, releases: [] },
-      ]),
-    );
-    const releaseTotals = new Map<
-      string,
-      Map<string, { total: number; done: number }>
-    >();
-    for (const f of allFeatures) {
-      if (!f.productId) continue;
-      const summary = summaries.get(f.productId);
-      if (!summary) continue;
-      summary.itemCount += 1;
-      summary.statusCounts[f.status] =
-        (summary.statusCounts[f.status] ?? 0) + 1;
-      if (f.releaseId) {
-        const byRelease =
-          releaseTotals.get(f.productId) ??
-          new Map<string, { total: number; done: number }>();
-        releaseTotals.set(f.productId, byRelease);
-        const entry = byRelease.get(f.releaseId) ?? { total: 0, done: 0 };
-        entry.total += 1;
-        if (f.status === "done") entry.done += 1;
-        byRelease.set(f.releaseId, entry);
-      }
-    }
-    for (const [productId, byRelease] of releaseTotals) {
-      const summary = summaries.get(productId);
-      if (!summary) continue;
-      summary.releases = [...byRelease.entries()].map(
-        ([releaseId, { total, done }]) => ({ releaseId, total, done }),
-      );
-    }
-
-    const productCount = (gid: string) =>
-      products.filter((p) => p.groupId === gid).length;
-    return {
-      group: { ...group, productCount: productCount(group.id) },
-      subgroups: groups
-        .filter((g) => g.parentId === id)
-        .sort((a, b) => a.position - b.position || a.name.localeCompare(b.name))
-        .map((g) => ({ ...g, productCount: productCount(g.id) })),
-      products: [...member]
-        .sort((a, b) => a.position - b.position || a.name.localeCompare(b.name))
-        .map((p) => summaries.get(p.id)!),
-    };
+  getGroupSummary(id: string, scope?: WorkspaceScope): Promise<GroupSummary> {
+    return productStore.getGroupSummary(this, id, scope);
   }
 
-  async listBlockingEdges(_scope?: WorkspaceScope): Promise<BlockingEdge[]> {
-    const [meta, features] = await Promise.all([
-      this.readMetadata(),
-      this.loadAll(),
-    ]);
-    const known = new Set(features.map((f) => f.specId));
-    const out: BlockingEdge[] = [];
-    for (const [fromSpec, m] of Object.entries(meta)) {
-      for (const link of m.links ?? []) {
-        // Same rule as the relation counts: both ends must resolve to a real
-        // item, so a link to a deleted spec is not drawn.
-        if (link.type !== "blocks") continue;
-        if (!known.has(fromSpec) || !known.has(link.to)) continue;
-        out.push({ blockerSpecId: fromSpec, blockedSpecId: link.to });
-      }
-    }
-    return out;
+  listBlockingEdges(scope?: WorkspaceScope): Promise<BlockingEdge[]> {
+    return productStore.listBlockingEdges(this, scope);
   }
 
-  async getWorkspaceSummary(
+  getWorkspaceSummary(
     options: WorkspaceSummaryOptions,
-    _scope?: WorkspaceScope,
+    scope?: WorkspaceScope,
   ): Promise<WorkspaceSummary> {
-    const [products, allFeatures, releases, doneKey] = await Promise.all([
-      this.readProducts(),
-      this.loadAll(),
-      this.listReleases(),
-      this.doneStatusKey(),
-    ]);
-
-    // Same aggregation as getGroupSummary, over every product rather than one
-    // subtree. File mode is single-user, so everything is readable.
-    const summaries = new Map<string, GroupProductSummary>(
-      products.map((p) => [
-        p.id,
-        { productId: p.id, itemCount: 0, statusCounts: {}, releases: [] },
-      ]),
-    );
-    const releaseTotals = new Map<
-      string,
-      Map<string, { total: number; done: number }>
-    >();
-    for (const f of allFeatures) {
-      if (!f.productId) continue;
-      const summary = summaries.get(f.productId);
-      if (!summary) continue;
-      summary.itemCount += 1;
-      summary.statusCounts[f.status] =
-        (summary.statusCounts[f.status] ?? 0) + 1;
-      if (f.releaseId) {
-        const byRelease =
-          releaseTotals.get(f.productId) ??
-          new Map<string, { total: number; done: number }>();
-        releaseTotals.set(f.productId, byRelease);
-        const entry = byRelease.get(f.releaseId) ?? { total: 0, done: 0 };
-        entry.total += 1;
-        if (isDone(f.status, doneKey)) entry.done += 1;
-        byRelease.set(f.releaseId, entry);
-      }
-    }
-    for (const [productId, byRelease] of releaseTotals) {
-      const summary = summaries.get(productId);
-      if (!summary) continue;
-      summary.releases = [...byRelease.entries()].map(
-        ([releaseId, { total, done }]) => ({ releaseId, total, done }),
-      );
-    }
-
-    const live = allFeatures.filter(
-      (f) => f.status !== "archived" && !isDone(f.status, doneKey),
-    );
-    const signal = (f: (typeof live)[number]): SignalItem => ({
-      specId: f.specId,
-      title: f.title,
-      level: f.level,
-      status: f.status,
-      productId: f.productId,
-      releaseId: f.releaseId,
-    });
-    const overdueReleases = new Set(
-      releases
-        .filter(
-          (r) =>
-            r.status !== "shipped" &&
-            r.targetDate !== null &&
-            r.targetDate < options.today,
-        )
-        .map((r) => r.id),
-    );
-    const blocked = live.filter((f) => f.blockedByCount > 0).map(signal);
-    const overdue = live
-      .filter((f) => f.releaseId && overdueReleases.has(f.releaseId))
-      .map(signal);
-    // File mode keeps no per-item updated_at, so staleness is unknowable here.
-    // Reporting an empty list is honest; inventing one from file mtimes would
-    // measure when the repo was cloned, not when the work last moved.
-    return {
-      products: [...products]
-        .sort((a, b) => a.position - b.position || a.name.localeCompare(b.name))
-        .map((p) => summaries.get(p.id)!),
-      signals: {
-        blocked: blocked.slice(0, SIGNAL_SAMPLE_LIMIT),
-        overdue: overdue.slice(0, SIGNAL_SAMPLE_LIMIT),
-        stale: [],
-        counts: {
-          blocked: blocked.length,
-          overdue: overdue.length,
-          stale: 0,
-        },
-      },
-    };
+    return productStore.getWorkspaceSummary(this, options, scope);
   }
 
-  async deleteProduct(id: string, _scope?: WorkspaceScope): Promise<void> {
-    const counts = await this.productItemCounts();
-    if ((counts.get(id) ?? 0) > 0) {
-      throw new ProductError(
-        "Can't delete a product while it still has work items.",
-      );
-    }
-    const products = await this.readProducts();
-    if (!products.some((p) => p.id === id))
-      throw new ProductError(`Unknown product: ${id}`);
-    await this.writeProducts(products.filter((p) => p.id !== id));
-  }
-
-  // Membership needs real user records, which file mode doesn't have.
-  async listProductMembers(
-    _productId: string,
-    _scope?: WorkspaceScope,
+  listProductMembers(
+    productId: string,
+    scope?: WorkspaceScope,
   ): Promise<ProductMemberRecord[]> {
-    return [];
+    return productStore.listProductMembers(productId, scope);
   }
 
-  async setProductMember(
-    _productId: string,
-    _input: ProductMemberInput,
-    _scope?: WorkspaceScope,
+  setProductMember(
+    productId: string,
+    input: ProductMemberInput,
+    scope?: WorkspaceScope,
   ): Promise<void> {
-    throw new ProductError(
-      "Managing product members requires authentication (not available in local file mode).",
-    );
+    return productStore.setProductMember(productId, input, scope);
   }
 
-  async removeProductMember(
-    _productId: string,
-    _userId: string,
-    _scope?: WorkspaceScope,
+  removeProductMember(
+    productId: string,
+    userId: string,
+    scope?: WorkspaceScope,
   ): Promise<void> {
-    // Nothing to remove in file mode.
+    return productStore.removeProductMember(productId, userId, scope);
   }
 
   // ==========================================================================
