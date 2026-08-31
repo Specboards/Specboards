@@ -60,6 +60,14 @@ jobs:
       # eslint.config.mjs. This used to be scoped to the web app because the
       # other packages had `lint` scripts with no eslint installed to run.
       - run: pnpm -w lint
+
+      # Dead-code gate, the other half of the lint one above. `no-unused-vars`
+      # sees inside a file; knip sees across the workspace, so an export nothing
+      # imports, a file nothing reaches, and a dependency nothing needs all fail
+      # here. Runs after build because knip resolves the workspace's own
+      # packages. Config and the reasoning behind each suppression: knip.ts.
+      - run: pnpm -w knip
+
       - run: pnpm -w test
 
       # E2E: apply migrations, install the browser, run the onboarding suite
