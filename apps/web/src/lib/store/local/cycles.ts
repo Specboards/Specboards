@@ -7,6 +7,11 @@
  * finished is the workflow's terminal stage rather than the literal string
  * "done", which is why this module asks the context for `doneStatusKey`.
  *
+ * What is absent is the authorization: file mode has no product roles, so the
+ * per-product write checks db/cycles.ts makes have no counterpart here. Every
+ * other rule is the same, including name uniqueness per scope, date validation,
+ * unscheduling on delete, and finished work staying put on rollover.
+ *
  * These were methods on `LocalFileStore` and are now functions taking the store
  * as `ctx`. The bodies are unchanged; the store delegates to them so no caller
  * moved. See ./context.ts.
