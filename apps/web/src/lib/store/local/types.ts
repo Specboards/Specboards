@@ -6,12 +6,20 @@
  * to agree on: the DB-native item, the metadata laid over a spec-backed one,
  * and the relation edges between them.
  *
+ * The three link helpers are here too, because a stored edge only means
+ * anything alongside the shape it is stored in: which id it gets, which way
+ * it points from one side, and how a viewer-relative direction becomes one.
+ *
  * These are the on-disk contract. Changing a field name here changes what an
  * existing `.specboards/` directory means, so treat it as a migration rather
  * than a rename.
  */
 
-import type { CustomFieldValue } from "../types";
+import type {
+  CustomFieldValue,
+  RelationDirection,
+  RelationInput,
+} from "../types";
 
 /** The single acting user in local (auth-disabled) file mode. */
 export const LOCAL_USER = "local";
@@ -43,10 +51,10 @@ export interface LocalItem {
   riceEffort?: number | null;
 }
 
-export type LocalLinkType = "blocks" | "relates_to" | "duplicates";
+type LocalLinkType = "blocks" | "relates_to" | "duplicates";
 
 /** A relation stored canonically on the `from` spec's metadata. */
-export interface LocalLink {
+interface LocalLink {
   to: string;
   type: LocalLinkType;
 }
@@ -75,3 +83,43 @@ export interface LocalMetadata {
 }
 
 export type MetadataFile = Record<string, LocalMetadata>;
+
+/** A synthetic, stable id for a local relation (no DB rows to key on). */
+export function localLinkId(fromSpec: string, link: LocalLink): string {
+  return `${fromSpec}:${link.to}:${link.type}`;
+}
+
+/** Resolve a stored edge into the direction seen from `viewerSpec`. */
+export function localDirection(
+  fromSpec: string,
+  type: LocalLinkType,
+  viewerSpec: string,
+): RelationDirection {
+  const outgoing = fromSpec === viewerSpec;
+  switch (type) {
+    case "blocks":
+      return outgoing ? "blocks" : "blocked_by";
+    case "duplicates":
+      return outgoing ? "duplicates" : "duplicated_by";
+    case "relates_to":
+      return "relates_to";
+  }
+}
+
+/** Map a viewer-relative direction to a canonical stored edge (by specId). */
+export function toLocalEdge(
+  selfSpec: string,
+  otherSpec: string,
+  direction: RelationInput["direction"],
+): { from: string; link: LocalLink } {
+  switch (direction) {
+    case "blocks":
+      return { from: selfSpec, link: { to: otherSpec, type: "blocks" } };
+    case "blocked_by":
+      return { from: otherSpec, link: { to: selfSpec, type: "blocks" } };
+    case "relates_to":
+      return { from: selfSpec, link: { to: otherSpec, type: "relates_to" } };
+    case "duplicates":
+      return { from: selfSpec, link: { to: otherSpec, type: "duplicates" } };
+  }
+}
