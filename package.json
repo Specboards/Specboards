@@ -22,11 +22,13 @@
     "release:prepare": "scripts/release-prepare.sh",
     "release:check": "scripts/release-guard.sh",
     "format": "prettier --write \"**/*.{ts,tsx,md,json,yml,yaml}\"",
-    "audit": "scripts/audit.sh"
+    "audit": "scripts/audit.sh",
+    "knip": "knip"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
     "eslint": "^9.39.5",
+    "knip": "^5.88.1",
     "prettier": "^3.9.6",
     "turbo": "^2.10.11",
     "typescript": "^5.7.2",
