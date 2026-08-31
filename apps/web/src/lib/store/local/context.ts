@@ -67,3 +67,15 @@ export interface LocalStoreContext {
    */
   doneStatusKey(): Promise<string>;
 }
+
+/**
+ * Whether an item is finished, for every progress figure the store derives
+ * (hierarchy roll-up, cycle totals, goal delivery, release progress).
+ *
+ * `doneKey` is the workflow's terminal stage rather than the literal "done",
+ * which is only that workspace's terminal stage by default. See
+ * `LocalFileStore.doneStatusKey`.
+ */
+export function isDone(status: string, doneKey: string): boolean {
+  return status === doneKey;
+}
