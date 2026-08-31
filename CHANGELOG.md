@@ -25,6 +25,40 @@ for how and when the version is bumped.
 > `pnpm deploy:prod` and the dispatched workflow. See
 > [VERSIONING.md](./VERSIONING.md).
 
+## [0.29.3] - 2026-08-31
+
+Nothing in the product behaves differently in this release, and that is the
+whole claim it makes. It is the store split finishing, shipped on its own so
+that the change nobody can see is not sitting underneath the next one that can.
+
+### Internal
+
+- **`FeatureStore`, a 104-member interface implemented twice, is now twenty-four
+  domain modules behind two maps.** Everything the product reads or writes went
+  through three files: a 1,999-line interface, a 6,639-line implementation of it
+  against Postgres, and a 3,360-line implementation of the same interface again
+  for local file mode. The Postgres one had no section comments anywhere in it,
+  so there was no way to navigate it except search, and no way to review a change
+  to it in context. The interface is now twelve composed per-domain interfaces,
+  and each store is a directory of twelve modules with an index that delegates:
+  `db/index.ts` is 989 lines where it was 6,707, and `local/index.ts` is 1,170
+  where it was 3,531. Callers still hold the same object and no test moved.
+- **The split is believable because it was counted rather than asserted.** Across
+  the twenty-four pull requests that moved a domain, one each, no method body was
+  ever retyped: each was sliced out by script and diffed against the parent commit
+  with exactly three mechanical edits permitted and reversed before comparing.
+  Anything else in that diff stopped the pull request. The authorization checks
+  were counted on every single one, 32 `canWriteProductId` and 25
+  `canReadProductId` across the Postgres store, identical from the first domain
+  moved to the last. The integration suite ran against a real Postgres with
+  row-level security active throughout.
+- **Dead code fails the build.** Unused exports, unused files and unused
+  dependencies are now reported by `knip` in CI, after the existing inventory was
+  taken to zero. The three deliberate exceptions are `@public` tags next to the
+  code that explain themselves, rather than entries in a config file that do not.
+  It earned its place immediately by catching three over-exported types in the
+  split's own new code within an hour of landing.
+
 ## [0.29.2] - 2026-08-30
 
 Cards that say what they mean, and progress that counts your workflow rather
@@ -251,7 +285,7 @@ Key results you can actually maintain, and a release process that checks itself.
   the first `create_doc`, so a page an agent writes is visible in the app
   instead of hidden behind the setup chooser. Deleting a folder that still holds
   pages needs an explicit `deleteChildren: true`.
-- **The missing goal verbs**: `read_goal` (a goal with its key results *and* the
+- **The missing goal verbs**: `read_goal` (a goal with its key results _and_ the
   work linked to it, which `list_goals` omits), `delete_goal` and
   `delete_key_result`. `read_item` now reports the goals an item ladders up to,
   so the "why does this exist" edge reads from both ends.
@@ -381,7 +415,7 @@ fundamentally is.
   measures distance travelled from a baseline rather than distance to a target,
   so decreasing metrics need no special case.
 - **Cycles** (gh-28). Sprints and iterations as a second, orthogonal axis to
-  releases: an item can be in a release *and* a cycle, and clearing one leaves
+  releases: an item can be in a release _and_ a cycle, and clearing one leaves
   the other untouched. New `cycles` table plus `features.cycle_id` (migration
   0051), a Cycles area under Build, a `?cycle=` backlog filter, a bulk control,
   and four MCP tools. A cycle has **no stored status**: it is upcoming, active or
@@ -433,20 +467,20 @@ external customers and close the gaps in the public REST surface.
 - **Auto-advance the sync loop past multi-step transitions.** The CLI's
   `specboard status <spec> <target> --advance` walks a spec through the shortest
   legal chain of intermediate statuses (e.g. `backlog -> defining -> ready ->
-  in_progress`) instead of stopping at the first illegal jump. `GET
-  /api/v1/statuses` now also returns the fully-resolved workflow (ordered
+in_progress`) instead of stopping at the first illegal jump. `GET
+/api/v1/statuses` now also returns the fully-resolved workflow (ordered
   statuses + legal transitions) so any client can compute a path;
   `scripts/specboard/sync-pr.sh` uses `--advance`.
 - **Service (bot) accounts and resource-scoped API keys** (migration 0045). A
   new `service` member role models a machine account: a real user with no login
   plus a `service` membership, so automated activity is attributed to a labelled
   identity instead of a human. An owner creates one via the session-only `POST
-  /api/v1/org/service-accounts`, which mints a scoped key. API keys now carry
+/api/v1/org/service-accounts`, which mints a scoped key. API keys now carry
   `<resource>:<action>` scopes (`api_keys.scopes`); an empty scope list stays
   full-access, so existing keys are unaffected. Scope enforcement is centralized
   in the API authorization layer, with per-key rate limiting on `/api/v1`.
 - **Public REST API completeness.** Filled the missing CRUD verbs (`GET
-  /products/:id`, `GET` + `PATCH /repositories/:id`, `PATCH /views/:id`); added
+/products/:id`, `GET` + `PATCH /repositories/:id`, `PATCH /views/:id`); added
   opt-in, order-preserving cursor pagination (`?limit` / `?cursor`, exposing
   `nextCursor`) on the features, releases, ideas, and org-members lists; and an
   OpenAPI 3 document at `GET /api/v1/openapi.json`.
@@ -840,8 +874,8 @@ applied to test and production.
 ### Changed
 
 - **Webhooks: durable transactional outbox** (migration 0029 adds
-  `outbox_events`). Domain changes now record their event in the *same database
-  transaction* as the change, closing the small window where a crash between the
+  `outbox_events`). Domain changes now record their event in the _same database
+  transaction_ as the change, closing the small window where a crash between the
   commit and the webhook enqueue could drop an event. A relay fans events out to
   the per-endpoint delivery queue and the drainer sends them as before, so
   delivery behavior is unchanged. The `outbox_events` stream is generic, so
