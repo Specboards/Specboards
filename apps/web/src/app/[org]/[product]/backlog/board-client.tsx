@@ -24,7 +24,11 @@ import {
 import { CSS, getEventCoordinates } from "@dnd-kit/utilities";
 import { toast } from "sonner";
 
-import type { PropertyType, StatusWorkflow } from "@specboards/core";
+import type {
+  PropertyType,
+  StatusWorkflow,
+  WorkspaceLevel,
+} from "@specboards/core";
 
 import { BoardColumnNav } from "@/components/board-column-nav";
 import { useBoardSelection } from "@/components/board-selection";
@@ -82,6 +86,7 @@ export function BoardClient({
   customFieldLabels,
   memberNames,
   releases,
+  levels,
   productsById,
   bulkOptions,
   quickAdd,
@@ -101,6 +106,9 @@ export function BoardClient({
   memberNames: Record<string, string>;
   /** The workspace's releases (for the release badge). */
   releases: ReleaseRecord[];
+  /** The workspace's hierarchy levels, so cards can name the child and parent
+   * levels in their progress badges. */
+  levels: readonly WorkspaceLevel[];
   /** Product identity by id, for the per-card attribution badge in the
    * cross-product view. Omitted when the board is scoped to one product. */
   productsById?: Record<string, ProductTag>;
@@ -468,6 +476,7 @@ export function BoardClient({
               customFieldTypes={customFieldTypes}
               memberNames={memberNames}
               releaseNames={releaseNames}
+              levels={levels}
               onOpen={setEditingSpecId}
               productsById={productsById}
               selectMode={selectMode}
@@ -491,6 +500,7 @@ export function BoardClient({
               customFieldTypes={customFieldTypes}
               memberNames={memberNames}
               releaseNames={releaseNames}
+              levels={levels}
               onOpen={() => {}}
               product={
                 activeRecord.productId
@@ -528,6 +538,7 @@ function Column({
   customFieldTypes,
   memberNames,
   releaseNames,
+  levels,
   onOpen,
   productsById,
   selectMode,
@@ -549,6 +560,7 @@ function Column({
   customFieldTypes: Record<string, PropertyType>;
   memberNames: Record<string, string>;
   releaseNames: Record<string, string>;
+  levels: readonly WorkspaceLevel[];
   onOpen: (specId: string) => void;
   productsById?: Record<string, ProductTag>;
   selectMode: boolean;
@@ -661,6 +673,7 @@ function Column({
                         customFieldTypes={customFieldTypes}
                         memberNames={memberNames}
                         releaseNames={releaseNames}
+                        levels={levels}
                         onOpen={() => onOpen(id)}
                         // Below md there is no drag to protect, so the whole card
                         // stays a tap target. Where it can be dragged, only the

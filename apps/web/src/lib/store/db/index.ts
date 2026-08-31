@@ -185,7 +185,7 @@ import {
 import {
   canReadProductId,
   canWriteProductId,
-  isDone,
+  doneStatusesIn,
   toCustomFields,
   type DbStoreContext,
   type ProductVisibilityRow,
@@ -490,13 +490,14 @@ export class DbStore implements FeatureStore, DbStoreContext {
         blockedBy.set(l.toFeatureId, (blockedBy.get(l.toFeatureId) ?? 0) + 1);
       }
       // Hierarchy roll-up from the visible workspace set.
+      const done = await doneStatusesIn(tx, scope!.workspaceId);
       const specById = new Map(rows.map((r) => [r.id, r.specId]));
       const childCount = new Map<string, number>();
       const childDone = new Map<string, number>();
       for (const r of rows) {
         if (!r.parentId || !visibleIds.has(r.parentId)) continue;
         childCount.set(r.parentId, (childCount.get(r.parentId) ?? 0) + 1);
-        if (isDone(r.status))
+        if (done.isDone(r.status, r.productId))
           childDone.set(r.parentId, (childDone.get(r.parentId) ?? 0) + 1);
       }
       // GitHub link aggregate, rolled up over each visible feature's subtree.
@@ -702,25 +703,32 @@ export class DbStore implements FeatureStore, DbStoreContext {
           parentTitle = parent.title;
         }
       }
-      const childRowsRaw = await tx
-        .select({
-          specId: features.specId,
-          title: features.title,
-          status: features.status,
-          productId: features.productId,
-        })
-        .from(features)
-        .where(
-          and(
-            eq(features.parentId, row.id),
-            eq(features.workspaceId, scope!.workspaceId),
+      const [childRowsRaw, done] = await Promise.all([
+        tx
+          .select({
+            specId: features.specId,
+            title: features.title,
+            status: features.status,
+            productId: features.productId,
+          })
+          .from(features)
+          .where(
+            and(
+              eq(features.parentId, row.id),
+              eq(features.workspaceId, scope!.workspaceId),
+            ),
           ),
-        );
-      const childRows = childRowsRaw
-        .filter((child) =>
-          canReadProductId(access, productById, child.productId),
-        )
-        .map(({ productId: _productId, ...child }) => child);
+        doneStatusesIn(tx, scope!.workspaceId),
+      ]);
+      // Kept with `productId` for the roll-up below, which judges each child's
+      // status against its own product's terminal stage; the shape the caller
+      // sees drops it.
+      const readableChildren = childRowsRaw.filter((child) =>
+        canReadProductId(access, productById, child.productId),
+      );
+      const childRows = readableChildren.map(
+        ({ productId: _productId, ...child }) => child,
+      );
 
       // The whole workspace tree (id + parent), for the subtree walks below.
       const treeRows = await tx
@@ -843,7 +851,9 @@ export class DbStore implements FeatureStore, DbStoreContext {
         parentTitle,
         children: childRows,
         childCount: childRows.length,
-        childDoneCount: childRows.filter((c) => isDone(c.status)).length,
+        childDoneCount: readableChildren.filter((c) =>
+          done.isDone(c.status, c.productId),
+        ).length,
         githubSummary,
         githubLinks,
       };
@@ -3018,7 +3028,7 @@ export class DbStore implements FeatureStore, DbStoreContext {
   async listGoals(scope?: WorkspaceScope): Promise<GoalRecord[]> {
     return this.scoped(scope, async (tx) => {
       const ws = scope!.workspaceId;
-      const [goalRows, krRows, access, productById] = await Promise.all([
+      const [goalRows, krRows, access, productById, done] = await Promise.all([
         tx.select().from(goals).where(eq(goals.workspaceId, ws)),
         // Same ordering as hydrateGoal, and for the same reason. This is the
         // list page, so an unordered read here is the one most people see.
@@ -3029,6 +3039,7 @@ export class DbStore implements FeatureStore, DbStoreContext {
           .orderBy(asc(keyResults.position), asc(keyResults.createdAt)),
         this.accessIn(tx, scope!),
         this.productVisibilityIn(tx, ws),
+        doneStatusesIn(tx, ws),
       ]);
       // Link counts are computed over readable work only, so a goal never
       // advertises progress from items the caller cannot see.
@@ -3046,7 +3057,7 @@ export class DbStore implements FeatureStore, DbStoreContext {
       for (const row of linkRows) {
         if (!canReadProductId(access, productById, row.productId)) continue;
         const list = byGoal.get(row.goalId) ?? [];
-        list.push({ done: isDone(row.status) });
+        list.push({ done: done.isDone(row.status, row.productId) });
         byGoal.set(row.goalId, list);
       }
 
@@ -3327,9 +3338,10 @@ export class DbStore implements FeatureStore, DbStoreContext {
   ): Promise<GoalContribution[]> {
     return this.scoped(scope, async (tx) => {
       const ws = scope!.workspaceId;
-      const [access, productById] = await Promise.all([
+      const [access, productById, done] = await Promise.all([
         this.accessIn(tx, scope!),
         this.productVisibilityIn(tx, ws),
+        doneStatusesIn(tx, ws),
       ]);
       const rows = await tx
         .select({
@@ -3346,7 +3358,7 @@ export class DbStore implements FeatureStore, DbStoreContext {
       // visible regardless (see the section comment).
       return rows
         .filter((r) => canReadProductId(access, productById, r.productId))
-        .map((r) => ({ ...r, done: isDone(r.status) }));
+        .map((r) => ({ ...r, done: done.isDone(r.status, r.productId) }));
     });
   }
 
@@ -3506,7 +3518,7 @@ export class DbStore implements FeatureStore, DbStoreContext {
     goal: typeof goals.$inferSelect,
   ): Promise<GoalRecord> {
     const ws = scope.workspaceId;
-    const [krs, linkRows, access, productById] = await Promise.all([
+    const [krs, linkRows, access, productById, done] = await Promise.all([
       // Ordered by the column that exists for it. `position` is set on insert
       // and was never read here, which left display order to whatever Postgres
       // returned: not merely arbitrary but unstable, since a row can move on
@@ -3526,10 +3538,11 @@ export class DbStore implements FeatureStore, DbStoreContext {
         .where(and(eq(goalLinks.workspaceId, ws), eq(goalLinks.goalId, goal.id))),
       this.accessIn(tx, scope),
       this.productVisibilityIn(tx, ws),
+      doneStatusesIn(tx, ws),
     ]);
     const links = linkRows
       .filter((r) => canReadProductId(access, productById, r.productId))
-      .map((r) => ({ done: isDone(r.status) }));
+      .map((r) => ({ done: done.isDone(r.status, r.productId) }));
     return toGoalRecord(goal, krs, links);
   }
 
@@ -5063,21 +5076,24 @@ export class DbStore implements FeatureStore, DbStoreContext {
     );
     if (productIds.length === 0) return summaries;
 
-    const rows = await tx
-      .select({
-        productId: features.productId,
-        status: features.status,
-        releaseId: features.releaseId,
-        n: count(),
-      })
-      .from(features)
-      .where(
-        and(
-          eq(features.workspaceId, ws),
-          inArray(features.productId, productIds),
-        ),
-      )
-      .groupBy(features.productId, features.status, features.releaseId);
+    const [rows, done] = await Promise.all([
+      tx
+        .select({
+          productId: features.productId,
+          status: features.status,
+          releaseId: features.releaseId,
+          n: count(),
+        })
+        .from(features)
+        .where(
+          and(
+            eq(features.workspaceId, ws),
+            inArray(features.productId, productIds),
+          ),
+        )
+        .groupBy(features.productId, features.status, features.releaseId),
+      doneStatusesIn(tx, ws),
+    ]);
 
     const releaseTotals = new Map<
       string,
@@ -5098,7 +5114,7 @@ export class DbStore implements FeatureStore, DbStoreContext {
         releaseTotals.set(row.productId, byRelease);
         const entry = byRelease.get(row.releaseId) ?? { total: 0, done: 0 };
         entry.total += n;
-        if (isDone(row.status)) entry.done += n;
+        if (done.isDone(row.status, row.productId)) entry.done += n;
         byRelease.set(row.releaseId, entry);
       }
     }

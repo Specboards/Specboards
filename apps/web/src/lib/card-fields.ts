@@ -13,12 +13,20 @@ export interface CardFieldDef {
 
 export const CUSTOM_FIELD_PREFIX = "cf:";
 
-/** Built-in card fields, in their default display order. */
+/**
+ * Built-in card fields, in their default display order.
+ *
+ * The `epic` and `sub` keys are historical: they are what saved board
+ * preferences store, and renaming one would silently drop that field from every
+ * board that had chosen it. The labels describe what the fields actually do,
+ * which is name a card's children and its parent at whatever levels the
+ * workspace has configured.
+ */
 export const BUILTIN_CARD_FIELDS: CardFieldDef[] = [
   { key: "assignee", label: "Assignee" },
   { key: "blocked", label: "Blocked badge" },
-  { key: "epic", label: "Epic progress" },
-  { key: "sub", label: "Sub-feature badge" },
+  { key: "epic", label: "Child progress" },
+  { key: "sub", label: "Parent level badge" },
   { key: "tags", label: "Tags" },
   { key: "release", label: "Release" },
   { key: "github", label: "GitHub" },

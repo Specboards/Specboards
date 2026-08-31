@@ -534,6 +534,7 @@ export default async function RoadmapPage({
       customFieldTypes={customFieldTypes}
       memberNames={memberNames}
       releaseNames={releaseNames}
+      levels={levels}
       allowDrag={canEdit && !showShipped}
       editableReleaseIds={editableReleaseIds}
       productNamesById={productNamesById}

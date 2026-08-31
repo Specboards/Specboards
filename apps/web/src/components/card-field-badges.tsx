@@ -1,9 +1,16 @@
 "use client";
 
-import type { PropertyType } from "@specboards/core";
+import {
+  childLevelKey,
+  findLevel,
+  parentLevelKey,
+  type PropertyType,
+  type WorkspaceLevel,
+} from "@specboards/core";
 
 import { Badge } from "@/components/ui/badge";
 import { CUSTOM_FIELD_PREFIX } from "@/lib/card-fields";
+import { pluralLevel } from "@/lib/feature-helpers";
 import type { CustomFieldValue, FeatureRecord } from "@/lib/store/types";
 
 /**
@@ -20,7 +27,86 @@ export type CardFieldMaps = {
   memberNames: Record<string, string>;
   /** Release name by id, for the release badge. */
   releaseNames: Record<string, string>;
+  /**
+   * The workspace's hierarchy levels, so the child-progress and parent badges
+   * can name the levels involved instead of assuming they are called "epic".
+   */
+  levels: readonly WorkspaceLevel[];
 };
+
+/**
+ * What a card's children are called, pluralised: "Features" for an Epic in the
+ * default hierarchy. Falls back to "items" for a level the hierarchy no longer
+ * contains, which is reachable if an admin removes a level while cards still
+ * sit at it.
+ */
+export function childLevelLabel(
+  level: string,
+  levels: readonly WorkspaceLevel[],
+): string {
+  const key = childLevelKey(level, levels);
+  const label = key ? findLevel(key, levels)?.label : undefined;
+  return label ? pluralLevel(label) : "items";
+}
+
+/** What a card's parent is called: "Epic" for a Feature in the default set. */
+export function parentLevelLabel(
+  level: string,
+  levels: readonly WorkspaceLevel[],
+): string {
+  const key = parentLevelKey(level, levels);
+  return (key ? findLevel(key, levels)?.label : undefined) ?? "Parent";
+}
+
+/**
+ * How much of a card's work is finished, as a count of its direct children.
+ *
+ * Named after the child level rather than the word "epic", which is what this
+ * badge used to say at every altitude: on an Epic it counted Features while
+ * calling them epics, and on a renamed hierarchy it meant nothing at all. The
+ * word "done" is in the visible text because `3/5` on its own reads as an id or
+ * a position, not as progress.
+ *
+ * Shared by the board card and the backlog table so the two cannot drift; the
+ * item detail drawer states the same figure in its own layout.
+ */
+export function ChildProgressBadge({
+  feature,
+  levels,
+}: {
+  feature: Pick<FeatureRecord, "level" | "childCount" | "childDoneCount">;
+  levels: readonly WorkspaceLevel[];
+}) {
+  if (feature.childCount === 0) return null;
+  const label = childLevelLabel(feature.level, levels);
+  return (
+    <Badge
+      variant="outline"
+      size="sm"
+      className="tabular-nums"
+      title={`${feature.childDoneCount} of ${feature.childCount} ${label} done`}
+    >
+      {feature.childDoneCount}/{feature.childCount} {label} done
+    </Badge>
+  );
+}
+
+/** That a card sits under a parent, and what that parent is called. */
+export function ParentLevelBadge({
+  feature,
+  levels,
+}: {
+  feature: Pick<FeatureRecord, "level" | "parentSpecId">;
+  levels: readonly WorkspaceLevel[];
+}) {
+  if (!feature.parentSpecId) return null;
+  const label = parentLevelLabel(feature.level, levels);
+  return (
+    <Badge variant="secondary" size="sm" title={`Parent level: ${label}`}>
+      ↳ {label}
+    </Badge>
+  );
+}
 
 export function customFieldText(value: CustomFieldValue): string {
   if (value === null || value === undefined) return "";
@@ -106,27 +192,22 @@ export function renderCardField(
           Blocked
         </Badge>
       ) : null;
+    // `epic` and `sub` are the stored names of these two fields in saved board
+    // preferences. They stay as they are, wrong as they now read, because
+    // renaming a key silently drops the field from every board that had chosen
+    // it; only what the badges say has changed.
+    //
+    // The emptiness guards are repeated here rather than left to the
+    // components: the caller reads a returned node as "this field has something
+    // to show", so an element that renders to nothing would still open a badge
+    // row on a card with none.
     case "epic":
       return f.childCount > 0 ? (
-        <Badge
-          key="epic"
-          variant="outline"
-          size="sm"
-          title={`${f.childDoneCount} of ${f.childCount} children done`}
-        >
-          epic {f.childDoneCount}/{f.childCount}
-        </Badge>
+        <ChildProgressBadge key="epic" feature={f} levels={maps.levels} />
       ) : null;
     case "sub":
       return f.parentSpecId ? (
-        <Badge
-          key="sub"
-          variant="secondary"
-          size="sm"
-          title="Has a parent epic"
-        >
-          ↳ sub
-        </Badge>
+        <ParentLevelBadge key="sub" feature={f} levels={maps.levels} />
       ) : null;
     case "release":
       return f.releaseId ? (

@@ -46,8 +46,9 @@ import {
 
 import {
   canWriteProductId,
-  isDone,
+  doneStatusesIn,
   type DbStoreContext,
+  type DoneStatuses,
   type Tx,
 } from "./context";
 
@@ -57,24 +58,29 @@ export async function listCycles(
 ): Promise<CycleRecord[]> {
   return ctx.scoped(scope, async (tx) => {
     const ws = scope!.workspaceId;
-    const [rows, counts] = await Promise.all([
+    const [rows, counts, done] = await Promise.all([
       tx.select().from(cycles).where(eq(cycles.workspaceId, ws)),
+      // Grouped by product as well as status, because "finished" is the
+      // product's own terminal stage and a workspace-wide cycle can hold work
+      // from products whose stage sets disagree.
       tx
         .select({
           cycleId: features.cycleId,
           status: features.status,
+          productId: features.productId,
           n: count(),
         })
         .from(features)
         .where(eq(features.workspaceId, ws))
-        .groupBy(features.cycleId, features.status),
+        .groupBy(features.cycleId, features.status, features.productId),
+      doneStatusesIn(tx, ws),
     ]);
     const totals = new Map<string, { items: number; done: number }>();
     for (const c of counts) {
       if (!c.cycleId) continue;
       const acc = totals.get(c.cycleId) ?? { items: 0, done: 0 };
       acc.items += Number(c.n);
-      if (isDone(c.status)) acc.done += Number(c.n);
+      if (done.isDone(c.status, c.productId)) acc.done += Number(c.n);
       totals.set(c.cycleId, acc);
     }
     const today = todayDateOnly();
@@ -344,6 +350,7 @@ export async function rolloverCycle(
         ? undefined
         : eq(features.productId, to.productId);
 
+    const done = await doneStatusesIn(tx, ws);
     const moved = await tx
       .update(features)
       .set({ cycleId: toId, updatedAt: new Date() })
@@ -353,7 +360,7 @@ export async function rolloverCycle(
           eq(features.cycleId, fromId),
           // Finished (and archived) work stays put, so the closed cycle
           // keeps an honest record of what it actually delivered.
-          not(inArray(features.status, NOT_ROLLED_OVER)),
+          not(inArray(features.status, notRolledOver(done, to.productId))),
           ...(productGuard ? [productGuard] : []),
         ),
       )
@@ -368,16 +375,23 @@ async function cycleTotals(
   ws: string,
   cycleId: string,
 ): Promise<{ items: number; done: number }> {
-  const rows = await tx
-    .select({ status: features.status, n: count() })
-    .from(features)
-    .where(and(eq(features.workspaceId, ws), eq(features.cycleId, cycleId)))
-    .groupBy(features.status);
+  const [rows, doneStatuses] = await Promise.all([
+    tx
+      .select({
+        status: features.status,
+        productId: features.productId,
+        n: count(),
+      })
+      .from(features)
+      .where(and(eq(features.workspaceId, ws), eq(features.cycleId, cycleId)))
+      .groupBy(features.status, features.productId),
+    doneStatusesIn(tx, ws),
+  ]);
   let items = 0;
   let done = 0;
   for (const r of rows) {
     items += Number(r.n);
-    if (isDone(r.status)) done += Number(r.n);
+    if (doneStatuses.isDone(r.status, r.productId)) done += Number(r.n);
   }
   return { items, done };
 }
@@ -417,10 +431,21 @@ async function assertCycleNameFree(
  * Statuses a cycle rollover leaves behind. Done work stays in the cycle that
  * delivered it, so the closed cycle keeps an honest record; archived work is
  * not carried into a new cycle either, since archiving is how a team says they
- * are not doing it. Broader than `isDone`, which answers a different question
- * (how much of this is finished) and must not count archived items as done.
+ * are not doing it. Broader than `DoneStatuses.isDone`, which answers a
+ * different question (how much of this is finished) and must not count archived
+ * items as done.
+ *
+ * The destination product's terminal stage when the move is scoped to one, and
+ * every product's when it is workspace-wide: this is a set-based SQL filter, so
+ * it cannot ask per row which product a candidate belongs to.
  */
-const NOT_ROLLED_OVER = ["done", "archived"];
+function notRolledOver(
+  done: DoneStatuses,
+  toProductId: string | null,
+): string[] {
+  const finished = toProductId ? [done.keyFor(toProductId)] : done.allKeys();
+  return [...new Set([...finished, "archived"])];
+}
 
 /**
  * Map a cycles row to the record the UI consumes, computing `state` from the
