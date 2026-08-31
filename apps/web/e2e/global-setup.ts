@@ -18,21 +18,27 @@ export default async function globalSetup() {
   const browser = await chromium.launch();
   const page = await browser.newPage({ baseURL: BASE_URL });
 
-  // Sign up. The form always lands on "check your email" (no session yet).
+  // Sign up. Where verification is not required, and it is not here, the
+  // response carries a session and the app moves straight on. It used to stop
+  // on "check your email" even in E2E because the form discarded that session
+  // and showed the wall unconditionally, which is the same bug that locked the
+  // first admin out of a self-host with no mail transport.
   await page.goto("/sign-up");
   await page.fill('input[name="name"]', ADMIN.name);
   await page.fill('input[name="email"]', ADMIN.email);
   await page.fill('input[name="password"]', ADMIN.password);
   await page.fill('input[name="confirmPassword"]', ADMIN.password);
   await page.getByRole("button", { name: "Sign up" }).click();
-  await page.getByText("Check your email").waitFor();
+  await page.waitForURL((url) => !url.pathname.startsWith("/sign-up"));
 
-  // Sign in (verification gate is relaxed in E2E), then wait for the session.
-  await page.goto("/sign-in");
-  await page.fill('input[name="email"]', ADMIN.email);
-  await page.fill('input[name="password"]', ADMIN.password);
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/sign-in"));
+  // Fallback for a configuration that does gate on verification, where sign-up
+  // lands on the verify screen and the session has to be picked up separately.
+  if (new URL(page.url()).pathname.startsWith("/sign-in")) {
+    await page.fill('input[name="email"]', ADMIN.email);
+    await page.fill('input[name="password"]', ADMIN.password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.waitForURL((url) => !url.pathname.startsWith("/sign-in"));
+  }
 
   // First user with no workspace: name the org and start empty -> becomes admin.
   // The app redirects a session with no workspace to /setup on its own, and a
@@ -46,7 +52,9 @@ export default async function globalSetup() {
   await page.locator('input[name="start"][value="empty"]').check();
   await page.getByRole("button", { name: "Create organization" }).click();
   await page.waitForURL(
-    (url) => !url.pathname.startsWith("/setup") && !url.pathname.startsWith("/sign-in"),
+    (url) =>
+      !url.pathname.startsWith("/setup") &&
+      !url.pathname.startsWith("/sign-in"),
   );
 
   await page.context().storageState({ path: STORAGE_STATE });
