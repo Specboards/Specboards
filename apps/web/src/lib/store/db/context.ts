@@ -17,6 +17,7 @@ import {
   canWriteProduct,
   safeParseRepoConfig,
   terminalStatus,
+  type WorkspaceLevel,
 } from "@specboards/core";
 
 import {
@@ -29,6 +30,7 @@ import {
 
 import type {
   CustomFieldValue,
+  GithubLinkAggregate,
   OutboxEmit,
   ProductAccess,
   WorkspaceScope,
@@ -61,6 +63,21 @@ export interface DbStoreContext {
   /** Verify a product id belongs to the workspace, returning it. */
   requireProductId(tx: Tx, ws: string, productId: string): Promise<string>;
   /**
+   * The workspace's default product id, creating it if it is somehow missing.
+   * Every domain that accepts an optional product id lands here when none was
+   * given, which is why it is context rather than one domain's helper.
+   */
+  defaultProductId(tx: Tx, ws: string): Promise<string>;
+  /**
+   * The workspace hierarchy as it applies to `productId` (or the workspace
+   * default when null), with per-product overrides already resolved.
+   */
+  levelsIn(
+    tx: Tx,
+    workspaceId: string,
+    productId?: string | null,
+  ): Promise<WorkspaceLevel[]>;
+  /**
    * Every product in the workspace with its visibility, keyed by id. The other
    * half of a read check: `accessIn` says what the caller may reach and this
    * says what there is to reach, and `canReadProductId` needs both.
@@ -75,6 +92,11 @@ export interface DbStoreContext {
    * every domain that emits: items, releases and goals.
    */
   writeOutbox(tx: Tx, scope: WorkspaceScope, emit: OutboxEmit): Promise<void>;
+}
+
+/** A GitHub link roll-up with nothing in it yet. */
+export function emptyAgg(): GithubLinkAggregate {
+  return { openPrs: 0, mergedPrs: 0, issues: 0, branches: 0, total: 0 };
 }
 
 /** Normalize the jsonb custom-fields column into the UI's value map. */

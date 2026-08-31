@@ -1931,6 +1931,13 @@ export interface ViewStore {
  * stages an idea moves through.
  */
 export interface IdeaStore {
+  /** The workspace's Ideas configuration (portal on/off, title, product). */
+  getIdeaSettings(scope?: WorkspaceScope): Promise<IdeaSettings>;
+  /** Update the workspace's Ideas configuration. Returns the updated settings. */
+  updateIdeaSettings(
+    patch: IdeaSettingsPatch,
+    scope?: WorkspaceScope,
+  ): Promise<IdeaSettings>;
   /** The workspace's ideas the acting user can see, most-voted first. */
   listIdeas(scope?: WorkspaceScope): Promise<IdeaRecord[]>;
   /** Capture a new idea; returns the new record. */
@@ -2024,12 +2031,6 @@ export interface WorkspaceSettingsStore {
     scope?: WorkspaceScope,
     productId?: string | null,
   ): Promise<TransitionMode>;
-  getIdeaSettings(scope?: WorkspaceScope): Promise<IdeaSettings>;
-  /** Update the workspace's Ideas configuration. Returns the updated settings. */
-  updateIdeaSettings(
-    patch: IdeaSettingsPatch,
-    scope?: WorkspaceScope,
-  ): Promise<IdeaSettings>;
   // ── Docs (Plan-section areas) ───────────────────────────────────────────
 }
 
