@@ -161,6 +161,22 @@ drive compose yourself, and it also migrates on the way up. It needs
 `BETTER_AUTH_SECRET` set (in `infra/.env`, or the environment); `setup.sh`
 exists so you do not have to produce one by hand.
 
+**Upgrading from a self-host installed before the stack was named.** Your
+database used to live in a Docker volume called `infra_specboard_db`, named
+after the directory the compose file sits in. It is now `specboard_db`, pinned
+so it can never move again. `setup.sh` notices the old volume and stops rather
+than bringing up an empty instance on top of it:
+
+```bash
+./setup.sh --adopt-legacy-volume   # copy the old database across
+./setup.sh --start                 # or: ignore it and start fresh
+```
+
+Adoption copies rather than moves, so `infra_specboard_db` is still there if you
+want to go back, and it resets the copied database's password to match your
+`infra/.env` (Postgres bakes that password in at first start and ignores the
+environment afterwards).
+
 **The two secrets, and why they matter.** `BETTER_AUTH_SECRET` keys session
 signing and the AES-256-GCM encryption of secrets at rest, so treat rotating it
 as a migration rather than a config edit: everyone is signed out, and anything
