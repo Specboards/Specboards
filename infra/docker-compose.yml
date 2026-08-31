@@ -8,6 +8,15 @@
 # POSTGRES_PASSWORD in infra/.env BEFORE the first `up`: Postgres bakes the
 # password into the data volume on initialization, so changing it later
 # means `ALTER USER` in psql, not just editing the env file.
+
+# Explicit project name. Without it compose derives one from this file's parent
+# directory, which is "infra" — generic enough to collide with unrelated
+# projects, and identical for every clone of this repo on a machine, so two
+# checkouts silently shared one `infra_specboard_db` volume and each thought it
+# owned the database. Naming it here makes a stack belong to Specboards rather
+# than to whatever directory it was launched from.
+name: specboards
+
 services:
   db:
     image: postgres:16-alpine
@@ -20,7 +29,11 @@ services:
       # other machines cannot. Remove the mapping if you don't need host
       # access; the web service reaches db over the compose network either
       # way. Do not publish 5432 on all interfaces.
-      - "127.0.0.1:5432:5432"
+      #
+      # POSTGRES_PORT moves the host side when 5432 is already taken, which on
+      # a developer's machine it very often is. The container side stays 5432,
+      # so DATABASE_URL inside the compose network never changes.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - specboard_db:/var/lib/postgresql/data
     healthcheck:
@@ -28,6 +41,31 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  # Applies infra/migrations, then exits. `web` waits for it to succeed, so the
+  # documented `docker compose up` is the whole install rather than the first
+  # half of it.
+  #
+  # This existed on Fly (`release_command = "node migrate.mjs"` in fly.toml) and
+  # nowhere here, so every environment we operate migrated itself and the one we
+  # hand to other people did not: the stack came up against an empty database,
+  # served its sign-up page at HTTP 200, and 500'd on the first write with
+  # `relation "outbox_events" does not exist`.
+  #
+  # Same image as `web`, so there is nothing extra to build. The runner is
+  # idempotent and takes a session advisory lock, so a re-run, a restart, or two
+  # `up`s racing are all safe.
+  migrate:
+    build:
+      context: ..
+      dockerfile: infra/web.Dockerfile
+    command: ["node", "migrate.mjs"]
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/specboard
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
 
   web:
     build:
@@ -62,6 +100,10 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      # Do not serve until the schema exists. Without this the app starts
+      # against an empty database and looks healthy until the first write.
+      migrate:
+        condition: service_completed_successfully
 
 volumes:
   specboard_db:

@@ -18,7 +18,7 @@ building, and whether what came back is right.
 - **Coordinated, not single-shot.** Agents share one board and one validated
   status workflow, so several can work a backlog at once, and you can see what
   each of them did.
-- **Git-native.** No second source of truth. The specs in your repo *are* the
+- **Git-native.** No second source of truth. The specs in your repo _are_ the
   backlog.
 - **Governed.** Per-agent identities, scoped API keys, request and write quotas,
   and an audit trail of every spec write.
@@ -93,14 +93,14 @@ endorsement. If the playbook changes, our product does not.
 The mapping below is deliberately specific, including the stages we do not
 serve. "Specboards supports the whole SDLC" would be worth nothing.
 
-| Playbook stage | What Specboards does | What it does not |
-| --- | --- | --- |
-| **Plan** | The Ideas intake is where an intent lands; promoting one creates the work item. `create_spec` commits the artifact into your repo, so it is version-controlled from the first line. | Run the brainstorming session that produces the intent. That is your agent, writing back to us over MCP. |
-| **Design** | `create_spec` / `update_spec_content` write `specs/**/spec.md` and commit, so a spec is reviewable as a diff. The `defining` stage is the gate that says design is still open. | Hold the org skills that constrain the spec. Those live in your agent's configuration. |
-| **Build** | The `ready` stage is the accepted-plan boundary: work is not picked up before it. Typed dependencies say what is blocked, and hierarchy says what a change belongs to. | Plan mode, `CLAUDE.md`, worktrees, and the coding session itself. We are what the session reads and writes, not the session. |
-| **Test** | Nothing. Your CI does this. | Everything. Specboards only records the outcome, through linked PR state. |
-| **Deploy** | `link_github` plus per-push reconciliation put live PR, issue, and branch state on the board. Agent identities, scoped keys, write quotas, and the spec-write audit trail are the governance surface. | The review passes themselves. |
-| **Maintain** | An unattended agent identity with a bearer key is exactly the "no person in the invocation path" shape, and what it finds is written back as an idea or an item. | The trigger. We are the destination and the identity, not the watcher. |
+| Playbook stage | What Specboards does                                                                                                                                                                                  | What it does not                                                                                                             |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| **Plan**       | The Ideas intake is where an intent lands; promoting one creates the work item. `create_spec` commits the artifact into your repo, so it is version-controlled from the first line.                   | Run the brainstorming session that produces the intent. That is your agent, writing back to us over MCP.                     |
+| **Design**     | `create_spec` / `update_spec_content` write `specs/**/spec.md` and commit, so a spec is reviewable as a diff. The `defining` stage is the gate that says design is still open.                        | Hold the org skills that constrain the spec. Those live in your agent's configuration.                                       |
+| **Build**      | The `ready` stage is the accepted-plan boundary: work is not picked up before it. Typed dependencies say what is blocked, and hierarchy says what a change belongs to.                                | Plan mode, `CLAUDE.md`, worktrees, and the coding session itself. We are what the session reads and writes, not the session. |
+| **Test**       | Nothing. Your CI does this.                                                                                                                                                                           | Everything. Specboards only records the outcome, through linked PR state.                                                    |
+| **Deploy**     | `link_github` plus per-push reconciliation put live PR, issue, and branch state on the board. Agent identities, scoped keys, write quotas, and the spec-write audit trail are the governance surface. | The review passes themselves.                                                                                                |
+| **Maintain**   | An unattended agent identity with a bearer key is exactly the "no person in the invocation path" shape, and what it finds is written back as an idea or an item.                                      | The trigger. We are the destination and the identity, not the watcher.                                                       |
 
 The longer version, with the reasoning behind each row and where we expect to
 close the gaps, is in
@@ -137,26 +137,49 @@ system-of-record split in [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
 ### Self-host the full stack
 
-There is no published image yet, so this builds `infra/web.Dockerfile` from your
-clone. Expect the first `up` to take a few minutes.
+One command, on any machine with Docker running:
 
 ```bash
-cp infra/.env.example infra/.env
-# then, in infra/.env:
-#   BETTER_AUTH_SECRET=$(openssl rand -hex 32)   # required, no default
-#   POSTGRES_PASSWORD=…                          # required before the first up
-docker compose -f infra/docker-compose.yml up   # web + Postgres
+./setup.sh          # http://localhost:3000
 ```
 
-Both values matter, for different reasons. `BETTER_AUTH_SECRET` has no default
-at all and compose refuses to start without one: it keys session signing and the
-AES-256-GCM encryption of secrets at rest, so treat rotating it as a migration
-rather than a config edit (everyone is signed out, and anything encrypted under
-the old key stops being readable). `POSTGRES_PASSWORD` defaults to the sample
-`postgres`, which is fine for a local trial and unsafe anywhere else, and it has
-to be set before the first `up`, because Postgres bakes it into the data volume
-on initialization. The database port is bound to loopback only; keep it that
-way (or drop the mapping) on any machine others can reach.
+That generates `infra/.env` with a strong `BETTER_AUTH_SECRET` and
+`POSTGRES_PASSWORD`, builds the image, applies the migrations, starts the stack,
+and waits until it answers. There is no published image yet, so the first run
+builds `infra/web.Dockerfile` from your clone and takes a few minutes;
+subsequent runs are fast. Open the URL and create your account: **the first
+account becomes the admin**. Nothing else to configure, and no email needed to
+get in (see below).
+
+```bash
+./setup.sh --stop      # stop, keep your data
+./setup.sh --destroy   # stop and delete the database volume
+```
+
+`docker compose -f infra/docker-compose.yml up` still works if you prefer to
+drive compose yourself, and it also migrates on the way up. It needs
+`BETTER_AUTH_SECRET` set (in `infra/.env`, or the environment); `setup.sh`
+exists so you do not have to produce one by hand.
+
+**The two secrets, and why they matter.** `BETTER_AUTH_SECRET` keys session
+signing and the AES-256-GCM encryption of secrets at rest, so treat rotating it
+as a migration rather than a config edit: everyone is signed out, and anything
+encrypted under the old key stops being readable. `POSTGRES_PASSWORD` is baked
+into the data volume when Postgres initializes, so changing it later means
+`ALTER USER` in psql rather than an edit. `setup.sh` generates both and never
+overwrites an existing `infra/.env`.
+
+**Before anyone else can reach it**, set `APP_URL` in `infra/.env` to the real
+HTTPS origin, and configure email (below) so account verification is real. The
+database port is bound to loopback only; keep it that way, or drop the mapping
+entirely, on a machine others can reach.
+
+**Email is optional, and that changes sign-up.** With no
+`POSTMARK_SERVER_TOKEN` / `EMAIL_FROM`, Specboards cannot deliver a
+verification link, so a single-tenant self-host does not require verification:
+you sign up and you are in. Set both to turn real verification on, which you
+should do before opening the instance to other people. A multi-tenant
+deployment always requires verification regardless.
 
 Optional environment flags for a hosted deployment:
 
@@ -354,19 +377,18 @@ pnpm --filter @specboards/db generate   # emit table migrations into infra/migra
 pnpm db:migrate                         # apply against $DATABASE_URL (incl. RLS policies)
 ```
 
-Deployed environments apply migrations themselves: the container image carries a
-bundled runner (`migrate.mjs`) plus the SQL, and Fly runs it as the
-`release_command` before a new version takes traffic, aborting the release if it
-fails. Self-hosting works the same way, against the image
-`infra/docker-compose.yml` builds for you:
+Deployed environments apply migrations themselves, and so does the compose
+stack: the container image carries a bundled runner (`migrate.mjs`) plus the
+SQL. Fly runs it as the `release_command` before a new version takes traffic,
+aborting the release if it fails; compose runs it as a one-shot `migrate`
+service that `web` waits on. Either way you do not run anything by hand, and
+`./setup.sh` covers the self-host case end to end.
+
+To run it yourself anyway, against a database of your own:
 
 ```bash
-# Against the compose stack's own Postgres (DATABASE_URL is already set for it):
-docker compose -f infra/docker-compose.yml run --rm web node migrate.mjs
-
-# Or point it at a database of your own:
 docker compose -f infra/docker-compose.yml run --rm \
-  -e DATABASE_URL=postgres://… web node migrate.mjs
+  -e DATABASE_URL=postgres://… migrate
 ```
 
 > **No prebuilt image yet.** Self-hosting currently means cloning this repo and

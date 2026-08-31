@@ -15,7 +15,35 @@ import {
 import { onFly, trustsForwardedFor } from "@/lib/client-ip";
 import { getDb } from "@/lib/db";
 import { isE2E } from "@/lib/e2e";
-import { renderActionEmail, sendEmail } from "@/lib/email";
+import { isEmailConfigured, renderActionEmail, sendEmail } from "@/lib/email";
+import { isSingleTenant } from "@/lib/tenancy";
+
+/**
+ * Whether email verification can be required of a new account.
+ *
+ * Requiring it means the account is unusable until the holder clicks a link we
+ * put in an email. On a single-tenant self-host with no mail transport
+ * configured that link is never delivered: {@link sendEmail} drops it with a
+ * warning, and Better Auth's token is not recoverable from the logs or the
+ * database, so the operator is locked out of the instance they just installed.
+ * That is exactly what the 2026-08-31 clean-machine run hit, and the only way
+ * through was hand-written SQL against `users.email_verified`.
+ *
+ * So the requirement is dropped in precisely that case, and nowhere else:
+ *
+ * - **Multi-tenant** keeps it unconditionally. A hosted deployment without a
+ *   working mail transport is a misconfiguration to fix, not a case to degrade
+ *   for, and unverified sign-up there would let anyone claim an address they do
+ *   not control.
+ * - **Self-host with email configured** keeps it. The link arrives, so the
+ *   protection costs nothing.
+ * - **Self-host without email** drops it, because the alternative is not
+ *   "safer", it is "does not work". The operator controls who can reach the
+ *   process, which is the boundary actually defending a single-tenant install.
+ */
+function canRequireEmailVerification(): boolean {
+  return !isSingleTenant() || isEmailConfigured();
+}
 
 /**
  * Reject sign-ups from consumer email providers (gmail.com, outlook.com, …)
@@ -23,7 +51,8 @@ import { renderActionEmail, sendEmail } from "@/lib/email";
  * SaaS; off by default so self-host admins can test with personal addresses.
  */
 function blockPublicEmailDomains(): boolean {
-  const value = process.env.SPECBOARDS_BLOCK_PUBLIC_EMAIL_DOMAINS?.trim().toLowerCase();
+  const value =
+    process.env.SPECBOARDS_BLOCK_PUBLIC_EMAIL_DOMAINS?.trim().toLowerCase();
   return value === "1" || value === "true" || value === "yes";
 }
 
@@ -69,8 +98,10 @@ async function allowLoopbackRedirectPort(ctx: {
     };
   };
 }): Promise<void> {
-  const requested = typeof ctx.query?.redirect_uri === "string" ? ctx.query.redirect_uri : "";
-  const clientId = typeof ctx.query?.client_id === "string" ? ctx.query.client_id : "";
+  const requested =
+    typeof ctx.query?.redirect_uri === "string" ? ctx.query.redirect_uri : "";
+  const clientId =
+    typeof ctx.query?.client_id === "string" ? ctx.query.client_id : "";
   const loopback = parseLoopbackRedirect(requested);
   if (!loopback || !clientId) return;
 
@@ -137,8 +168,10 @@ function createAuth(url: string) {
       // Block sign-in until the address is confirmed. Combined with
       // `sendOnSignUp` below this closes the gap where a fresh deployment's
       // first-user admin slot could be claimed without mailbox control.
-      // Relaxed only under SPECBOARDS_E2E so tests can sign in without a mailbox.
-      requireEmailVerification: !isE2E(),
+      // Relaxed under SPECBOARDS_E2E so tests can sign in without a mailbox,
+      // and on a self-host with no mail transport, where the link would be
+      // dropped and the instance locked (see canRequireEmailVerification).
+      requireEmailVerification: !isE2E() && canRequireEmailVerification(),
       // With requireEmailVerification on, Better Auth answers sign-up attempts
       // for an existing email with a generic success (enumeration protection),
       // so the attempter learns nothing and no verification email goes out.
@@ -152,7 +185,7 @@ function createAuth(url: string) {
         const { textBody, htmlBody } = renderActionEmail({
           name: user.name,
           intro:
-            "Someone (probably you) just tried to sign up for Specboards with this email address, but it already has an account. Sign in instead; if you have forgotten your password, use \"Forgot password?\" on the sign-in page.",
+            'Someone (probably you) just tried to sign up for Specboards with this email address, but it already has an account. Sign in instead; if you have forgotten your password, use "Forgot password?" on the sign-in page.',
           action: "Sign in",
           url: `${origin}/sign-in`,
           footer:
@@ -168,10 +201,12 @@ function createAuth(url: string) {
       sendResetPassword: async ({ user, url }) => {
         const { textBody, htmlBody } = renderActionEmail({
           name: user.name,
-          intro: "We received a request to reset your Specboards password. Click the button below to choose a new one.",
+          intro:
+            "We received a request to reset your Specboards password. Click the button below to choose a new one.",
           action: "Reset password",
           url,
-          footer: "If you didn't request this, you can safely ignore this email.",
+          footer:
+            "If you didn't request this, you can safely ignore this email.",
         });
         await sendEmail({
           to: user.email,
@@ -207,7 +242,8 @@ function createAuth(url: string) {
             intro: `Confirm that you want to change your Specboards email address to ${newEmail}. The change takes effect once you click the button below.`,
             action: "Confirm email change",
             url,
-            footer: "If you didn't request this, you can safely ignore this email and your address stays the same.",
+            footer:
+              "If you didn't request this, you can safely ignore this email and your address stays the same.",
           });
           await sendEmail({
             to: user.email,
@@ -222,14 +258,17 @@ function createAuth(url: string) {
       // Delivered via Postmark when POSTMARK_SERVER_TOKEN is set. Sign-in is
       // gated on verification (see requireEmailVerification above); a failed
       // sign-in by an unverified user re-sends this email automatically.
-      // Suppressed under SPECBOARDS_E2E (no mailbox in tests).
-      sendOnSignUp: !isE2E(),
+      // Suppressed under SPECBOARDS_E2E (no mailbox in tests), and on a
+      // self-host with no transport, where it would only log a dropped-email
+      // warning next to an account that is already usable.
+      sendOnSignUp: !isE2E() && canRequireEmailVerification(),
       // Land verified users back in the app rather than on a bare API 200.
       autoSignInAfterVerification: true,
       sendVerificationEmail: async ({ user, url }) => {
         const { textBody, htmlBody } = renderActionEmail({
           name: user.name,
-          intro: "Confirm your email address to finish setting up your Specboards account.",
+          intro:
+            "Confirm your email address to finish setting up your Specboards account.",
           action: "Verify email",
           url,
         });
@@ -270,8 +309,12 @@ function createAuth(url: string) {
         // touches the auth body schema.
         if (signUpCodeRequired()) {
           const db = getDb();
-          const invited = db ? await hasValidPendingInvitation(db, email) : false;
-          const firstForDomain = db ? await isFirstUserForDomain(db, email) : true;
+          const invited = db
+            ? await hasValidPendingInvitation(db, email)
+            : false;
+          const firstForDomain = db
+            ? await isFirstUserForDomain(db, email)
+            : true;
           if (firstForDomain && !invited) {
             const code = ctx.headers?.get("x-specboards-signup-code") ?? "";
             if (!signUpCodeMatches(code)) {
