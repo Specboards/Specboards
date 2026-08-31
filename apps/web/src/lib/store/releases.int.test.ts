@@ -198,6 +198,34 @@ describe.skipIf(!OWNER_URL)("per-product releases (store + RLS)", () => {
     expect(reopened.shippedDate).toBeNull();
   });
 
+  it("stamps the ship date on a release created already shipped", async () => {
+    // The stamp used to live only on the status transition, so a release
+    // created as `shipped` was stored shipped with no ship date: a state the
+    // roadmap, the detail sheet and `compareReleases` all read as authoritative
+    // and none of them could get right.
+    const rel = await store.createRelease(
+      { name: "v-born-shipped", productId: product.alpha, status: "shipped" },
+      asAdmin,
+    );
+    expect(rel.status).toBe("shipped");
+    expect(rel.shippedDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+
+    // And it survives a read, rather than only being right in the return value.
+    const listed = (await store.listReleases(asAdmin)).find(
+      (r) => r.id === rel.id,
+    )!;
+    expect(listed.shippedDate).toBe(rel.shippedDate);
+
+    // The other two creation states still start with no ship date.
+    for (const status of ["planned", "in_progress"] as const) {
+      const other = await store.createRelease(
+        { name: `v-born-${status}`, productId: product.alpha, status },
+        asAdmin,
+      );
+      expect(other.shippedDate).toBeNull();
+    }
+  });
+
   it("only schedules an item into a release from its product or portfolio", async () => {
     const item = await store.createFeature(
       { title: "Alpha epic", level: "epic", productId: product.alpha },

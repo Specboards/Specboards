@@ -107,13 +107,21 @@ export async function createRelease(
     if (clash[0]) {
       throw new ReleaseError(`A release named "${name}" already exists.`);
     }
+    // `shipped_date` describes the state, not the transition that reached it,
+    // so a release created already shipped is stamped here for the same reason
+    // `updateRelease` stamps one that ships later. Leaving it null produced a
+    // shipped release with no ship date, which every reader treats as
+    // authoritative: the roadmap draws its bar from it, the detail sheet prints
+    // it, and `compareReleases` sorts on it before falling back to the target.
+    const status = normalizeReleaseStatus(input.status);
     const [row] = await tx
       .insert(releases)
       .values({
         workspaceId: ws,
         productId,
         name,
-        status: normalizeReleaseStatus(input.status),
+        status,
+        shippedDate: status === "shipped" ? todayDateOnly() : null,
         startDate: input.startDate ?? null,
         targetDate: input.targetDate ?? null,
         notes: input.notes ?? null,
