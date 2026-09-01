@@ -220,6 +220,35 @@ verification is required. In particular a deployment that has simply not said
 what it is gets the strict behaviour, so forgetting a variable can never quietly
 turn the check off.
 
+**Connecting GitHub.** Specs live in git, so this is the step that makes a
+self-host useful. Settings -> Integrations -> Repositories offers two routes,
+and which one you can use is decided by GitHub, not by preference:
+
+- **One click**, if GitHub can reach your instance over the public internet.
+  Specboards sends GitHub an App manifest, you confirm the name and permissions
+  once, and the credentials come straight back. Nothing to copy.
+- **By hand**, if it cannot, which includes every `localhost` trial and every
+  internal-only deployment. GitHub validates the manifest's webhook URL for
+  reachability and refuses to create the App at all when that fails, whether or
+  not the webhook is active, so the one-click route is genuinely unavailable
+  rather than merely awkward. The setup card detects this and shows the manual
+  form instead, listing the exact Homepage, Callback, Setup and Webhook URLs to
+  enter on GitHub, generated from your own origin.
+
+  Create the App on GitHub (**Settings -> Developer settings -> GitHub Apps ->
+  New GitHub App**), then paste back its **App ID**, **private key** (the whole
+  `.pem`), and **client secret**. Specboards authenticates as the App before
+  storing anything, so wrong credentials are refused there and then rather than
+  failing later at the first sync. The private key is encrypted at rest under
+  `BETTER_AUTH_SECRET` and never returned to the browser.
+
+**Webhooks need a reachable instance; syncing does not.** Writing a spec in
+Specboards commits it to GitHub over an outbound call, which works from behind a
+firewall. Reconciling a change someone pushed on GitHub needs a webhook GitHub
+can deliver, which needs a public HTTPS `APP_URL`. An internal-only deployment
+therefore works one way out of the box, and gains the other when you give it a
+public origin and add the webhook URL to the App.
+
 Optional environment flags for a hosted deployment:
 
 - `APP_URL` - the deployment's canonical public origin (e.g.
