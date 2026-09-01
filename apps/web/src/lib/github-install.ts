@@ -118,6 +118,34 @@ export function newSetupNonce(): string {
   return randomBytes(16).toString("hex");
 }
 
+/**
+ * Whether the flow cookies should carry `Secure`, derived from the origin the
+ * deployment actually serves on.
+ *
+ * These were hardcoded `secure: true`. A `Secure` cookie is only stored over
+ * HTTPS, so on a plain-HTTP origin the browser silently discards it, the state
+ * check on the callback then fails, and the operator gets an opaque
+ * state-mismatch error with nothing pointing at their scheme as the cause.
+ *
+ * It went unnoticed because Chrome exempts `http://localhost`, which is the
+ * default self-host trial and therefore the only plain-HTTP origin anyone
+ * tested. An internal-only deployment on `http://specboards.corp.internal` is
+ * the case that breaks, and it is a normal on-prem shape.
+ *
+ * Deriving rather than dropping the flag: a deployment on HTTPS keeps `Secure`,
+ * which is where it matters. Only an origin that could never store the cookie
+ * loses it.
+ */
+export function secureCookies(req: Request): boolean {
+  try {
+    return new URL(appOriginFromRequest(req)).protocol === "https:";
+  } catch {
+    // Multi-tenant with no configured origin throws rather than guessing; that
+    // deployment is HTTPS by definition, so the strict answer is also correct.
+    return true;
+  }
+}
+
 /** Install URL for `slug`, carrying a CSRF `state` GitHub echoes to setup. */
 export function installUrlWithState(
   slug: string | null,
