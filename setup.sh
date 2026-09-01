@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Stand up a self-hosted Specboards with one command.
 #
-#   ./setup.sh              # build, migrate, start; http://localhost:3000
+#   ./setup.sh              # pull, migrate, start; http://localhost:3000
+#   ./setup.sh --build      # compile this working tree instead of pulling
 #   ./setup.sh --stop       # stop the stack, keep the data
 #   ./setup.sh --destroy    # stop and delete the database volume
 #
@@ -30,6 +31,8 @@ adopt_legacy=false
 # --start is "I know about the old volume, start fresh anyway". Without it a
 # bare run stops rather than silently ignoring a database someone may want.
 skip_legacy=false
+# Pull the published image unless asked to compile the working tree.
+build_from_source=false
 case "${1:-}" in
   --stop)
     exec "${compose[@]}" down
@@ -39,6 +42,9 @@ case "${1:-}" in
     ;;
   --start)
     skip_legacy=true
+    ;;
+  --build)
+    build_from_source=true
     ;;
   --destroy)
     # -v drops the named volume, which is the database. Ask first: this is the
@@ -50,7 +56,7 @@ case "${1:-}" in
     ;;
   "") ;;
   *)
-    echo "usage: ./setup.sh [--start|--stop|--destroy|--adopt-legacy-volume]" >&2
+    echo "usage: ./setup.sh [--start|--build|--stop|--destroy|--adopt-legacy-volume]" >&2
     exit 64
     ;;
 esac
@@ -268,16 +274,34 @@ elif [ "$adopt_legacy" = true ]; then
 fi
 
 
-# --- build, migrate, start --------------------------------------------------
-# There is no published image yet, so the first run builds one and takes a few
-# minutes. `up` waits on the migrate service, which waits on the database being
-# healthy, so by the time this returns the schema exists.
-echo "Building and starting (first run takes a few minutes)…"
+# --- pull (or build), migrate, start ----------------------------------------
+# `up` waits on the migrate service, which waits on the database being healthy,
+# so by the time this returns the schema exists.
+#
+# The published image is pulled by default: a self-host should be a download,
+# not a Next.js build on someone else's laptop. --build compiles from the
+# working tree instead, which is what anyone modifying the code wants.
+if [ "$build_from_source" = true ]; then
+  echo "Building from this working tree (a few minutes)…"
+else
+  echo "Pulling the Specboards image and starting…"
+fi
 # Explicit rather than inherited: a POSTGRES_PORT passed on this script's
 # command line has to reach compose, and one already recorded in infra/.env is
 # read from there.
 export POSTGRES_PORT="$db_port"
-"${compose[@]}" up -d --build
+if [ "$build_from_source" = true ]; then
+  "${compose[@]}" up -d --build
+else
+  # Fall back to building rather than dying, so a network without reach to
+  # ghcr.io, or a version tag that was never published, still ends with a
+  # running instance instead of a registry error the operator has to decode.
+  if ! "${compose[@]}" up -d --pull always; then
+    echo
+    echo "Could not pull the image; building from this working tree instead." >&2
+    "${compose[@]}" up -d --build
+  fi
+fi
 
 url="$(grep -E '^APP_URL=' "$env_file" | cut -d= -f2- | tr -d '"' || true)"
 url="${url:-http://localhost:3000}"

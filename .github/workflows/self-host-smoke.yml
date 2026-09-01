@@ -1,0 +1,103 @@
+# Prove the documented self-host install still produces a working instance.
+#
+# Nothing else asks this question. CI builds, tests and lints the code, but it
+# never runs `docker compose up`, so the whole self-host path could break and
+# every check would stay green: a change to the Dockerfile, an env var the app
+# newly requires, a migration needing a privilege the compose Postgres does not
+# grant. The 2026-08-31 clean-machine run found the stack coming up against an
+# empty database and 500ing on the first write, and it had been that way for as
+# long as compose had existed.
+#
+# Verifying self-host by hand once before v1.0.0 buys a launch and nothing
+# after it. The Homebrew tap already proves its own install on every bump; this
+# is the equivalent for a far more important promise.
+#
+# Deliberately a smoke test. The E2E suite covers behaviour; this only answers
+# "does the documented install still produce a working instance", which is
+# exactly what nothing currently asks.
+name: Self-host smoke
+
+on:
+  schedule:
+    # Daily. The failure this catches is usually introduced by a merge and
+    # discovered by a stranger, so the gap that matters is days, not hours.
+    - cron: "17 6 * * *"
+  push:
+    branches: [main]
+    paths:
+      - "infra/**"
+      - "setup.sh"
+      - "packages/db/src/migrate.ts"
+      - ".github/workflows/self-host-smoke.yml"
+  pull_request:
+    paths:
+      - "infra/**"
+      - "setup.sh"
+      - "packages/db/src/migrate.ts"
+      - ".github/workflows/self-host-smoke.yml"
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Exactly what the README tells a person to run. Not a bespoke sequence
+      # of compose commands: the point is to test the documented path, so if
+      # setup.sh stops working this has to fail with it.
+      #
+      # Pulls the published image when there is one and falls back to building
+      # from the tree, which is also what an operator gets, so this covers
+      # whichever path is real on the day.
+      - name: Install the way the README says to
+        run: ./setup.sh
+
+      # 1. The process serves. `/` redirects an anonymous visitor to sign-in.
+      - name: Serves a sign-in page
+        run: |
+          code="$(curl -s -o /dev/null -w '%{http_code}' -L http://localhost:3000/)"
+          [ "$code" = "200" ] || { echo "GET / returned $code"; exit 1; }
+          curl -fsS -L http://localhost:3000/ | grep -q "Sign in" \
+            || { echo "The page served is not the sign-in page."; exit 1; }
+
+      # 2. Migrations actually ran. The failure this exists for was an app that
+      # started healthy against an empty database, so "it responds" is not
+      # enough: ask the database what it has.
+      - name: Migrations applied
+        run: |
+          tables="$(docker exec specboards-db-1 psql -U postgres -d specboard -tAc \
+            "select count(*) from information_schema.tables where table_schema='public';")"
+          echo "public tables: $tables"
+          # Exact count would break on every migration that adds one. The
+          # distinction being drawn is "schema" vs "nothing".
+          [ "$tables" -gt 40 ] || { echo "Only $tables tables; migrations did not run."; exit 1; }
+          docker logs specboards-migrate-1 2>&1 | grep -qE "applied [0-9]+ migration|already up to date" \
+            || { echo "The migrate service did not report success."; exit 1; }
+
+      # 3. The database is writable through the app, not just present. Sign-up
+      # is the first thing any real operator does and it touches several tables.
+      # A self-host with no mail transport does not require verification, so a
+      # successful sign-up returns a session token; its absence means the
+      # verification gate is wrongly on and the operator would be locked out.
+      - name: A first account can be created and is signed in
+        run: |
+          body="$(curl -fsS -X POST http://localhost:3000/api/auth/sign-up/email \
+            -H 'Content-Type: application/json' \
+            -d '{"name":"Smoke Test","email":"smoke@onprem.test","password":"SmokeTest!2026x"}')"
+          echo "$body" | grep -q '"token"' \
+            || { echo "Sign-up returned no session token: $body"; exit 1; }
+          users="$(docker exec specboards-db-1 psql -U postgres -d specboard -tAc \
+            "select count(*) from users where email='smoke@onprem.test';")"
+          [ "$users" = "1" ] || { echo "Expected 1 user row, found $users."; exit 1; }
+
+      # Whatever failed above, the logs are the first thing anyone will want,
+      # and a dead container's logs are gone once the runner is recycled.
+      - name: Logs on failure
+        if: failure()
+        run: |
+          echo "=== web ==="; docker logs specboards-web-1 2>&1 | tail -60 || true
+          echo "=== migrate ==="; docker logs specboards-migrate-1 2>&1 | tail -40 || true
+          echo "=== db ==="; docker logs specboards-db-1 2>&1 | tail -30 || true
+          echo "=== compose ==="; docker compose -f infra/docker-compose.yml ps -a || true

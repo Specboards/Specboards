@@ -56,6 +56,7 @@ services:
   # idempotent and takes a session advisory lock, so a re-run, a restart, or two
   # `up`s racing are all safe.
   migrate:
+    image: ${SPECBOARDS_IMAGE:-ghcr.io/specboards/specboards}:${SPECBOARDS_VERSION:-latest}
     build:
       context: ..
       dockerfile: infra/web.Dockerfile
@@ -68,6 +69,15 @@ services:
     restart: "no"
 
   web:
+    # Pull by default, build on request. `docker compose up` fetches the
+    # published image; `docker compose up --build` (or `./setup.sh --build`)
+    # builds this same tag from your working tree instead, which is what
+    # someone modifying the code wants and what the AGPL positively invites.
+    #
+    # SPECBOARDS_VERSION pins a release, e.g. `SPECBOARDS_VERSION=0.29.4`, or a
+    # digest-bearing tag for something a moved tag cannot change. SPECBOARDS_IMAGE
+    # redirects the whole thing at a private registry or a fork's namespace.
+    image: ${SPECBOARDS_IMAGE:-ghcr.io/specboards/specboards}:${SPECBOARDS_VERSION:-latest}
     build:
       context: ..
       dockerfile: infra/web.Dockerfile
