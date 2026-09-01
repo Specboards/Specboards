@@ -16,33 +16,43 @@ import { onFly, trustsForwardedFor } from "@/lib/client-ip";
 import { getDb } from "@/lib/db";
 import { isE2E } from "@/lib/e2e";
 import { isEmailConfigured, renderActionEmail, sendEmail } from "@/lib/email";
-import { isSingleTenant } from "@/lib/tenancy";
+import { isSelfHost, isSingleTenant } from "@/lib/tenancy";
 
 /**
  * Whether email verification can be required of a new account.
  *
  * Requiring it means the account is unusable until the holder clicks a link we
- * put in an email. On a single-tenant self-host with no mail transport
- * configured that link is never delivered: {@link sendEmail} drops it with a
- * warning, and Better Auth's token is not recoverable from the logs or the
- * database, so the operator is locked out of the instance they just installed.
- * That is exactly what the 2026-08-31 clean-machine run hit, and the only way
- * through was hand-written SQL against `users.email_verified`.
+ * put in an email. On a self-host with no mail transport that link is never
+ * delivered: {@link sendEmail} drops it with a warning, and Better Auth's token
+ * is not recoverable from the logs or the database, so the operator is locked
+ * out of the instance they just installed. That is exactly what the 2026-08-31
+ * clean-machine run hit, and the only way through was hand-written SQL against
+ * `users.email_verified`.
  *
- * So the requirement is dropped in precisely that case, and nowhere else:
+ * Dropping the requirement therefore needs to happen, but only where it is the
+ * difference between "works" and "does not work". Three conditions, all
+ * required, because each one alone fails open in a way the others do not:
  *
- * - **Multi-tenant** keeps it unconditionally. A hosted deployment without a
- *   working mail transport is a misconfiguration to fix, not a case to degrade
- *   for, and unverified sign-up there would let anyone claim an address they do
- *   not control.
- * - **Self-host with email configured** keeps it. The link arrives, so the
- *   protection costs nothing.
- * - **Self-host without email** drops it, because the alternative is not
- *   "safer", it is "does not work". The operator controls who can reach the
- *   process, which is the boundary actually defending a single-tenant install.
+ * - **The deployment says it is a self-host.** Opt-in via `SPECBOARDS_SELF_HOST`
+ *   rather than inferred from tenancy. This used to read `isSingleTenant()`,
+ *   which is the *default* when `SPECBOARDS_MULTI_TENANT` is unset, so a hosted
+ *   deployment that lost that one variable would have quietly stopped
+ *   requiring verification. A safety property should not rest on a variable
+ *   being remembered.
+ * - **And it is single-tenant.** Belt and braces against the opposite mistake:
+ *   `SPECBOARDS_SELF_HOST=true` set by accident on a multi-tenant deployment
+ *   must not relax anything, because there unverified sign-up lets anyone claim
+ *   an address they do not control.
+ * - **And email is genuinely not configured.** With a transport the link
+ *   arrives, so the protection costs nothing and is kept.
+ *
+ * Every other combination keeps verification on. The default, with nothing
+ * set, is on.
  */
-function canRequireEmailVerification(): boolean {
-  return !isSingleTenant() || isEmailConfigured();
+export function canRequireEmailVerification(): boolean {
+  const unverifiableSelfHost =
+    isSelfHost() && isSingleTenant() && !isEmailConfigured();
+  return !unverifiableSelfHost;
 }
 
 /**
