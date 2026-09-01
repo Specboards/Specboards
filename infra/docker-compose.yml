@@ -87,8 +87,14 @@ services:
       # arg never reaches the Dockerfile, /legal's "Source code" link falls back
       # to the repo root, and a build of MODIFIED source stops naming that
       # source, which is the case the AGPL section 13 offer is about.
+      #
+      # The version arrives as SPECBOARDS_BUILD_VERSION rather than
+      # SPECBOARDS_VERSION because that name is already taken above, where it
+      # selects the image TAG to pull. Exporting it to name the build would
+      # silently change which image this stack runs.
       args:
         GIT_SHA: ${GIT_SHA:-}
+        SPECBOARDS_VERSION: ${SPECBOARDS_BUILD_VERSION:-}
     environment:
       DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/specboard
       # Keys session signing, the install-cookie HMAC, and AES-256-GCM

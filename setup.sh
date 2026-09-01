@@ -338,6 +338,13 @@ if [ "$build_from_source" = true ]; then
     git_sha="${git_sha}-dirty"
   fi
   export GIT_SHA="$git_sha"
+  # The release version too, so a built image identifies itself the same way a
+  # pulled one does: same OCI label, same /api/health?full=1. Read with sed
+  # rather than node, because the only tool this script requires is Docker.
+  export SPECBOARDS_BUILD_VERSION="$(
+    sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+      "$root/package.json" | head -1
+  )"
 fi
 
 if [ "$build_from_source" = true ]; then
