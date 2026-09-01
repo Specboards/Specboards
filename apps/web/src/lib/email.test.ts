@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { sendEmail } from "./email";
+import { isEmailConfigured, sendEmail } from "./email";
 
 const MESSAGE = {
   to: "user@example.test",
@@ -50,7 +50,10 @@ describe("sendEmail", () => {
 
   it("throws on a non-2xx response", async () => {
     vi.stubGlobal("fetch", async () =>
-      postmarkResponse(422, { ErrorCode: 300, Message: "Invalid email request" }),
+      postmarkResponse(422, {
+        ErrorCode: 300,
+        Message: "Invalid email request",
+      }),
     );
     await expect(sendEmail(MESSAGE)).rejects.toThrow(/422/);
   });
@@ -62,5 +65,43 @@ describe("sendEmail", () => {
     vi.stubGlobal("fetch", fetchMock);
     await expect(sendEmail(MESSAGE)).resolves.toBeUndefined();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("isEmailConfigured", () => {
+  const prevToken = process.env.POSTMARK_SERVER_TOKEN;
+  const prevFrom = process.env.EMAIL_FROM;
+
+  afterEach(() => {
+    if (prevToken === undefined) delete process.env.POSTMARK_SERVER_TOKEN;
+    else process.env.POSTMARK_SERVER_TOKEN = prevToken;
+    if (prevFrom === undefined) delete process.env.EMAIL_FROM;
+    else process.env.EMAIL_FROM = prevFrom;
+  });
+
+  it("is true only when both the token and the sender are set", () => {
+    process.env.POSTMARK_SERVER_TOKEN = "test-token";
+    process.env.EMAIL_FROM = "Specboards <no-reply@example.test>";
+    expect(isEmailConfigured()).toBe(true);
+  });
+
+  it("is false with a token but no sender", () => {
+    process.env.POSTMARK_SERVER_TOKEN = "test-token";
+    delete process.env.EMAIL_FROM;
+    expect(isEmailConfigured()).toBe(false);
+  });
+
+  it("is false with a sender but no token", () => {
+    delete process.env.POSTMARK_SERVER_TOKEN;
+    process.env.EMAIL_FROM = "Specboards <no-reply@example.test>";
+    expect(isEmailConfigured()).toBe(false);
+  });
+
+  it("is false when neither is set, which is the default self-host", () => {
+    // This is the condition that drops the email-verification requirement:
+    // sendEmail would log and discard the link, leaving no way to verify.
+    delete process.env.POSTMARK_SERVER_TOKEN;
+    delete process.env.EMAIL_FROM;
+    expect(isEmailConfigured()).toBe(false);
   });
 });

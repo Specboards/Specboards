@@ -13,16 +13,43 @@
  * It is bundled into a single file at build time (see infra/web.Dockerfile), so
  * it carries no dependency on the runtime image's node_modules layout.
  */
+import { existsSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
 
 /**
- * Where the SQL files and their journal live inside the runtime image. The repo
- * keeps them in infra/migrations (drizzle.config.ts `out`); the Dockerfile
- * copies that directory next to this script.
+ * Where the SQL files and their journal live.
+ *
+ * Two layouts, because this runs in two places. In the runtime image the
+ * Dockerfile copies `infra/migrations` next to the bundled `migrate.mjs` at
+ * /app, so `./migrations` resolves. Run from the repo (`pnpm db:migrate`) the
+ * working directory is `packages/db` and the SQL is up at `infra/migrations`,
+ * which is what `drizzle-kit` used to find via drizzle.config.ts before this
+ * became the single runner for both.
+ *
+ * Resolved from this module's own location rather than the working directory
+ * wherever possible, so it does not depend on where the process was launched.
+ * MIGRATIONS_FOLDER overrides everything for anyone with a third layout.
  */
-const MIGRATIONS_FOLDER = process.env.MIGRATIONS_FOLDER ?? "./migrations";
+function migrationsFolder(): string {
+  const override = process.env.MIGRATIONS_FOLDER;
+  if (override) return override;
+
+  const here = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    // Runtime image: bundled script and SQL side by side.
+    resolve(here, "migrations"),
+    // Repo: packages/db/src -> infra/migrations.
+    resolve(here, "../../../infra/migrations"),
+  ];
+  return candidates.find((path) => existsSync(path)) ?? "./migrations";
+}
+
+const MIGRATIONS_FOLDER = migrationsFolder();
 
 /**
  * Key for the advisory lock below. Any constant works as long as every deploy
@@ -47,6 +74,34 @@ function connectionString(): string {
   return url;
 }
 
+/**
+ * How many migrations the journal records as applied.
+ *
+ * Zero when the journal does not exist yet, which is the state of every
+ * database before its first migration: "no table" and "no rows" mean the same
+ * thing here, and conflating them is what made the first run, the one that
+ * builds all 63 tables, report "schema up to date" and tell the operator
+ * nothing had happened. Postgres raises 3F000 for the missing schema and 42P01
+ * for a missing table; both are the empty case.
+ *
+ * Any other failure returns null, which degrades the summary line to a vaguer
+ * one rather than failing a migration that otherwise succeeded.
+ */
+async function appliedCount(sql: postgres.Sql): Promise<number | null> {
+  try {
+    const rows = await sql<{ count: string }[]>`
+      SELECT count(*)::text AS count FROM drizzle.__drizzle_migrations
+    `;
+    return Number(rows[0]?.count ?? 0);
+  } catch (err: unknown) {
+    const code =
+      typeof err === "object" && err !== null && "code" in err
+        ? String((err as { code: unknown }).code)
+        : "";
+    return code === "3F000" || code === "42P01" ? 0 : null;
+  }
+}
+
 async function main(): Promise<void> {
   const sql = postgres(connectionString(), {
     // A release machine runs one short task: a single connection, no pooling
@@ -67,10 +122,21 @@ async function main(): Promise<void> {
     // find nothing left to do.
     await sql`SELECT pg_advisory_lock(${LOCK_KEY})`;
     const started = Date.now();
+    // Count the journal either side so the summary can distinguish "created
+    // the whole schema" from "there was nothing to do". Reporting "schema up
+    // to date" for both is how a first-time self-hoster watched 63 tables get
+    // created and could not tell whether anything had happened.
+    const before = await appliedCount(sql);
     await migrate(drizzle(sql), { migrationsFolder: MIGRATIONS_FOLDER });
-    process.stdout.write(
-      `[migrate] schema up to date in ${Date.now() - started}ms\n`,
-    );
+    const after = await appliedCount(sql);
+    const applied = after !== null && before !== null ? after - before : null;
+    const summary =
+      applied === null
+        ? "schema up to date"
+        : applied === 0
+          ? "already up to date, nothing to apply"
+          : `applied ${applied} migration${applied === 1 ? "" : "s"}`;
+    process.stdout.write(`[migrate] ${summary} in ${Date.now() - started}ms\n`);
   } finally {
     // Best-effort unlock; ending the session releases it anyway.
     await sql`SELECT pg_advisory_unlock(${LOCK_KEY})`.catch(() => {});
@@ -82,7 +148,7 @@ main().catch((err: unknown) => {
   // Exit non-zero so Fly aborts the release and the previous version keeps
   // serving, rather than promoting code whose schema never landed.
   process.stderr.write(
-    `[migrate] failed: ${err instanceof Error ? err.stack ?? err.message : String(err)}\n`,
+    `[migrate] failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}\n`,
   );
   process.exit(1);
 });

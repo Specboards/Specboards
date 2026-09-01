@@ -158,7 +158,13 @@ export async function BoardView({
     access ?? undefined,
     activeProduct?.id ?? null,
   );
-  const activeLevel = resolveActiveLevel(levels, sp.level);
+  // Pass the levels that actually hold cards so a landing view (no `?level=`)
+  // opens on one with work on it rather than on an empty planning altitude.
+  const activeLevel = resolveActiveLevel(
+    levels,
+    sp.level,
+    scoped.map((f) => f.level),
+  );
   // Cards at the active level, then narrowed by the URL filters. `featuresForLevel`
   // (pre-filter) drives the empty-state and toolbar decisions so the filter bar
   // never disappears when a filter empties the board.

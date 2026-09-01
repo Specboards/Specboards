@@ -169,6 +169,20 @@ export function renderInfoEmail(opts: {
   return { textBody, htmlBody };
 }
 
+/**
+ * Whether outbound email can actually be delivered.
+ *
+ * Both halves are needed: a token with no verified sender, or a sender with no
+ * token, sends nothing. Callers use this to decide whether a flow may *depend*
+ * on an email arriving. Email verification does, which is why a self-host with
+ * no transport cannot require it (see `requireEmailVerification` in auth.ts) —
+ * the link is dropped by {@link sendEmail} and the token is not recoverable
+ * from anywhere, so the first admin would be locked out of their own instance.
+ */
+export function isEmailConfigured(): boolean {
+  return Boolean(process.env.POSTMARK_SERVER_TOKEN && process.env.EMAIL_FROM);
+}
+
 export async function sendEmail(message: OutboundEmail): Promise<void> {
   const token = process.env.POSTMARK_SERVER_TOKEN;
   const from = process.env.EMAIL_FROM;
@@ -203,12 +217,16 @@ export async function sendEmail(message: OutboundEmail): Promise<void> {
   const raw = await res.text().catch(() => "");
   let parsed: { ErrorCode?: number; Message?: string } | null = null;
   try {
-    parsed = raw ? (JSON.parse(raw) as { ErrorCode?: number; Message?: string }) : null;
+    parsed = raw
+      ? (JSON.parse(raw) as { ErrorCode?: number; Message?: string })
+      : null;
   } catch {
     parsed = null;
   }
   const postmarkError =
-    parsed != null && typeof parsed.ErrorCode === "number" && parsed.ErrorCode !== 0;
+    parsed != null &&
+    typeof parsed.ErrorCode === "number" &&
+    parsed.ErrorCode !== 0;
   if (!res.ok || postmarkError) {
     const code = parsed?.ErrorCode != null ? `, code ${parsed.ErrorCode}` : "";
     throw new Error(

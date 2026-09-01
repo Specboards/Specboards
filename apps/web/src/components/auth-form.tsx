@@ -21,7 +21,14 @@ type Mode = "sign-in" | "sign-up";
 
 const copy: Record<
   Mode,
-  { title: string; description: string; submit: string; altText: string; altHref: string; altLabel: string }
+  {
+    title: string;
+    description: string;
+    submit: string;
+    altText: string;
+    altHref: string;
+    altLabel: string;
+  }
 > = {
   "sign-in": {
     title: "Sign in",
@@ -42,7 +49,18 @@ const copy: Record<
 };
 
 /** Email/password sign-in and sign-up form backed by the Better Auth client. */
-export function AuthForm({ mode }: { mode: Mode }) {
+export function AuthForm({
+  mode,
+  showSignUpCode = false,
+}: {
+  mode: Mode;
+  /**
+   * Whether this deployment gates sign-up behind a code. Off by default so a
+   * self-host never shows a field for a code it does not enforce; the sign-up
+   * page reads the real setting server-side and passes it in.
+   */
+  showSignUpCode?: boolean;
+}) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [pending, startTransition] = useTransition();
@@ -85,7 +103,10 @@ export function AuthForm({ mode }: { mode: Mode }) {
     // and the server lets them through (see access-gate `isFirstUserForDomain`).
     const signUpCode = String(data.get("signUpCode") ?? "").trim();
 
-    if (mode === "sign-up" && password !== String(data.get("confirmPassword") ?? "")) {
+    if (
+      mode === "sign-up" &&
+      password !== String(data.get("confirmPassword") ?? "")
+    ) {
       setError("Passwords don't match.");
       return;
     }
@@ -95,7 +116,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
       if (mode === "sign-up") {
         // Send the code in a header rather than the body so it never touches
         // Better Auth's sign-up schema; the auth before-hook reads it.
-        const { error } = await signUp.email({
+        const { data, error } = await signUp.email({
           email,
           password,
           name,
@@ -108,12 +129,25 @@ export function AuthForm({ mode }: { mode: Mode }) {
           setError(error.message ?? "Something went wrong. Please try again.");
           return;
         }
-        // requireEmailVerification means no session yet — wait for the link.
+        // With verification required there is no session yet, so wait for the
+        // link. A deployment that cannot send email does not require it (see
+        // canRequireEmailVerification in lib/auth.ts) and signs the user
+        // straight in; sending them to "check your email" there would park
+        // them in front of a message about a mail that was never sent.
+        if (data?.token) {
+          router.push(redirectTo);
+          router.refresh();
+          return;
+        }
         setPendingEmail(email);
         return;
       }
 
-      const { error } = await signIn.email({ email, password, callbackURL: redirectTo });
+      const { error } = await signIn.email({
+        email,
+        password,
+        callbackURL: redirectTo,
+      });
       if (error) {
         // An unverified address can't sign in; Better Auth re-sends the
         // verification email, so route the user to the "check your email"
@@ -129,7 +163,9 @@ export function AuthForm({ mode }: { mode: Mode }) {
         return;
       }
       if (isOAuthAuthorize) {
-        window.location.assign(`/api/auth/mcp/authorize?${searchParams.toString()}`);
+        window.location.assign(
+          `/api/auth/mcp/authorize?${searchParams.toString()}`,
+        );
         return;
       }
       router.push(redirectTo);
@@ -163,7 +199,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
       </CardHeader>
       <CardContent>
         <form onSubmit={onSubmit} className="space-y-4">
-          {mode === "sign-up" ? (
+          {mode === "sign-up" && showSignUpCode ? (
             <FormField
               label="Sign-up code"
               hint="New teams need a sign-up code to get started. If a teammate is already on Specboards, you can leave this blank."
@@ -201,13 +237,20 @@ export function AuthForm({ mode }: { mode: Mode }) {
             <Input
               name="password"
               type="password"
-              autoComplete={mode === "sign-up" ? "new-password" : "current-password"}
+              autoComplete={
+                mode === "sign-up" ? "new-password" : "current-password"
+              }
               required
             />
           </FormField>
           {mode === "sign-up" ? (
             <FormField label="Confirm password">
-              <Input name="confirmPassword" type="password" autoComplete="new-password" required />
+              <Input
+                name="confirmPassword"
+                type="password"
+                autoComplete="new-password"
+                required
+              />
             </FormField>
           ) : null}
           <FormError>{error}</FormError>
@@ -217,7 +260,10 @@ export function AuthForm({ mode }: { mode: Mode }) {
         </form>
         <p className="mt-4 text-center text-xs text-muted-foreground">
           {t.altText}{" "}
-          <Link href={altHref} className="text-link underline underline-offset-4">
+          <Link
+            href={altHref}
+            className="text-link underline underline-offset-4"
+          >
             {t.altLabel}
           </Link>
         </p>
@@ -245,7 +291,10 @@ function VerifyEmailNotice({
   function resend() {
     startTransition(async () => {
       setStatus("idle");
-      const { error } = await sendVerificationEmail({ email, callbackURL: redirectTo });
+      const { error } = await sendVerificationEmail({
+        email,
+        callbackURL: redirectTo,
+      });
       setStatus(error ? "error" : "sent");
     });
   }
@@ -255,12 +304,17 @@ function VerifyEmailNotice({
       <CardHeader>
         <CardTitle>Check your email</CardTitle>
         <CardDescription>
-          We sent an email to <span className="text-foreground">{email}</span>. Follow the link in
-          it to continue.
+          We sent an email to <span className="text-foreground">{email}</span>.
+          Follow the link in it to continue.
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <Button type="button" className="w-full" onClick={resend} disabled={pending}>
+        <Button
+          type="button"
+          className="w-full"
+          onClick={resend}
+          disabled={pending}
+        >
           {pending ? "…" : "Resend verification email"}
         </Button>
         {status === "sent" ? (

@@ -20,7 +20,7 @@
     "dev": "tsc -b --watch",
     "typecheck": "tsc --noEmit",
     "generate": "drizzle-kit generate",
-    "migrate": "drizzle-kit migrate",
+    "migrate": "tsx src/migrate.ts",
     "seed": "tsx src/seed.ts",
     "lint": "eslint src",
     "build:migrate": "esbuild src/migrate.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/migrate.mjs --banner:js=\"import{createRequire}from'node:module';const require=createRequire(import.meta.url);\""

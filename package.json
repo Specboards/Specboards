@@ -14,7 +14,7 @@
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
-    "db:up": "docker compose -f infra/docker-compose.yml up -d db",
+    "db:up": "BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:-unused-by-the-db-service} docker compose -f infra/docker-compose.yml up -d db",
     "db:migrate": "pnpm --filter @specboards/db migrate",
     "db:seed": "pnpm --filter @specboards/db seed",
     "deploy:test": "scripts/deploy.sh test",
