@@ -94,6 +94,32 @@ test.describe("security headers", () => {
     ).toEqual([]);
   });
 
+  /**
+   * `form-action 'self'` is right for every route but one. The GitHub App
+   * manifest flow has to POST the App definition to github.com, and a blanket
+   * `'self'` refuses that navigation outright, which was half of why the
+   * self-host GitHub connection dead-ended on a blank page (the other half was
+   * the refused inline script, covered by `lib/github-manifest-form.test.ts`).
+   *
+   * The widening is scoped to the one path and to github.com, so these two
+   * assertions are a pair: the exception exists, and it has not leaked.
+   */
+  test("form-action permits github.com on the manifest route only", async ({ page }) => {
+    const formAction = async (path: string) => {
+      const res = await page.request.get(path, { maxRedirects: 0 });
+      const csp = res.headers()["content-security-policy"] ?? "";
+      return csp
+        .split(";")
+        .map((d) => d.trim())
+        .find((d) => d === "form-action" || d.startsWith("form-action "));
+    };
+
+    expect(await formAction("/api/v1/github/app/create")).toBe(
+      "form-action 'self' https://github.com",
+    );
+    expect(await formAction("/sign-in")).toBe("form-action 'self'");
+  });
+
   test("the page hydrates under the nonce policy", async ({ page }) => {
     // The assertion above proves the tags are nonced; this proves the browser
     // accepted them and React came alive. A silently dead bundle fails here

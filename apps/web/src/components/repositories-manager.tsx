@@ -11,6 +11,7 @@ import {
   disconnectRepository,
   importWorkspaceSpecs,
   listInstallationRepositories,
+  saveManualGithubApp,
   scanWorkspaceSpecs,
   setRepositoryProducts,
   updateRepository,
@@ -69,6 +70,12 @@ interface RepositoriesManagerProps {
   /** Self-host (single-tenant) deployment: admins create their own GitHub App.
    *  On hosted (multi-tenant), the App is shared and managed by Specboards. */
   selfHosted: boolean;
+  /** This deployment's own origin, shown in the manual GitHub App instructions. */
+  appOrigin: string;
+  /** Whether GitHub could reach this origin. False rules the one-click manifest
+   *  flow out entirely: GitHub refuses to create an App whose webhook URL it
+   *  cannot deliver to, so the manual path is the only one that can work. */
+  originIsPublic: boolean;
   /** GitHub App "install" URL once the App exists, else null. */
   installUrl: string | null;
   /** One-time banner from the setup/callback round-trip. */
@@ -116,6 +123,8 @@ export function RepositoriesManager({
   canConnect,
   configured,
   selfHosted,
+  appOrigin,
+  originIsPublic,
   installUrl,
   notice,
   installations,
@@ -182,7 +191,7 @@ export function RepositoriesManager({
           initial={installations}
         />
       ) : selfHosted ? (
-        <SetupGitHubCard />
+        <SetupGitHubCard origin={appOrigin} originIsPublic={originIsPublic} />
       ) : (
         <HostedNotConfiguredCard />
       )}
@@ -774,12 +783,218 @@ function CreateSpecRepoForm({
   );
 }
 
+/** A labelled, copyable value for the manual GitHub App instructions. */
+function SettingRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="space-y-0.5">
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <code className="block overflow-x-auto rounded border border-input px-2 py-1 text-xs">
+        {value}
+      </code>
+    </div>
+  );
+}
+
 /**
- * Shown to an admin before any GitHub App exists. Kicks off the one-click
- * manifest flow: GitHub creates the App, redirects back, and we store the
- * credentials — no copying ids or secrets.
+ * The manual path: the operator creates the App on GitHub themselves and pastes
+ * its credentials here.
+ *
+ * This is the only path that works for an instance GitHub cannot reach, which
+ * is most on-prem deployments. GitHub validates the manifest's webhook URL for
+ * public reachability and refuses to create the App when it fails, so the
+ * one-click flow is unavailable there by construction, not by configuration.
+ *
+ * The form asks only for what cannot be derived. The App's slug and client id
+ * come back from `GET /app` when the server verifies the credentials, so every
+ * field here is one GitHub has no way to tell us.
  */
-function SetupGitHubCard() {
+function ManualGitHubAppForm({
+  origin,
+  onCancel,
+}: {
+  origin: string;
+  onCancel: (() => void) | null;
+}) {
+  const router = useRouter();
+  const [appId, setAppId] = useState("");
+  const [privateKey, setPrivateKey] = useState("");
+  const [clientSecret, setClientSecret] = useState("");
+  const [webhookSecret, setWebhookSecret] = useState("");
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  function submit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    startTransition(async () => {
+      setError(null);
+      try {
+        await saveManualGithubApp({
+          appId: appId.trim(),
+          privateKey,
+          clientSecret: clientSecret.trim(),
+          webhookSecret: webhookSecret.trim(),
+        });
+        router.refresh();
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Couldn't save the GitHub credentials.",
+        );
+      }
+    });
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-4">
+      <div className="space-y-2 rounded-md border border-input p-3">
+        <p className="text-xs text-muted-foreground">
+          On GitHub, create a new App (Settings &rarr; Developer settings &rarr;
+          GitHub Apps &rarr; New GitHub App) with these values, then paste its
+          credentials below.
+        </p>
+        <SettingRow label="Homepage URL" value={origin} />
+        <SettingRow
+          label="Callback URL"
+          value={`${origin}/api/v1/github/oauth/callback`}
+        />
+        <SettingRow label="Setup URL" value={`${origin}/api/v1/github/setup`} />
+        <SettingRow
+          label="Webhook URL (only if this instance is reachable from GitHub)"
+          value={`${origin}/api/webhooks/github`}
+        />
+        <SettingRow
+          label="Repository permissions"
+          value="Administration: write · Contents: write · Pull requests: write · Issues: read · Metadata: read"
+        />
+        <SettingRow label="Organization permissions" value="Members: read" />
+        <SettingRow label="Subscribe to events" value="Push · Pull request · Issues" />
+      </div>
+
+      <label className="block space-y-1.5">
+        <span className="text-xs font-medium text-muted-foreground">App ID</span>
+        <Input
+          value={appId}
+          onChange={(e) => setAppId(e.target.value)}
+          placeholder="123456"
+          inputMode="numeric"
+          disabled={pending}
+          required
+        />
+      </label>
+
+      <label className="block space-y-1.5">
+        <span className="text-xs font-medium text-muted-foreground">
+          Private key
+        </span>
+        <textarea
+          value={privateKey}
+          onChange={(e) => setPrivateKey(e.target.value)}
+          placeholder={"-----BEGIN RSA PRIVATE KEY-----\n…"}
+          rows={5}
+          disabled={pending}
+          required
+          spellCheck={false}
+          className="w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs"
+        />
+        <span className="block text-xs text-muted-foreground">
+          Generate one on the App&apos;s page and paste the whole .pem file. It
+          is encrypted before it is stored and never sent back to the browser.
+        </span>
+      </label>
+
+      <label className="block space-y-1.5">
+        <span className="text-xs font-medium text-muted-foreground">
+          Client secret
+        </span>
+        <Input
+          type="password"
+          value={clientSecret}
+          onChange={(e) => setClientSecret(e.target.value)}
+          disabled={pending}
+          required
+          autoComplete="off"
+        />
+        <span className="block text-xs text-muted-foreground">
+          Used to check that whoever installs the App administers the account
+          they install it on.
+        </span>
+      </label>
+
+      <label className="block space-y-1.5">
+        <span className="text-xs font-medium text-muted-foreground">
+          Webhook secret <span className="font-normal">(optional)</span>
+        </span>
+        <Input
+          type="password"
+          value={webhookSecret}
+          onChange={(e) => setWebhookSecret(e.target.value)}
+          disabled={pending}
+          autoComplete="off"
+        />
+        <span className="block text-xs text-muted-foreground">
+          Leave blank if GitHub cannot reach this instance. Specs you write here
+          still reach GitHub; changes pushed on GitHub will not flow back until
+          a webhook can be delivered.
+        </span>
+      </label>
+
+      {error ? <p className="text-sm text-destructive">{error}</p> : null}
+
+      <div className="flex items-center gap-2">
+        <Button type="submit" disabled={pending}>
+          {pending ? "Verifying…" : "Save credentials"}
+        </Button>
+        {onCancel ? (
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={onCancel}
+            disabled={pending}
+          >
+            Cancel
+          </Button>
+        ) : null}
+      </div>
+    </form>
+  );
+}
+
+/**
+ * Shown to an admin before any GitHub App exists.
+ *
+ * When GitHub can reach this deployment, the one-click manifest flow leads and
+ * the manual path sits behind a disclosure. When it cannot, the manual path is
+ * the whole card: offering one-click there would send the operator to a GitHub
+ * error page, which is exactly what used to happen.
+ */
+function SetupGitHubCard({
+  origin,
+  originIsPublic,
+}: {
+  origin: string;
+  originIsPublic: boolean;
+}) {
+  const [manualOpen, setManualOpen] = useState(false);
+
+  if (!originIsPublic) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Connect Specboards to GitHub</CardTitle>
+          <CardDescription>
+            This instance is at <code>{origin}</code>, which GitHub cannot reach,
+            so GitHub will not create an app for it automatically. Create the app
+            yourself and paste its credentials here.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ManualGitHubAppForm origin={origin} onCancel={null} />
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card>
       <CardHeader>
@@ -790,7 +1005,7 @@ function SetupGitHubCard() {
           repositories and sync specs.
         </CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-4">
         <form
           action="/api/v1/github/app/create"
           method="get"
@@ -813,6 +1028,23 @@ function SetupGitHubCard() {
           </label>
           <Button type="submit">Set up GitHub App</Button>
         </form>
+
+        {manualOpen ? (
+          <div className="border-t border-input pt-4">
+            <ManualGitHubAppForm
+              origin={origin}
+              onCancel={() => setManualOpen(false)}
+            />
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setManualOpen(true)}
+            className="text-xs text-muted-foreground underline"
+          >
+            Or set the app up manually
+          </button>
+        )}
       </CardContent>
     </Card>
   );

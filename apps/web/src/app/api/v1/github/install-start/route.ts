@@ -8,6 +8,7 @@ import {
   INSTALL_STATE_MAX_AGE,
   createInstallState,
   installUrlWithState,
+  secureCookies,
 } from "@/lib/github-install";
 import { orgPath } from "@/lib/org-path";
 import { resolveApiMembership, workspaceSlug } from "@/lib/workspace";
@@ -67,7 +68,7 @@ export async function GET(req: Request) {
   jar.set(INSTALL_STATE_COOKIE, state, {
     httpOnly: true,
     sameSite: "lax",
-    secure: true,
+    secure: secureCookies(req),
     path: "/",
     maxAge: INSTALL_STATE_MAX_AGE,
   });

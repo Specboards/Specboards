@@ -6,8 +6,11 @@ import {
   APP_SETUP_COOKIE,
   appOriginFromRequest,
   newSetupNonce,
+  secureCookies,
 } from "@/lib/github-install";
+import { renderManifestForm } from "@/lib/github-manifest-form";
 import { orgPath } from "@/lib/org-path";
+import { isPubliclyReachable } from "@/lib/public-origin";
 import { isMultiTenant } from "@/lib/tenancy";
 import { getMembership, workspaceSlug } from "@/lib/workspace";
 
@@ -65,6 +68,18 @@ export async function GET(req: Request) {
   const origin = appOriginFromRequest(req);
   const nonce = newSetupNonce();
 
+  // Stop here rather than sending the operator to a GitHub error page they
+  // cannot act on. GitHub validates the manifest's webhook URL for public
+  // reachability and refuses the whole App when it fails, and it does so
+  // whether `active` is true or false; omitting `hook_attributes` is refused
+  // too ("Hook url cannot be blank"). So a manifest from an instance GitHub
+  // cannot reach can never succeed, and the only useful thing to do is say so
+  // in our own UI, on this side of the redirect. Such a deployment uses the
+  // manual credential path (`app/manual`) instead.
+  if (!isPubliclyReachable(origin)) {
+    return htmlRedirect(repos("?error=origin_not_public"));
+  }
+
   // GitHub App names are globally unique and GitHub reserves the bare name
   // "Specboards" for the @specboards account, so every self-host App must carry a
   // distinguishing suffix. Prefer the admin-supplied org name, falling back to
@@ -102,31 +117,13 @@ export async function GET(req: Request) {
     ? `https://github.com/organizations/${org}/settings/apps/new`
     : "https://github.com/settings/apps/new";
 
-  // Embed the manifest as a JS literal (JSON is valid JS); escape `<` so a
-  // value can't break out of the <script> element.
-  const manifestLiteral = JSON.stringify(manifest).replace(/</g, "\\u003c");
-
-  const html = `<!doctype html>
-<html>
-  <head><meta charset="utf-8"><title>Setting up GitHub…</title></head>
-  <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;padding:40px;text-align:center;color:#444;">
-    <p>Redirecting you to GitHub to create the Specboards app…</p>
-    <form id="f" method="post" action="${action}?state=${nonce}">
-      <input type="hidden" name="manifest" id="m">
-      <noscript><button type="submit">Continue to GitHub</button></noscript>
-    </form>
-    <script>
-      document.getElementById('m').value = JSON.stringify(${manifestLiteral});
-      document.getElementById('f').submit();
-    </script>
-  </body>
-</html>`;
+  const html = renderManifestForm({ action, nonce, manifest, org });
 
   const jar = await cookies();
   jar.set(APP_SETUP_COOKIE, nonce, {
     httpOnly: true,
     sameSite: "lax",
-    secure: true,
+    secure: secureCookies(req),
     path: "/",
     maxAge: 60 * 10,
   });

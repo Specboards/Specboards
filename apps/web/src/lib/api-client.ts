@@ -2264,6 +2264,53 @@ export async function createSpecRepository(input: {
   return body.repository;
 }
 
+/** What the deployment's App looks like once manual credentials are accepted. */
+export interface ManualGithubAppResult {
+  slug: string;
+  name: string;
+  /** False when no webhook secret was supplied, so pushes will not reconcile. */
+  webhookConfigured: boolean;
+}
+
+/**
+ * Configure the deployment's GitHub App from credentials the operator created
+ * by hand, for a self-host that GitHub cannot reach and so cannot use the
+ * one-click manifest flow. The server verifies them against `GET /app` before
+ * storing, so a rejection here means the credentials are wrong, not that the
+ * save failed.
+ */
+export async function saveManualGithubApp(input: {
+  appId: string;
+  privateKey: string;
+  clientSecret: string;
+  webhookSecret?: string;
+  clientId?: string;
+}): Promise<ManualGithubAppResult> {
+  const res = await apiFetch("/api/v1/github/app/manual", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (res.status === 401) throw new AuthRequiredError();
+  const body = (await res.json().catch(() => null)) as {
+    ok?: boolean;
+    slug?: string;
+    name?: string;
+    webhookConfigured?: boolean;
+    error?: string;
+  } | null;
+  if (!res.ok || !body?.ok) {
+    throw new Error(
+      body?.error ?? `Couldn't save the GitHub credentials (${res.status}).`,
+    );
+  }
+  return {
+    slug: body.slug ?? "",
+    name: body.name ?? "",
+    webhookConfigured: body.webhookConfigured ?? false,
+  };
+}
+
 // ── Products ────────────────────────────────────────────────────────────
 
 /** Create a product (org-admin only on the server); returns the new record. */
