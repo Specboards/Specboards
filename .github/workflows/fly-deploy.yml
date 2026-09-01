@@ -37,7 +37,11 @@ jobs:
       # "Source code" link resolves to the exact commit running (AGPL s13).
       # It has to be passed on every deploy path or the link silently degrades
       # to the repo root, which is why it is here and not left to a human.
-      - run: flyctl deploy -c fly.test.toml --remote-only --build-arg GIT_SHA="${GITHUB_SHA::7}"
+      # SPECBOARDS_VERSION rides along so the image's OCI version label and
+      # /api/health?full=1 report the release, not just the commit.
+      - id: version
+        run: echo "value=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+      - run: flyctl deploy -c fly.test.toml --remote-only --build-arg GIT_SHA="${GITHUB_SHA::7}" --build-arg SPECBOARDS_VERSION="${{ steps.version.outputs.value }}"
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN_TEST }}
 
@@ -82,6 +86,8 @@ jobs:
       - name: Refuse production of an unreleased version
         run: ./scripts/release-guard.sh
       - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # master, 2026-04-08
-      - run: flyctl deploy --remote-only --build-arg GIT_SHA="${GITHUB_SHA::7}"
+      - id: version
+        run: echo "value=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+      - run: flyctl deploy --remote-only --build-arg GIT_SHA="${GITHUB_SHA::7}" --build-arg SPECBOARDS_VERSION="${{ steps.version.outputs.value }}"
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN_PROD }}
