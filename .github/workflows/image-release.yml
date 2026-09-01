@@ -111,7 +111,9 @@ jobs:
           context: .
           file: infra/web.Dockerfile
           platforms: ${{ matrix.platform }}
-          build-args: GIT_SHA=${{ steps.meta.outputs.sha }}
+          build-args: |
+            GIT_SHA=${{ steps.meta.outputs.sha }}
+            SPECBOARDS_VERSION=${{ steps.meta.outputs.version }}
           # Push the blob only; the merge job assigns the human-readable tags.
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=${{ steps.meta.outputs.slug }}

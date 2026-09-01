@@ -165,6 +165,36 @@ EOF
   echo "  secrets generated; this file is not overwritten on later runs."
 else
   echo "Using existing $env_file."
+  # Never overwritten, but it does need extending. A file written by an older
+  # version has only the keys that version knew about, so an upgrading operator
+  # never sees the ones added since, nor the comments explaining them. Nothing
+  # breaks (compose defaults cover both), but the documented way to point the
+  # instance at a real origin or turn on email is invisible to exactly the
+  # people who have been running it longest.
+  #
+  # Only ever appends, only keys that are absent, and never a secret: a file
+  # that already has BETTER_AUTH_SECRET must not gain a second one.
+  added=()
+  add_key() {
+    grep -qE "^[#[:space:]]*$1=" "$env_file" && return 0
+    printf '%s\n' "" "$2" >> "$env_file"
+    added+=("$1")
+  }
+  add_key APP_URL "# Public origin of this deployment. The default suits a local trial. Set this
+# to a real HTTPS origin before anyone else can reach the instance.
+APP_URL=http://localhost:3000"
+  add_key POSTGRES_PORT "# Host port the database is published on, loopback only. Move it if something
+# else already owns 5432; only the host side changes.
+POSTGRES_PORT=${db_port}"
+  add_key POSTMARK_SERVER_TOKEN "# Outbound email (verification, password reset, invites). Unset means email is
+# skipped; sign-up then does not require verification, because the link could
+# never arrive. Set both to turn real verification on.
+# POSTMARK_SERVER_TOKEN=
+# EMAIL_FROM=Specboards <no-reply@example.com>"
+  if [ ${#added[@]} -gt 0 ]; then
+    echo "  added newer settings to $env_file: ${added[*]}"
+    echo "  (values are the defaults this version already used; nothing changed behaviour)"
+  fi
 fi
 
 # --- legacy volume ----------------------------------------------------------
@@ -290,6 +320,26 @@ fi
 # command line has to reach compose, and one already recorded in infra/.env is
 # read from there.
 export POSTGRES_PORT="$db_port"
+
+# The commit being built, passed through as a build arg exactly as
+# scripts/deploy.sh does on the Fly path. Without it NEXT_PUBLIC_GIT_SHA is
+# empty and /legal's "Source code" link degrades to the repo root, which does
+# not name the source actually running and so does not satisfy the AGPL
+# section 13 offer. That matters most precisely here: `--build` is the path for
+# someone running a MODIFIED copy, which the licence positively invites, and it
+# was the one path that stopped naming its source.
+#
+# A source tarball with no git metadata leaves this empty, which is the
+# pre-existing fallback rather than a failure. A dirty tree is marked, because
+# then no commit fully describes what is running.
+if [ "$build_from_source" = true ]; then
+  git_sha="$(git -C "$root" rev-parse --short HEAD 2>/dev/null || true)"
+  if [ -n "$git_sha" ] && ! git -C "$root" diff --quiet HEAD 2>/dev/null; then
+    git_sha="${git_sha}-dirty"
+  fi
+  export GIT_SHA="$git_sha"
+fi
+
 if [ "$build_from_source" = true ]; then
   "${compose[@]}" up -d --build
 else
