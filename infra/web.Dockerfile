@@ -13,6 +13,11 @@ ENV NEXT_OUTPUT=standalone
 # NEXT_PUBLIC_SOURCE_REPO_URL to point the notice at their published fork.
 ARG GIT_SHA=""
 ENV NEXT_PUBLIC_GIT_SHA=$GIT_SHA
+# Also readable at runtime, so /api/health can report which build is answering
+# without the caller having to load and read a rendered page.
+ENV SPECBOARDS_GIT_SHA=$GIT_SHA
+ARG SPECBOARDS_VERSION=""
+ENV SPECBOARDS_VERSION=$SPECBOARDS_VERSION
 RUN pnpm build
 # Bundle the migration runner into one self-contained file. The runtime image
 # below is a Next standalone trace, which carries only what the server imports,
@@ -32,6 +37,21 @@ LABEL org.opencontainers.image.description="Specboards: a spec-based product man
 LABEL org.opencontainers.image.licenses="AGPL-3.0-only"
 LABEL org.opencontainers.image.title="Specboards"
 LABEL org.opencontainers.image.url="https://specboards.ai"
+# Which build this is. Both were missing, so `docker image inspect` could not
+# answer "what am I running?" at all: an operator who pulled `latest` weeks ago
+# had to boot the container and read /legal to find out, and registry UIs, SBOM
+# tooling and vulnerability scanners got nothing. That is the first question
+# every on-prem support conversation asks.
+#
+# The build already knew: GIT_SHA arrives above and is baked into the client
+# bundle. These just publish it as metadata. Both re-declare the ARG because a
+# LABEL in this stage cannot see one declared in the builder stage.
+ARG GIT_SHA
+ARG SPECBOARDS_VERSION
+LABEL org.opencontainers.image.revision="${GIT_SHA}"
+LABEL org.opencontainers.image.version="${SPECBOARDS_VERSION}"
+ENV SPECBOARDS_GIT_SHA=${GIT_SHA}
+ENV SPECBOARDS_VERSION=${SPECBOARDS_VERSION}
 ENV NODE_ENV=production
 WORKDIR /app
 # Copy the traced bundle owned by the unprivileged `node` user (shipped in the
