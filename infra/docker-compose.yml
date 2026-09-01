@@ -60,8 +60,15 @@ services:
     build:
       context: ..
       dockerfile: infra/web.Dockerfile
+      # Must match `web`'s args exactly. Both services resolve to the SAME image
+      # tag, so compose builds it once and the args of whichever service it
+      # picks are the ones baked in. When these two lists differed, the build
+      # silently took this service's (which lacked the version), and the running
+      # app reported `"version": null` from an image that had been built with
+      # the version right there on the command line.
       args:
         GIT_SHA: ${GIT_SHA:-}
+        SPECBOARDS_VERSION: ${SPECBOARDS_BUILD_VERSION:-}
     command: ["node", "migrate.mjs"]
     environment:
       DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/specboard
@@ -92,6 +99,8 @@ services:
       # SPECBOARDS_VERSION because that name is already taken above, where it
       # selects the image TAG to pull. Exporting it to name the build would
       # silently change which image this stack runs.
+      #
+      # Keep this list identical to `migrate`'s: same image tag, one build.
       args:
         GIT_SHA: ${GIT_SHA:-}
         SPECBOARDS_VERSION: ${SPECBOARDS_BUILD_VERSION:-}
