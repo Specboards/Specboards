@@ -52,6 +52,7 @@ const copy: Record<
 export function AuthForm({
   mode,
   showSignUpCode = false,
+  firstRun = false,
 }: {
   mode: Mode;
   /**
@@ -60,6 +61,12 @@ export function AuthForm({
    * page reads the real setting server-side and passes it in.
    */
   showSignUpCode?: boolean;
+  /**
+   * Whether this is the deployment's very first account, which administers it.
+   * Changes the copy only. Off by default so the hosted sign-up, where every
+   * visitor is joining an existing deployment, is untouched.
+   */
+  firstRun?: boolean;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -68,7 +75,22 @@ export function AuthForm({
   // Set once a verification email is in flight: sign-up always lands here (no
   // session until confirmed), and an unverified sign-in falls through to it too.
   const [pendingEmail, setPendingEmail] = useState<string | null>(null);
-  const t = copy[mode];
+  // First run replaces the sign-up copy wholesale. "Sign up with your work
+  // email to get started" describes joining a service; this person is
+  // installing one, and the thing they most need told is that this account
+  // becomes the administrator. "Work email" is also a hosted-only constraint:
+  // self-host ships with SPECBOARDS_BLOCK_PUBLIC_EMAIL_DOMAINS off, so it reads
+  // as a rule they might trip over when no such rule is enforced.
+  const t =
+    mode === "sign-up" && firstRun
+      ? {
+          ...copy["sign-up"],
+          title: "Create the admin account",
+          description:
+            "This is the first account on this Specboards instance, so it administers the workspace. Any email address works.",
+          submit: "Create admin account",
+        }
+      : copy[mode];
 
   // After auth, return to wherever the user was headed (set by the redirect
   // that bounced them here), defaulting to "/" — the root resolves the user's
@@ -258,15 +280,20 @@ export function AuthForm({
             {pending ? "…" : t.submit}
           </Button>
         </form>
-        <p className="mt-4 text-center text-xs text-muted-foreground">
-          {t.altText}{" "}
-          <Link
-            href={altHref}
-            className="text-link underline underline-offset-4"
-          >
-            {t.altLabel}
-          </Link>
-        </p>
+        {/* On first run there is no account to sign in to, so offering the
+            link would send the operator to a page that redirects straight
+            back here. */}
+        {firstRun && mode === "sign-up" ? null : (
+          <p className="mt-4 text-center text-xs text-muted-foreground">
+            {t.altText}{" "}
+            <Link
+              href={altHref}
+              className="text-link underline underline-offset-4"
+            >
+              {t.altLabel}
+            </Link>
+          </p>
+        )}
       </CardContent>
     </Card>
   );
