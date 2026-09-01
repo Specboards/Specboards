@@ -25,6 +25,74 @@ for how and when the version is bumped.
 > `pnpm deploy:prod` and the dispatched workflow. See
 > [VERSIONING.md](./VERSIONING.md).
 
+## [0.30.0] - 2026-08-31
+
+Self-hosting works. Before this release it did not, and we had never checked.
+
+Someone installed Specboards from a clean machine using only the README, wrote
+down every place they stopped, and this is the result. They could not get a
+working instance. The stack came up against an empty database and returned a
+500 on the first thing anyone does; the first admin was then locked out of
+their own instance by a verification email that could never arrive. Both had
+been true for as long as the self-host path had existed, because every
+environment we run migrates itself and sends mail, and the one we hand to other
+people did neither.
+
+### Added
+
+- **One command installs Specboards.** `./setup.sh` checks the prerequisites and
+  the ports, generates the secrets, pulls the image, applies the migrations,
+  starts the stack, and waits until it answers. There is nothing to edit and no
+  second command. `--stop`, `--destroy`, and `--build` cover the rest; re-running
+  is safe and takes about three seconds.
+- **A published container image**, `ghcr.io/specboards/specboards`, built for
+  linux/amd64 and linux/arm64 on every release. Self-hosting is now a pull
+  rather than a clone-and-compile, and you can choose your version:
+  `SPECBOARDS_VERSION=0.30.0`, or pin the manifest digest recorded with each
+  release, since a tag can be moved and a digest cannot. `SPECBOARDS_IMAGE`
+  points the stack at your own registry or fork. Building from source stays a
+  first-class path, which the AGPL positively invites: `./setup.sh --build`.
+- **A daily check that the documented install still works.** It runs
+  `./setup.sh` exactly as the README tells you to, then asserts the app serves,
+  the database really has a schema, and a first account can be created and
+  signed in. Nothing previously asked that question, which is how the path
+  stayed broken.
+
+### Fixed
+
+- **The self-hosted stack now applies its own migrations.** It came up with an
+  empty database and looked healthy: the sign-up page rendered, and the first
+  write failed with `relation "outbox_events" does not exist`. The migration
+  step existed for our cloud deploys and had simply never been added here.
+- **A self-host with no mail configured can create its first account.** Sign-up
+  demanded an emailed verification link, and with no mail transport that link
+  was discarded and its token never stored, so the instance could not be entered
+  at all. Verification is now required only where it can actually be delivered:
+  always on a multi-tenant deployment, always when email is configured, and not
+  on a single-tenant self-host that has none.
+- **The sign-up page no longer asks self-hosters for a code they cannot have.**
+  The "Sign-up code" field belongs to our hosted beta and appeared on every
+  deployment; the first user of a self-host is by definition a new team, so it
+  read as a wall in front of a door that was open.
+- **A new workspace opens on a board with something on it.** Choosing "Explore
+  with sample data" landed on an empty Features tab while the four starter
+  cards, one of them titled "Welcome to Specboards", sat one tab away.
+- **Two checkouts on one machine no longer share a database.** The compose
+  project took its name from a directory, so every clone resolved to the same
+  volume and each believed it owned the data. The volume now has a fixed name of
+  its own. If you installed before this, `./setup.sh` finds your old database
+  and offers to bring it across rather than quietly starting empty beside it.
+- **`pnpm db:up` works on a fresh clone**, instead of failing on a secret only
+  the web service reads.
+- **Migration output reads like progress rather than failure.** It printed raw
+  Postgres notices that look like errors, and said "schema up to date" on the run
+  that created the entire schema. It now says how many migrations it applied.
+
+### Internal
+
+- One migration runner for development and production, where `pnpm db:migrate`
+  and the deployed release command previously used different code.
+
 ## [0.29.4] - 2026-08-31
 
 A release can now say when it actually shipped, rather than only when someone
