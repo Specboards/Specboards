@@ -810,18 +810,30 @@ function SettingRow({ label, value }: { label: string; value: string }) {
  */
 function ManualGitHubAppForm({
   origin,
+  originIsPublic,
   onCancel,
 }: {
   origin: string;
+  originIsPublic: boolean;
   onCancel: (() => void) | null;
 }) {
   const router = useRouter();
+  const [org, setOrg] = useState("");
   const [appId, setAppId] = useState("");
   const [privateKey, setPrivateKey] = useState("");
   const [clientSecret, setClientSecret] = useState("");
   const [webhookSecret, setWebhookSecret] = useState("");
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+
+  // GitHub keeps App creation under a different URL per owner, and finding it
+  // by hand means five clicks through two settings areas that look alike
+  // (an org's "Developer settings" is not the one under your avatar). Building
+  // the link from the owner the operator types removes that entirely.
+  const trimmedOrg = org.trim();
+  const createUrl = trimmedOrg
+    ? `https://github.com/organizations/${encodeURIComponent(trimmedOrg)}/settings/apps/new`
+    : "https://github.com/settings/apps/new";
 
   function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -847,27 +859,140 @@ function ManualGitHubAppForm({
 
   return (
     <form onSubmit={submit} className="space-y-4">
+      <label className="block space-y-1.5">
+        <span className="text-xs font-medium text-muted-foreground">
+          GitHub organization <span className="font-normal">(optional)</span>
+        </span>
+        <Input
+          value={org}
+          onChange={(e) => setOrg(e.target.value)}
+          placeholder="your-org"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          disabled={pending}
+        />
+        <span className="block text-xs text-muted-foreground">
+          Where the app should live. Leave blank for your personal account.
+        </span>
+      </label>
+
+      <ol className="space-y-3 rounded-md border border-input p-3 text-xs text-muted-foreground">
+        <li>
+          <span className="font-medium text-foreground">
+            1. Open GitHub&apos;s New GitHub App page.
+          </span>{" "}
+          <a
+            href={createUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="text-link underline underline-offset-4"
+          >
+            {createUrl}
+          </a>
+          <span className="block">
+            GitHub may ask you to re-enter your password or 2FA first. This page
+            is under the <em>organization&apos;s</em> developer settings, which
+            is a different place from the one under your avatar.
+          </span>
+        </li>
+
+        <li>
+          <span className="font-medium text-foreground">
+            2. Fill in these values.
+          </span>{" "}
+          Everything not listed can stay as GitHub sets it.
+          <div className="mt-2 space-y-2">
+            <SettingRow label="GitHub App name" value="Anything unique, e.g. Specboards (your-org)" />
+            <SettingRow label="Homepage URL" value={origin} />
+            <SettingRow
+              label="Callback URL"
+              value={`${origin}/api/v1/github/oauth/callback`}
+            />
+            <SettingRow label="Setup URL" value={`${origin}/api/v1/github/setup`} />
+            <SettingRow label="Redirect on update" value="Tick this box" />
+            <SettingRow
+              label="Webhook: Active"
+              value="UNTICK this box (see the note below)"
+            />
+            <SettingRow
+              label="Where can this app be installed?"
+              value="Only on this account"
+            />
+          </div>
+        </li>
+
+        <li>
+          <span className="font-medium text-foreground">
+            3. Set the permissions.
+          </span>{" "}
+          Under <em>Permissions</em>, expand each group and set only these. Every
+          one is needed; the app cannot work with less.
+          <div className="mt-2 space-y-2">
+            <SettingRow
+              label="Repository permissions"
+              value="Administration: Read and write · Contents: Read and write · Issues: Read-only · Metadata: Read-only · Pull requests: Read and write"
+            />
+            <SettingRow
+              label="Organization permissions"
+              value="Members: Read-only"
+            />
+          </div>
+          <span className="mt-1 block">
+            Members is the one most often missed. Without it Specboards cannot
+            check that whoever installs the app administers the account, and
+            every organization install fails at the last step.
+          </span>
+        </li>
+
+        <li>
+          <span className="font-medium text-foreground">
+            4. Create it, then collect three things.
+          </span>
+          <span className="block">
+            On the app&apos;s page after creating it: the{" "}
+            <strong className="text-foreground">App ID</strong> is shown near the
+            top. Press{" "}
+            <strong className="text-foreground">Generate a new client secret</strong>{" "}
+            and copy it now, because GitHub shows it once. Scroll down and press{" "}
+            <strong className="text-foreground">Generate a private key</strong>,
+            which downloads a <code>.pem</code> file. Paste all three below.
+          </span>
+        </li>
+
+        <li>
+          <span className="font-medium text-foreground">
+            5. Install the app on your account or organization.
+          </span>{" "}
+          Use <em>Install App</em> in the left sidebar of the app&apos;s settings.
+          GitHub requires the private key to exist before it will let you
+          install.
+        </li>
+      </ol>
+
       <div className="space-y-2 rounded-md border border-input p-3">
         <p className="text-xs text-muted-foreground">
-          On GitHub, create a new App (Settings &rarr; Developer settings &rarr;
-          GitHub Apps &rarr; New GitHub App) with these values, then paste its
-          credentials below.
+          <span className="font-medium text-foreground">
+            About the webhook.
+          </span>{" "}
+          {originIsPublic ? (
+            <>
+              GitHub can reach this instance, so tick <em>Active</em> in step 2
+              and set the URL below. Put the same secret in both places.
+            </>
+          ) : (
+            <>
+              This instance is at <code>{origin}</code>, which GitHub cannot
+              reach, so leave the webhook off. Specs written here still reach
+              GitHub, because that is an outbound call. Changes pushed on GitHub
+              will not flow back until this instance has a public HTTPS address.
+            </>
+          )}
         </p>
-        <SettingRow label="Homepage URL" value={origin} />
         <SettingRow
-          label="Callback URL"
-          value={`${origin}/api/v1/github/oauth/callback`}
-        />
-        <SettingRow label="Setup URL" value={`${origin}/api/v1/github/setup`} />
-        <SettingRow
-          label="Webhook URL (only if this instance is reachable from GitHub)"
+          label="Webhook URL (only once GitHub can reach this instance)"
           value={`${origin}/api/webhooks/github`}
         />
-        <SettingRow
-          label="Repository permissions"
-          value="Administration: write · Contents: write · Pull requests: write · Issues: read · Metadata: read"
-        />
-        <SettingRow label="Organization permissions" value="Members: read" />
         <SettingRow label="Subscribe to events" value="Push · Pull request · Issues" />
       </div>
 
@@ -989,7 +1114,11 @@ function SetupGitHubCard({
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <ManualGitHubAppForm origin={origin} onCancel={null} />
+          <ManualGitHubAppForm
+            origin={origin}
+            originIsPublic={originIsPublic}
+            onCancel={null}
+          />
         </CardContent>
       </Card>
     );
@@ -1033,6 +1162,7 @@ function SetupGitHubCard({
           <div className="border-t border-input pt-4">
             <ManualGitHubAppForm
               origin={origin}
+              originIsPublic={originIsPublic}
               onCancel={() => setManualOpen(false)}
             />
           </div>
