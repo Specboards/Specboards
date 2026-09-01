@@ -209,10 +209,16 @@ entirely, on a machine others can reach.
 
 **Email is optional, and that changes sign-up.** With no
 `POSTMARK_SERVER_TOKEN` / `EMAIL_FROM`, Specboards cannot deliver a
-verification link, so a single-tenant self-host does not require verification:
-you sign up and you are in. Set both to turn real verification on, which you
-should do before opening the instance to other people. A multi-tenant
-deployment always requires verification regardless.
+verification link, so it does not demand one: you sign up and you are in. Set
+both to turn real verification on, which you should do before opening the
+instance to other people.
+
+That relaxation is deliberately narrow. It applies only when all three of these
+hold: the deployment sets `SPECBOARDS_SELF_HOST=true` (the compose stack does),
+it is single-tenant, and no mail transport is configured. Anything else, and
+verification is required. In particular a deployment that has simply not said
+what it is gets the strict behaviour, so forgetting a variable can never quietly
+turn the check off.
 
 Optional environment flags for a hosted deployment:
 
