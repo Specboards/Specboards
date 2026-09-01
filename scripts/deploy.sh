@@ -94,5 +94,15 @@ if [ "${context_files:-0}" -gt 2000 ]; then
   echo "remote builder. Check for a new top-level or agent/tool state directory." >&2
 fi
 
+# The release version, alongside the commit. Both feed the image's OCI labels
+# and `/api/health?full=1`; without this the Fly deployments report their
+# revision but a null version, so the number an operator actually quotes ("we
+# are on 0.30.1") is the one the deployment cannot tell them. The image-release
+# workflow already passes it on the GHCR path; this keeps Fly in step.
+version="$(node -p "require('$root/package.json').version" 2>/dev/null || true)"
+
 echo "Deploying $config at $sha (branch $branch)…"
-exec fly deploy -c "$config" --build-arg GIT_SHA="$sha" "$@"
+exec fly deploy -c "$config" \
+  --build-arg GIT_SHA="$sha" \
+  --build-arg SPECBOARDS_VERSION="$version" \
+  "$@"
