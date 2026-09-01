@@ -25,6 +25,33 @@ for how and when the version is bumped.
 > `pnpm deploy:prod` and the dispatched workflow. See
 > [VERSIONING.md](./VERSIONING.md).
 
+## [0.30.1] - 2026-08-31
+
+Hardening on 0.30.0's self-host work, and metadata on the published image.
+
+### Fixed
+
+- **Email verification is relaxed only where a deployment has said it is a
+  self-host.** 0.30.0 stopped requiring verification when a deployment was
+  single-tenant and had no mail transport, which was right for the case it was
+  written for and wrong as a rule: single-tenant is what you get by setting
+  nothing, so it also described any hosted deployment that had lost a
+  configuration variable. Such a deployment would have quietly stopped
+  requiring verification, with nothing to signal it. It now takes all three of
+  `SPECBOARDS_SELF_HOST=true`, single-tenant, and no configured mail
+  transport, so the strict behaviour is what a deployment gets by default and
+  the relaxed one has to be asked for. No hosted deployment was affected: ours
+  is multi-tenant with mail configured, which satisfied the old rule twice
+  over.
+
+### Changed
+
+- **The published image declares its provenance.** `ghcr.io/specboards/specboards`
+  now carries the standard OCI labels, including `org.opencontainers.image.source`
+  pointing at this repository and `AGPL-3.0-only` as the license, so scanners and
+  registries can read where a running binary came from and what it is licensed
+  under without being told.
+
 ## [0.30.0] - 2026-08-31
 
 Self-hosting works. Before this release it did not, and we had never checked.
