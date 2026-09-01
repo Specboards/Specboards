@@ -144,17 +144,34 @@ One command, on any machine with Docker running:
 ```
 
 That generates `infra/.env` with a strong `BETTER_AUTH_SECRET` and
-`POSTGRES_PASSWORD`, builds the image, applies the migrations, starts the stack,
-and waits until it answers. There is no published image yet, so the first run
-builds `infra/web.Dockerfile` from your clone and takes a few minutes;
-subsequent runs are fast. Open the URL and create your account: **the first
-account becomes the admin**. Nothing else to configure, and no email needed to
-get in (see below).
+`POSTGRES_PASSWORD`, pulls the published image, applies the migrations, starts
+the stack, and waits until it answers. Open the URL and create your account:
+**the first account becomes the admin**. Nothing else to configure, and no
+email needed to get in (see below).
 
 ```bash
+./setup.sh --build     # compile your working tree instead of pulling
 ./setup.sh --stop      # stop, keep your data
 ./setup.sh --destroy   # stop and delete the database volume
 ```
+
+**Pinning a version.** The image is `ghcr.io/specboards/specboards`, published
+on every release and tagged with the version and `latest`, for linux/amd64 and
+linux/arm64. `latest` is what you get by default:
+
+```bash
+SPECBOARDS_VERSION=0.29.4 ./setup.sh    # a specific release
+SPECBOARDS_IMAGE=ghcr.io/you/specboards ./setup.sh   # your own fork or registry
+```
+
+Each release records its manifest digest, and pinning to that rather than to a
+tag is the stronger guarantee, since a tag can be moved and a digest cannot.
+
+**Building instead of pulling** is a first-class path, not a fallback: the
+AGPL positively invites you to modify and run your own copy. `./setup.sh
+--build`, or `docker compose -f infra/docker-compose.yml up --build`, compiles
+`infra/web.Dockerfile` from your clone. Set `NEXT_PUBLIC_SOURCE_REPO_URL` so
+the in-app source link points at your published fork rather than at us.
 
 `docker compose -f infra/docker-compose.yml up` still works if you prefer to
 drive compose yourself, and it also migrates on the way up. It needs
@@ -407,9 +424,9 @@ docker compose -f infra/docker-compose.yml run --rm \
   -e DATABASE_URL=postgres://… migrate
 ```
 
-> **No prebuilt image yet.** Self-hosting currently means cloning this repo and
-> building `infra/web.Dockerfile` locally; we do not publish to a registry.
-> Changing that is tracked for v1.0.0.
+> **Upgrading a self-host** is `git pull && ./setup.sh`, or bump
+> `SPECBOARDS_VERSION` and re-run. Migrations apply themselves on the way up,
+> and the runner is idempotent, so a repeated or interrupted upgrade is safe.
 
 ## License
 
