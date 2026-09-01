@@ -31,6 +31,7 @@ import { leafLevel } from "@specboards/core";
 import { getStore } from "@/lib/store";
 import { listProducts } from "@/lib/products-service";
 import { listRepoProductLinks } from "@/lib/repo-links-service";
+import { isPubliclyReachable } from "@/lib/public-origin";
 import { isSingleTenant } from "@/lib/tenancy";
 import { summarizeUsage } from "@/lib/usage-service";
 import { UsageCard } from "@/components/usage-card";
@@ -39,19 +40,19 @@ import { requireWorkspaceAccess } from "@/lib/workspace-access";
 
 export const dynamic = "force-dynamic";
 
+/** This deployment's own origin, e.g. https://test.specboards.ai. */
+async function appOrigin(): Promise<string> {
+  const configured = (process.env.APP_URL ?? process.env.BETTER_AUTH_URL)?.trim();
+  if (configured) return configured.replace(/\/+$/, "");
+  const h = await headers();
+  const proto = h.get("x-forwarded-proto") ?? "https";
+  const host = h.get("x-forwarded-host") ?? h.get("host") ?? "";
+  return `${proto}://${host}`;
+}
+
 /** This deployment's public MCP endpoint, e.g. https://test.specboards.ai/api/mcp. */
 async function mcpEndpoint(): Promise<string> {
-  const configured = (process.env.APP_URL ?? process.env.BETTER_AUTH_URL)?.trim();
-  let origin: string;
-  if (configured) {
-    origin = configured.replace(/\/+$/, "");
-  } else {
-    const h = await headers();
-    const proto = h.get("x-forwarded-proto") ?? "https";
-    const host = h.get("x-forwarded-host") ?? h.get("host") ?? "";
-    origin = `${proto}://${host}`;
-  }
-  return `${origin}/api/mcp`;
+  return `${await appOrigin()}/api/mcp`;
 }
 
 /** Map the GitHub callback/setup query params to a user-facing banner. */
@@ -74,6 +75,11 @@ function noticeFor(params: Record<string, string | string[] | undefined>): Setup
     "install-denied":
       "We couldn't verify that you're an owner or admin of that GitHub account, so the installation wasn't connected.",
     hosted: "GitHub is managed by Specboards on the hosted plan. Just install the app below.",
+    origin_not_public:
+      "GitHub can't reach this instance, so it will refuse to create the app. " +
+      "Creating a GitHub App requires a webhook URL that GitHub can deliver to over " +
+      "the public internet. Set APP_URL to a public HTTPS origin for this instance, " +
+      "restart it, and try again.",
   };
   const err = typeof params.error === "string" ? errors[params.error] : undefined;
   return err ? { kind: "error", message: err } : null;
@@ -109,6 +115,7 @@ export default async function IntegrationsSettingsPage({
   }
 
   const endpoint = await mcpEndpoint();
+  const origin = await appOrigin();
 
   // The caller's own OAuth connections. Per-user, not per-workspace: an OAuth
   // connection acts as a person, so it is theirs to review and revoke.
@@ -243,6 +250,8 @@ export default async function IntegrationsSettingsPage({
           canConnect={isAdmin}
           configured={configured}
           selfHosted={isSingleTenant()}
+          appOrigin={origin}
+          originIsPublic={isPubliclyReachable(origin)}
           installUrl={configured ? `/api/v1/github/install-start?org=${encodeURIComponent(access.orgSlug)}` : null}
           notice={noticeFor(params)}
           installations={installations}

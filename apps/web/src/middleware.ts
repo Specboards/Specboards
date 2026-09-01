@@ -47,7 +47,19 @@ const HOST_REDIRECTS: Record<string, string> = {
  */
 const DEV = process.env.NODE_ENV !== "production";
 
-function contentSecurityPolicy(nonce: string): string {
+/**
+ * The one route that must POST off-origin: the GitHub App manifest flow submits
+ * an App definition to github.com, so a blanket `form-action 'self'` refuses it
+ * and the self-host GitHub connection dead-ends on a blank page. Widened for
+ * this path only rather than globally, and only to github.com.
+ */
+const GITHUB_APP_CREATE_PATH = "/api/v1/github/app/create";
+
+function contentSecurityPolicy(nonce: string, pathname: string): string {
+  const formAction =
+    pathname === GITHUB_APP_CREATE_PATH
+      ? "form-action 'self' https://github.com"
+      : "form-action 'self'";
   return [
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${
@@ -60,7 +72,7 @@ function contentSecurityPolicy(nonce: string): string {
     `connect-src 'self'${DEV ? " ws: wss:" : ""}`,
     "frame-ancestors 'none'",
     "base-uri 'self'",
-    "form-action 'self'",
+    formAction,
     "object-src 'none'",
   ].join("; ");
 }
@@ -152,7 +164,7 @@ export function middleware(req: NextRequest) {
   }
 
   const nonce = newNonce();
-  const csp = contentSecurityPolicy(nonce);
+  const csp = contentSecurityPolicy(nonce, pathname);
 
   const headers = new Headers(req.headers);
   headers.set("x-nonce", nonce);
