@@ -1,0 +1,170 @@
+# Publish the self-host container image to GHCR when a `v*` tag is pushed.
+#
+# Self-hosting used to mean cloning the monorepo and waiting for a full Next.js
+# build, because infra/docker-compose.yml only knew how to build from source.
+# That is building from source with extra steps, not self-hosting, and it left
+# an operator unable to pin a version: they got whatever main built that day.
+#
+# The same `v*` tag that releases the app publishes the image, so the version on
+# /legal, the version in package.json, the git tag, and the image tag are all
+# one number. release-guard.sh already refuses a production deploy unless the
+# first three agree; this keeps the fourth in step.
+#
+# Multi-arch on purpose. A large share of people evaluating us are on Apple
+# silicon, and an amd64-only image under emulation is slow enough to read as
+# broken. Each architecture builds on a runner of that architecture rather than
+# under QEMU, because emulating a Next.js build costs tens of minutes. The two
+# jobs push blobs by digest and the merge job stitches them into one tag.
+name: Publish image
+
+on:
+  push:
+    tags:
+      - "v*"
+  # Lets a maintainer republish without minting a tag (e.g. after fixing this
+  # workflow). Takes an existing tag, so it can never publish a commit that was
+  # not released.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing git tag to build and publish (e.g. v0.29.4)"
+        required: true
+
+env:
+  IMAGE: ghcr.io/specboards/specboards
+
+jobs:
+  build:
+    # Never publish from a fork. A self-hoster's clone that pushes a `v*` tag
+    # must not be able to push to the specboards namespace.
+    if: github.repository == 'Specboards/Specboards'
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      # The tag is the version, and it has to be a version some commit actually
+      # carries. Publishing an image tagged 0.30.0 from a tree that says 0.29.4
+      # would put a number on the registry that nothing else in the release
+      # agrees with, which is the exact failure release-guard.sh exists to stop.
+      - id: meta
+        run: |
+          ref="${{ inputs.tag || github.ref_name }}"
+          version="${ref#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          if [ "$version" != "$pkg" ]; then
+            echo "Tag $ref ($version) does not match the repo version ($pkg)." >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          # A slug (linux/amd64 -> linux-amd64) for the artifact name, which
+          # cannot contain a slash.
+          echo "slug=${PLATFORM//\//-}" >> "$GITHUB_OUTPUT"
+        env:
+          PLATFORM: ${{ matrix.platform }}
+
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+      - uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # GIT_SHA is the same build arg scripts/deploy.sh passes on the Fly path.
+      # Without it /legal's "Source code" link degrades to the repo root, which
+      # does not satisfy the AGPL section 13 offer for the code actually running.
+      - id: build
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          file: infra/web.Dockerfile
+          platforms: ${{ matrix.platform }}
+          build-args: GIT_SHA=${{ steps.meta.outputs.sha }}
+          # Push the blob only; the merge job assigns the human-readable tags.
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ steps.meta.outputs.slug }}
+          cache-to: type=gha,scope=${{ steps.meta.outputs.slug }},mode=max
+
+      # An empty file named after the digest. The merge job globs the directory
+      # rather than parsing anything, which is the pattern docker documents.
+      - name: Export the digest
+        run: |
+          mkdir -p "${{ runner.temp }}/digests"
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: digest-${{ steps.meta.outputs.slug }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    needs: build
+    if: github.repository == 'Specboards/Specboards'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digest-*
+          merge-multiple: true
+
+      - id: meta
+        run: |
+          ref="${{ inputs.tag || github.ref_name }}"
+          echo "version=${ref#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+      - uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # One manifest list under both tags, assembled from the per-arch digests.
+      - name: Create the multi-arch tags
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          v="${{ steps.meta.outputs.version }}"
+          docker buildx imagetools create \
+            --tag "$IMAGE:$v" \
+            --tag "$IMAGE:latest" \
+            $(printf "$IMAGE@sha256:%s " *)
+
+      # The digest is what a cautious operator pins to: a tag can be moved, a
+      # digest cannot. Written to the run summary so it stays findable without
+      # pulling the image.
+      - name: Record the digest
+        run: |
+          v="${{ steps.meta.outputs.version }}"
+          digest="$(docker buildx imagetools inspect "$IMAGE:$v" --format '{{json .Manifest.Digest}}' | tr -d '"')"
+          {
+            echo "## Published \`$IMAGE:$v\`"
+            echo
+            echo "Also tagged \`latest\`. Platforms: linux/amd64, linux/arm64."
+            echo
+            echo "Pin to the digest rather than the tag, since a tag can be moved:"
+            echo
+            echo '```yaml'
+            echo "image: $IMAGE@$digest"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
