@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { ALL_PRODUCTS } from "@/lib/active-product";
 import { getServerSessionUser } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
+import { hasAnyUser } from "@/lib/first-run";
 import { LOCAL_ORG_SLUG, orgProductPath } from "@/lib/org-path";
 import { getWorkspaceById, resolveActiveWorkspace } from "@/lib/workspace";
 
@@ -19,7 +20,12 @@ export default async function HomePage() {
   if (!db) redirect(orgProductPath(LOCAL_ORG_SLUG, ALL_PRODUCTS, "/backlog"));
 
   const user = await getServerSessionUser();
-  if (!user) redirect("/sign-in");
+  if (!user) {
+    // A freshly installed instance has nobody to sign in as, so sending them to
+    // a "Welcome back" password form is a dead end that also contradicts what
+    // setup.sh just told them. Route the first visit to account creation.
+    redirect((await hasAnyUser(db)) ? "/sign-in" : "/sign-up");
+  }
 
   const membership = await resolveActiveWorkspace(db, user.id);
   if (!membership) redirect("/setup");
