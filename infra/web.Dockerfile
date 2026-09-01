@@ -21,6 +21,17 @@ RUN pnpm build
 RUN pnpm --filter @specboards/db build:migrate
 
 FROM node:22-alpine AS runner
+# Standard OCI metadata, read by registries, scanners, and tools like `docker
+# scout`. GHCR already links the package to this repo on its own, because the
+# push comes from this repo's Actions, so image.source is not what creates that
+# link; it is what makes the provenance readable to anything outside GitHub.
+# image.licenses earns its place here: this is AGPL code distributed as a
+# binary, and the label is where a scanner looks for that.
+LABEL org.opencontainers.image.source="https://github.com/Specboards/Specboards"
+LABEL org.opencontainers.image.description="Specboards: a spec-based product management layer over git-native specs. Self-hostable."
+LABEL org.opencontainers.image.licenses="AGPL-3.0-only"
+LABEL org.opencontainers.image.title="Specboards"
+LABEL org.opencontainers.image.url="https://specboards.ai"
 ENV NODE_ENV=production
 WORKDIR /app
 # Copy the traced bundle owned by the unprivileged `node` user (shipped in the
