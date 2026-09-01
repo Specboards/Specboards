@@ -2265,7 +2265,7 @@ export async function createSpecRepository(input: {
 }
 
 /** What the deployment's App looks like once manual credentials are accepted. */
-export interface ManualGithubAppResult {
+interface ManualGithubAppResult {
   slug: string;
   name: string;
   /** False when no webhook secret was supplied, so pushes will not reconcile. */
