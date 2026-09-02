@@ -13,7 +13,8 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
-import { AuthRequiredError, createRelease } from "@/lib/api-client";
+import { createRelease } from "@/lib/api-client/planning";
+import { AuthRequiredError } from "@/lib/api-client/request";
 
 /**
  * "New release" button + drawer on the Roadmap. A release belongs to a product
@@ -74,7 +75,12 @@ export function ReleaseCreate({ productId }: { productId: string | null }) {
               <span className="text-xs font-medium text-muted-foreground">
                 Name
               </span>
-              <Input name="name" autoFocus placeholder="e.g. v0.4" className="h-8" />
+              <Input
+                name="name"
+                autoFocus
+                placeholder="e.g. v0.4"
+                className="h-8"
+              />
             </label>
             <div className="grid grid-cols-2 gap-3">
               <label className="block space-y-1.5">

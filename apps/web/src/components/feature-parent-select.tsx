@@ -5,7 +5,8 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { Select } from "@/components/ui/select";
-import { AuthRequiredError, patchFeature } from "@/lib/api-client";
+import { AuthRequiredError } from "@/lib/api-client/request";
+import { patchFeature } from "@/lib/api-client/work-items";
 
 /**
  * Parent picker in the Relationships section: reparents the item under a

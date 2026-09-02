@@ -18,13 +18,13 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  AuthRequiredError,
   createCycle,
   deleteCycle,
   generateCycles,
   rolloverCycle,
   updateCycle,
-} from "@/lib/api-client";
+} from "@/lib/api-client/planning";
+import { AuthRequiredError } from "@/lib/api-client/request";
 import { statusLabel } from "@/lib/feature-helpers";
 import { orgProductPath } from "@/lib/org-path";
 import {
@@ -286,7 +286,10 @@ function CycleCard({
           <p className="text-xs text-muted-foreground">
             {cycle.startDate} to {cycle.endDate}
             {cycle.state === "active" ? (
-              <> · {remaining} day{remaining === 1 ? "" : "s"} left</>
+              <>
+                {" "}
+                · {remaining} day{remaining === 1 ? "" : "s"} left
+              </>
             ) : null}
             {cycle.itemCount > 0 ? (
               <>
@@ -427,7 +430,9 @@ function GenerateScheduleForm({
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
-  const [nameTemplate, setNameTemplate] = useState(`Sprint ${CYCLE_NUMBER_TOKEN}`);
+  const [nameTemplate, setNameTemplate] = useState(
+    `Sprint ${CYCLE_NUMBER_TOKEN}`,
+  );
   const [lengthDays, setLengthDays] = useState(14);
   // Runs client-side only (the form is behind a state toggle), so reading the
   // clock here cannot cause a hydration mismatch.
@@ -492,12 +497,15 @@ function GenerateScheduleForm({
   }
 
   return (
-    <form onSubmit={onSubmit} className="space-y-3 rounded-md border bg-card p-4">
+    <form
+      onSubmit={onSubmit}
+      className="space-y-3 rounded-md border bg-card p-4"
+    >
       <div className="space-y-1">
         <h2 className="text-sm font-medium">Generate a schedule</h2>
         <p className="text-xs text-muted-foreground">
-          Create a run of back-to-back cycles at a fixed cadence. Each one starts
-          the day after the last ends, and they are numbered in sequence.
+          Create a run of back-to-back cycles at a fixed cadence. Each one
+          starts the day after the last ends, and they are numbered in sequence.
         </p>
       </div>
 
@@ -628,8 +636,8 @@ function SchedulePreview({
   return (
     <div className="space-y-2 rounded-md border bg-muted/30 p-3">
       <p className="text-xs font-medium">
-        {planned.length} cycle{planned.length === 1 ? "" : "s"}, {planned[0]!.startDate}{" "}
-        to {last!.endDate}
+        {planned.length} cycle{planned.length === 1 ? "" : "s"},{" "}
+        {planned[0]!.startDate} to {last!.endDate}
       </p>
       <ul className="max-h-48 space-y-0.5 overflow-y-auto text-xs text-muted-foreground">
         {planned.map((p) => (
@@ -650,7 +658,8 @@ function SchedulePreview({
       {overlapping.length > 0 ? (
         <p className="text-2xs text-warning-fg">
           Overlaps {overlapping.length} existing cycle
-          {overlapping.length === 1 ? "" : "s"} ({overlapping
+          {overlapping.length === 1 ? "" : "s"} (
+          {overlapping
             .slice(0, 3)
             .map((c) => c.name)
             .join(", ")}
@@ -735,7 +744,9 @@ function CycleForm({
     >
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="block space-y-1.5">
-          <span className="text-xs font-medium text-muted-foreground">Name</span>
+          <span className="text-xs font-medium text-muted-foreground">
+            Name
+          </span>
           <Input
             name="name"
             defaultValue={cycle?.name ?? ""}
@@ -836,7 +847,8 @@ function RolloverForm({
 
   // Default to the soonest cycle that has not finished; the list is already
   // ordered active, then upcoming, then complete.
-  const preferred = candidates.find((c) => c.state !== "complete") ?? candidates[0];
+  const preferred =
+    candidates.find((c) => c.state !== "complete") ?? candidates[0];
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();

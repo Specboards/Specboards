@@ -17,11 +17,11 @@ import { MarkdownEditor } from "@/components/markdown-editor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  AuthRequiredError,
   createDocPage,
   deleteDocPage,
   patchDocPage,
-} from "@/lib/api-client";
+} from "@/lib/api-client/docs";
+import { AuthRequiredError } from "@/lib/api-client/request";
 import type { DocArea, DocPageRecord } from "@/lib/store/types";
 import { cn } from "@/lib/utils";
 
@@ -116,15 +116,19 @@ export function DocsWorkspace({
     if (!title.trim() || title.trim() === page.title) return;
     try {
       const updated = await patchDocPage(page.id, { title });
-      setPages((prev) => prev.map((p) => (p.id === page.id ? { ...p, ...updated } : p)));
+      setPages((prev) =>
+        prev.map((p) => (p.id === page.id ? { ...p, ...updated } : p)),
+      );
     } catch (err) {
       fail(err, "Rename failed.");
     }
   }
 
   async function remove(page: DocPageRecord) {
-    const label = page.kind === "folder" ? "folder and everything in it" : "page";
-    if (!window.confirm(`Delete "${page.title}"? This removes the ${label}.`)) return;
+    const label =
+      page.kind === "folder" ? "folder and everything in it" : "page";
+    if (!window.confirm(`Delete "${page.title}"? This removes the ${label}.`))
+      return;
     try {
       await deleteDocPage(page.id);
       setPages((prev) => {
@@ -153,7 +157,9 @@ export function DocsWorkspace({
   function childrenOf(parentId: string | null): DocPageRecord[] {
     return pages
       .filter((p) => p.parentId === parentId)
-      .sort((a, b) => a.position - b.position || a.title.localeCompare(b.title));
+      .sort(
+        (a, b) => a.position - b.position || a.title.localeCompare(b.title),
+      );
   }
 
   function renderTree(parentId: string | null, depth: number) {
@@ -177,7 +183,9 @@ export function DocsWorkspace({
             setSelectedId(node.id);
           }
         }}
-        onNewPageInside={() => setDraft({ kind: "page", parentId: node.id, title: "" })}
+        onNewPageInside={() =>
+          setDraft({ kind: "page", parentId: node.id, title: "" })
+        }
         onRename={(title) => void rename(node, title)}
         onDelete={() => void remove(node)}
       >
@@ -192,7 +200,9 @@ export function DocsWorkspace({
     return (
       <div className="mx-auto max-w-md space-y-3 py-16 text-center">
         <p className="text-sm font-medium">No pages yet</p>
-        {emptyHint ? <p className="text-sm text-muted-foreground">{emptyHint}</p> : null}
+        {emptyHint ? (
+          <p className="text-sm text-muted-foreground">{emptyHint}</p>
+        ) : null}
         {canEdit ? (
           <div className="flex justify-center gap-2 pt-1">
             {starterTitles.length > 0 ? (
@@ -202,7 +212,9 @@ export function DocsWorkspace({
             ) : null}
             <Button
               variant={starterTitles.length > 0 ? "secondary" : "default"}
-              onClick={() => setDraft({ kind: "page", parentId: null, title: "" })}
+              onClick={() =>
+                setDraft({ kind: "page", parentId: null, title: "" })
+              }
             >
               <Plus className="mr-1 h-4 w-4" aria-hidden />
               New page
@@ -222,7 +234,9 @@ export function DocsWorkspace({
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setDraft({ kind: "page", parentId: null, title: "" })}
+              onClick={() =>
+                setDraft({ kind: "page", parentId: null, title: "" })
+              }
             >
               <FilePlus className="mr-1 h-4 w-4" aria-hidden />
               Page
@@ -230,7 +244,9 @@ export function DocsWorkspace({
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setDraft({ kind: "folder", parentId: null, title: "" })}
+              onClick={() =>
+                setDraft({ kind: "folder", parentId: null, title: "" })
+              }
             >
               <FolderPlus className="mr-1 h-4 w-4" aria-hidden />
               Folder
@@ -256,13 +272,19 @@ export function DocsWorkspace({
               onBlur={() => {
                 if (!draft.title.trim()) setDraft(null);
               }}
-              placeholder={draft.kind === "folder" ? "Folder name" : "Page title"}
+              placeholder={
+                draft.kind === "folder" ? "Folder name" : "Page title"
+              }
               className="h-7 text-sm"
-              aria-label={draft.kind === "folder" ? "New folder name" : "New page title"}
+              aria-label={
+                draft.kind === "folder" ? "New folder name" : "New page title"
+              }
             />
           </form>
         ) : null}
-        {error ? <p className="px-1 text-xs text-destructive">{error}</p> : null}
+        {error ? (
+          <p className="px-1 text-xs text-destructive">{error}</p>
+        ) : null}
       </div>
 
       <div className="min-w-0 flex-1">
@@ -404,7 +426,13 @@ function TreeRow({
  * pages remounts with fresh seed content; within a page's lifetime the editor
  * is never remounted (see feature-details-editor for the race this avoids).
  */
-function PageEditor({ page, canEdit }: { page: DocPageRecord; canEdit: boolean }) {
+function PageEditor({
+  page,
+  canEdit,
+}: {
+  page: DocPageRecord;
+  canEdit: boolean;
+}) {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inFlightRef = useRef(false);
   const pendingRef = useRef<string | null>(null);
@@ -465,7 +493,11 @@ function PageEditor({ page, canEdit }: { page: DocPageRecord; canEdit: boolean }
               role="status"
               aria-live="polite"
             >
-              {status === "saving" ? "Saving…" : status === "saved" ? "Saved" : ""}
+              {status === "saving"
+                ? "Saving…"
+                : status === "saved"
+                  ? "Saved"
+                  : ""}
             </p>
           )}
         </>

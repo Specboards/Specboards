@@ -8,7 +8,8 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { CardsOverride } from "@/components/cards-override";
-import { AuthRequiredError, updateStageGates } from "@/lib/api-client";
+import { AuthRequiredError } from "@/lib/api-client/request";
+import { updateStageGates } from "@/lib/api-client/workspace-config";
 import { statusDotColor } from "@/lib/feature-helpers";
 import type { StageGate } from "@/lib/store/types";
 
@@ -156,7 +157,8 @@ export function WorkflowGatesEditor({
             label: g.label,
           })),
           productId,
-        ).then(() => undefined)}
+        ).then(() => undefined)
+      }
       onRevert={() => updateStageGates([], productId).then(() => undefined)}
     >
       <div className="space-y-4">
@@ -164,7 +166,10 @@ export function WorkflowGatesEditor({
           {stages.map((stage) => {
             const rows = byStage[stage.key] ?? [];
             return (
-              <li key={stage.key} className="rounded-md border bg-background p-3">
+              <li
+                key={stage.key}
+                className="rounded-md border bg-background p-3"
+              >
                 <div className="mb-2 flex items-center gap-2">
                   <span
                     className="size-2.5 shrink-0 rounded-full"
@@ -187,7 +192,9 @@ export function WorkflowGatesEditor({
                       >
                         <Input
                           value={row.label}
-                          onChange={(e) => setLabel(stage.key, i, e.target.value)}
+                          onChange={(e) =>
+                            setLabel(stage.key, i, e.target.value)
+                          }
                           disabled={!canEdit || saving}
                           placeholder="Checklist item"
                           className="h-8"

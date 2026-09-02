@@ -8,7 +8,8 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { CardsOverride } from "@/components/cards-override";
-import { AuthRequiredError, updateStatuses } from "@/lib/api-client";
+import { AuthRequiredError } from "@/lib/api-client/request";
+import { updateStatuses } from "@/lib/api-client/workspace-config";
 import { statusDotColor } from "@/lib/feature-helpers";
 import type { WorkspaceStatus } from "@/lib/store/types";
 
@@ -48,7 +49,9 @@ export function WorkflowEditor({
 
   const dirty =
     rows.length !== initial.length ||
-    rows.some((r, i) => r.key !== initial[i]?.key || r.label !== initial[i]?.label);
+    rows.some(
+      (r, i) => r.key !== initial[i]?.key || r.label !== initial[i]?.label,
+    );
   const valid = rows.length >= 2 && rows.every((r) => r.label.trim() !== "");
 
   function setLabel(i: number, label: string) {
@@ -119,7 +122,9 @@ export function WorkflowEditor({
               <GripVertical className="size-4 shrink-0 text-muted-foreground" />
               <span
                 className="size-2.5 shrink-0 rounded-full"
-                style={{ backgroundColor: statusDotColor(row.key || row.label) }}
+                style={{
+                  backgroundColor: statusDotColor(row.key || row.label),
+                }}
               />
               <Input
                 value={row.label}

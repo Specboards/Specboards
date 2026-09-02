@@ -7,11 +7,11 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { AuthRequiredError } from "@/lib/api-client/request";
 import {
-  AuthRequiredError,
   bulkPatchFeatures,
   type BulkTagOps,
-} from "@/lib/api-client";
+} from "@/lib/api-client/work-items";
 import { statusLabel } from "@/lib/feature-helpers";
 import type { FeaturePatch } from "@/lib/store/types";
 
@@ -52,7 +52,10 @@ export function BulkActionBar({
   if (count === 0) return null;
 
   async function apply(
-    patch: Pick<FeaturePatch, "status" | "assigneeId" | "releaseId" | "cycleId">,
+    patch: Pick<
+      FeaturePatch,
+      "status" | "assigneeId" | "releaseId" | "cycleId"
+    >,
     tagOps: BulkTagOps,
     label: string,
   ) {
@@ -70,13 +73,17 @@ export function BulkActionBar({
             : `${label} on ${okCount} item${okCount === 1 ? "" : "s"}`,
         );
       } else {
-        toast.error(`Couldn't ${label.toLowerCase()}: all ${failCount} items rejected`);
+        toast.error(
+          `Couldn't ${label.toLowerCase()}: all ${failCount} items rejected`,
+        );
       }
       router.refresh();
       onClear();
     } catch (err) {
       if (err instanceof AuthRequiredError) {
-        router.push(`/sign-in?from=${encodeURIComponent(window.location.pathname)}`);
+        router.push(
+          `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
+        );
         return;
       }
       toast.error(err instanceof Error ? err.message : "Bulk edit failed.");
@@ -103,7 +110,8 @@ export function BulkActionBar({
         value=""
         disabled={pending}
         onChange={(e) => {
-          if (e.target.value) void apply({ status: e.target.value }, {}, "Set status");
+          if (e.target.value)
+            void apply({ status: e.target.value }, {}, "Set status");
         }}
       >
         <option value="">Set status…</option>
@@ -121,7 +129,8 @@ export function BulkActionBar({
         disabled={pending}
         onChange={(e) => {
           if (!e.target.value) return;
-          const assigneeId = e.target.value === "unassigned" ? null : e.target.value;
+          const assigneeId =
+            e.target.value === "unassigned" ? null : e.target.value;
           void apply({ assigneeId }, {}, "Set assignee");
         }}
       >
@@ -204,12 +213,7 @@ export function BulkActionBar({
       </Button>
 
       <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />
-      <Button
-        size="sm"
-        variant="ghost"
-        onClick={onExit}
-        disabled={pending}
-      >
+      <Button size="sm" variant="ghost" onClick={onExit} disabled={pending}>
         Cancel
       </Button>
     </div>

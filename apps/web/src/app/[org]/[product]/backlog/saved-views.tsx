@@ -3,7 +3,8 @@
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useState, useTransition } from "react";
 
-import { AuthRequiredError, deleteView, saveView } from "@/lib/api-client";
+import { AuthRequiredError } from "@/lib/api-client/request";
+import { deleteView, saveView } from "@/lib/api-client/views";
 import { withViewParams } from "@/lib/backlog-query";
 import {
   FILTER_KEYS,
@@ -110,7 +111,9 @@ export function SavedViews({
   return (
     <div className="flex flex-wrap items-center gap-2" data-pending={pending}>
       {views.length > 0 ? (
-        <span className="text-xs font-medium text-muted-foreground">Views:</span>
+        <span className="text-xs font-medium text-muted-foreground">
+          Views:
+        </span>
       ) : null}
       {views.map((v) => {
         const isActive = viewQuery(v.filters) === currentQuery;

@@ -42,14 +42,14 @@ import {
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  AuthRequiredError,
   createProduct,
   createProductGroup,
   deleteProduct,
   deleteProductGroup,
   updateProduct,
   updateProductGroup,
-} from "@/lib/api-client";
+} from "@/lib/api-client/products";
+import { AuthRequiredError } from "@/lib/api-client/request";
 import { productDotColor } from "@/lib/product-color";
 import type {
   ProductGroupPatch,
@@ -387,7 +387,11 @@ export function ProductsManager({
     if (!isOrgAdmin || groups.length === 0) return null;
     const current = p.groupId ?? UNGROUPED_KEY;
     const destinations: MoveOption[] = [
-      { key: UNGROUPED_KEY, label: "Ungrouped", current: current === UNGROUPED_KEY },
+      {
+        key: UNGROUPED_KEY,
+        label: "Ungrouped",
+        current: current === UNGROUPED_KEY,
+      },
       ...groups.map((g) => ({
         key: g.id,
         label: g.name,
@@ -399,9 +403,7 @@ export function ProductsManager({
         triggerLabel={`Move ${p.name}`}
         destinationsLabel="Move to group"
         destinations={destinations}
-        onSelect={(key) =>
-          moveProduct(p, key === UNGROUPED_KEY ? null : key)
-        }
+        onSelect={(key) => moveProduct(p, key === UNGROUPED_KEY ? null : key)}
       />
     );
   }
@@ -506,8 +508,7 @@ export function ProductsManager({
   // Groups only earn their affordance once there's more than one product to
   // organize; existing groups keep it visible so they never become
   // unmanageable.
-  const showAddGroup =
-    isOrgAdmin && (products.length > 1 || groups.length > 0);
+  const showAddGroup = isOrgAdmin && (products.length > 1 || groups.length > 0);
 
   return (
     <div className="space-y-4">
@@ -534,9 +535,9 @@ export function ProductsManager({
 
       {showAddGroup && groups.length > 0 ? (
         <p className="text-xs text-muted-foreground">
-          Drag a product onto a group to move it there, or drag a group to
-          nest or reorder it (up to {MAX_GROUP_DEPTH} levels). A group appears
-          in the product switcher and rolls its products&apos; work up on its
+          Drag a product onto a group to move it there, or drag a group to nest
+          or reorder it (up to {MAX_GROUP_DEPTH} levels). A group appears in the
+          product switcher and rolls its products&apos; work up on its
           dashboard.
         </p>
       ) : null}
@@ -720,7 +721,9 @@ function GroupRow({
       {group.color ? (
         <span
           className="h-2 w-2 shrink-0 rounded-full"
-          style={{ backgroundColor: productDotColor(resolveProductColor(group)) }}
+          style={{
+            backgroundColor: productDotColor(resolveProductColor(group)),
+          }}
           aria-hidden
         />
       ) : null}
@@ -809,7 +812,9 @@ function ProductRow({
       ) : null}
       <span
         className="h-2 w-2 shrink-0 rounded-full"
-        style={{ backgroundColor: productDotColor(resolveProductColor(product)) }}
+        style={{
+          backgroundColor: productDotColor(resolveProductColor(product)),
+        }}
         aria-hidden
       />
       <span>{product.name}</span>

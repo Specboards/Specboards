@@ -4,7 +4,10 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 
-import { EXAMPLE_DETAIL_TEMPLATES, type DetailTemplate } from "@specboards/core";
+import {
+  EXAMPLE_DETAIL_TEMPLATES,
+  type DetailTemplate,
+} from "@specboards/core";
 
 import { CardsOverride } from "@/components/cards-override";
 import { EmptyState } from "@/components/empty-state";
@@ -12,13 +15,13 @@ import { MarkdownEditor } from "@/components/markdown-editor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { AuthRequiredError } from "@/lib/api-client/request";
 import {
-  AuthRequiredError,
   createDetailTemplate,
   deleteDetailTemplate,
   updateDetailTemplate,
   updateLevelTemplates,
-} from "@/lib/api-client";
+} from "@/lib/api-client/workspace-config";
 import type { WorkspaceLevel } from "@/lib/store/types";
 
 /**
@@ -69,54 +72,54 @@ export function DetailTemplatesManager({
         for (const t of templates) await deleteDetailTemplate(t.id);
       }}
     >
-    <div className="max-w-2xl space-y-4">
-      {templates.length === 0 && !adding ? (
-        <EmptyState
-          variant="inline"
-          title="No detail templates yet"
-          description="A template is a Markdown skeleton with your team's sections in it. New cards start from one, and so do new specs, so work of a kind starts consistent instead of from a blank page."
-          action={
-            canEdit ? (
-              <Button size="sm" onClick={() => setAdding(true)}>
-                Add template
-              </Button>
-            ) : null
-          }
-        />
-      ) : null}
-      {templates.length > 0 ? (
-        <div className="space-y-3">
-          {templates.map((template) => (
-            <TemplateRow
-              key={template.id}
-              template={template}
-              canEdit={canEdit}
-            />
-          ))}
-        </div>
-      ) : null}
-      {/* Start as an "Add template" affordance; reveal the form on opt-in (see
+      <div className="max-w-2xl space-y-4">
+        {templates.length === 0 && !adding ? (
+          <EmptyState
+            variant="inline"
+            title="No detail templates yet"
+            description="A template is a Markdown skeleton with your team's sections in it. New cards start from one, and so do new specs, so work of a kind starts consistent instead of from a blank page."
+            action={
+              canEdit ? (
+                <Button size="sm" onClick={() => setAdding(true)}>
+                  Add template
+                </Button>
+              ) : null
+            }
+          />
+        ) : null}
+        {templates.length > 0 ? (
+          <div className="space-y-3">
+            {templates.map((template) => (
+              <TemplateRow
+                key={template.id}
+                template={template}
+                canEdit={canEdit}
+              />
+            ))}
+          </div>
+        ) : null}
+        {/* Start as an "Add template" affordance; reveal the form on opt-in (see
           the "add" UX rule in CLAUDE.md). */}
-      {canEdit && adding ? (
-        <TemplateCreate
-          productId={productId}
-          onDone={() => setAdding(false)}
-        />
-      ) : null}
-      {canEdit && !adding && templates.length > 0 ? (
-        <Button size="sm" variant="outline" onClick={() => setAdding(true)}>
-          Add template
-        </Button>
-      ) : null}
-      {templates.length > 0 ? (
-        <LevelTemplateAssign
-          levels={levels}
-          templates={templates}
-          canEdit={canEdit}
-          productId={productId}
-        />
-      ) : null}
-    </div>
+        {canEdit && adding ? (
+          <TemplateCreate
+            productId={productId}
+            onDone={() => setAdding(false)}
+          />
+        ) : null}
+        {canEdit && !adding && templates.length > 0 ? (
+          <Button size="sm" variant="outline" onClick={() => setAdding(true)}>
+            Add template
+          </Button>
+        ) : null}
+        {templates.length > 0 ? (
+          <LevelTemplateAssign
+            levels={levels}
+            templates={templates}
+            canEdit={canEdit}
+            productId={productId}
+          />
+        ) : null}
+      </div>
     </CardsOverride>
   );
 }
@@ -361,8 +364,8 @@ function LevelTemplateAssign({
       <legend className="px-1 text-sm font-medium">Default per level</legend>
       <p className="text-xs text-muted-foreground">
         Pick which template seeds a new card&apos;s details at each level. The
-        leaf level&apos;s template also seeds a new spec, unless the author picks
-        another one.
+        leaf level&apos;s template also seeds a new spec, unless the author
+        picks another one.
       </p>
       <div className="space-y-2">
         {assignable.map((level) => (

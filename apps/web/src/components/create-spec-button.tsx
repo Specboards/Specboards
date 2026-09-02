@@ -10,7 +10,8 @@ import { specFilePath, type DetailTemplate } from "@specboards/core";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { AuthRequiredError, createSpec } from "@/lib/api-client";
+import { AuthRequiredError } from "@/lib/api-client/request";
+import { createSpec } from "@/lib/api-client/specs";
 import type { LinkableRepo } from "@/lib/github-links-service";
 
 /**
@@ -141,7 +142,9 @@ export function CreateSpecButton({
       // The server's messages are written for a human, including the slug
       // collision ("… already exists … Pick a different title."), which is the
       // rename prompt: it lands next to the title field the author must change.
-      setError(err instanceof Error ? err.message : "Creating the spec failed.");
+      setError(
+        err instanceof Error ? err.message : "Creating the spec failed.",
+      );
     } finally {
       setSaving(false);
     }
@@ -256,7 +259,11 @@ export function CreateSpecButton({
           </Select>
         </label>
       ) : null}
-      <p className="text-2xs text-muted-foreground" role="status" aria-live="polite">
+      <p
+        className="text-2xs text-muted-foreground"
+        role="status"
+        aria-live="polite"
+      >
         {path && repo ? (
           <>
             Commits <span className="font-mono">{path}</span> to{" "}

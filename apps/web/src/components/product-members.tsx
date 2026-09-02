@@ -8,11 +8,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import {
-  AuthRequiredError,
   listProductMembers,
   removeProductMember,
   setProductMember,
-} from "@/lib/api-client";
+} from "@/lib/api-client/products";
+import { AuthRequiredError } from "@/lib/api-client/request";
 import type { ProductMemberRecord, ProductRole } from "@/lib/store/types";
 import { cn } from "@/lib/utils";
 

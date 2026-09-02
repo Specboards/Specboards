@@ -5,7 +5,8 @@ import { useState, useTransition } from "react";
 import { ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 
-import { AuthRequiredError, addGithubLink, removeGithubLink } from "@/lib/api-client";
+import { AuthRequiredError } from "@/lib/api-client/request";
+import { addGithubLink, removeGithubLink } from "@/lib/api-client/work-items";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,7 +27,9 @@ function linkLabel(l: GithubLink): string {
 }
 
 /** Badge variant for a cached state. */
-function stateVariant(state: string | null): "default" | "secondary" | "outline" {
+function stateVariant(
+  state: string | null,
+): "default" | "secondary" | "outline" {
   if (state === "merged") return "default";
   if (state === "open") return "secondary";
   return "outline";
@@ -61,7 +64,9 @@ export function FeatureGithubLinks({
 
   function handleAuth(err: unknown): boolean {
     if (err instanceof AuthRequiredError) {
-      router.push(`/sign-in?from=${encodeURIComponent(window.location.pathname)}`);
+      router.push(
+        `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
+      );
       return true;
     }
     return false;
@@ -165,10 +170,18 @@ export function FeatureGithubLinks({
             ))}
           </Select>
           {showRepoPicker ? (
-            <Select name="repo" aria-label="Repository" className="h-8" defaultValue="">
+            <Select
+              name="repo"
+              aria-label="Repository"
+              className="h-8"
+              defaultValue=""
+            >
               <option value="">Infer repository</option>
               {repos.map((r) => (
-                <option key={`${r.owner}/${r.name}`} value={`${r.owner}/${r.name}`}>
+                <option
+                  key={`${r.owner}/${r.name}`}
+                  value={`${r.owner}/${r.name}`}
+                >
                   {r.owner}/{r.name}
                 </option>
               ))}
@@ -177,7 +190,13 @@ export function FeatureGithubLinks({
           {kind === "branch" ? (
             <Input name="branch" placeholder="branch name" className="h-8" />
           ) : (
-            <Input name="number" type="number" min={1} placeholder="number" className="h-8" />
+            <Input
+              name="number"
+              type="number"
+              min={1}
+              placeholder="number"
+              className="h-8"
+            />
           )}
           <Button type="submit" size="sm" variant="outline" disabled={pending}>
             {pending ? "Saving…" : "Add link"}

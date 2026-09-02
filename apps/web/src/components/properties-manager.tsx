@@ -4,7 +4,11 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 
-import type { PropertyDef, PropertyEntity, PropertyType } from "@specboards/core";
+import type {
+  PropertyDef,
+  PropertyEntity,
+  PropertyType,
+} from "@specboards/core";
 import { PROPERTY_TYPES } from "@specboards/core";
 
 import { CardsOverride } from "@/components/cards-override";
@@ -12,12 +16,12 @@ import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { AuthRequiredError } from "@/lib/api-client/request";
 import {
-  AuthRequiredError,
   createProperty,
   deleteProperty,
   updateProperty,
-} from "@/lib/api-client";
+} from "@/lib/api-client/views";
 import type { WorkspaceLevel } from "@/lib/store/types";
 
 const TYPE_LABELS: Record<PropertyType, string> = {
@@ -88,48 +92,48 @@ export function PropertiesManager({
         for (const p of properties) await deleteProperty(p.id);
       }}
     >
-    <div className="max-w-2xl space-y-4">
-      {properties.length === 0 && !adding ? (
-        <EmptyState
-          variant="inline"
-          title="No custom properties yet"
-          description="Custom properties add fields like Effort or Team to your cards, editable on each item's detail page."
-          action={
-            canEdit ? (
-              <Button size="sm" onClick={() => setAdding(true)}>
-                Add property
-              </Button>
-            ) : null
-          }
-        />
-      ) : null}
-      {properties.length > 0 ? (
-        <div className="space-y-3">
-          {properties.map((property) => (
-            <PropertyRow
-              key={property.id}
-              property={property}
-              levels={levels}
-              canEdit={canEdit}
-            />
-          ))}
-        </div>
-      ) : null}
-      {/* Start as an "Add property" affordance; reveal the form on opt-in (see
+      <div className="max-w-2xl space-y-4">
+        {properties.length === 0 && !adding ? (
+          <EmptyState
+            variant="inline"
+            title="No custom properties yet"
+            description="Custom properties add fields like Effort or Team to your cards, editable on each item's detail page."
+            action={
+              canEdit ? (
+                <Button size="sm" onClick={() => setAdding(true)}>
+                  Add property
+                </Button>
+              ) : null
+            }
+          />
+        ) : null}
+        {properties.length > 0 ? (
+          <div className="space-y-3">
+            {properties.map((property) => (
+              <PropertyRow
+                key={property.id}
+                property={property}
+                levels={levels}
+                canEdit={canEdit}
+              />
+            ))}
+          </div>
+        ) : null}
+        {/* Start as an "Add property" affordance; reveal the form on opt-in (see
           the "add" UX rule in CLAUDE.md). */}
-      {canEdit && adding ? (
-        <PropertyCreate
-          levels={levels}
-          productId={productId}
-          onDone={() => setAdding(false)}
-        />
-      ) : null}
-      {canEdit && !adding && properties.length > 0 ? (
-        <Button size="sm" variant="outline" onClick={() => setAdding(true)}>
-          Add property
-        </Button>
-      ) : null}
-    </div>
+        {canEdit && adding ? (
+          <PropertyCreate
+            levels={levels}
+            productId={productId}
+            onDone={() => setAdding(false)}
+          />
+        ) : null}
+        {canEdit && !adding && properties.length > 0 ? (
+          <Button size="sm" variant="outline" onClick={() => setAdding(true)}>
+            Add property
+          </Button>
+        ) : null}
+      </div>
     </CardsOverride>
   );
 }
@@ -379,21 +383,26 @@ function PropertyCreate({
   function onCreate() {
     startTransition(async () => {
       try {
-        await createProperty({
-          label: label.trim(),
-          type,
-          entity,
-          ...(hasOptions(type)
-            ? {
-                options: options
-                  .split(",")
-                  .map((o) => o.trim())
-                  .filter(Boolean),
-              }
-            : {}),
-          // Levels only apply to item properties; releases are workspace-wide.
-          ...(entity === "item" ? { levels: levelsValue(levels, checked) } : {}),
-        }, productId);
+        await createProperty(
+          {
+            label: label.trim(),
+            type,
+            entity,
+            ...(hasOptions(type)
+              ? {
+                  options: options
+                    .split(",")
+                    .map((o) => o.trim())
+                    .filter(Boolean),
+                }
+              : {}),
+            // Levels only apply to item properties; releases are workspace-wide.
+            ...(entity === "item"
+              ? { levels: levelsValue(levels, checked) }
+              : {}),
+          },
+          productId,
+        );
         toast.success("Property added");
         setLabel("");
         setType("text");

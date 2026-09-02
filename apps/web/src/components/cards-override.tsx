@@ -5,7 +5,7 @@ import { useState, useTransition, type ReactNode } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import { AuthRequiredError } from "@/lib/api-client";
+import { AuthRequiredError } from "@/lib/api-client/request";
 
 /**
  * The inherited-versus-overridden frame every per-product Cards setting sits
@@ -84,10 +84,7 @@ export function CardsOverride({
               size="sm"
               disabled={saving}
               onClick={() =>
-                run(
-                  onRevert,
-                  `Now following the workspace default ${label}.`,
-                )
+                run(onRevert, `Now following the workspace default ${label}.`)
               }
             >
               Revert to workspace default
@@ -99,10 +96,7 @@ export function CardsOverride({
               size="sm"
               disabled={saving}
               onClick={() =>
-                run(
-                  onOverride,
-                  `This product now has its own ${label}.`,
-                )
+                run(onOverride, `This product now has its own ${label}.`)
               }
             >
               Override for this product

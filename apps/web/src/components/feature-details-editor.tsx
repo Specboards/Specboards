@@ -4,7 +4,8 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 import { MarkdownEditor } from "@/components/markdown-editor";
-import { AuthRequiredError, patchFeature } from "@/lib/api-client";
+import { AuthRequiredError } from "@/lib/api-client/request";
+import { patchFeature } from "@/lib/api-client/work-items";
 
 /**
  * Edit a DB-native item's Details body (Markdown). Saves are automatic: edits

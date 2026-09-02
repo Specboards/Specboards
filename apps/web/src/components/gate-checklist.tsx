@@ -4,7 +4,8 @@ import { useState } from "react";
 import { ListChecks } from "lucide-react";
 import { toast } from "sonner";
 
-import { AuthRequiredError, setGateCompletion } from "@/lib/api-client";
+import { AuthRequiredError } from "@/lib/api-client/request";
+import { setGateCompletion } from "@/lib/api-client/workspace-config";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import type { StageGate } from "@/lib/store/types";
@@ -65,7 +66,9 @@ export function GateChecklist({
       if (err instanceof AuthRequiredError) {
         toast.error("Please sign in again.");
       } else {
-        toast.error(err instanceof Error ? err.message : "Could not update gate.");
+        toast.error(
+          err instanceof Error ? err.message : "Could not update gate.",
+        );
       }
     } finally {
       setPending((prev) => {

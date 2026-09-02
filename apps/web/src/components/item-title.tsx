@@ -3,7 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useLayoutEffect, useRef, useState } from "react";
 
-import { AuthRequiredError, patchFeature } from "@/lib/api-client";
+import { AuthRequiredError } from "@/lib/api-client/request";
+import { patchFeature } from "@/lib/api-client/work-items";
 import { cn } from "@/lib/utils";
 
 /**
@@ -45,7 +46,7 @@ export function ItemTitle({
 
   async function commit() {
     const next = value.trim();
-    if (next === "" ) {
+    if (next === "") {
       // Don't allow an empty title; revert to the last saved value.
       setValue(savedRef.current);
       return;

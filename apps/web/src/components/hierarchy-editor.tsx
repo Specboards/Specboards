@@ -5,7 +5,8 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { AuthRequiredError, updateLevels } from "@/lib/api-client";
+import { AuthRequiredError } from "@/lib/api-client/request";
+import { updateLevels } from "@/lib/api-client/workspace-config";
 import type { WorkspaceLevel } from "@/lib/store/types";
 
 /** One editable row; `key` is set for existing levels, undefined for new ones. */
@@ -32,7 +33,12 @@ export function HierarchyEditor({
   canEdit: boolean;
 }) {
   const [rows, setRows] = useState<Row[]>(() =>
-    levels.map((l) => ({ rowId: l.key, key: l.key, label: l.label, isLeaf: l.isLeaf })),
+    levels.map((l) => ({
+      rowId: l.key,
+      key: l.key,
+      label: l.label,
+      isLeaf: l.isLeaf,
+    })),
   );
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -102,7 +108,9 @@ export function HierarchyEditor({
               <span className="w-5 text-xs text-muted-foreground">{i + 1}</span>
               <span className="font-medium">{r.label}</span>
               {r.isLeaf ? (
-                <span className="text-xs text-muted-foreground">· from specs</span>
+                <span className="text-xs text-muted-foreground">
+                  · from specs
+                </span>
               ) : null}
             </li>
           ))}
@@ -153,8 +161,8 @@ export function HierarchyEditor({
 
       <p className="text-xs text-muted-foreground">
         Levels run top to bottom, broadest first. The bottom level holds your
-        git-synced specs and can&apos;t be removed. A level can only be removed once
-        nothing uses it.
+        git-synced specs and can&apos;t be removed. A level can only be removed
+        once nothing uses it.
       </p>
 
       {error ? <p className="text-xs text-destructive">{error}</p> : null}

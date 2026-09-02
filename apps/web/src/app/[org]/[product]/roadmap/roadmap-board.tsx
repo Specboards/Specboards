@@ -49,7 +49,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { AuthRequiredError, patchFeature } from "@/lib/api-client";
+import { AuthRequiredError } from "@/lib/api-client/request";
+import { patchFeature } from "@/lib/api-client/work-items";
 import { statusLabel } from "@/lib/feature-helpers";
 import { productBadge } from "@/lib/product-color";
 import { releaseStatusLabel } from "@/lib/release-status";

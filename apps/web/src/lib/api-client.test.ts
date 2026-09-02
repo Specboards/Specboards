@@ -1,14 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  AuthRequiredError,
   estimateBreakdown,
-  patchFeature,
-  ProposalStaleError,
   resolveProposal,
   resolveReleaseProposal,
-  SpecConflictError,
-} from "./api-client";
+} from "./api-client/assistant";
+import { AuthRequiredError } from "./api-client/request";
+import { ProposalStaleError, SpecConflictError } from "./api-client/specs";
+import { patchFeature } from "./api-client/work-items";
 
 /**
  * Decoding a refused accept.
@@ -55,7 +54,8 @@ describe("authentication failures", () => {
 describe("resolving a proposal on an item", () => {
   it("carries the current body off a stale refusal", async () => {
     respond(409, {
-      error: "This item's description changed after the assistant drafted this.",
+      error:
+        "This item's description changed after the assistant drafted this.",
       currentBody: "What the colleague wrote instead.",
     });
 

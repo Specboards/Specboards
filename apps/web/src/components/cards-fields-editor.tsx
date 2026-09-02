@@ -4,7 +4,8 @@ import { useState, useTransition } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import { AuthRequiredError, updateLevelFields } from "@/lib/api-client";
+import { AuthRequiredError } from "@/lib/api-client/request";
+import { updateLevelFields } from "@/lib/api-client/workspace-config";
 import type { CardFieldDef } from "@/lib/card-fields";
 import type { WorkspaceLevel } from "@/lib/store/types";
 
@@ -55,10 +56,9 @@ export function CardsFieldsEditor({
         const fields = Object.fromEntries(
           levels.map((l) => {
             const set = checked[l.key] ?? new Set(allKeys);
-            const value =
-              allKeys.every((k) => set.has(k))
-                ? null
-                : allKeys.filter((k) => set.has(k));
+            const value = allKeys.every((k) => set.has(k))
+              ? null
+              : allKeys.filter((k) => set.has(k));
             return [l.key, value];
           }),
         );

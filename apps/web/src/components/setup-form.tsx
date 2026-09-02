@@ -4,10 +4,10 @@ import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
 
 import {
-  AuthRequiredError,
-  createWorkspace,
   WorkspaceSlugTakenError,
-} from "@/lib/api-client";
+  createWorkspace,
+} from "@/lib/api-client/organization";
+import { AuthRequiredError } from "@/lib/api-client/request";
 import { slugifyOrg } from "@/lib/org-path";
 import { Button } from "@/components/ui/button";
 import {
@@ -160,7 +160,12 @@ export function SetupForm() {
               </span>
             </label>
             <label className="flex items-start gap-2 rounded-md border p-2.5 text-sm has-[:checked]:border-foreground">
-              <input type="radio" name="start" value="empty" className="mt-0.5" />
+              <input
+                type="radio"
+                name="start"
+                value="empty"
+                className="mt-0.5"
+              />
               <span>
                 <span className="font-medium">Start empty</span>
                 <span className="block text-xs text-muted-foreground">

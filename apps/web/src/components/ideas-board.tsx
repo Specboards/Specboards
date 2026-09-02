@@ -21,12 +21,8 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import {
-  AuthRequiredError,
-  createIdea,
-  setIdeaVote,
-  updateIdea,
-} from "@/lib/api-client";
+import { createIdea, setIdeaVote, updateIdea } from "@/lib/api-client/ideas";
+import { AuthRequiredError } from "@/lib/api-client/request";
 import type { IdeaRecord } from "@/lib/store/types";
 import { cn } from "@/lib/utils";
 

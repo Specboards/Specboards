@@ -3,12 +3,12 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 
+import { AuthRequiredError } from "@/lib/api-client/request";
 import {
-  AuthRequiredError,
   createComment,
   deleteComment,
   listComments,
-} from "@/lib/api-client";
+} from "@/lib/api-client/work-items";
 import {
   MentionInput,
   renderCommentBody,

@@ -17,11 +17,11 @@ import { MarkdownEditor } from "@/components/markdown-editor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  AuthRequiredError,
   deleteGithubDocFile,
   renameGithubDocFile,
   saveGithubDocFile,
-} from "@/lib/api-client";
+} from "@/lib/api-client/docs";
+import { AuthRequiredError } from "@/lib/api-client/request";
 import type { DocArea } from "@/lib/store/types";
 import { cn } from "@/lib/utils";
 
@@ -61,9 +61,13 @@ export function GithubDocsWorkspace({
     initialFiles[0]?.path ?? null,
   );
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const [draft, setDraft] = useState<{ folder: string; title: string } | null>(null);
+  const [draft, setDraft] = useState<{ folder: string; title: string } | null>(
+    null,
+  );
   const [dirty, setDirty] = useState<Record<string, string>>({});
-  const [busy, setBusy] = useState<"save" | "create" | "rename" | "delete" | null>(null);
+  const [busy, setBusy] = useState<
+    "save" | "create" | "rename" | "delete" | null
+  >(null);
   const [savedPath, setSavedPath] = useState<string | null>(null);
   const [renameTo, setRenameTo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -116,7 +120,9 @@ export function GithubDocsWorkspace({
         blobSha: selected.blobSha,
       });
       setFiles((prev) =>
-        prev.map((f) => (f.path === selected.path ? { ...f, content, blobSha } : f)),
+        prev.map((f) =>
+          f.path === selected.path ? { ...f, content, blobSha } : f,
+        ),
       );
       setDirty((prev) => {
         const next = { ...prev };
@@ -150,7 +156,11 @@ export function GithubDocsWorkspace({
       setFiles((prev) =>
         prev
           .filter((f) => f.path !== selected.path && f.path !== renamed.path)
-          .concat({ path: renamed.path, content: renamed.content, blobSha: renamed.blobSha })
+          .concat({
+            path: renamed.path,
+            content: renamed.content,
+            blobSha: renamed.blobSha,
+          })
           .sort((a, b) => a.path.localeCompare(b.path)),
       );
       setSelectedPath(renamed.path);
@@ -165,7 +175,8 @@ export function GithubDocsWorkspace({
 
   async function deletePage() {
     if (!selected || busy) return;
-    if (!window.confirm(`Delete "${selected.path}" from the repository?`)) return;
+    if (!window.confirm(`Delete "${selected.path}" from the repository?`))
+      return;
     setBusy("delete");
     setError(null);
     try {
@@ -221,7 +232,9 @@ export function GithubDocsWorkspace({
         blobSha: null,
       });
       setFiles((prev) =>
-        [...prev, { path, content, blobSha }].sort((a, b) => a.path.localeCompare(b.path)),
+        [...prev, { path, content, blobSha }].sort((a, b) =>
+          a.path.localeCompare(b.path),
+        ),
       );
       setSelectedPath(path);
       setSavedPath(null);
@@ -236,7 +249,11 @@ export function GithubDocsWorkspace({
   // Folder tree derived from the flat path list.
   const root = buildTree(files.map((f) => f.path));
 
-  function renderNodes(node: TreeNode, prefix: string, depth: number): React.ReactNode {
+  function renderNodes(
+    node: TreeNode,
+    prefix: string,
+    depth: number,
+  ): React.ReactNode {
     const folders = [...node.folders.keys()].sort();
     return (
       <>
@@ -343,7 +360,9 @@ export function GithubDocsWorkspace({
               }}
             >
               {draft.folder ? (
-                <p className="text-2xs text-muted-foreground">in {draft.folder}/</p>
+                <p className="text-2xs text-muted-foreground">
+                  in {draft.folder}/
+                </p>
               ) : null}
               <Input
                 autoFocus
@@ -366,7 +385,9 @@ export function GithubDocsWorkspace({
               No Markdown files yet.{canEdit ? " Create the first page." : ""}
             </p>
           ) : null}
-          {error ? <p className="px-1 text-xs text-destructive">{error}</p> : null}
+          {error ? (
+            <p className="px-1 text-xs text-destructive">{error}</p>
+          ) : null}
         </div>
 
         <div className="min-w-0 flex-1">
@@ -391,7 +412,12 @@ export function GithubDocsWorkspace({
                       className="h-8 max-w-md text-sm"
                       aria-label="New file path"
                     />
-                    <Button type="submit" size="sm" variant="secondary" disabled={busy !== null}>
+                    <Button
+                      type="submit"
+                      size="sm"
+                      variant="secondary"
+                      disabled={busy !== null}
+                    >
                       {busy === "rename" ? "Renaming…" : "Rename"}
                     </Button>
                     <Button
@@ -432,7 +458,11 @@ export function GithubDocsWorkspace({
                           // would be left behind; save first.
                           disabled={busy !== null || selectedDirty}
                           className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
-                          title={selectedDirty ? "Save changes before renaming" : "Rename page"}
+                          title={
+                            selectedDirty
+                              ? "Save changes before renaming"
+                              : "Rename page"
+                          }
                           aria-label="Rename page"
                         >
                           <Pencil className="h-3.5 w-3.5" aria-hidden />
