@@ -44,6 +44,26 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
+      # Turborepo's cache, which CI otherwise starts empty on every run.
+      # `turbo.json` already declares proper `outputs`, so the tasks were always
+      # cacheable; nothing was carrying the cache between runs to find out.
+      #
+      # Keyed by commit so each run writes its own entry, and restored from the
+      # most recent one for this OS. A pull request falls back to whatever main
+      # last wrote, which is the common case here.
+      #
+      # Measured at 3.4 MB after a run, so there is no size problem to manage:
+      # `turbo.json` excludes `.next/cache`, which is the only output here big
+      # enough to be worth worrying about. Worth re-checking if a package ever
+      # starts emitting something large, because GitHub evicts caches silently
+      # and least-recently-used when a repository passes its 10 GB budget.
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: .turbo
+          key: turbo-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            turbo-${{ runner.os }}-
+
       # Fail the build on a high/critical advisory in production dependencies.
       # Accepted exceptions are recorded by GHSA id in package.json
       # (pnpm.auditConfig.ignoreGhsas) and documented, with a review-by date, in
@@ -78,5 +98,23 @@ jobs:
       # proves tenant data cannot cross the workspace boundary (fails closed).
       - run: pnpm --filter @specboards/web test:int
 
-      - run: pnpm --filter @specboards/web exec playwright install --with-deps chromium
+      # The browser binary, which was downloaded fresh every run. Keyed on the
+      # lockfile rather than on the Playwright version alone: over-invalidating
+      # costs one download, and a stale browser against a bumped Playwright is
+      # the kind of failure nobody would look for here.
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      # On a hit the binary is already there and only the OS packages it links
+      # against are checked, which is why the two are split rather than always
+      # running `install --with-deps`.
+      - if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: pnpm --filter @specboards/web exec playwright install --with-deps chromium
+      - if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: pnpm --filter @specboards/web exec playwright install-deps chromium
+
       - run: pnpm --filter @specboards/web test:e2e
+
