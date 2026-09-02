@@ -26,7 +26,13 @@ import type { LinkableRepo } from "@/lib/github-links-service";
  */
 type SpecCreateTarget =
   | { kind: "attach"; workItemId: string; itemTitle: string }
-  | { kind: "child"; parentSpecId: string; parentTitle: string };
+  | {
+      kind: "child";
+      parentSpecId: string;
+      parentTitle: string;
+      /** The leaf level's label ("Work Item"), which is what this creates. */
+      childLevelLabel: string;
+    };
 
 /**
  * "Attach a spec" / "New spec": create a `specs/<slug>/spec.md`, commit it to a
@@ -154,7 +160,12 @@ export function CreateSpecButton({
         ) : (
           <Plus className="size-3.5" />
         )}
-        {attaching ? "Attach a spec" : "New spec"}
+        {/* Named after what it CREATES, not after the file it writes. "New
+            spec" on a Feature reads as "give this feature a spec", which is
+            the one thing it does not do: it creates a different item beneath
+            this one. Naming the level removes the ambiguity, and the level's
+            own label keeps it right for a workspace that renamed it. */}
+        {attaching ? "Attach a spec" : `New ${target.childLevelLabel}`}
       </Button>
     );
   }
@@ -166,10 +177,30 @@ export function CreateSpecButton({
       // a wrapping row of controls rather than being squeezed beside them.
       className="w-full space-y-3 rounded-md border bg-muted/30 p-3"
     >
+      {/* Both controls write a spec file, so saying only that leaves them
+          indistinguishable. What differs is which ITEM you end up with, and
+          the child case needs its final clause: an author who wanted to
+          document the card in front of them gets a different card instead,
+          and nothing else on screen says so. */}
       <p className="text-xs text-muted-foreground">
-        {attaching
-          ? "Gives this item a spec document. The item keeps its status, assignee, parent and history, and its description becomes the spec's body."
-          : `Creates a spec and nests it under “${target.parentTitle}”.`}
+        {attaching ? (
+          <>
+            <span className="font-medium text-foreground">
+              Documents this item.
+            </span>{" "}
+            It keeps its id, status, assignee, parent and history, and its
+            description becomes the spec&apos;s body.
+          </>
+        ) : (
+          <>
+            <span className="font-medium text-foreground">
+              Creates a new {target.childLevelLabel} under &ldquo;
+              {target.parentTitle}&rdquo;
+            </span>
+            , with its own spec document. This does not document &ldquo;
+            {target.parentTitle}&rdquo; itself.
+          </>
+        )}
       </p>
       <label className="block space-y-1.5">
         <span className="text-xs font-medium text-muted-foreground">Title</span>

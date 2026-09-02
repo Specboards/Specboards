@@ -197,6 +197,16 @@ export function ItemDetailView({
             repos={data.repos}
             onCreated={onSpecSaved}
           />
+        ) : canCreateChildSpec && childLabel ? (
+          // Explain the absence rather than leaving it a mystery. On a
+          // grouping level there is no "Attach a spec" and no stated reason,
+          // so the neighbouring "New <leaf>" control reads as the way to
+          // document THIS card. It is not, and finding that out means reading
+          // a committed file.
+          <p className="text-2xs text-muted-foreground">
+            Specs live on {pluralLevel(childLabel.toLowerCase())}. To document
+            this {levelLabel.toLowerCase()}, break it down into one below.
+          </p>
         ) : null}
       </div>
 
@@ -284,6 +294,7 @@ export function ItemDetailView({
                           kind: "child",
                           parentSpecId: feature.specId,
                           parentTitle: feature.title,
+                          childLevelLabel: childLabel,
                         }}
                         repos={data.repos}
                         templates={data.specTemplates}

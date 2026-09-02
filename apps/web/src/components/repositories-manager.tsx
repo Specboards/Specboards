@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 
 import {
   connectRepository,
@@ -136,6 +136,47 @@ export function RepositoriesManager({
   const [scanNonce, setScanNonce] = useState(0);
   const bumpScan = useCallback(() => setScanNonce((n) => n + 1), []);
 
+  // Repos created in this session, held until the server render catches up.
+  //
+  // `repos` is a server prop, and `router.refresh()` is not awaitable, so the
+  // "Created and connected owner/name" message could paint while the list above
+  // still said "No repositories connected". Two statements on one screen
+  // contradicting each other, one of them wrong, at the exact moment an
+  // evaluator is deciding whether the product works.
+  //
+  // Holding the new repo locally makes the list correct immediately rather than
+  // eventually. The merge is keyed by id, so when the refresh does land and the
+  // server includes it, nothing doubles up.
+  const [justCreated, setJustCreated] = useState<ConnectedRepo[]>([]);
+  const onRepoCreated = useCallback((repo?: CreatedSpecRepo) => {
+    if (repo) {
+      setJustCreated((prev) =>
+        prev.some((r) => r.id === repo.id)
+          ? prev
+          : [
+              ...prev,
+              {
+                id: repo.id,
+                owner: repo.owner,
+                name: repo.name,
+                defaultBranch: repo.defaultBranch,
+                // The create endpoint connects through the workspace's own
+                // organization installation, which is the only one it can use.
+                githubInstallationId: "",
+                isSpecRepo: true,
+              },
+            ],
+      );
+    }
+    setScanNonce((n) => n + 1);
+  }, []);
+
+  const allRepos = useMemo(() => {
+    if (justCreated.length === 0) return repos;
+    const seen = new Set(repos.map((r) => r.id));
+    return [...repos, ...justCreated.filter((r) => !seen.has(r.id))];
+  }, [repos, justCreated]);
+
   return (
     <div className="mx-auto w-full max-w-xl space-y-6">
       <div>
@@ -159,21 +200,21 @@ export function RepositoriesManager({
       ) : null}
 
       <RepoList
-        repos={repos}
+        repos={allRepos}
         canResync={canConnect && configured}
         canManage={canConnect}
         products={products}
         links={links}
       />
 
-      {canConnect && configured && repos.length > 0 ? (
+      {canConnect && configured && allRepos.length > 0 ? (
         <SpecImportPanel
           leafLevelKey={leafLevelKey}
           scanNonce={scanNonce}
-          repos={repos}
+          repos={allRepos}
           installUrl={installUrl}
           orgInstallationId={orgInstallationOf(installations.installations)}
-          onRepoCreated={bumpScan}
+          onRepoCreated={onRepoCreated}
         />
       ) : null}
 
@@ -186,7 +227,7 @@ export function RepositoriesManager({
       ) : configured ? (
         <ConnectSection
           installUrl={installUrl}
-          connected={repos}
+          connected={allRepos}
           onConnected={bumpScan}
           initial={installations}
         />
@@ -219,8 +260,9 @@ function SpecImportPanel({
   installUrl: string | null;
   /** Organization installation id, enabling one-click spec-repo creation. */
   orgInstallationId: string | null;
-  /** Called when the nudge creates a repo, so the panel re-scans. */
-  onRepoCreated: () => void;
+  /** Called when the nudge creates a repo, so the panel re-scans and the
+   *  connected list can show it without waiting on a server refresh. */
+  onRepoCreated: (repo?: CreatedSpecRepo) => void;
   /** The workspace's leaf level key; see RepositoriesManagerProps. */
   leafLevelKey?: string;
 }) {
@@ -472,7 +514,7 @@ function EmptySpecsState({
   loading: boolean;
   installUrl: string | null;
   orgInstallationId: string | null;
-  onRepoCreated: () => void;
+  onRepoCreated: (repo?: CreatedSpecRepo) => void;
 }) {
   const router = useRouter();
   const [featureName, setFeatureName] = useState("");
@@ -637,7 +679,7 @@ function CreateSpecRepoNudge({
   /** Organization installation to create in; null hides the one-click form. */
   orgInstallationId: string | null;
   /** Called after a repo is created + connected, so parent panels refresh. */
-  onCreated: () => void;
+  onCreated: (repo?: CreatedSpecRepo) => void;
 }) {
   const newRepoUrl =
     "https://github.com/new?name=specs&description=" +
@@ -707,7 +749,7 @@ function CreateSpecRepoForm({
   onCreated,
 }: {
   installationId: string;
-  onCreated: () => void;
+  onCreated: (repo?: CreatedSpecRepo) => void;
 }) {
   const router = useRouter();
   const [name, setName] = useState("specs");
@@ -730,8 +772,11 @@ function CreateSpecRepoForm({
           installationId,
         });
         setCreated(result);
+        // Hand the repo up before asking for a refresh: the parent can show it
+        // immediately, so the success message and the list above never
+        // disagree while the server render is still in flight.
+        onCreated(result);
         router.refresh();
-        onCreated();
       } catch (err) {
         setError(
           err instanceof Error
@@ -783,14 +828,46 @@ function CreateSpecRepoForm({
   );
 }
 
-/** A labelled, copyable value for the manual GitHub App instructions. */
+/**
+ * A value to copy into GitHub, deliberately NOT shaped like an input.
+ *
+ * These were bordered boxes, which read as disabled text fields: the setup card
+ * looked like ten form fields of which seven were broken, burying the three the
+ * operator actually fills in. They are reference material, so they are styled
+ * as reference material and carry a copy button, which is the only thing anyone
+ * wants to do with them.
+ */
 function SettingRow({ label, value }: { label: string; value: string }) {
+  const [copied, setCopied] = useState(false);
+
+  function copy() {
+    void navigator.clipboard.writeText(value).then(
+      () => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1500);
+      },
+      () => {
+        // Clipboard can be refused (permissions, insecure context). The value is
+        // selectable text either way, so say nothing rather than raise an error
+        // about a convenience.
+      },
+    );
+  }
+
   return (
-    <div className="space-y-0.5">
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <code className="block overflow-x-auto rounded border border-input px-2 py-1 text-xs">
+    <div className="flex items-baseline gap-2 py-0.5">
+      <span className="w-40 shrink-0 text-2xs text-muted-foreground">{label}</span>
+      <code className="min-w-0 flex-1 break-all font-mono text-2xs text-foreground">
         {value}
       </code>
+      <button
+        type="button"
+        onClick={copy}
+        className="shrink-0 text-2xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+        aria-label={`Copy ${label}`}
+      >
+        {copied ? "Copied" : "Copy"}
+      </button>
     </div>
   );
 }
@@ -877,7 +954,14 @@ function ManualGitHubAppForm({
         </span>
       </label>
 
-      <ol className="space-y-3 rounded-md border border-input p-3 text-xs text-muted-foreground">
+      {/* Collapsible, open by default. First time through it is the whole
+          point of the card; coming back to paste a regenerated key, it is a
+          wall of instructions between the operator and the three fields. */}
+      <details open className="rounded-md border border-input">
+        <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-foreground">
+          On GitHub: create the app
+        </summary>
+      <ol className="space-y-3 border-t border-input p-3 text-xs text-muted-foreground">
         <li>
           <span className="font-medium text-foreground">
             1. Open GitHub&apos;s New GitHub App page.
@@ -982,32 +1066,46 @@ function ManualGitHubAppForm({
             the wrong list.
           </span>
         </li>
-      </ol>
-
-      <div className="space-y-2 rounded-md border border-input p-3">
-        <p className="text-xs text-muted-foreground">
+        <li>
           <span className="font-medium text-foreground">
-            About the webhook.
+            {originIsPublic ? "6. Set up the webhook." : "About the webhook."}
           </span>{" "}
           {originIsPublic ? (
             <>
               GitHub can reach this instance, so tick <em>Active</em> in step 2
-              and set the URL below. Put the same secret in both places.
+              and use these. Put the same secret here and on GitHub.
+              <div className="mt-2 space-y-1">
+                <SettingRow
+                  label="Webhook URL"
+                  value={`${origin}/api/webhooks/github`}
+                />
+                <SettingRow
+                  label="Subscribe to events"
+                  value="Push · Pull request · Issues"
+                />
+              </div>
             </>
           ) : (
             <>
               This instance is at <code>{origin}</code>, which GitHub cannot
-              reach, so leave the webhook off. Specs written here still reach
-              GitHub, because that is an outbound call. Changes pushed on GitHub
-              will not flow back until this instance has a public HTTPS address.
+              reach, so leave the webhook off entirely. Specs written here still
+              reach GitHub, because that is an outbound call. Changes pushed on
+              GitHub will not flow back until this instance has a public HTTPS
+              address.
             </>
           )}
+        </li>
+      </ol>
+      </details>
+
+      <div className="space-y-1">
+        <h4 className="text-xs font-medium text-foreground">
+          Back here: paste {originIsPublic ? "four things" : "three things"} from the app
+        </h4>
+        <p className="text-2xs text-muted-foreground">
+          Specboards signs in as the app to check these before saving, so a wrong
+          value is refused now rather than at your first sync.
         </p>
-        <SettingRow
-          label="Webhook URL (only once GitHub can reach this instance)"
-          value={`${origin}/api/webhooks/github`}
-        />
-        <SettingRow label="Subscribe to events" value="Push · Pull request · Issues" />
       </div>
 
       <label className="block space-y-1.5">
@@ -1060,23 +1158,29 @@ function ManualGitHubAppForm({
         </span>
       </label>
 
-      <label className="block space-y-1.5">
-        <span className="text-xs font-medium text-muted-foreground">
-          Webhook secret <span className="font-normal">(optional)</span>
-        </span>
-        <Input
-          type="password"
-          value={webhookSecret}
-          onChange={(e) => setWebhookSecret(e.target.value)}
-          disabled={pending}
-          autoComplete="off"
-        />
-        <span className="block text-xs text-muted-foreground">
-          Leave blank if GitHub cannot reach this instance. Specs you write here
-          still reach GitHub; changes pushed on GitHub will not flow back until
-          a webhook can be delivered.
-        </span>
-      </label>
+      {/* Only shown when a webhook could actually be delivered. On an
+          unreachable origin this field is not merely optional, it is inert:
+          nothing will ever arrive to verify against it. Offering it there is
+          asking for a value that cannot matter, which is how an operator ends
+          up wondering what they got wrong. */}
+      {originIsPublic ? (
+        <label className="block space-y-1.5">
+          <span className="text-xs font-medium text-muted-foreground">
+            Webhook secret
+          </span>
+          <Input
+            type="password"
+            value={webhookSecret}
+            onChange={(e) => setWebhookSecret(e.target.value)}
+            disabled={pending}
+            autoComplete="off"
+          />
+          <span className="block text-xs text-muted-foreground">
+            The same secret you set on the app&apos;s webhook. Without it pushes
+            on GitHub will not reconcile back onto the board.
+          </span>
+        </label>
+      ) : null}
 
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
