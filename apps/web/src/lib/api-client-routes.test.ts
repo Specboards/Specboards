@@ -198,11 +198,13 @@ describe("api-client reaches routes that exist", () => {
   it("finds the client's calls and the app's routes", () => {
     // Guards the parsing itself: if a refactor breaks these regexes the suite
     // must fail loudly rather than pass by checking nothing.
-    expect(
-      sources.some(({ path }) =>
-        path.endsWith(join("api-client", "repositories.ts")),
-      ),
-    ).toBe(true);
+    for (const clientModule of ["planning.ts", "repositories.ts"]) {
+      expect(
+        sources.some(({ path }) =>
+          path.endsWith(join("api-client", clientModule)),
+        ),
+      ).toBe(true);
+    }
     expect(calls.length).toBeGreaterThan(80);
     expect(table.size).toBeGreaterThan(50);
   });
