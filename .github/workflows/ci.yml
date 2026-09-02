@@ -52,7 +52,11 @@ jobs:
       # most recent one for this OS. A pull request falls back to whatever main
       # last wrote, which is the common case here.
       #
-      # See the prune step at the end of this job for why this stays small.
+      # Measured at 3.4 MB after a run, so there is no size problem to manage:
+      # `turbo.json` excludes `.next/cache`, which is the only output here big
+      # enough to be worth worrying about. Worth re-checking if a package ever
+      # starts emitting something large, because GitHub evicts caches silently
+      # and least-recently-used when a repository passes its 10 GB budget.
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: .turbo
@@ -114,29 +118,3 @@ jobs:
 
       - run: pnpm --filter @specboards/web test:e2e
 
-      # Keep the Turborepo cache small enough to be worth having.
-      #
-      # A cached `@specboards/web#build` is 263 MB, because the entry is the
-      # whole of `.next`. Saved unpruned, one run restores the last one and adds
-      # its own, so the cache grows by a quarter of a gigabyte per run and
-      # crosses GitHub's 10 GB per-repository budget in about five weeks of
-      # merges. Nothing warns when that happens: the eviction is silent and
-      # least-recently-used, so the first thing lost is whichever cache was not
-      # touched this run, and CI gets slower for reasons no one can see.
-      #
-      # Dropping the oversized entries leaves the cheap ones, which are the
-      # frequent hits anyway: every task in `packages/*` replays for any pull
-      # request that only touches `apps/web`, which is most of them. What is
-      # given up is the app's own build being replayed on a run that did not
-      # touch it, and those runs rebuild in about a minute.
-      - name: Prune oversized entries from the Turborepo cache
-        if: always()
-        run: |
-          # `always()` above means this can run after a step that failed before
-          # anything was built, so the directory is not guaranteed to be here.
-          [ -d .turbo/cache ] || exit 0
-          find .turbo/cache -name '*.tar.zst' -size +50M -print0 |
-            while IFS= read -r -d "" tar; do
-              rm -f "$tar" "${tar%.tar.zst}-meta.json" "${tar%.tar.zst}-manifest.json"
-            done
-          du -sh .turbo/cache || true
