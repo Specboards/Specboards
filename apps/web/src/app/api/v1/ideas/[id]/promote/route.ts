@@ -1,5 +1,5 @@
 import { authorizeWrite } from "@/lib/auth-session";
-import { promoteIdea } from "@/lib/features-service";
+import { promoteIdea } from "@/lib/ideas-service";
 import { revalidateIdeaPages } from "@/lib/revalidate-cards";
 import { IdeaError } from "@/lib/store/types";
 

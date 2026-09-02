@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { computeRiceScore } from "./feature-helpers";
-import { InvalidPatchError, parseFeaturePatch } from "./features-service";
+import { parseFeaturePatch } from "./features-service";
+import { InvalidPatchError } from "./service-errors";
 
 describe("computeRiceScore", () => {
   it("computes Reach × Impact × Confidence/100 ÷ Effort", () => {

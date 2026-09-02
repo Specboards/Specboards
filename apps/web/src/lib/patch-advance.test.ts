@@ -64,7 +64,8 @@ vi.mock("@/lib/repo-config", () => ({
 }));
 vi.mock("@/lib/webhooks/events", () => ({ notifyOutbox: () => {} }));
 
-const { InvalidPatchError, patchFeature } = await import("./features-service");
+const { InvalidPatchError } = await import("./service-errors");
+const { patchFeature } = await import("./features-service");
 
 beforeEach(() => {
   current = {

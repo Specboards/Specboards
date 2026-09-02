@@ -5,12 +5,12 @@ import {
   readCardsProductId,
 } from "@/lib/api/cards-scope";
 import { resolveReadScope } from "@/lib/auth-session";
+import { InvalidPatchError } from "@/lib/service-errors";
 import {
-  InvalidPatchError,
   listStageGates,
   parseStageGates,
   replaceStageGates,
-} from "@/lib/features-service";
+} from "@/lib/workflow-service";
 
 export const dynamic = "force-dynamic";
 

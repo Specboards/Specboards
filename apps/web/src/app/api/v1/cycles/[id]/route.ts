@@ -1,11 +1,11 @@
 import { readJsonBody } from "@/lib/api/body";
 import { authorizeWrite } from "@/lib/auth-session";
 import {
-  InvalidPatchError,
   deleteCycle,
   parseCyclePatch,
   updateCycle,
-} from "@/lib/features-service";
+} from "@/lib/cycles-service";
+import { InvalidPatchError } from "@/lib/service-errors";
 import { revalidateCardPages } from "@/lib/revalidate-cards";
 import { CycleError } from "@/lib/store/types";
 

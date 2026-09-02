@@ -1,11 +1,7 @@
 import { readJsonBody } from "@/lib/api/body";
 import { authorizeWrite } from "@/lib/auth-session";
-import {
-  InvalidPatchError,
-  deleteIdea,
-  parseIdeaPatch,
-  updateIdea,
-} from "@/lib/features-service";
+import { deleteIdea, parseIdeaPatch, updateIdea } from "@/lib/ideas-service";
+import { InvalidPatchError } from "@/lib/service-errors";
 import { revalidateIdeaPages } from "@/lib/revalidate-cards";
 import { IdeaError } from "@/lib/store/types";
 

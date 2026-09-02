@@ -1,11 +1,11 @@
 import { readJsonBody } from "@/lib/api/body";
 import { authorizeOrgAdmin } from "@/lib/auth-session";
 import {
-  InvalidPatchError,
   deleteProperty,
   parsePropertyPatch,
   updateProperty,
-} from "@/lib/features-service";
+} from "@/lib/properties-service";
+import { InvalidPatchError } from "@/lib/service-errors";
 import { revalidateCardPages } from "@/lib/revalidate-cards";
 import { PropertyError } from "@/lib/store/types";
 

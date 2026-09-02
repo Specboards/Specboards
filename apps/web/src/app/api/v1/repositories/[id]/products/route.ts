@@ -1,7 +1,7 @@
 import { readJsonBody } from "@/lib/api/body";
 import { authorizeOrgAdmin, resolveReadScope } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
-import { InvalidPatchError } from "@/lib/features-service";
+import { InvalidPatchError } from "@/lib/service-errors";
 import {
   listRepoProductLinks,
   parseRepoProductsInput,

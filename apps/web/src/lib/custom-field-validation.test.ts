@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import type { PropertyDef } from "@specboards/core";
 
-import { assertCustomFieldTypes, InvalidPatchError } from "./features-service";
+import { assertCustomFieldTypes } from "./custom-fields";
+import { InvalidPatchError } from "./service-errors";
 
 /** A property definition stub; only `key` and `type` matter to the validator. */
 function prop(key: string, type: PropertyDef["type"]): PropertyDef {

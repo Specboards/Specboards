@@ -1,13 +1,13 @@
 import { readJsonBody } from "@/lib/api/body";
 import { authorizeWrite, resolveReadScope } from "@/lib/auth-session";
 import {
-  InvalidPatchError,
   deleteGoal,
   listGoalContributions,
   listGoals,
   parseGoalPatch,
   updateGoal,
-} from "@/lib/features-service";
+} from "@/lib/goals-service";
+import { InvalidPatchError } from "@/lib/service-errors";
 import { revalidateCardPages } from "@/lib/revalidate-cards";
 import { GoalError } from "@/lib/store/types";
 

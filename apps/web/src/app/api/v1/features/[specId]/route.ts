@@ -2,13 +2,9 @@ import { revalidatePath } from "next/cache";
 
 import { readJsonBody } from "@/lib/api/body";
 import { authorizeWrite, resolveReadScope } from "@/lib/auth-session";
-import {
-  FeatureNotFoundError,
-  InvalidPatchError,
-  deleteWorkItem,
-  parseFeaturePatch,
-  patchFeature,
-} from "@/lib/features-service";
+import { parseFeaturePatch, patchFeature } from "@/lib/features-service";
+import { FeatureNotFoundError, InvalidPatchError } from "@/lib/service-errors";
+import { deleteWorkItem } from "@/lib/work-items-service";
 import { getStore } from "@/lib/store";
 import { FeatureError, RelationError } from "@/lib/store/types";
 

@@ -4,11 +4,11 @@ import {
 } from "@/lib/api/cards-scope";
 import { resolveReadScope } from "@/lib/auth-session";
 import {
-  InvalidPatchError,
   createDetailTemplate,
   listDetailTemplates,
   parseDetailTemplateInput,
-} from "@/lib/features-service";
+} from "@/lib/detail-templates-service";
+import { InvalidPatchError } from "@/lib/service-errors";
 import { revalidateCardPages } from "@/lib/revalidate-cards";
 import { DetailTemplateError } from "@/lib/store/types";
 

@@ -1,11 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  InvalidPatchError,
-  parsePropertyInput,
-  parseReleaseInput,
-  parseReleasePatch,
-} from "./features-service";
+import { parsePropertyInput } from "./properties-service";
+import { parseReleaseInput, parseReleasePatch } from "./releases-service";
+import { InvalidPatchError } from "./service-errors";
 
 describe("parsePropertyInput - entity scope", () => {
   it("defaults entity to undefined (store treats as 'item')", () => {

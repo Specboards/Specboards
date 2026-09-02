@@ -1,11 +1,11 @@
 import { readJsonBody } from "@/lib/api/body";
 import { authorizeWrite } from "@/lib/auth-session";
 import {
-  InvalidPatchError,
   deleteKeyResult,
   parseKeyResultPatch,
   updateKeyResult,
-} from "@/lib/features-service";
+} from "@/lib/goals-service";
+import { InvalidPatchError } from "@/lib/service-errors";
 import { revalidateCardPages } from "@/lib/revalidate-cards";
 import { GoalError } from "@/lib/store/types";
 

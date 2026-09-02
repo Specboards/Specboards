@@ -1,10 +1,7 @@
 import { readJsonBody } from "@/lib/api/body";
 import { resolveReadScope } from "@/lib/auth-session";
-import {
-  InvalidPatchError,
-  parseIdeaVote,
-  setIdeaVote,
-} from "@/lib/features-service";
+import { parseIdeaVote, setIdeaVote } from "@/lib/ideas-service";
+import { InvalidPatchError } from "@/lib/service-errors";
 import { revalidateIdeaPages } from "@/lib/revalidate-cards";
 import { IdeaError } from "@/lib/store/types";
 

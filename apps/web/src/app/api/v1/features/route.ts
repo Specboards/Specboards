@@ -2,11 +2,9 @@ import { revalidatePath } from "next/cache";
 
 import { readJsonBody } from "@/lib/api/body";
 import { authorizeWrite, resolveReadScope } from "@/lib/auth-session";
-import {
-  InvalidPatchError,
-  createWorkItem,
-  parseCreateFeatureInput,
-} from "@/lib/features-service";
+import { parseCreateFeatureInput } from "@/lib/features-service";
+import { InvalidPatchError } from "@/lib/service-errors";
+import { createWorkItem } from "@/lib/work-items-service";
 import { InvalidPageError, paginate, parsePageRequest } from "@/lib/pagination";
 import { getStore } from "@/lib/store";
 import { FeatureError } from "@/lib/store/types";

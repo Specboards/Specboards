@@ -4,10 +4,9 @@ import { readJsonBody } from "@/lib/api/body";
 import { authorizeWrite, resolveReadScope } from "@/lib/auth-session";
 import {
   addFeatureRelation,
-  FeatureNotFoundError,
-  InvalidPatchError,
   parseRelationInput,
-} from "@/lib/features-service";
+} from "@/lib/relations-service";
+import { FeatureNotFoundError, InvalidPatchError } from "@/lib/service-errors";
 import { getStore } from "@/lib/store";
 import { RelationError } from "@/lib/store/types";
 

@@ -1,5 +1,5 @@
 import { authorizeWrite } from "@/lib/auth-session";
-import { deleteComment } from "@/lib/features-service";
+import { deleteComment } from "@/lib/comments-service";
 import { CommentError } from "@/lib/store/types";
 
 export const dynamic = "force-dynamic";

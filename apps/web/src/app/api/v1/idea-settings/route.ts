@@ -3,11 +3,11 @@ import { revalidatePath } from "next/cache";
 import { readJsonBody } from "@/lib/api/body";
 import { authorizeOrgAdmin, resolveReadScope } from "@/lib/auth-session";
 import {
-  InvalidPatchError,
   getIdeaSettings,
   parseIdeaSettingsPatch,
   updateIdeaSettings,
-} from "@/lib/features-service";
+} from "@/lib/ideas-service";
+import { InvalidPatchError } from "@/lib/service-errors";
 
 export const dynamic = "force-dynamic";
 

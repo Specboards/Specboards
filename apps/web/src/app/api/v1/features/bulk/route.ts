@@ -3,10 +3,10 @@ import { revalidatePath } from "next/cache";
 import { readJsonBody } from "@/lib/api/body";
 import { authorizeWrite } from "@/lib/auth-session";
 import {
-  InvalidPatchError,
   bulkPatchFeatures,
   parseBulkPatchRequest,
-} from "@/lib/features-service";
+} from "@/lib/bulk-patch-service";
+import { InvalidPatchError } from "@/lib/service-errors";
 
 export const dynamic = "force-dynamic";
 
