@@ -18,7 +18,6 @@ import { GripVertical } from "lucide-react";
 import { toast } from "sonner";
 
 import {
-  descendantGroupIds,
   MAX_GROUP_DEPTH,
   PRODUCT_COLORS,
   resolveProductColor,
@@ -28,6 +27,20 @@ import {
 } from "@specboards/core";
 
 import { MoveMenu, type MoveOption } from "@/components/move-menu";
+import {
+  parseDndId,
+  planGroupMove,
+  resolveDropTarget,
+  type GroupMoveRefusal,
+} from "@/components/products-manager/drag";
+import {
+  byPosition,
+  childGroupsOf,
+  flattenGroupTree,
+  legalParentOptions,
+  productsOf,
+  ungroupedProducts,
+} from "@/components/products-manager/tree";
 import { ProductMembers } from "@/components/product-members";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -52,7 +65,6 @@ import {
 import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import { productDotColor } from "@/lib/product-color";
 import type {
-  ProductGroupPatch,
   ProductGroupRecord,
   ProductRecord,
   ProductVisibility,
@@ -111,45 +123,6 @@ function ColorPicker({
   );
 }
 
-/** A group flattened for tree display: depth-first, sibling position order. */
-interface TreeRow {
-  group: ProductGroupRecord;
-  depth: number;
-}
-
-/** Flatten the group tree depth-first. Cycle/orphan-safe: a dangling parent
- * renders at the top level and every group appears exactly once. */
-function flattenGroupTree(groups: ProductGroupRecord[]): TreeRow[] {
-  const ids = new Set(groups.map((g) => g.id));
-  const byParent = new Map<string | null, ProductGroupRecord[]>();
-  for (const g of groups) {
-    const parent = g.parentId && ids.has(g.parentId) ? g.parentId : null;
-    const list = byParent.get(parent);
-    if (list) list.push(g);
-    else byParent.set(parent, [g]);
-  }
-  const out: TreeRow[] = [];
-  const walk = (parent: string | null, depth: number, seen: Set<string>) => {
-    const siblings = (byParent.get(parent) ?? []).sort(
-      (a, b) => a.position - b.position || a.name.localeCompare(b.name),
-    );
-    for (const g of siblings) {
-      if (seen.has(g.id)) continue;
-      seen.add(g.id);
-      out.push({ group: g, depth });
-      walk(g.id, depth + 1, seen);
-    }
-  };
-  walk(null, 0, new Set());
-  return out;
-}
-
-/** Split a "kind:rest" drag/drop id into its kind and payload. */
-function parseDndId(raw: string): { kind: string; rest: string } {
-  const i = raw.indexOf(":");
-  return { kind: raw.slice(0, i), rest: raw.slice(i + 1) };
-}
-
 /**
  * Manage the org's products and product groups in one tree: groups as nodes
  * (nesting up to MAX_GROUP_DEPTH levels), products as leaf rows, and
@@ -189,19 +162,11 @@ export function ProductsManager({
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
   );
 
-  const groupIds = new Set(groups.map((g) => g.id));
-  /** A group's effective parent; a dangling parent id renders at top level. */
-  const parentOf = (g: ProductGroupRecord) =>
-    g.parentId && groupIds.has(g.parentId) ? g.parentId : null;
-  const childGroupsOf = (parent: string | null) =>
-    groups
-      .filter((g) => parentOf(g) === parent)
-      .sort((a, b) => a.position - b.position || a.name.localeCompare(b.name));
-  const byPosition = (a: ProductRecord, b: ProductRecord) =>
-    a.position - b.position || a.name.localeCompare(b.name);
-  const productsOf = (groupId: string) =>
-    products.filter((p) => p.groupId === groupId).sort(byPosition);
-  const ungrouped = products.filter((p) => !p.groupId).sort(byPosition);
+  // Tree reads live in ./products-manager/tree, so the ordering and
+  // dangling-parent rules can be tested without rendering the page.
+  const childGroups = (parent: string | null) => childGroupsOf(groups, parent);
+  const groupProducts = (groupId: string) => productsOf(products, groupId);
+  const ungrouped = ungroupedProducts(products);
 
   function onProductSaved(product: ProductRecord) {
     setProducts((ps) => ps.map((p) => (p.id === product.id ? product : p)));
@@ -271,63 +236,33 @@ export function ProductsManager({
       });
   }
 
+  /** What a refused move tells the user. "self" is a no-op, so it says nothing. */
+  const REFUSAL: Record<GroupMoveRefusal, string | null> = {
+    self: null,
+    cycle: "A group can't move inside its own subtree.",
+    depth: `That nesting would exceed the ${MAX_GROUP_DEPTH}-level limit.`,
+  };
+
   function moveGroup(
     dragged: ProductGroupRecord,
     newParent: string | null,
     insertIndex: number | null,
   ) {
-    if (newParent === dragged.id) return;
-    if (wouldCreateCycle(groups, dragged.id, newParent)) {
-      toast.error("A group can't move inside its own subtree.");
+    // The decision (legality, slot compensation, sibling renumbering) is made
+    // in ./products-manager/drag; what is left here is acting on it.
+    const plan = planGroupMove(groups, dragged.id, newParent, insertIndex);
+    if (!plan.ok) {
+      const message = REFUSAL[plan.reason];
+      if (message) toast.error(message);
       return;
     }
-    if (wouldExceedDepth(groups, dragged.id, newParent)) {
-      toast.error(
-        `That nesting would exceed the ${MAX_GROUP_DEPTH}-level limit.`,
-      );
-      return;
-    }
-
-    const oldParent = parentOf(dragged);
-    // Slot indexes count the dragged row itself when it already sits among the
-    // target siblings; compensate so the drop lands where the bar showed.
-    let index = insertIndex;
-    if (index !== null && oldParent === newParent) {
-      const orig = childGroupsOf(newParent).findIndex(
-        (g) => g.id === dragged.id,
-      );
-      if (orig >= 0 && orig < index) index -= 1;
-    }
-    const siblings = childGroupsOf(newParent).filter(
-      (g) => g.id !== dragged.id,
-    );
-    const at =
-      index === null ? siblings.length : Math.min(index, siblings.length);
-    const order = [...siblings.slice(0, at), dragged, ...siblings.slice(at)];
-
-    // Renumber the target siblings 0..n and patch only what changed (position
-    // is an integer column, so a clean insert needs its neighbors renumbered).
-    const patches: { id: string; patch: ProductGroupPatch }[] = [];
-    order.forEach((g, i) => {
-      const patch: ProductGroupPatch = {};
-      if (g.position !== i) patch.position = i;
-      if (g.id === dragged.id && oldParent !== newParent) {
-        patch.parentId = newParent;
-      }
-      if (Object.keys(patch).length > 0) patches.push({ id: g.id, patch });
-    });
-    if (patches.length === 0) return;
+    if (plan.patches.length === 0) return;
 
     const prevGroups = groups;
-    const posById = new Map(order.map((g, i) => [g.id, i]));
-    setGroups(
-      groups.map((g) => ({
-        ...g,
-        position: posById.get(g.id) ?? g.position,
-        parentId: g.id === dragged.id ? newParent : g.parentId,
-      })),
-    );
-    Promise.all(patches.map(({ id, patch }) => updateProductGroup(id, patch)))
+    setGroups(plan.groups);
+    Promise.all(
+      plan.patches.map(({ id, patch }) => updateProductGroup(id, patch)),
+    )
       .then(() => {
         toast.success("Group moved");
         router.refresh();
@@ -344,23 +279,9 @@ export function ProductsManager({
     const { active, over } = event;
     if (!over) return;
     const { kind, rest: id } = parseDndId(String(active.id));
-    const target = parseDndId(String(over.id));
-
-    // Resolve the drop target to a destination parent/group (+ slot index).
-    let intoGroup: string | null;
-    let slotIndex: number | null = null;
-    if (target.kind === "into") {
-      intoGroup = target.rest;
-    } else if (target.kind === "slot") {
-      const cut = target.rest.lastIndexOf(":");
-      const parent = target.rest.slice(0, cut);
-      intoGroup = parent === "root" ? null : parent;
-      slotIndex = Number(target.rest.slice(cut + 1));
-    } else if (target.kind === "ungrouped") {
-      intoGroup = null;
-    } else {
-      return;
-    }
+    const target = resolveDropTarget(String(over.id));
+    if (!target) return;
+    const { intoGroup, slotIndex } = target;
 
     if (kind === "product") {
       const product = products.find((p) => p.id === id);
@@ -450,7 +371,7 @@ export function ProductsManager({
     parent: string | null,
     depth: number,
   ): React.ReactNode => {
-    const siblings = childGroupsOf(parent);
+    const siblings = childGroups(parent);
     return (
       <>
         {siblings.map((group, i) => (
@@ -465,15 +386,15 @@ export function ProductsManager({
               depth={depth}
               canManage={isOrgAdmin}
               canDrag={isOrgAdmin}
-              productCount={productsOf(group.id).length}
-              subgroupCount={childGroupsOf(group.id).length}
+              productCount={groupProducts(group.id).length}
+              subgroupCount={childGroups(group.id).length}
               onEdit={() => setEditingGroupId(group.id)}
               onDelete={() => onDeleteGroup(group)}
               moveMenu={groupMoveMenu(group, parent, i, siblings.length)}
               busy={pending}
             />
             {renderLevel(group.id, depth + 1)}
-            {productsOf(group.id).map((p) => (
+            {groupProducts(group.id).map((p) => (
               <ProductRow
                 key={p.id}
                 product={p}
@@ -880,28 +801,6 @@ function UngroupedZone({
         </p>
       ) : null}
     </div>
-  );
-}
-
-/** Parent choices for a group being created or moved: every group with room
- * below the depth cap, excluding (when editing) the group's own subtree. */
-function legalParentOptions(
-  groups: ProductGroupRecord[],
-  editing: ProductGroupRecord | null,
-): TreeRow[] {
-  const rows = flattenGroupTree(groups);
-  if (!editing) return rows.filter((r) => r.depth + 1 < MAX_GROUP_DEPTH);
-  const depthById = new Map(rows.map((r) => [r.group.id, r.depth]));
-  const depth = depthById.get(editing.id) ?? 0;
-  const subtree = descendantGroupIds(groups, editing.id);
-  const subtreeHeight =
-    Math.max(...[...subtree].map((id) => depthById.get(id) ?? depth)) -
-    depth +
-    1;
-  return rows.filter(
-    ({ group: candidate, depth: candidateDepth }) =>
-      !subtree.has(candidate.id) &&
-      candidateDepth + 1 + subtreeHeight <= MAX_GROUP_DEPTH,
   );
 }
 
