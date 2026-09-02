@@ -48,6 +48,7 @@ import {
   SpecConflictError,
   updateSpecContent,
 } from "@/lib/spec-content";
+import { reconcileLinkedPullRequestState } from "@/lib/pr-state-refresh";
 import { getStore, type GithubLink } from "@/lib/store";
 
 import { DOC_TOOLS } from "./doc-tools";
@@ -1779,6 +1780,13 @@ export const TOOLS: McpTool[] = [
     scope: { resource: "features", action: "read" },
     run: async (args, ctx) => {
       const specId = requireUuid(args, "specId");
+      // Re-confirm before answering, the same as the item view does. This tool
+      // exists to say what state a link is in, and an agent reading it has no
+      // other way to notice the answer went stale: it never renders the page
+      // that would otherwise trigger the check.
+      if (ctx.scope) {
+        await reconcileLinkedPullRequestState(specId, ctx.scope.workspaceId);
+      }
       const store = await getStore();
       const f = await store.getFeature(specId, ctx.scope);
       if (!f) throw new McpToolError(`No item with spec id ${specId}.`);
