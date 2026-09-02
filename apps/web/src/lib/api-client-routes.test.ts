@@ -208,6 +208,7 @@ describe("api-client reaches routes that exist", () => {
       "specs.ts",
       "views.ts",
       "work-items.ts",
+      "workspace-config.ts",
     ]) {
       expect(
         sources.some(({ path }) =>
