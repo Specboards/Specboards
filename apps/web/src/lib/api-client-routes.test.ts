@@ -204,6 +204,7 @@ describe("api-client reaches routes that exist", () => {
       "ideas.ts",
       "notifications.ts",
       "planning.ts",
+      "products.ts",
       "repositories.ts",
       "specs.ts",
       "views.ts",
