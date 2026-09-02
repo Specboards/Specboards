@@ -891,9 +891,17 @@ function ManualGitHubAppForm({
             {createUrl}
           </a>
           <span className="block">
-            GitHub may ask you to re-enter your password or 2FA first. This page
-            is under the <em>organization&apos;s</em> developer settings, which
-            is a different place from the one under your avatar.
+            GitHub may ask you to re-enter your password or 2FA first.
+          </span>
+          <span className="mt-1 block">
+            Two pages in an organization&apos;s settings are both called
+            &ldquo;GitHub Apps&rdquo;, and only one of them is this. The app you
+            create appears under{" "}
+            <strong className="text-foreground">Developer settings</strong>, at
+            the very bottom of the sidebar. The{" "}
+            <strong className="text-foreground">Installed GitHub Apps</strong>{" "}
+            page higher up lists apps installed <em>on</em> the organization, and
+            yours will not appear there until step 5.
           </span>
         </li>
 
@@ -967,6 +975,12 @@ function ManualGitHubAppForm({
           Use <em>Install App</em> in the left sidebar of the app&apos;s settings.
           GitHub requires the private key to exist before it will let you
           install.
+          <span className="mt-1 block">
+            Once installed, it shows up on the <em>Installed GitHub Apps</em>{" "}
+            page too. Before that it exists only under Developer settings, which
+            is why a newly created app looks missing if you go looking for it in
+            the wrong list.
+          </span>
         </li>
       </ol>
 

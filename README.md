@@ -248,6 +248,17 @@ and which one you can use is decided by GitHub, not by preference:
   and GitHub will usually ask you to re-enter your password or 2FA before it
   lets you create an App.
 
+  **Two pages in an organization's settings are both called "GitHub Apps",** and
+  a newly created App appears in only one of them:
+
+  | Page | What it lists |
+  | --- | --- |
+  | Developer settings -> GitHub Apps (`/settings/apps`) | Apps the organization **owns**. Your new App is here. |
+  | Installed GitHub Apps (`/settings/installations`) | Apps installed **on** the organization. Yours appears here only after you install it. |
+
+  So an App you just created looks missing if you check the installed list
+  first. It is not; it is one page further down the sidebar.
+
   Two settings are easy to miss and both stop the connection working:
 
   - **Webhook -> Active** must be **unticked** when GitHub cannot reach the
