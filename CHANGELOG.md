@@ -25,6 +25,83 @@ for how and when the version is bumped.
 > `pnpm deploy:prod` and the dispatched workflow. See
 > [VERSIONING.md](./VERSIONING.md).
 
+## [0.31.0] - 2026-09-01
+
+0.30.0 made self-hosting install. This release makes it **connect**.
+
+Someone ran the whole thing end to end against a real GitHub organization,
+stopping at every point a self-hoster would stop, and this is the result. The
+headline: an on-prem instance could not connect to GitHub at all. Not "was
+awkward to connect", could not. Three separate defects stacked on one path, and
+because the hosted product never takes that path, all three had been shipping
+undetected since the flow was added in mid-June.
+
+### Added
+
+- **A self-hosted instance can connect to GitHub.** GitHub's one-click App
+  creation validates that it can reach your webhook URL and refuses when it
+  cannot, so every deployment behind a firewall was excluded from it by
+  construction. There was no second path: the function that stores App
+  credentials had exactly one caller, the one-click callback. An operator who
+  could not use that flow had nowhere to go. Credentials can now be entered
+  directly, and the instance verifies them against GitHub before saving, so a
+  wrong value is refused while you are still looking at the field rather than
+  at the first sync.
+- **The setup card walks you through creating the App, with the form already
+  filled in.** GitHub accepts its entire New GitHub App form as URL parameters,
+  permissions included, so the link does that for you. This matters most for
+  the permissions: miss one and GitHub creates the App happily, the settings
+  page looks correct, and it surfaces much later as an installation that fails
+  at the final step with nothing on screen connecting the two. The values are
+  still listed, now as something to confirm rather than transcribe.
+- **`/api/health?full=1` reports what is actually running:** version, commit,
+  whether the database is reachable, and how many migrations are applied. The
+  bare `/api/health` is unchanged for load balancers.
+
+### Changed
+
+- **The controls that create specs are named after what they create.** "New
+  spec" on a Feature reads as "give this feature a spec", which is the one
+  thing it does not do: it creates a *different* item beneath it, and the
+  Feature stays undocumented. It now reads "New Work Item" (or whatever the
+  workspace calls its leaf level), and the expanded form says plainly that it
+  does not document the item you are looking at. Grouping levels, which cannot
+  take a spec at all, now say so and link to the control that can, instead of
+  leaving a nearby button to be misread as one.
+- **The GitHub setup card shows only the fields an operator can act on.** Values
+  that are ours to supply are reference rows with copy buttons rather than
+  disabled-looking inputs, and the webhook secret is hidden entirely on an
+  origin GitHub cannot reach, where it would be an inert control asking for a
+  secret nothing will ever verify.
+
+### Fixed
+
+- **A fresh instance opens on account creation, not on a sign-in page.** The
+  first person to reach a new self-host was shown a form for an account that
+  could not exist yet, with the sign-up link below the fold.
+- **The browser could reach GitHub's App-creation endpoint.** The
+  Content-Security-Policy sent on every response set `form-action 'self'`, which
+  silently blocked the POST to github.com that the flow is built on. The
+  exception is scoped to that one path.
+- **The setup cookie works over plain HTTP.** It was marked `Secure`
+  unconditionally, so on an internal HTTP origin the browser dropped it and the
+  install failed at the final callback with no explanation.
+- **A stack served over plain HTTP no longer half-starts an unreachable flow.**
+  The App-creation route now checks up front whether GitHub could reach this
+  origin and explains what to do instead, rather than handing off to GitHub and
+  failing there.
+- **`docker compose up --build` bakes in the version as well as the commit.**
+  `migrate` and `web` resolve to the same image tag, so Compose builds it once
+  using whichever service it happened to pick. Their build arguments differed,
+  and the one that won lacked the version, so a stack built with the version on
+  the command line reported `"version": null`.
+- **The repository list no longer contradicts itself.** Creating a spec repo
+  reported success while the panel above still read "No repositories
+  connected", because that list came from a server render that the refresh
+  could not be awaited on.
+- **`setup.sh` upgrades an existing `.env`** rather than leaving a stack running
+  on an old one that is missing newly required keys.
+
 ## [0.30.1] - 2026-08-31
 
 Hardening on 0.30.0's self-host work, and metadata on the published image.
