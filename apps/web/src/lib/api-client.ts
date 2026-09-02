@@ -4,7 +4,6 @@ import { apiFetch } from "@/lib/api-client/request";
 import type {
   BoardKey,
   BoardPreferences,
-  NotificationList,
   CreateProductGroupInput,
   CreateProductInput,
   DetailTemplate,
@@ -48,6 +47,7 @@ import type {
 
 export { AuthRequiredError } from "@/lib/api-client/request";
 export * from "@/lib/api-client/assistant";
+export * from "@/lib/api-client/notifications";
 export * from "@/lib/api-client/planning";
 export * from "@/lib/api-client/repositories";
 export * from "@/lib/api-client/specs";
@@ -75,36 +75,6 @@ export class WorkspaceSlugTakenError extends Error {
   }
 }
 
-/** The caller's notification inbox (items + unread count). */
-export async function listNotifications(): Promise<NotificationList> {
-  const res = await apiFetch("/api/v1/notifications");
-  const body = (await res.json().catch(() => null)) as
-    | (NotificationList & { error?: string })
-    | null;
-  if (!res.ok || !body?.items) {
-    throw new Error(
-      body?.error ?? `Failed to load notifications (${res.status}).`,
-    );
-  }
-  return { items: body.items, unreadCount: body.unreadCount };
-}
-
-/** Mark one notification read. */
-export async function markNotificationRead(id: string): Promise<void> {
-  const res = await apiFetch(
-    `/api/v1/notifications/${encodeURIComponent(id)}/read`,
-    { method: "POST" },
-  );
-  if (!res.ok) throw new Error(`Failed to mark read (${res.status}).`);
-}
-
-/** Mark all of the caller's notifications read. */
-export async function markAllNotificationsRead(): Promise<void> {
-  const res = await apiFetch("/api/v1/notifications/read-all", {
-    method: "POST",
-  });
-  if (!res.ok) throw new Error(`Failed to mark all read (${res.status}).`);
-}
 
 /** Replace the workspace's hierarchy levels (admin-only); returns the new set. */
 export async function updateLevels(
