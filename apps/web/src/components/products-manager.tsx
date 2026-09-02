@@ -29,18 +29,13 @@ import {
 import { MoveMenu, type MoveOption } from "@/components/move-menu";
 import {
   parseDndId,
-  planGroupMove,
   resolveDropTarget,
-  type GroupMoveRefusal,
 } from "@/components/products-manager/drag";
 import {
-  byPosition,
-  childGroupsOf,
   flattenGroupTree,
   legalParentOptions,
-  productsOf,
-  ungroupedProducts,
 } from "@/components/products-manager/tree";
+import { useProductTree } from "@/components/products-manager/use-product-tree";
 import { ProductMembers } from "@/components/product-members";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -57,8 +52,6 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   createProduct,
   createProductGroup,
-  deleteProduct,
-  deleteProductGroup,
   updateProduct,
   updateProductGroup,
 } from "@/lib/api-client/products";
@@ -144,14 +137,27 @@ export function ProductsManager({
   members: Member[];
   isOrgAdmin: boolean;
 }) {
-  const router = useRouter();
-  const [products, setProducts] = useState(initial);
-  const [groups, setGroups] = useState(initialGroups);
+  const {
+    products,
+    groups,
+    pending,
+    childGroups,
+    groupProducts,
+    ungrouped,
+    onProductSaved,
+    onProductCreated,
+    onGroupCreated,
+    onGroupSaved,
+    onDeleteProduct,
+    onDeleteGroup,
+    moveProduct,
+    moveGroup,
+  } = useProductTree(initial, initialGroups);
+
   const [creatingProduct, setCreatingProduct] = useState(false);
   const [addingGroup, setAddingGroup] = useState(false);
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
   // What is being dragged right now (drives slot visibility and the overlay).
   const [drag, setDrag] = useState<{
     kind: "group" | "product";
@@ -162,45 +168,6 @@ export function ProductsManager({
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
   );
 
-  // Tree reads live in ./products-manager/tree, so the ordering and
-  // dangling-parent rules can be tested without rendering the page.
-  const childGroups = (parent: string | null) => childGroupsOf(groups, parent);
-  const groupProducts = (groupId: string) => productsOf(products, groupId);
-  const ungrouped = ungroupedProducts(products);
-
-  function onProductSaved(product: ProductRecord) {
-    setProducts((ps) => ps.map((p) => (p.id === product.id ? product : p)));
-  }
-
-  function onDeleteProduct(product: ProductRecord) {
-    if (!confirm(`Delete “${product.name}”? This can't be undone.`)) return;
-    startTransition(async () => {
-      try {
-        await deleteProduct(product.id);
-        setProducts((ps) => ps.filter((p) => p.id !== product.id));
-        toast.success("Product deleted");
-        router.refresh();
-      } catch (err) {
-        if (redirectOnAuthExpiry(err, router)) return;
-        toast.error(err instanceof Error ? err.message : "Delete failed.");
-      }
-    });
-  }
-
-  function onDeleteGroup(group: ProductGroupRecord) {
-    startTransition(async () => {
-      try {
-        await deleteProductGroup(group.id);
-        setGroups((gs) => gs.filter((g) => g.id !== group.id));
-        toast.success("Group deleted");
-        router.refresh();
-      } catch (err) {
-        if (redirectOnAuthExpiry(err, router)) return;
-        toast.error(err instanceof Error ? err.message : "Delete failed.");
-      }
-    });
-  }
-
   function onDragStart(event: DragStartEvent) {
     const { kind, rest } = parseDndId(String(event.active.id));
     if (kind !== "group" && kind !== "product") return;
@@ -209,69 +176,6 @@ export function ProductsManager({
         ? (groups.find((g) => g.id === rest)?.name ?? "")
         : (products.find((p) => p.id === rest)?.name ?? "");
     setDrag({ kind, label });
-  }
-
-  function moveProduct(product: ProductRecord, newGroupId: string | null) {
-    if ((product.groupId ?? null) === newGroupId) return;
-    const prev = product;
-    const groupName = newGroupId
-      ? (groups.find((g) => g.id === newGroupId)?.name ?? "group")
-      : null;
-    // Optimistically re-home the leaf, then persist and revalidate.
-    onProductSaved({ ...product, groupId: newGroupId });
-    updateProduct(product.id, { groupId: newGroupId })
-      .then((updated) => {
-        onProductSaved(updated);
-        toast.success(
-          groupName
-            ? `${product.name} moved to ${groupName}`
-            : `${product.name} ungrouped`,
-        );
-        router.refresh();
-      })
-      .catch((err) => {
-        onProductSaved(prev);
-        if (redirectOnAuthExpiry(err, router)) return;
-        toast.error(err instanceof Error ? err.message : "Move failed.");
-      });
-  }
-
-  /** What a refused move tells the user. "self" is a no-op, so it says nothing. */
-  const REFUSAL: Record<GroupMoveRefusal, string | null> = {
-    self: null,
-    cycle: "A group can't move inside its own subtree.",
-    depth: `That nesting would exceed the ${MAX_GROUP_DEPTH}-level limit.`,
-  };
-
-  function moveGroup(
-    dragged: ProductGroupRecord,
-    newParent: string | null,
-    insertIndex: number | null,
-  ) {
-    // The decision (legality, slot compensation, sibling renumbering) is made
-    // in ./products-manager/drag; what is left here is acting on it.
-    const plan = planGroupMove(groups, dragged.id, newParent, insertIndex);
-    if (!plan.ok) {
-      const message = REFUSAL[plan.reason];
-      if (message) toast.error(message);
-      return;
-    }
-    if (plan.patches.length === 0) return;
-
-    const prevGroups = groups;
-    setGroups(plan.groups);
-    Promise.all(
-      plan.patches.map(({ id, patch }) => updateProductGroup(id, patch)),
-    )
-      .then(() => {
-        toast.success("Group moved");
-        router.refresh();
-      })
-      .catch((err) => {
-        setGroups(prevGroups);
-        if (redirectOnAuthExpiry(err, router)) return;
-        toast.error(err instanceof Error ? err.message : "Move failed.");
-      });
   }
 
   function onDragEnd(event: DragEndEvent) {
@@ -500,9 +404,7 @@ export function ProductsManager({
         <CreateProductSheet
           open={creatingProduct}
           onOpenChange={setCreatingProduct}
-          onCreated={(product) =>
-            setProducts((ps) => [...ps, product].sort(byPosition))
-          }
+          onCreated={onProductCreated}
         />
       ) : null}
       {isOrgAdmin ? (
@@ -510,7 +412,7 @@ export function ProductsManager({
           open={addingGroup}
           onOpenChange={setAddingGroup}
           groups={groups}
-          onCreated={(group) => setGroups((gs) => [...gs, group])}
+          onCreated={onGroupCreated}
         />
       ) : null}
       <EditProductSheet
@@ -529,11 +431,7 @@ export function ProductsManager({
           onOpenChange={(open) => {
             if (!open) setEditingGroupId(null);
           }}
-          onSaved={(updated) =>
-            setGroups((gs) =>
-              gs.map((g) => (g.id === updated.id ? updated : g)),
-            )
-          }
+          onSaved={onGroupSaved}
         />
       ) : null}
     </div>
