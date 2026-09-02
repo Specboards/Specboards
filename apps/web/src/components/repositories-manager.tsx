@@ -37,6 +37,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { githubAppCreateUrl } from "@/lib/github-app-create-url";
 import { useOrgProductPath } from "@/lib/use-org";
 
 interface ConnectedRepo {
@@ -906,11 +907,15 @@ function ManualGitHubAppForm({
   // GitHub keeps App creation under a different URL per owner, and finding it
   // by hand means five clicks through two settings areas that look alike
   // (an org's "Developer settings" is not the one under your avatar). Building
-  // the link from the owner the operator types removes that entirely.
+  // the link from the owner the operator types removes that entirely, and the
+  // query parameters carry every field and permission across with it.
   const trimmedOrg = org.trim();
-  const createUrl = trimmedOrg
-    ? `https://github.com/organizations/${encodeURIComponent(trimmedOrg)}/settings/apps/new`
-    : "https://github.com/settings/apps/new";
+  const createUrl = githubAppCreateUrl({
+    org: trimmedOrg,
+    origin,
+    name: trimmedOrg ? `Specboards (${trimmedOrg})` : "Specboards",
+    webhookActive: originIsPublic,
+  });
 
   function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -964,7 +969,7 @@ function ManualGitHubAppForm({
       <ol className="space-y-3 border-t border-input p-3 text-xs text-muted-foreground">
         <li>
           <span className="font-medium text-foreground">
-            1. Open GitHub&apos;s New GitHub App page.
+            1. Open the prefilled New GitHub App page.
           </span>{" "}
           <a
             href={createUrl}
@@ -972,10 +977,12 @@ function ManualGitHubAppForm({
             rel="noreferrer"
             className="text-link underline underline-offset-4"
           >
-            {createUrl}
+            Create the app on GitHub
           </a>
-          <span className="block">
-            GitHub may ask you to re-enter your password or 2FA first.
+          <span className="mt-1 block">
+            This link carries every setting below with it, including the
+            permissions. GitHub may ask you to re-enter your password or 2FA
+            first.
           </span>
           <span className="mt-1 block">
             Two pages in an organization&apos;s settings are both called
@@ -985,42 +992,45 @@ function ManualGitHubAppForm({
             the very bottom of the sidebar. The{" "}
             <strong className="text-foreground">Installed GitHub Apps</strong>{" "}
             page higher up lists apps installed <em>on</em> the organization, and
-            yours will not appear there until step 5.
+            yours will not appear there until step 4.
           </span>
         </li>
 
         <li>
+          {/* Shown to be CONFIRMED, not typed. These are GitHub's parameter
+              names on our side of the link, so a rename upstream would stop
+              prefilling one field without any error. Listing the values means
+              that shows up as a visible mismatch here rather than as an
+              install that fails later for no stated reason. */}
           <span className="font-medium text-foreground">
-            2. Fill in these values.
+            2. Check the page matches this.
           </span>{" "}
-          Everything not listed can stay as GitHub sets it.
+          The link has already set it. Everything not listed can stay as GitHub
+          sets it.
           <div className="mt-2 space-y-2">
-            <SettingRow label="GitHub App name" value="Anything unique, e.g. Specboards (your-org)" />
+            <SettingRow
+              label="GitHub App name"
+              value={
+                trimmedOrg ? `Specboards (${trimmedOrg})` : "Specboards"
+              }
+            />
             <SettingRow label="Homepage URL" value={origin} />
             <SettingRow
               label="Callback URL"
               value={`${origin}/api/v1/github/oauth/callback`}
             />
             <SettingRow label="Setup URL" value={`${origin}/api/v1/github/setup`} />
-            <SettingRow label="Redirect on update" value="Tick this box" />
+            <SettingRow label="Redirect on update" value="Ticked" />
             <SettingRow
               label="Webhook: Active"
-              value="UNTICK this box (see the note below)"
+              value={
+                originIsPublic ? "Ticked" : "Unticked (see the note below)"
+              }
             />
             <SettingRow
               label="Where can this app be installed?"
               value="Only on this account"
             />
-          </div>
-        </li>
-
-        <li>
-          <span className="font-medium text-foreground">
-            3. Set the permissions.
-          </span>{" "}
-          Under <em>Permissions</em>, expand each group and set only these. Every
-          one is needed; the app cannot work with less.
-          <div className="mt-2 space-y-2">
             <SettingRow
               label="Repository permissions"
               value="Administration: Read and write · Contents: Read and write · Issues: Read-only · Metadata: Read-only · Pull requests: Read and write"
@@ -1031,15 +1041,17 @@ function ManualGitHubAppForm({
             />
           </div>
           <span className="mt-1 block">
-            Members is the one most often missed. Without it Specboards cannot
-            check that whoever installs the app administers the account, and
-            every organization install fails at the last step.
+            The name has to be unique across all of GitHub, so change it if
+            GitHub says it is taken. Members is the permission most often missed
+            when this is done by hand: without it Specboards cannot check that
+            whoever installs the app administers the account, and every
+            organization install fails at the last step.
           </span>
         </li>
 
         <li>
           <span className="font-medium text-foreground">
-            4. Create it, then collect three things.
+            3. Create it, then collect three things.
           </span>
           <span className="block">
             On the app&apos;s page after creating it: the{" "}
@@ -1054,7 +1066,7 @@ function ManualGitHubAppForm({
 
         <li>
           <span className="font-medium text-foreground">
-            5. Install the app on your account or organization.
+            4. Install the app on your account or organization.
           </span>{" "}
           Use <em>Install App</em> in the left sidebar of the app&apos;s settings.
           GitHub requires the private key to exist before it will let you
@@ -1068,12 +1080,13 @@ function ManualGitHubAppForm({
         </li>
         <li>
           <span className="font-medium text-foreground">
-            {originIsPublic ? "6. Set up the webhook." : "About the webhook."}
+            {originIsPublic ? "5. Set up the webhook." : "About the webhook."}
           </span>{" "}
           {originIsPublic ? (
             <>
-              GitHub can reach this instance, so tick <em>Active</em> in step 2
-              and use these. Put the same secret here and on GitHub.
+              GitHub can reach this instance, so the link armed the webhook and
+              set these already. The secret is the one thing it cannot carry:
+              put the same value here and on GitHub.
               <div className="mt-2 space-y-1">
                 <SettingRow
                   label="Webhook URL"
@@ -1088,7 +1101,7 @@ function ManualGitHubAppForm({
           ) : (
             <>
               This instance is at <code>{origin}</code>, which GitHub cannot
-              reach, so leave the webhook off entirely. Specs written here still
+              reach, so the link left the webhook off. Specs written here still
               reach GitHub, because that is an outbound call. Changes pushed on
               GitHub will not flow back until this instance has a public HTTPS
               address.
