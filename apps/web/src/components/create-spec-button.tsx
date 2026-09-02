@@ -35,7 +35,7 @@ type SpecCreateTarget =
     };
 
 /**
- * "Attach a spec" / "New spec": create a `specs/<slug>/spec.md`, commit it to a
+ * "Attach a spec" / "New <leaf>": create a `specs/<slug>/spec.md`, commit it to a
  * connected repo, and bring it onto the board.
  *
  * Collapsed to a single control until the author opts in, then the fields
