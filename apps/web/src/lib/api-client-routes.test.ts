@@ -204,6 +204,7 @@ describe("api-client reaches routes that exist", () => {
       "planning.ts",
       "repositories.ts",
       "specs.ts",
+      "views.ts",
       "work-items.ts",
     ]) {
       expect(
