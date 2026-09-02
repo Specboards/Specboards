@@ -199,6 +199,7 @@ describe("api-client reaches routes that exist", () => {
     // Guards the parsing itself: if a refactor breaks these regexes the suite
     // must fail loudly rather than pass by checking nothing.
     for (const clientModule of [
+      "assistant.ts",
       "planning.ts",
       "repositories.ts",
       "specs.ts",
