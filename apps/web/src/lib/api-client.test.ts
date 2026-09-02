@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  AuthRequiredError,
+  estimateBreakdown,
+  patchFeature,
   ProposalStaleError,
   resolveProposal,
   resolveReleaseProposal,
@@ -31,6 +34,22 @@ function respond(status: number, payload: unknown) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe("authentication failures", () => {
+  it("raises the shared authentication error for an ordinary API call", async () => {
+    respond(401, { error: "Authentication required." });
+
+    await expect(
+      patchFeature("spec-1", { status: "done" }),
+    ).rejects.toBeInstanceOf(AuthRequiredError);
+  });
+
+  it("keeps a missing breakdown estimate non-fatal on 401", async () => {
+    respond(401, { error: "Authentication required." });
+
+    await expect(estimateBreakdown("spec-1")).resolves.toBeNull();
+  });
 });
 
 describe("resolving a proposal on an item", () => {
