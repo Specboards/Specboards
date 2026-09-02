@@ -22,7 +22,7 @@ import { getRepoFiles, resetFixture } from "./helpers/github";
  *   Get that wrong and the sync does not recognise the file as that row, so the
  *   board ends up with two cards for one piece of work and the original's
  *   status, assignee and history are stranded on the wrong one.
- * - **New spec under a card** must end up nested. The create and the parenting
+ * - **New Work Item under a card** must end up nested. The create and the parenting
  *   are two operations, and a spec left unparented lands at the top of the
  *   board under an auto-created grouping, which is tedious to untangle by hand.
  */
@@ -63,7 +63,7 @@ test.describe("spec creation: bring a spec into existence from the app", () => {
 
     // Scoped to the form: the item's own header also renders a path once the
     // spec exists, so an unscoped match would be ambiguous after the write.
-    const form = page.locator("form").filter({ hasText: /Gives this item a spec document/ });
+    const form = page.locator("form").filter({ hasText: /Documents this item/ });
     // The form names the exact file it is about to commit, so the author is
     // never guessing where their document went.
     await expect(form.getByText("specs/refund-window/spec.md")).toBeVisible();
@@ -123,7 +123,7 @@ test.describe("spec creation: bring a spec into existence from the app", () => {
     await expect(page.getByText("Saved", { exact: true })).toBeVisible();
 
     await page.getByRole("button", { name: /Attach a spec/i }).click();
-    const form = page.locator("form").filter({ hasText: /Gives this item a spec document/ });
+    const form = page.locator("form").filter({ hasText: /Documents this item/ });
     const [resp] = await Promise.all([
       page.waitForResponse(
         (r) => r.url().includes("/api/v1/specs") && r.request().method() === "POST",
@@ -153,11 +153,11 @@ test.describe("spec creation: bring a spec into existence from the app", () => {
 
     // The child controls live in the collapsed Relationships section.
     await page.getByRole("button", { name: /Relationships/i }).click();
-    await page.getByRole("button", { name: /New spec/i }).click();
+    await page.getByRole("button", { name: /New Work Item/i }).click();
 
     const form = page
       .locator("form")
-      .filter({ hasText: /Creates a spec and nests it under/ });
+      .filter({ hasText: /Creates a new Work Item under/ });
     await form.getByRole("textbox").fill("Chargeback handling");
     await expect(
       form.getByText("specs/chargeback-handling/spec.md"),
@@ -219,11 +219,11 @@ test.describe("spec creation: bring a spec into existence from the app", () => {
 
     await page.goto(`/${ws.slug}/all/backlog/feature/${parentSpecId}`);
     await page.getByRole("button", { name: /Relationships/i }).click();
-    await page.getByRole("button", { name: /New spec/i }).click();
+    await page.getByRole("button", { name: /New Work Item/i }).click();
 
     const form = page
       .locator("form")
-      .filter({ hasText: /Creates a spec and nests it under/ });
+      .filter({ hasText: /Creates a new Work Item under/ });
     await form.getByRole("textbox").fill("Card declines");
     await form.getByLabel(/Start from/i).selectOption({ label: "Bug report" });
 
@@ -246,10 +246,10 @@ test.describe("spec creation: bring a spec into existence from the app", () => {
     // Leaving the picker on "Workspace default" falls through to the template
     // the level is configured with, which is the whole point of the default:
     // an author who chooses nothing still gets the team's sections.
-    await page.getByRole("button", { name: /New spec/i }).click();
+    await page.getByRole("button", { name: /New Work Item/i }).click();
     const second = page
       .locator("form")
-      .filter({ hasText: /Creates a spec and nests it under/ });
+      .filter({ hasText: /Creates a new Work Item under/ });
     await second.getByRole("textbox").fill("Refund latency");
     const [resp2] = await Promise.all([
       page.waitForResponse(
@@ -294,7 +294,7 @@ test.describe("spec creation: bring a spec into existence from the app", () => {
 
     await page.goto(`/${ws.slug}/all/backlog/work/${specId}`);
     await page.getByRole("button", { name: /Attach a spec/i }).click();
-    const form = page.locator("form").filter({ hasText: /Gives this item a spec document/ });
+    const form = page.locator("form").filter({ hasText: /Documents this item/ });
     // No template picker on attach: the card's description is the body, so a
     // control that could not change the outcome is not offered.
     await expect(form.getByLabel(/Start from/i)).toHaveCount(0);
@@ -334,7 +334,7 @@ test.describe("spec creation: bring a spec into existence from the app", () => {
 
     await page.goto(`/${ws.slug}/all/backlog/work/${secondId}`);
     await page.getByRole("button", { name: /Attach a spec/i }).click();
-    const form = page.locator("form").filter({ hasText: /Gives this item a spec document/ });
+    const form = page.locator("form").filter({ hasText: /Documents this item/ });
     await form.getByRole("button", { name: /^Attach spec$/i }).click();
 
     // The collision is reported next to the field the author has to change,
@@ -346,5 +346,42 @@ test.describe("spec creation: bring a spec into existence from the app", () => {
     // The first spec is untouched: a refused create must not overwrite it.
     const raw = getRepoFiles(OWNER, REPO)["specs/refund-window/spec.md"];
     expect(raw).toContain(`id: ${firstId}`);
+  });
+
+  /**
+   * A grouping card has no "Attach a spec", and for a long time said nothing
+   * about why. The neighbouring control creates a *different* card beneath it,
+   * so an author who wanted to document the card in front of them got one they
+   * did not ask for and no warning either way.
+   *
+   * Both halves of the fix are asserted here because either alone is still a
+   * trap: copy that explains the absence, and copy that actually reaches the
+   * control it names. The control lives inside a collapsed section, so a
+   * sentence ending "below" would point at nothing a reader can see.
+   */
+  test("a grouping card explains why it cannot take a spec, and gets you to the control that can", async ({
+    page,
+  }) => {
+    const ws = await getWorkspace();
+    const created = await page.request.post("/api/v1/features", {
+      data: { title: "Billing", level: "feature" },
+    });
+    expect(created.ok(), await created.text()).toBeTruthy();
+    const specId = (await created.json()).feature.specId as string;
+
+    await page.goto(`/${ws.slug}/all/backlog/feature/${specId}`);
+
+    // No attach control at this altitude, and the reason is on the page.
+    await expect(
+      page.getByRole("button", { name: /Attach a spec/i }),
+    ).toHaveCount(0);
+    await expect(page.getByText(/Specs live on Work Items/i)).toBeVisible();
+
+    // The control it points at is behind a collapsed section to start with.
+    const create = page.getByRole("button", { name: /New Work Item/i });
+    await expect(create).toHaveCount(0);
+
+    await page.getByRole("button", { name: /break it down into one/i }).click();
+    await expect(create).toBeVisible();
   });
 });

@@ -125,7 +125,7 @@ export interface ItemDetailData {
    */
   repos: LinkableRepo[];
   /**
-   * Templates a new spec can start from, for the "New spec" picker. Empty when
+   * Templates a new spec can start from, for the "New <leaf>" picker. Empty when
    * no spec can be created here, so its absence is not "none configured".
    */
   specTemplates: DetailTemplate[];

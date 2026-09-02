@@ -1,12 +1,26 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { ChevronDown } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
 const STORAGE_KEY = "specboard:item-detail:sections";
+const OPEN_EVENT = "specboard:item-detail:open-section";
+
+/**
+ * Expand a section and scroll to it, from anywhere on the page.
+ *
+ * Copy elsewhere on the detail view points at controls that live inside these
+ * sections ("break it down into one"), and a collapsed section makes that
+ * sentence name something the reader cannot see. An event rather than shared
+ * state because the pointing copy and the section are in different subtrees and
+ * have no reason to know about each other otherwise.
+ */
+export function openDetailSection(id: string) {
+  window.dispatchEvent(new CustomEvent(OPEN_EVENT, { detail: id }));
+}
 
 /**
  * Read the per-section collapsed map. Values are explicit user choices; a
@@ -54,11 +68,25 @@ export function DetailSection({
   children: ReactNode;
 }) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed);
+  const ref = useRef<HTMLElement>(null);
 
   useEffect(() => {
     const stored = readState()[id];
     setCollapsed(stored ?? defaultCollapsed);
   }, [id, defaultCollapsed]);
+
+  useEffect(() => {
+    function onOpen(event: Event) {
+      if ((event as CustomEvent<string>).detail !== id) return;
+      // Persist it: the reader was sent here deliberately, so treat it as the
+      // same explicit choice a click on the header would be.
+      writeState(id, false);
+      setCollapsed(false);
+      ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+    window.addEventListener(OPEN_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_EVENT, onOpen);
+  }, [id]);
 
   function toggle() {
     setCollapsed((prev) => {
@@ -68,7 +96,7 @@ export function DetailSection({
   }
 
   return (
-    <section className="overflow-hidden rounded-md border">
+    <section ref={ref} className="overflow-hidden rounded-md border">
       <button
         type="button"
         onClick={toggle}

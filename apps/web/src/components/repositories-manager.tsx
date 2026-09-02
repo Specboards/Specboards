@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 
 import {
   connectRepository,
@@ -136,6 +136,47 @@ export function RepositoriesManager({
   const [scanNonce, setScanNonce] = useState(0);
   const bumpScan = useCallback(() => setScanNonce((n) => n + 1), []);
 
+  // Repos created in this session, held until the server render catches up.
+  //
+  // `repos` is a server prop, and `router.refresh()` is not awaitable, so the
+  // "Created and connected owner/name" message could paint while the list above
+  // still said "No repositories connected". Two statements on one screen
+  // contradicting each other, one of them wrong, at the exact moment an
+  // evaluator is deciding whether the product works.
+  //
+  // Holding the new repo locally makes the list correct immediately rather than
+  // eventually. The merge is keyed by id, so when the refresh does land and the
+  // server includes it, nothing doubles up.
+  const [justCreated, setJustCreated] = useState<ConnectedRepo[]>([]);
+  const onRepoCreated = useCallback((repo?: CreatedSpecRepo) => {
+    if (repo) {
+      setJustCreated((prev) =>
+        prev.some((r) => r.id === repo.id)
+          ? prev
+          : [
+              ...prev,
+              {
+                id: repo.id,
+                owner: repo.owner,
+                name: repo.name,
+                defaultBranch: repo.defaultBranch,
+                // The create endpoint connects through the workspace's own
+                // organization installation, which is the only one it can use.
+                githubInstallationId: "",
+                isSpecRepo: true,
+              },
+            ],
+      );
+    }
+    setScanNonce((n) => n + 1);
+  }, []);
+
+  const allRepos = useMemo(() => {
+    if (justCreated.length === 0) return repos;
+    const seen = new Set(repos.map((r) => r.id));
+    return [...repos, ...justCreated.filter((r) => !seen.has(r.id))];
+  }, [repos, justCreated]);
+
   return (
     <div className="mx-auto w-full max-w-xl space-y-6">
       <div>
@@ -159,21 +200,21 @@ export function RepositoriesManager({
       ) : null}
 
       <RepoList
-        repos={repos}
+        repos={allRepos}
         canResync={canConnect && configured}
         canManage={canConnect}
         products={products}
         links={links}
       />
 
-      {canConnect && configured && repos.length > 0 ? (
+      {canConnect && configured && allRepos.length > 0 ? (
         <SpecImportPanel
           leafLevelKey={leafLevelKey}
           scanNonce={scanNonce}
-          repos={repos}
+          repos={allRepos}
           installUrl={installUrl}
           orgInstallationId={orgInstallationOf(installations.installations)}
-          onRepoCreated={bumpScan}
+          onRepoCreated={onRepoCreated}
         />
       ) : null}
 
@@ -186,7 +227,7 @@ export function RepositoriesManager({
       ) : configured ? (
         <ConnectSection
           installUrl={installUrl}
-          connected={repos}
+          connected={allRepos}
           onConnected={bumpScan}
           initial={installations}
         />
@@ -219,8 +260,9 @@ function SpecImportPanel({
   installUrl: string | null;
   /** Organization installation id, enabling one-click spec-repo creation. */
   orgInstallationId: string | null;
-  /** Called when the nudge creates a repo, so the panel re-scans. */
-  onRepoCreated: () => void;
+  /** Called when the nudge creates a repo, so the panel re-scans and the
+   *  connected list can show it without waiting on a server refresh. */
+  onRepoCreated: (repo?: CreatedSpecRepo) => void;
   /** The workspace's leaf level key; see RepositoriesManagerProps. */
   leafLevelKey?: string;
 }) {
@@ -472,7 +514,7 @@ function EmptySpecsState({
   loading: boolean;
   installUrl: string | null;
   orgInstallationId: string | null;
-  onRepoCreated: () => void;
+  onRepoCreated: (repo?: CreatedSpecRepo) => void;
 }) {
   const router = useRouter();
   const [featureName, setFeatureName] = useState("");
@@ -637,7 +679,7 @@ function CreateSpecRepoNudge({
   /** Organization installation to create in; null hides the one-click form. */
   orgInstallationId: string | null;
   /** Called after a repo is created + connected, so parent panels refresh. */
-  onCreated: () => void;
+  onCreated: (repo?: CreatedSpecRepo) => void;
 }) {
   const newRepoUrl =
     "https://github.com/new?name=specs&description=" +
@@ -707,7 +749,7 @@ function CreateSpecRepoForm({
   onCreated,
 }: {
   installationId: string;
-  onCreated: () => void;
+  onCreated: (repo?: CreatedSpecRepo) => void;
 }) {
   const router = useRouter();
   const [name, setName] = useState("specs");
@@ -730,8 +772,11 @@ function CreateSpecRepoForm({
           installationId,
         });
         setCreated(result);
+        // Hand the repo up before asking for a refresh: the parent can show it
+        // immediately, so the success message and the list above never
+        // disagree while the server render is still in flight.
+        onCreated(result);
         router.refresh();
-        onCreated();
       } catch (err) {
         setError(
           err instanceof Error
@@ -783,14 +828,46 @@ function CreateSpecRepoForm({
   );
 }
 
-/** A labelled, copyable value for the manual GitHub App instructions. */
+/**
+ * A value to copy into GitHub, deliberately NOT shaped like an input.
+ *
+ * These were bordered boxes, which read as disabled text fields: the setup card
+ * looked like ten form fields of which seven were broken, burying the three the
+ * operator actually fills in. They are reference material, so they are styled
+ * as reference material and carry a copy button, which is the only thing anyone
+ * wants to do with them.
+ */
 function SettingRow({ label, value }: { label: string; value: string }) {
+  const [copied, setCopied] = useState(false);
+
+  function copy() {
+    void navigator.clipboard.writeText(value).then(
+      () => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1500);
+      },
+      () => {
+        // Clipboard can be refused (permissions, insecure context). The value is
+        // selectable text either way, so say nothing rather than raise an error
+        // about a convenience.
+      },
+    );
+  }
+
   return (
-    <div className="space-y-0.5">
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <code className="block overflow-x-auto rounded border border-input px-2 py-1 text-xs">
+    <div className="flex items-baseline gap-2 py-0.5">
+      <span className="w-40 shrink-0 text-2xs text-muted-foreground">{label}</span>
+      <code className="min-w-0 flex-1 break-all font-mono text-2xs text-foreground">
         {value}
       </code>
+      <button
+        type="button"
+        onClick={copy}
+        className="shrink-0 text-2xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+        aria-label={`Copy ${label}`}
+      >
+        {copied ? "Copied" : "Copy"}
+      </button>
     </div>
   );
 }
@@ -810,18 +887,30 @@ function SettingRow({ label, value }: { label: string; value: string }) {
  */
 function ManualGitHubAppForm({
   origin,
+  originIsPublic,
   onCancel,
 }: {
   origin: string;
+  originIsPublic: boolean;
   onCancel: (() => void) | null;
 }) {
   const router = useRouter();
+  const [org, setOrg] = useState("");
   const [appId, setAppId] = useState("");
   const [privateKey, setPrivateKey] = useState("");
   const [clientSecret, setClientSecret] = useState("");
   const [webhookSecret, setWebhookSecret] = useState("");
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+
+  // GitHub keeps App creation under a different URL per owner, and finding it
+  // by hand means five clicks through two settings areas that look alike
+  // (an org's "Developer settings" is not the one under your avatar). Building
+  // the link from the owner the operator types removes that entirely.
+  const trimmedOrg = org.trim();
+  const createUrl = trimmedOrg
+    ? `https://github.com/organizations/${encodeURIComponent(trimmedOrg)}/settings/apps/new`
+    : "https://github.com/settings/apps/new";
 
   function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -847,28 +936,176 @@ function ManualGitHubAppForm({
 
   return (
     <form onSubmit={submit} className="space-y-4">
-      <div className="space-y-2 rounded-md border border-input p-3">
-        <p className="text-xs text-muted-foreground">
-          On GitHub, create a new App (Settings &rarr; Developer settings &rarr;
-          GitHub Apps &rarr; New GitHub App) with these values, then paste its
-          credentials below.
+      <label className="block space-y-1.5">
+        <span className="text-xs font-medium text-muted-foreground">
+          GitHub organization <span className="font-normal">(optional)</span>
+        </span>
+        <Input
+          value={org}
+          onChange={(e) => setOrg(e.target.value)}
+          placeholder="your-org"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          disabled={pending}
+        />
+        <span className="block text-xs text-muted-foreground">
+          Where the app should live. Leave blank for your personal account.
+        </span>
+      </label>
+
+      {/* Collapsible, open by default. First time through it is the whole
+          point of the card; coming back to paste a regenerated key, it is a
+          wall of instructions between the operator and the three fields. */}
+      <details open className="rounded-md border border-input">
+        <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-foreground">
+          On GitHub: create the app
+        </summary>
+      <ol className="space-y-3 border-t border-input p-3 text-xs text-muted-foreground">
+        <li>
+          <span className="font-medium text-foreground">
+            1. Open GitHub&apos;s New GitHub App page.
+          </span>{" "}
+          <a
+            href={createUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="text-link underline underline-offset-4"
+          >
+            {createUrl}
+          </a>
+          <span className="block">
+            GitHub may ask you to re-enter your password or 2FA first.
+          </span>
+          <span className="mt-1 block">
+            Two pages in an organization&apos;s settings are both called
+            &ldquo;GitHub Apps&rdquo;, and only one of them is this. The app you
+            create appears under{" "}
+            <strong className="text-foreground">Developer settings</strong>, at
+            the very bottom of the sidebar. The{" "}
+            <strong className="text-foreground">Installed GitHub Apps</strong>{" "}
+            page higher up lists apps installed <em>on</em> the organization, and
+            yours will not appear there until step 5.
+          </span>
+        </li>
+
+        <li>
+          <span className="font-medium text-foreground">
+            2. Fill in these values.
+          </span>{" "}
+          Everything not listed can stay as GitHub sets it.
+          <div className="mt-2 space-y-2">
+            <SettingRow label="GitHub App name" value="Anything unique, e.g. Specboards (your-org)" />
+            <SettingRow label="Homepage URL" value={origin} />
+            <SettingRow
+              label="Callback URL"
+              value={`${origin}/api/v1/github/oauth/callback`}
+            />
+            <SettingRow label="Setup URL" value={`${origin}/api/v1/github/setup`} />
+            <SettingRow label="Redirect on update" value="Tick this box" />
+            <SettingRow
+              label="Webhook: Active"
+              value="UNTICK this box (see the note below)"
+            />
+            <SettingRow
+              label="Where can this app be installed?"
+              value="Only on this account"
+            />
+          </div>
+        </li>
+
+        <li>
+          <span className="font-medium text-foreground">
+            3. Set the permissions.
+          </span>{" "}
+          Under <em>Permissions</em>, expand each group and set only these. Every
+          one is needed; the app cannot work with less.
+          <div className="mt-2 space-y-2">
+            <SettingRow
+              label="Repository permissions"
+              value="Administration: Read and write · Contents: Read and write · Issues: Read-only · Metadata: Read-only · Pull requests: Read and write"
+            />
+            <SettingRow
+              label="Organization permissions"
+              value="Members: Read-only"
+            />
+          </div>
+          <span className="mt-1 block">
+            Members is the one most often missed. Without it Specboards cannot
+            check that whoever installs the app administers the account, and
+            every organization install fails at the last step.
+          </span>
+        </li>
+
+        <li>
+          <span className="font-medium text-foreground">
+            4. Create it, then collect three things.
+          </span>
+          <span className="block">
+            On the app&apos;s page after creating it: the{" "}
+            <strong className="text-foreground">App ID</strong> is shown near the
+            top. Press{" "}
+            <strong className="text-foreground">Generate a new client secret</strong>{" "}
+            and copy it now, because GitHub shows it once. Scroll down and press{" "}
+            <strong className="text-foreground">Generate a private key</strong>,
+            which downloads a <code>.pem</code> file. Paste all three below.
+          </span>
+        </li>
+
+        <li>
+          <span className="font-medium text-foreground">
+            5. Install the app on your account or organization.
+          </span>{" "}
+          Use <em>Install App</em> in the left sidebar of the app&apos;s settings.
+          GitHub requires the private key to exist before it will let you
+          install.
+          <span className="mt-1 block">
+            Once installed, it shows up on the <em>Installed GitHub Apps</em>{" "}
+            page too. Before that it exists only under Developer settings, which
+            is why a newly created app looks missing if you go looking for it in
+            the wrong list.
+          </span>
+        </li>
+        <li>
+          <span className="font-medium text-foreground">
+            {originIsPublic ? "6. Set up the webhook." : "About the webhook."}
+          </span>{" "}
+          {originIsPublic ? (
+            <>
+              GitHub can reach this instance, so tick <em>Active</em> in step 2
+              and use these. Put the same secret here and on GitHub.
+              <div className="mt-2 space-y-1">
+                <SettingRow
+                  label="Webhook URL"
+                  value={`${origin}/api/webhooks/github`}
+                />
+                <SettingRow
+                  label="Subscribe to events"
+                  value="Push · Pull request · Issues"
+                />
+              </div>
+            </>
+          ) : (
+            <>
+              This instance is at <code>{origin}</code>, which GitHub cannot
+              reach, so leave the webhook off entirely. Specs written here still
+              reach GitHub, because that is an outbound call. Changes pushed on
+              GitHub will not flow back until this instance has a public HTTPS
+              address.
+            </>
+          )}
+        </li>
+      </ol>
+      </details>
+
+      <div className="space-y-1">
+        <h4 className="text-xs font-medium text-foreground">
+          Back here: paste {originIsPublic ? "four things" : "three things"} from the app
+        </h4>
+        <p className="text-2xs text-muted-foreground">
+          Specboards signs in as the app to check these before saving, so a wrong
+          value is refused now rather than at your first sync.
         </p>
-        <SettingRow label="Homepage URL" value={origin} />
-        <SettingRow
-          label="Callback URL"
-          value={`${origin}/api/v1/github/oauth/callback`}
-        />
-        <SettingRow label="Setup URL" value={`${origin}/api/v1/github/setup`} />
-        <SettingRow
-          label="Webhook URL (only if this instance is reachable from GitHub)"
-          value={`${origin}/api/webhooks/github`}
-        />
-        <SettingRow
-          label="Repository permissions"
-          value="Administration: write · Contents: write · Pull requests: write · Issues: read · Metadata: read"
-        />
-        <SettingRow label="Organization permissions" value="Members: read" />
-        <SettingRow label="Subscribe to events" value="Push · Pull request · Issues" />
       </div>
 
       <label className="block space-y-1.5">
@@ -921,23 +1158,29 @@ function ManualGitHubAppForm({
         </span>
       </label>
 
-      <label className="block space-y-1.5">
-        <span className="text-xs font-medium text-muted-foreground">
-          Webhook secret <span className="font-normal">(optional)</span>
-        </span>
-        <Input
-          type="password"
-          value={webhookSecret}
-          onChange={(e) => setWebhookSecret(e.target.value)}
-          disabled={pending}
-          autoComplete="off"
-        />
-        <span className="block text-xs text-muted-foreground">
-          Leave blank if GitHub cannot reach this instance. Specs you write here
-          still reach GitHub; changes pushed on GitHub will not flow back until
-          a webhook can be delivered.
-        </span>
-      </label>
+      {/* Only shown when a webhook could actually be delivered. On an
+          unreachable origin this field is not merely optional, it is inert:
+          nothing will ever arrive to verify against it. Offering it there is
+          asking for a value that cannot matter, which is how an operator ends
+          up wondering what they got wrong. */}
+      {originIsPublic ? (
+        <label className="block space-y-1.5">
+          <span className="text-xs font-medium text-muted-foreground">
+            Webhook secret
+          </span>
+          <Input
+            type="password"
+            value={webhookSecret}
+            onChange={(e) => setWebhookSecret(e.target.value)}
+            disabled={pending}
+            autoComplete="off"
+          />
+          <span className="block text-xs text-muted-foreground">
+            The same secret you set on the app&apos;s webhook. Without it pushes
+            on GitHub will not reconcile back onto the board.
+          </span>
+        </label>
+      ) : null}
 
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
@@ -989,7 +1232,11 @@ function SetupGitHubCard({
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <ManualGitHubAppForm origin={origin} onCancel={null} />
+          <ManualGitHubAppForm
+            origin={origin}
+            originIsPublic={originIsPublic}
+            onCancel={null}
+          />
         </CardContent>
       </Card>
     );
@@ -1033,6 +1280,7 @@ function SetupGitHubCard({
           <div className="border-t border-input pt-4">
             <ManualGitHubAppForm
               origin={origin}
+              originIsPublic={originIsPublic}
               onCancel={() => setManualOpen(false)}
             />
           </div>

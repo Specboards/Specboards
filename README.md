@@ -235,10 +235,47 @@ and which one you can use is decided by GitHub, not by preference:
   form instead, listing the exact Homepage, Callback, Setup and Webhook URLs to
   enter on GitHub, generated from your own origin.
 
-  Create the App on GitHub (**Settings -> Developer settings -> GitHub Apps ->
-  New GitHub App**), then paste back its **App ID**, **private key** (the whole
-  `.pem`), and **client secret**. Specboards authenticates as the App before
-  storing anything, so wrong credentials are refused there and then rather than
+  Enter your GitHub organization and the page gives you a direct link to the
+  right "New GitHub App" page, because GitHub keeps that page somewhere
+  different for an organization than for a personal account:
+
+  | Owner | Where the App is created |
+  | --- | --- |
+  | An organization | `https://github.com/organizations/<org>/settings/apps/new` |
+  | Your personal account | `https://github.com/settings/apps/new` |
+
+  An organization's developer settings are **not** the ones under your avatar,
+  and GitHub will usually ask you to re-enter your password or 2FA before it
+  lets you create an App.
+
+  **Two pages in an organization's settings are both called "GitHub Apps",** and
+  a newly created App appears in only one of them:
+
+  | Page | What it lists |
+  | --- | --- |
+  | Developer settings -> GitHub Apps (`/settings/apps`) | Apps the organization **owns**. Your new App is here. |
+  | Installed GitHub Apps (`/settings/installations`) | Apps installed **on** the organization. Yours appears here only after you install it. |
+
+  So an App you just created looks missing if you check the installed list
+  first. It is not; it is one page further down the sidebar.
+
+  Two settings are easy to miss and both stop the connection working:
+
+  - **Webhook -> Active** must be **unticked** when GitHub cannot reach the
+    instance. An active webhook pointing somewhere undeliverable is what makes
+    GitHub reject the App outright.
+  - **Organization permissions -> Members: Read-only** is required. Without it
+    Specboards cannot check that whoever installs the App administers the
+    account, and every organization install fails at the last step.
+
+  Then collect three things from the App's page and paste them back: the
+  **App ID**, a **client secret** (press "Generate a new client secret"; GitHub
+  shows it once), and a **private key** (press "Generate a private key", which
+  downloads a `.pem`). Finally use **Install App** in the App's sidebar to
+  install it; GitHub will not let you install until a private key exists.
+
+  Specboards authenticates as the App before storing anything, so wrong
+  credentials are refused there and then, naming the field at fault, rather than
   failing later at the first sync. The private key is encrypted at rest under
   `BETTER_AUTH_SECRET` and never returned to the browser.
 

@@ -6,7 +6,10 @@ import ReactMarkdown from "react-markdown";
 
 import { AssistantPanel } from "@/components/assistant-panel";
 import { CreateSpecButton } from "@/components/create-spec-button";
-import { DetailSection } from "@/components/detail-section";
+import {
+  DetailSection,
+  openDetailSection,
+} from "@/components/detail-section";
 import { FeatureComments } from "@/components/feature-comments";
 import { FeatureDetailsEditor } from "@/components/feature-details-editor";
 import { FeatureGithubLinks } from "@/components/feature-github-links";
@@ -197,6 +200,28 @@ export function ItemDetailView({
             repos={data.repos}
             onCreated={onSpecSaved}
           />
+        ) : canCreateChildSpec && childLabel ? (
+          // Explain the absence rather than leaving it a mystery. On a
+          // grouping level there is no "Attach a spec" and no stated reason,
+          // so the neighbouring "New <leaf>" control reads as the way to
+          // document THIS card. It is not, and finding that out means reading
+          // a committed file.
+          //
+          // The control it points at lives in Relationships, which is
+          // collapsed by default: saying "below" would name something the
+          // reader cannot see, so the phrase opens the section instead.
+          <p className="text-2xs text-muted-foreground">
+            Specs live on {pluralLevel(childLabel.toLowerCase())}. To document
+            this {levelLabel.toLowerCase()},{" "}
+            <button
+              type="button"
+              className="underline underline-offset-2 hover:text-foreground"
+              onClick={() => openDetailSection("relationships")}
+            >
+              break it down into one
+            </button>
+            .
+          </p>
         ) : null}
       </div>
 
@@ -284,6 +309,7 @@ export function ItemDetailView({
                           kind: "child",
                           parentSpecId: feature.specId,
                           parentTitle: feature.title,
+                          childLevelLabel: childLabel,
                         }}
                         repos={data.repos}
                         templates={data.specTemplates}
