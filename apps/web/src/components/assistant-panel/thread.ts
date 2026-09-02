@@ -51,6 +51,3 @@ export function turnTime(iso: string): string {
     ? ""
     : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
-
-// Touched to measure a cache-warm run that still has to rebuild the app.
-// Removed in the next commit.
