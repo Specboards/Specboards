@@ -4,8 +4,8 @@ import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
- * Every request `api-client.ts` sends must reach a route that exports that
- * method.
+ * Every request the browser API client sends must reach a route that exports
+ * that method.
  *
  * This exists because nothing else checks it, and the gap cost us a shipped
  * feature. #259 rewrote `api/v1/statuses/route.ts` to make Settings > Cards
@@ -24,7 +24,32 @@ import { describe, expect, it } from "vitest";
 
 const SRC = resolve(__dirname, "..");
 const APP_DIR = join(SRC, "app");
-const CLIENT = join(SRC, "lib", "api-client.ts");
+const CLIENT_ENTRY = join(SRC, "lib", "api-client.ts");
+const CLIENT_DIR = join(SRC, "lib", "api-client");
+
+interface ClientSource {
+  path: string;
+  source: string;
+}
+
+/** The compatibility entry point plus every focused client module. */
+function clientSources(): ClientSource[] {
+  const sources = [
+    { path: CLIENT_ENTRY, source: readFileSync(CLIENT_ENTRY, "utf8") },
+  ];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir)) {
+      const full = join(dir, entry);
+      if (statSync(full).isDirectory()) {
+        walk(full);
+      } else if (entry.endsWith(".ts") && !entry.endsWith(".test.ts")) {
+        sources.push({ path: full, source: readFileSync(full, "utf8") });
+      }
+    }
+  };
+  walk(CLIENT_DIR);
+  return sources;
+}
 
 /**
  * Call sites whose URL is not a literal, so no static reading can say where
@@ -115,9 +140,13 @@ function clientCalls(source: string): { calls: Call[]; unresolved: string[] } {
 
   const calls: Call[] = [];
   const unresolved: string[] = [];
-  for (const m of source.matchAll(/apiFetch\(\s*([`"][^`"]*[`"]|\w+)\s*(,?)/g)) {
+  for (const m of source.matchAll(
+    /apiFetch\(\s*([`"][^`"]*[`"]|\w+)\s*(,?)/g,
+  )) {
     // `function apiFetch(input: string, ...)` is the definition, not a call.
-    if (/function\s+$/.test(source.slice(Math.max(0, m.index! - 10), m.index!))) {
+    if (
+      /function\s+$/.test(source.slice(Math.max(0, m.index! - 10), m.index!))
+    ) {
       continue;
     }
     const rawArg = m[1]!;
@@ -135,7 +164,10 @@ function clientCalls(source: string): { calls: Call[]; unresolved: string[] } {
 
     if (url === null || !normalize(url).startsWith("/api/")) {
       unresolved.push(
-        source.slice(m.index!, m.index! + 20).replace(/\s+/g, " ").trim(),
+        source
+          .slice(m.index!, m.index! + 20)
+          .replace(/\s+/g, " ")
+          .trim(),
       );
       continue;
     }
@@ -157,13 +189,20 @@ function clientCalls(source: string): { calls: Call[]; unresolved: string[] } {
 }
 
 describe("api-client reaches routes that exist", () => {
-  const source = readFileSync(CLIENT, "utf8");
-  const { calls, unresolved } = clientCalls(source);
+  const sources = clientSources();
+  const parsed = sources.map(({ source }) => clientCalls(source));
+  const calls = parsed.flatMap((result) => result.calls);
+  const unresolved = parsed.flatMap((result) => result.unresolved);
   const table = routeTable();
 
   it("finds the client's calls and the app's routes", () => {
     // Guards the parsing itself: if a refactor breaks these regexes the suite
     // must fail loudly rather than pass by checking nothing.
+    expect(
+      sources.some(({ path }) =>
+        path.endsWith(join("api-client", "repositories.ts")),
+      ),
+    ).toBe(true);
     expect(calls.length).toBeGreaterThan(80);
     expect(table.size).toBeGreaterThan(50);
   });
