@@ -27,7 +27,7 @@ export function parseDndId(raw: string): { kind: string; rest: string } {
 
 /** Where a drop lands: a destination group (null for the top level), and the
  * slot to insert at when the drop was on a reorder bar rather than a row. */
-export interface DropTarget {
+interface DropTarget {
   intoGroup: string | null;
   slotIndex: number | null;
 }
@@ -62,7 +62,7 @@ export function resolveDropTarget(overId: string): DropTarget | null {
 /** Why a move was refused. The component owns what each one says to the user. */
 export type GroupMoveRefusal = "self" | "cycle" | "depth";
 
-export type GroupMovePlan =
+type GroupMovePlan =
   | { ok: false; reason: GroupMoveRefusal }
   /**
    * `patches` is what to persist and `groups` is the state to show while it is

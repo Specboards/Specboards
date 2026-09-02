@@ -16,8 +16,13 @@ import type { ProductGroupRecord, ProductRecord } from "@/lib/store/types";
  * call, once per level of the tree.
  */
 
-/** A group flattened for tree display: depth-first, sibling position order. */
-export interface TreeRow {
+/**
+ * A group flattened for tree display: depth-first, sibling position order.
+ *
+ * Not exported: it is the element type of what the two flatten helpers return,
+ * and every caller reads it through them rather than naming it.
+ */
+interface TreeRow {
   group: ProductGroupRecord;
   depth: number;
 }
