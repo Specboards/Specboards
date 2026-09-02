@@ -10,7 +10,7 @@ import {
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
-import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import { saveBoardPreferences } from "@/lib/api-client/views";
 import type { BoardKey } from "@/lib/store";
 
@@ -57,12 +57,7 @@ export function BoardPrefsProvider({
         { cardFields: ordered, featured: nextFeatured },
         board,
       ).catch((err) => {
-        if (err instanceof AuthRequiredError) {
-          router.push(
-            `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
-          );
-          return;
-        }
+        if (redirectOnAuthExpiry(err, router)) return;
         toast.error(
           err instanceof Error ? err.message : "Couldn't save preferences.",
         );

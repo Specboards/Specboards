@@ -32,6 +32,7 @@ import {
   updateRelease,
 } from "@/lib/api-client/planning";
 import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import { statusLabel } from "@/lib/feature-helpers";
 import type { ReleaseItemGroup } from "@/lib/release-items";
 import { RELEASE_STATUS_LABELS } from "@/lib/release-status";
@@ -111,16 +112,6 @@ export function ReleaseDetailSheet({
   // The ship-date field, so a start date moved past it can pull it along.
   const targetDateRef = useRef<HTMLInputElement | null>(null);
 
-  function handleAuthError(err: unknown): boolean {
-    if (err instanceof AuthRequiredError) {
-      router.push(
-        `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
-      );
-      return true;
-    }
-    return false;
-  }
-
   if (!release) {
     return (
       <Sheet open={false} onOpenChange={(open) => !open && onClose()}>
@@ -144,7 +135,7 @@ export function ReleaseDetailSheet({
         setSaveState("saved");
         router.refresh();
       } catch (err) {
-        if (handleAuthError(err)) return;
+        if (redirectOnAuthExpiry(err, router)) return;
         setSaveState("idle");
         toast.error(err instanceof Error ? err.message : "Save failed.");
       } finally {
@@ -170,7 +161,7 @@ export function ReleaseDetailSheet({
         toast.success(successMsg ?? "Release updated");
         router.refresh();
       } catch (err) {
-        if (handleAuthError(err)) return;
+        if (redirectOnAuthExpiry(err, router)) return;
         toast.error(err instanceof Error ? err.message : "Update failed.");
       }
     });
@@ -191,7 +182,7 @@ export function ReleaseDetailSheet({
         onClose();
         router.refresh();
       } catch (err) {
-        if (handleAuthError(err)) return;
+        if (redirectOnAuthExpiry(err, router)) return;
         toast.error(err instanceof Error ? err.message : "Delete failed.");
       }
     });

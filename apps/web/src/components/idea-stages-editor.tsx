@@ -10,7 +10,7 @@ import type { IdeaStage } from "@specboards/core";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { updateIdeaStatuses } from "@/lib/api-client/ideas";
-import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 
 /** A stage being edited. `key` is empty for stages added this session; the
  *  server assigns one from the label on save (existing keys stay stable). */
@@ -75,12 +75,7 @@ export function IdeaStagesEditor({
         toast.success("Idea stages saved");
         router.refresh();
       } catch (err) {
-        if (err instanceof AuthRequiredError) {
-          router.push(
-            `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
-          );
-          return;
-        }
+        if (redirectOnAuthExpiry(err, router)) return;
         setError(err instanceof Error ? err.message : "Save failed.");
       }
     });

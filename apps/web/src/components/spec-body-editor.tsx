@@ -6,7 +6,7 @@ import { toast } from "sonner";
 
 import { MarkdownEditor } from "@/components/markdown-editor";
 import { Button } from "@/components/ui/button";
-import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import {
   SpecConflictError,
   type SpecConflict,
@@ -236,12 +236,7 @@ export function SpecBodyEditor({
       router.refresh();
       onSaved?.();
     } catch (err) {
-      if (err instanceof AuthRequiredError) {
-        router.push(
-          `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
-        );
-        return;
-      }
+      if (redirectOnAuthExpiry(err, router)) return;
       // A conflict opens the resolution panel instead of an error line. The
       // draft is untouched and still dirty, which is the point: an author whose
       // ten minutes of writing is thrown away by a toast stops trusting the

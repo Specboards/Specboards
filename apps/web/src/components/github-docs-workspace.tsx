@@ -1,5 +1,7 @@
 "use client";
 
+import { useRouter } from "next/navigation";
+
 import {
   ChevronDown,
   ChevronRight,
@@ -21,7 +23,7 @@ import {
   renameGithubDocFile,
   saveGithubDocFile,
 } from "@/lib/api-client/docs";
-import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import type { DocArea } from "@/lib/store/types";
 import { cn } from "@/lib/utils";
 
@@ -56,6 +58,7 @@ export function GithubDocsWorkspace({
   initialFiles: GithubDocFileView[];
   canEdit: boolean;
 }) {
+  const router = useRouter();
   const [files, setFiles] = useState<GithubDocFileView[]>(initialFiles);
   const [selectedPath, setSelectedPath] = useState<string | null>(
     initialFiles[0]?.path ?? null,
@@ -76,10 +79,7 @@ export function GithubDocsWorkspace({
   const selectedDirty = selected ? dirty[selected.path] !== undefined : false;
 
   function fail(err: unknown, fallback: string) {
-    if (err instanceof AuthRequiredError) {
-      window.location.href = `/sign-in?from=${encodeURIComponent(window.location.pathname)}`;
-      return;
-    }
+    if (redirectOnAuthExpiry(err, router)) return;
     setError(err instanceof Error ? err.message : fallback);
   }
 

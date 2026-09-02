@@ -49,7 +49,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import { patchFeature } from "@/lib/api-client/work-items";
 import { statusLabel } from "@/lib/feature-helpers";
 import { productBadge } from "@/lib/product-color";
@@ -239,12 +239,7 @@ export function RoadmapBoard({
       .then(() => router.refresh())
       .catch((err) => {
         setPlacement(prev);
-        if (err instanceof AuthRequiredError) {
-          router.push(
-            `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
-          );
-          return;
-        }
+        if (redirectOnAuthExpiry(err, router)) return;
         toast.error(err instanceof Error ? err.message : "Move failed.");
       });
   }
@@ -269,12 +264,7 @@ export function RoadmapBoard({
       })
       .catch((err) => {
         setPlacement(prev);
-        if (err instanceof AuthRequiredError) {
-          router.push(
-            `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
-          );
-          return;
-        }
+        if (redirectOnAuthExpiry(err, router)) return;
         toast.error(err instanceof Error ? err.message : "Move failed.");
       });
   }

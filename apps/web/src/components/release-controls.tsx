@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import { createRelease } from "@/lib/api-client/planning";
-import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 
 /**
  * "New release" button + drawer on the Roadmap. A release belongs to a product
@@ -49,12 +49,7 @@ export function ReleaseCreate({ productId }: { productId: string | null }) {
         setOpen(false);
         router.refresh();
       } catch (err) {
-        if (err instanceof AuthRequiredError) {
-          router.push(
-            `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
-          );
-          return;
-        }
+        if (redirectOnAuthExpiry(err, router)) return;
         setError(err instanceof Error ? err.message : "Create failed.");
       }
     });

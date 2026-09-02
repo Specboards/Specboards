@@ -10,7 +10,7 @@ import { specFilePath, type DetailTemplate } from "@specboards/core";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import { createSpec } from "@/lib/api-client/specs";
 import type { LinkableRepo } from "@/lib/github-links-service";
 
@@ -133,12 +133,7 @@ export function CreateSpecButton({
       router.refresh();
       onCreated?.();
     } catch (err) {
-      if (err instanceof AuthRequiredError) {
-        router.push(
-          `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
-        );
-        return;
-      }
+      if (redirectOnAuthExpiry(err, router)) return;
       // The server's messages are written for a human, including the slug
       // collision ("… already exists … Pick a different title."), which is the
       // rename prompt: it lands next to the title field the author must change.

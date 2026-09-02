@@ -24,7 +24,7 @@ import {
   resolveProposal,
   resolveReleaseProposal,
 } from "@/lib/api-client/assistant";
-import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import { ProposalStaleError, SpecConflictError } from "@/lib/api-client/specs";
 import type { AssistantMessageView } from "@/lib/assistant-service";
 import { useOrgPath } from "@/lib/use-org";
@@ -658,12 +658,7 @@ export function AssistantPanel({
       // often fix and retry in one click.
       return false;
     } catch (err) {
-      if (err instanceof AuthRequiredError) {
-        window.location.href = `/sign-in?from=${encodeURIComponent(
-          window.location.pathname,
-        )}`;
-        return false;
-      }
+      if (redirectOnAuthExpiry(err, router)) return false;
       setFailure({
         text: err instanceof Error ? err.message : "The assistant failed.",
         settingsLink: false,
@@ -732,12 +727,7 @@ export function AssistantPanel({
       // showing the old text until this runs.
       router.refresh();
     } catch (err) {
-      if (err instanceof AuthRequiredError) {
-        window.location.href = `/sign-in?from=${encodeURIComponent(
-          window.location.pathname,
-        )}`;
-        return;
-      }
+      if (redirectOnAuthExpiry(err, router)) return;
       if (err instanceof SpecConflictError) {
         // The proposal stays open rather than being marked resolved: it was
         // not applied, and a card claiming otherwise is worse than the error.

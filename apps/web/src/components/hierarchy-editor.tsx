@@ -1,11 +1,13 @@
 "use client";
 
+import { useRouter } from "next/navigation";
+
 import { useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import { updateLevels } from "@/lib/api-client/workspace-config";
 import type { WorkspaceLevel } from "@/lib/store/types";
 
@@ -32,6 +34,7 @@ export function HierarchyEditor({
   levels: WorkspaceLevel[];
   canEdit: boolean;
 }) {
+  const router = useRouter();
   const [rows, setRows] = useState<Row[]>(() =>
     levels.map((l) => ({
       rowId: l.key,
@@ -87,10 +90,7 @@ export function HierarchyEditor({
         );
         toast.success("Hierarchy saved");
       } catch (err) {
-        if (err instanceof AuthRequiredError) {
-          window.location.href = "/sign-in";
-          return;
-        }
+        if (redirectOnAuthExpiry(err, router)) return;
         setError(err instanceof Error ? err.message : "Save failed.");
       }
     });

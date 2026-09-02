@@ -1,5 +1,7 @@
 "use client";
 
+import { useRouter } from "next/navigation";
+
 import {
   ChevronDown,
   ChevronRight,
@@ -21,7 +23,7 @@ import {
   deleteDocPage,
   patchDocPage,
 } from "@/lib/api-client/docs";
-import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import type { DocArea, DocPageRecord } from "@/lib/store/types";
 import { cn } from "@/lib/utils";
 
@@ -49,6 +51,7 @@ export function DocsWorkspace({
   /** One-line empty-state description of what belongs here. */
   emptyHint?: string;
 }) {
+  const router = useRouter();
   const [pages, setPages] = useState<DocPageRecord[]>(initialPages);
   const [selectedId, setSelectedId] = useState<string | null>(
     initialPages.find((p) => p.kind === "page")?.id ?? null,
@@ -65,10 +68,7 @@ export function DocsWorkspace({
   const selected = pages.find((p) => p.id === selectedId) ?? null;
 
   function fail(err: unknown, fallback: string) {
-    if (err instanceof AuthRequiredError) {
-      window.location.href = `/sign-in?from=${encodeURIComponent(window.location.pathname)}`;
-      return;
-    }
+    if (redirectOnAuthExpiry(err, router)) return;
     setError(err instanceof Error ? err.message : fallback);
   }
 
@@ -433,6 +433,7 @@ function PageEditor({
   page: DocPageRecord;
   canEdit: boolean;
 }) {
+  const router = useRouter();
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inFlightRef = useRef(false);
   const pendingRef = useRef<string | null>(null);
@@ -454,10 +455,7 @@ function PageEditor({
       savedRef.current = value;
       setStatus("saved");
     } catch (err) {
-      if (err instanceof AuthRequiredError) {
-        window.location.href = `/sign-in?from=${encodeURIComponent(window.location.pathname)}`;
-        return;
-      }
+      if (redirectOnAuthExpiry(err, router)) return;
       setStatus("idle");
       setError(err instanceof Error ? err.message : "Save failed.");
     } finally {

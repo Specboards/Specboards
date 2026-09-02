@@ -1,10 +1,12 @@
 "use client";
 
+import { useRouter } from "next/navigation";
+
 import { useState } from "react";
 import { ListChecks } from "lucide-react";
 import { toast } from "sonner";
 
-import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import { setGateCompletion } from "@/lib/api-client/workspace-config";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
@@ -30,6 +32,7 @@ export function GateChecklist({
   completedGateIds: string[];
   canEdit: boolean;
 }) {
+  const router = useRouter();
   const [done, setDone] = useState<Set<string>>(
     () => new Set(completedGateIds),
   );
@@ -63,13 +66,12 @@ export function GateChecklist({
         else s.add(gate.id);
         return s;
       });
-      if (err instanceof AuthRequiredError) {
-        toast.error("Please sign in again.");
-      } else {
-        toast.error(
-          err instanceof Error ? err.message : "Could not update gate.",
-        );
-      }
+      // Was a toast telling the reader to sign in again without taking them
+      // anywhere, which is advice they cannot act on from here.
+      if (redirectOnAuthExpiry(err, router)) return;
+      toast.error(
+        err instanceof Error ? err.message : "Could not update gate.",
+      );
     } finally {
       setPending((prev) => {
         const s = new Set(prev);

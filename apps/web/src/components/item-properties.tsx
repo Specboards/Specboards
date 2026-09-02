@@ -26,7 +26,7 @@ import type {
   StatusWorkflow,
 } from "@specboards/core";
 
-import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import { patchFeature } from "@/lib/api-client/work-items";
 import { RiceEditor, type RiceStrings } from "@/components/rice-editor";
 import { StatusDot } from "@/components/status-dot";
@@ -213,12 +213,7 @@ export function ItemProperties({
       setStatus("saved");
       router.refresh();
     } catch (err) {
-      if (err instanceof AuthRequiredError) {
-        router.push(
-          `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
-        );
-        return;
-      }
+      if (redirectOnAuthExpiry(err, router)) return;
       setStatus("idle");
       setError(err instanceof Error ? err.message : "Save failed.");
     } finally {

@@ -22,7 +22,7 @@ import {
   estimateBreakdown,
   suggestBreakdown,
 } from "@/lib/api-client/assistant";
-import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import { createWorkItem } from "@/lib/api-client/work-items";
 import { formatTokenEstimate } from "@/lib/ai/estimate";
 import { pluralLevel, statusLabel } from "@/lib/feature-helpers";
@@ -136,12 +136,7 @@ export function GenerateChildButton({
         items: outcome.children.map((c) => ({ ...c, taken: true })),
       });
     } catch (err) {
-      if (err instanceof AuthRequiredError) {
-        router.push(
-          `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
-        );
-        return;
-      }
+      if (redirectOnAuthExpiry(err, router)) return;
       setModelError(err instanceof Error ? err.message : "That did not work.");
     } finally {
       setAsking(false);
@@ -181,12 +176,7 @@ export function GenerateChildButton({
         made === 1 ? `Added one ${label}.` : `Added ${made} ${plural}.`,
       );
     } catch (err) {
-      if (err instanceof AuthRequiredError) {
-        router.push(
-          `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
-        );
-        return;
-      }
+      if (redirectOnAuthExpiry(err, router)) return;
       setError(
         `${err instanceof Error ? err.message : "Create failed."} ` +
           `${made} of ${wanted.length} were added before this.`,
@@ -242,12 +232,7 @@ export function GenerateChildButton({
         inputRef.current?.focus();
         router.refresh();
       } catch (err) {
-        if (err instanceof AuthRequiredError) {
-          router.push(
-            `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
-          );
-          return;
-        }
+        if (redirectOnAuthExpiry(err, router)) return;
         setError(err instanceof Error ? err.message : "Create failed.");
       }
     });
