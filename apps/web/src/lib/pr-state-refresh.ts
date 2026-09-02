@@ -3,7 +3,6 @@ import {
   eq,
   featureGithubLinks,
   features,
-  isNotNull,
   isNull,
   lt,
   or,
@@ -43,22 +42,14 @@ const STALE_AFTER_MS = 15 * 60 * 1000;
 
 /**
  * Most links to re-check in one view. A cap rather than a queue: an item with
- * twenty stale proposals is not a case worth optimising, and it must not turn a
- * page load into twenty sequential GitHub calls.
+ * twenty stale links is not a case worth optimising, and it must not turn a
+ * page load into twenty sequential GitHub calls. The rest are picked up on a
+ * later view.
  */
 const MAX_PER_VIEW = 3;
 
-/**
- * Re-confirm this item's pending spec changes against GitHub when they have
- * gone too long without it. Returns true when a state actually changed, so the
- * caller knows to re-read.
- *
- * Never throws. This runs on the render path of a page whose job is to show a
- * spec; GitHub being slow, rate-limited or down is not a reason for that page
- * to fail, and a stale state is a strictly better outcome than an error.
- */
-/** A pending spec change whose state is due to be confirmed again. */
-interface StalePendingChange {
+/** A linked pull request whose state is due to be confirmed again. */
+interface StaleLinkedPullRequest {
   id: string;
   number: number | null;
   state: string | null;
@@ -77,58 +68,62 @@ interface StalePendingChange {
  * near GitHub. Each predicate below excludes something that would otherwise
  * cost an API call and answer a question nobody asked.
  */
-export async function selectStalePendingChanges(
+export async function selectStaleLinkedPullRequests(
   db: Database,
   specId: string,
   workspaceId: string,
   now: Date,
-): Promise<StalePendingChange[]> {
+): Promise<StaleLinkedPullRequest[]> {
   const staleBefore = new Date(now.getTime() - STALE_AFTER_MS);
   return db
     .select({
-        id: featureGithubLinks.id,
-        number: featureGithubLinks.number,
-        state: featureGithubLinks.state,
-        title: featureGithubLinks.title,
-        installationId: repositories.githubInstallationId,
-        owner: repositories.owner,
-        name: repositories.name,
-        defaultBranch: repositories.defaultBranch,
-      })
-      .from(featureGithubLinks)
-      .innerJoin(features, eq(features.id, featureGithubLinks.featureId))
-      .innerJoin(repositories, eq(repositories.id, featureGithubLinks.repoId))
-      .where(
-        and(
-          eq(features.specId, specId),
-          eq(featureGithubLinks.workspaceId, workspaceId),
-          eq(featureGithubLinks.kind, "pull_request"),
-          // Only proposals Specboards opened for a spec edit. A pull request
-          // someone pasted onto the card by hand is not something this item
-          // claims to report the status of, so polling it would be spending
-          // rate limit on a question nobody asked.
-          isNotNull(featureGithubLinks.headBranch),
-          // A merged or closed review is finished and cannot change again.
-          eq(featureGithubLinks.state, "open"),
-          or(
-            isNull(featureGithubLinks.stateCheckedAt),
-            lt(featureGithubLinks.stateCheckedAt, staleBefore),
-          ),
+      id: featureGithubLinks.id,
+      number: featureGithubLinks.number,
+      state: featureGithubLinks.state,
+      title: featureGithubLinks.title,
+      installationId: repositories.githubInstallationId,
+      owner: repositories.owner,
+      name: repositories.name,
+      defaultBranch: repositories.defaultBranch,
+    })
+    .from(featureGithubLinks)
+    .innerJoin(features, eq(features.id, featureGithubLinks.featureId))
+    .innerJoin(repositories, eq(repositories.id, featureGithubLinks.repoId))
+    .where(
+      and(
+        eq(features.specId, specId),
+        eq(featureGithubLinks.workspaceId, workspaceId),
+        eq(featureGithubLinks.kind, "pull_request"),
+        // Every linked pull request, not only the ones Specboards opened for
+        // a spec edit. This used to require a head branch, on the reasoning
+        // that a hand-linked pull request is a reference the item never
+        // claimed to report the status of. That is no longer true: linking
+        // one caches its state, and the item view and `list_github_links`
+        // both show that state, so we are making the claim either way. The
+        // choice is between keeping it true and displaying something we know
+        // may be wrong, and the second is not really a choice.
+        //
+        // A merged or closed review is finished and cannot change again.
+        eq(featureGithubLinks.state, "open"),
+        or(
+          isNull(featureGithubLinks.stateCheckedAt),
+          lt(featureGithubLinks.stateCheckedAt, staleBefore),
         ),
-      )
-      .limit(MAX_PER_VIEW);
+      ),
+    )
+    .limit(MAX_PER_VIEW);
 }
 
 /**
- * Re-confirm this item's pending spec changes against GitHub when they have
- * gone too long without it. Returns true when a state actually changed, so the
- * caller knows to re-read.
+ * Re-confirm this item's open linked pull requests against GitHub when they
+ * have gone too long without it. Returns true when a state actually changed,
+ * so the caller knows to re-read.
  *
  * Never throws. This runs on the render path of a page whose job is to show a
  * spec; GitHub being slow, rate-limited or down is not a reason for that page
  * to fail, and a stale state is a strictly better outcome than an error.
  */
-export async function reconcilePendingChangeState(
+export async function reconcileLinkedPullRequestState(
   specId: string,
   workspaceId: string,
 ): Promise<boolean> {
@@ -136,7 +131,12 @@ export async function reconcilePendingChangeState(
     const db = getDb();
     if (!db) return false;
 
-    const stale = await selectStalePendingChanges(db, specId, workspaceId, new Date());
+    const stale = await selectStaleLinkedPullRequests(
+      db,
+      specId,
+      workspaceId,
+      new Date(),
+    );
     if (stale.length === 0) return false;
 
     const app = await getGithubApp(db);

@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createDb, type Database } from "@specboards/db";
 
-import { selectStalePendingChanges } from "./pr-state-refresh";
+import { selectStaleLinkedPullRequests } from "./pr-state-refresh";
 
 /**
  * Which pending spec changes are due a re-check against GitHub.
@@ -15,8 +15,8 @@ import { selectStalePendingChanges } from "./pr-state-refresh";
  * narrow and its failure modes are both real:
  *
  * - too eager, and every item view spends GitHub rate limit re-asking about
- *   pull requests nobody is waiting on, including ones somebody merely pasted
- *   onto a card
+ *   pull requests that cannot have moved, or re-asking far more often than
+ *   anyone would notice the answer changing
  * - too shy, and an author is left being told their change is still in review
  *   long after it merged, which is the exact confusion the authoring work is
  *   there to remove
@@ -44,7 +44,7 @@ const LONG_AGO = new Date("2026-08-08T10:00:00.000Z");
 /** Inside it. */
 const JUST_NOW = new Date("2026-08-08T11:56:00.000Z");
 
-describe.skipIf(!OWNER_URL)("selectStalePendingChanges", () => {
+describe.skipIf(!OWNER_URL)("selectStaleLinkedPullRequests", () => {
   let owner: postgres.Sql;
   let db: Database;
 
@@ -70,7 +70,7 @@ describe.skipIf(!OWNER_URL)("selectStalePendingChanges", () => {
   }
 
   async function selected(): Promise<number[]> {
-    const rows = await selectStalePendingChanges(db, specId, wsId, NOW);
+    const rows = await selectStaleLinkedPullRequests(db, specId, wsId, NOW);
     return rows.map((r) => r.number!).sort((a, b) => a - b);
   }
 
@@ -113,31 +113,35 @@ describe.skipIf(!OWNER_URL)("selectStalePendingChanges", () => {
     expect(await selected()).toEqual([1, 3]);
   });
 
-  it("ignores a pull request somebody linked by hand", async () => {
-    // No head branch means Specboards did not open it for a spec edit, so the
-    // item never claimed to report its status and must not poll it.
+  it("selects a pull request somebody linked by hand", async () => {
+    // No head branch means Specboards did not open this one for a spec edit.
+    // It is still selected, because linking it cached its state and the item
+    // view and `list_github_links` both display that state. Having made the
+    // claim, we have to keep it true; the alternative is showing a merged
+    // change as still in review, which is the failure this file exists to
+    // prevent and does not care how the link got there.
     await link({ number: 4, headBranch: null });
-    expect(await selected()).toEqual([1, 3]);
+    expect(await selected()).toEqual([1, 3, 4]);
   });
 
   it("ignores reviews that are already finished", async () => {
     await link({ number: 5, state: "merged" });
     await link({ number: 6, state: "closed" });
-    expect(await selected()).toEqual([1, 3]);
+    expect(await selected()).toEqual([1, 3, 4]);
   });
 
   it("ignores links belonging to a different item", async () => {
     await link({ number: 7, featureId: otherFeatureId });
-    expect(await selected()).toEqual([1, 3]);
+    expect(await selected()).toEqual([1, 3, 4]);
   });
 
   it("caps how many one view will re-check", async () => {
     await link({ number: 8 });
     await link({ number: 9 });
     await link({ number: 10 });
-    // Five are now eligible. A page load must not turn into five sequential
+    // Six are now eligible. A page load must not turn into six sequential
     // GitHub calls; the rest are picked up on a later view.
-    const rows = await selectStalePendingChanges(db, specId, wsId, NOW);
+    const rows = await selectStaleLinkedPullRequests(db, specId, wsId, NOW);
     expect(rows).toHaveLength(3);
   });
 });
