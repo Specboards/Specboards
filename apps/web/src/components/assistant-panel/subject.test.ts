@@ -10,9 +10,8 @@ vi.mock("@/lib/api-client/assistant", () => ({
 }));
 
 const api = await import("@/lib/api-client/assistant");
-const { assistantApi, subjectBodyNoun, subjectId, subjectNoun } = await import(
-  "./subject"
-);
+const { assistantApi, subjectBodyNoun, subjectId, subjectNoun } =
+  await import("./subject");
 
 /**
  * Which endpoint a panel talks to.
