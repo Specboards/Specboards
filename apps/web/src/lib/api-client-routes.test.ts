@@ -201,6 +201,7 @@ describe("api-client reaches routes that exist", () => {
     for (const clientModule of [
       "planning.ts",
       "repositories.ts",
+      "specs.ts",
       "work-items.ts",
     ]) {
       expect(
