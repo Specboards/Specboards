@@ -93,14 +93,20 @@ function activeOrgSlug(): string | null {
 }
 
 /**
- * `fetch` for the versioned API that tags each request with the active org.
- * All calls in this module go through here so none can forget the header.
+ * `fetch` for the versioned API that tags each request with the active org and
+ * turns an expired session into the one error every caller already handles.
+ * All calls in this module go through here so neither invariant can be missed.
  */
-function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
+async function apiFetch(
+  input: string,
+  init: RequestInit = {},
+): Promise<Response> {
   const slug = activeOrgSlug();
   const headers = new Headers(init.headers);
   if (slug) headers.set("x-org-slug", slug);
-  return fetch(input, { ...init, headers });
+  const response = await fetch(input, { ...init, headers });
+  if (response.status === 401) throw new AuthRequiredError();
+  return response;
 }
 
 /** Thrown when a write is rejected for lack of a session (HTTP 401). */
@@ -136,7 +142,6 @@ export async function getItemDetail(specId: string): Promise<ItemDetailData> {
   const res = await apiFetch(
     `/api/v1/features/${encodeURIComponent(specId)}/context`,
   );
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     data?: ItemDetailData;
     error?: string;
@@ -204,7 +209,6 @@ export async function updateSpecBody(
       }),
     },
   );
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     spec?: SpecWriteResult;
     conflict?: SpecConflict;
@@ -313,7 +317,6 @@ export async function createSpec(input: {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     spec?: SpecWriteResult;
     parentWarning?: string;
@@ -336,7 +339,6 @@ export async function patchFeature(
     headers: { "content-type": "application/json" },
     body: JSON.stringify(patch),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as {
       error?: string;
@@ -381,7 +383,6 @@ export async function bulkPatchFeatures(
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ specIds, patch, ...tagOps }),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as
     | (BulkPatchResult & { error?: string })
     | null;
@@ -396,7 +397,6 @@ export async function listComments(specId: string): Promise<CommentRecord[]> {
   const res = await apiFetch(
     `/api/v1/features/${encodeURIComponent(specId)}/comments`,
   );
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     comments?: CommentRecord[];
     error?: string;
@@ -412,7 +412,6 @@ export async function listItemEvents(specId: string): Promise<ItemEvent[]> {
   const res = await apiFetch(
     `/api/v1/features/${encodeURIComponent(specId)}/events`,
   );
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     events?: ItemEvent[];
     error?: string;
@@ -443,7 +442,6 @@ export async function getAssistantThread(specId: string): Promise<{
   const res = await apiFetch(
     `/api/v1/assistant/${encodeURIComponent(specId)}`,
   );
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     messages?: AssistantMessageView[];
     context?: AssistantContextField[];
@@ -484,7 +482,6 @@ export async function saveAssistantSkills(skills: SkillRow[]): Promise<Skill[]> 
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ skills }),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     skills?: Skill[];
     error?: string;
@@ -527,7 +524,6 @@ export async function suggestBreakdown(
     `/api/v1/assistant/${encodeURIComponent(specId)}/breakdown`,
     { method: "POST" },
   );
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as
     | (BreakdownSuggestion & { error?: string | { kind: string; message: string } })
     | null;
@@ -609,7 +605,6 @@ export async function resolveProposal(
       }),
     },
   );
-  if (res.status === 401) throw new AuthRequiredError();
   const payload = (await res.json().catch(() => null)) as
     | (ProposalOutcome & {
         conflict?: SpecConflict;
@@ -728,7 +723,6 @@ export async function askAssistant(
     if (opts.signal?.aborted) return { ok: false, cancelled: true };
     throw err;
   }
-  if (res.status === 401) throw new AuthRequiredError();
 
   // Our own refusals (unknown item, unusable message) are decided before any
   // streaming starts and still arrive as ordinary JSON with a status.
@@ -787,7 +781,6 @@ export async function getReleaseAssistantThread(releaseId: string): Promise<{
   const res = await apiFetch(
     `/api/v1/assistant/releases/${encodeURIComponent(releaseId)}`,
   );
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     messages?: AssistantMessageView[];
     context?: AssistantContextField[];
@@ -859,7 +852,6 @@ export async function askReleaseAssistant(
     if (opts.signal?.aborted) return { ok: false, cancelled: true };
     throw err;
   }
-  if (res.status === 401) throw new AuthRequiredError();
 
   // Our own refusals (unknown release, no permission, unusable message) are
   // decided before any streaming starts and arrive as ordinary JSON.
@@ -923,7 +915,6 @@ export async function resolveReleaseProposal(
       }),
     },
   );
-  if (res.status === 401) throw new AuthRequiredError();
   const payload = (await res.json().catch(() => null)) as
     | (ProposalOutcome & { currentBody?: string; error?: string })
     | null;
@@ -951,7 +942,6 @@ export async function createComment(
       body: JSON.stringify(input),
     },
   );
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     comment?: CommentRecord;
     error?: string;
@@ -968,7 +958,6 @@ export async function deleteComment(commentId: string): Promise<void> {
     `/api/v1/comments/${encodeURIComponent(commentId)}`,
     { method: "DELETE" },
   );
-  if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as {
       error?: string;
@@ -980,7 +969,6 @@ export async function deleteComment(commentId: string): Promise<void> {
 /** The caller's notification inbox (items + unread count). */
 export async function listNotifications(): Promise<NotificationList> {
   const res = await apiFetch("/api/v1/notifications");
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as
     | (NotificationList & { error?: string })
     | null;
@@ -998,7 +986,6 @@ export async function markNotificationRead(id: string): Promise<void> {
     `/api/v1/notifications/${encodeURIComponent(id)}/read`,
     { method: "POST" },
   );
-  if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) throw new Error(`Failed to mark read (${res.status}).`);
 }
 
@@ -1007,7 +994,6 @@ export async function markAllNotificationsRead(): Promise<void> {
   const res = await apiFetch("/api/v1/notifications/read-all", {
     method: "POST",
   });
-  if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) throw new Error(`Failed to mark all read (${res.status}).`);
 }
 
@@ -1020,7 +1006,6 @@ export async function createWorkItem(
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     feature?: FeatureRecord;
     error?: string;
@@ -1043,7 +1028,6 @@ export async function deleteWorkItem(
     `/api/v1/features/${encodeURIComponent(specId)}${query}`,
     { method: "DELETE" },
   );
-  if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as {
       error?: string;
@@ -1061,7 +1045,6 @@ export async function updateLevels(
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ levels }),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     levels?: WorkspaceLevel[];
     error?: string;
@@ -1085,7 +1068,6 @@ export async function updateLevelFields(
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ fields, productId: productId ?? null }),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     levels?: WorkspaceLevel[];
     error?: string;
@@ -1109,7 +1091,6 @@ export async function updateLevelTemplates(
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ templates, productId: productId ?? null }),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     levels?: WorkspaceLevel[];
     error?: string;
@@ -1130,7 +1111,6 @@ export async function createDetailTemplate(
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ ...input, productId: productId ?? null }),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     template?: DetailTemplate;
     error?: string;
@@ -1154,7 +1134,6 @@ export async function updateDetailTemplate(
       body: JSON.stringify(patch),
     },
   );
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     template?: DetailTemplate;
     error?: string;
@@ -1171,7 +1150,6 @@ export async function deleteDetailTemplate(id: string): Promise<void> {
     `/api/v1/detail-templates/${encodeURIComponent(id)}`,
     { method: "DELETE" },
   );
-  if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as {
       error?: string;
@@ -1196,7 +1174,6 @@ export async function updateStatuses(
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ statuses: stages, productId: productId ?? null }),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     statuses?: WorkspaceStatus[];
     error?: string;
@@ -1223,7 +1200,6 @@ export async function updateTransitionMode(
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ transitionMode: mode, productId: productId ?? null }),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     transitionMode?: TransitionMode;
     error?: string;
@@ -1246,7 +1222,6 @@ export async function updateStageGates(
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ gates, productId: productId ?? null }),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     gates?: StageGate[];
     error?: string;
@@ -1273,7 +1248,6 @@ export async function setGateCompletion(
       body: JSON.stringify({ gateId, completed }),
     },
   );
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     completed?: string[];
     error?: string;
@@ -1293,7 +1267,6 @@ export async function createIdea(input: IdeaInput): Promise<IdeaRecord> {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     idea?: IdeaRecord;
     error?: string;
@@ -1314,7 +1287,6 @@ export async function updateIdea(
     headers: { "content-type": "application/json" },
     body: JSON.stringify(patch),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     idea?: IdeaRecord;
     error?: string;
@@ -1330,7 +1302,6 @@ export async function deleteIdea(id: string): Promise<void> {
   const res = await apiFetch(`/api/v1/ideas/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
-  if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as {
       error?: string;
@@ -1349,7 +1320,6 @@ export async function setIdeaVote(
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ voted }),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     idea?: IdeaRecord;
     error?: string;
@@ -1370,7 +1340,6 @@ export async function promoteIdea(
       method: "POST",
     },
   );
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     idea?: IdeaRecord;
     feature?: FeatureRecord;
@@ -1391,7 +1360,6 @@ export async function updateIdeaStatuses(
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ statuses: stages }),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     statuses?: IdeaStage[];
     error?: string;
@@ -1413,7 +1381,6 @@ export async function updateIdeaSettings(
     headers: { "content-type": "application/json" },
     body: JSON.stringify(patch),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     settings?: IdeaSettings;
     error?: string;
@@ -1436,7 +1403,6 @@ export async function createProperty(
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ ...input, productId: productId ?? null }),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     property?: PropertyDef;
     error?: string;
@@ -1457,7 +1423,6 @@ export async function updateProperty(
     headers: { "content-type": "application/json" },
     body: JSON.stringify(patch),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     property?: PropertyDef;
     error?: string;
@@ -1473,7 +1438,6 @@ export async function deleteProperty(id: string): Promise<void> {
   const res = await apiFetch(`/api/v1/properties/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
-  if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as {
       error?: string;
@@ -1491,7 +1455,6 @@ export async function createRelease(
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     release?: ReleaseRecord;
     error?: string;
@@ -1512,7 +1475,6 @@ export async function updateRelease(
     headers: { "content-type": "application/json" },
     body: JSON.stringify(patch),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     release?: ReleaseRecord;
     error?: string;
@@ -1528,7 +1490,6 @@ export async function deleteRelease(id: string): Promise<void> {
   const res = await apiFetch(`/api/v1/releases/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
-  if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as {
       error?: string;
@@ -1548,7 +1509,6 @@ export async function getReleaseItems(
   const res = await apiFetch(
     `/api/v1/releases/${encodeURIComponent(id)}/items`,
   );
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     groups?: ReleaseItemGroup[];
     count?: number;
@@ -1572,7 +1532,6 @@ export async function createCycle(input: CycleInput): Promise<CycleRecord> {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     cycle?: CycleRecord;
     error?: string;
@@ -1595,7 +1554,6 @@ export async function generateCycles(
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     cycles?: CycleRecord[];
     error?: string;
@@ -1616,7 +1574,6 @@ export async function updateCycle(
     headers: { "content-type": "application/json" },
     body: JSON.stringify(patch),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     cycle?: CycleRecord;
     error?: string;
@@ -1632,7 +1589,6 @@ export async function deleteCycle(id: string): Promise<void> {
   const res = await apiFetch(`/api/v1/cycles/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
-  if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as {
       error?: string;
@@ -1654,7 +1610,6 @@ export async function rolloverCycle(
       body: JSON.stringify({ toCycleId }),
     },
   );
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     moved?: number;
     toCycleId?: string;
@@ -1691,7 +1646,6 @@ export async function deleteGoal(id: string): Promise<void> {
   const res = await apiFetch(`/api/v1/goals/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
-  if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as { error?: string } | null;
     throw new Error(body?.error ?? `Delete goal failed with ${res.status}`);
@@ -1747,7 +1701,6 @@ export async function setGoalLink(
     : await apiFetch(`${base}?specId=${encodeURIComponent(specId)}`, {
         method: "DELETE",
       });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     contributions?: GoalContribution[];
     error?: string;
@@ -1773,7 +1726,6 @@ async function goalRequest(
         }
       : {}),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     goal?: GoalRecord;
     error?: string;
@@ -1797,7 +1749,6 @@ export async function addRelation(
       body: JSON.stringify(input),
     },
   );
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     relations?: FeatureRelation[];
     error?: string;
@@ -1817,7 +1768,6 @@ export async function removeRelation(
     `/api/v1/features/${encodeURIComponent(specId)}/relations/${encodeURIComponent(linkId)}`,
     { method: "DELETE" },
   );
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     relations?: FeatureRelation[];
     error?: string;
@@ -1841,7 +1791,6 @@ export async function saveBoardPreferences(
       body: JSON.stringify(prefs),
     },
   );
-  if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as {
       error?: string;
@@ -1865,7 +1814,6 @@ export async function addGithubLink(
       body: JSON.stringify(input),
     },
   );
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     githubLinks?: GithubLink[];
     error?: string;
@@ -1885,7 +1833,6 @@ export async function removeGithubLink(
     `/api/v1/features/${encodeURIComponent(specId)}/github-links/${encodeURIComponent(linkId)}`,
     { method: "DELETE" },
   );
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     githubLinks?: GithubLink[];
     error?: string;
@@ -1905,7 +1852,6 @@ export async function saveView(input: SavedViewInput): Promise<SavedView> {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     view?: SavedView;
     error?: string;
@@ -1921,7 +1867,6 @@ export async function deleteView(id: string): Promise<void> {
   const res = await apiFetch(`/api/v1/views/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
-  if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as {
       error?: string;
@@ -1944,7 +1889,6 @@ export async function createWorkspace(
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ name, seedSampleData, slug }),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     workspace?: { slug: string };
     error?: string;
@@ -2001,7 +1945,6 @@ export async function connectRepository(
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     sync?: SyncResult | { error: string } | null;
     error?: string;
@@ -2031,7 +1974,6 @@ export async function scanWorkspaceSpecs(): Promise<{
   totalSpecs: number;
 }> {
   const res = await apiFetch("/api/v1/repositories/scan");
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     repos?: RepoScan[];
     totalSpecs?: number;
@@ -2063,7 +2005,6 @@ export async function createStarterSpec(input: {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     path?: string;
     summary?: SyncResult;
@@ -2098,7 +2039,6 @@ export interface ImportResult {
  */
 export async function importWorkspaceSpecs(): Promise<ImportResult> {
   const res = await apiFetch("/api/v1/repositories/import", { method: "POST" });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     summary?: SyncResult;
     errors?: ImportResult["errors"];
@@ -2151,7 +2091,6 @@ export async function updateRepository(
     headers: { "content-type": "application/json" },
     body: JSON.stringify(patch),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     repository?: ConnectedRepository;
     error?: string;
@@ -2170,7 +2109,6 @@ export async function disconnectRepository(id: string): Promise<void> {
   const res = await apiFetch(`/api/v1/repositories/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
-  if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as {
       error?: string;
@@ -2210,7 +2148,6 @@ export interface InstallationConnectState {
  */
 export async function listInstallationRepositories(): Promise<InstallationConnectState> {
   const res = await apiFetch("/api/v1/github/installations/repositories");
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as
     | (Partial<InstallationConnectState> & {
         error?: string;
@@ -2251,7 +2188,6 @@ export async function createSpecRepository(input: {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     repository?: CreatedSpecRepo;
     error?: string;
@@ -2291,7 +2227,6 @@ export async function saveManualGithubApp(input: {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     ok?: boolean;
     slug?: string;
@@ -2322,7 +2257,6 @@ export async function createProduct(
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     product?: ProductRecord;
     error?: string;
@@ -2343,7 +2277,6 @@ export async function updateProduct(
     headers: { "content-type": "application/json" },
     body: JSON.stringify(patch),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     product?: ProductRecord;
     error?: string;
@@ -2359,7 +2292,6 @@ export async function deleteProduct(id: string): Promise<void> {
   const res = await apiFetch(`/api/v1/products/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
-  if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as {
       error?: string;
@@ -2388,7 +2320,6 @@ export async function setRepositoryProducts(
       body: JSON.stringify(input),
     },
   );
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as
     | (RepoProductLinksPayload & { error?: string })
     | null;
@@ -2409,7 +2340,6 @@ export async function createProductGroup(
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     group?: ProductGroupRecord;
     error?: string;
@@ -2430,7 +2360,6 @@ export async function updateProductGroup(
     headers: { "content-type": "application/json" },
     body: JSON.stringify(patch),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     group?: ProductGroupRecord;
     error?: string;
@@ -2446,7 +2375,6 @@ export async function deleteProductGroup(id: string): Promise<void> {
   const res = await apiFetch(`/api/v1/product-groups/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
-  if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as {
       error?: string;
@@ -2462,7 +2390,6 @@ export async function listProductMembers(
   const res = await apiFetch(
     `/api/v1/products/${encodeURIComponent(productId)}/members`,
   );
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     members?: ProductMemberRecord[];
     error?: string;
@@ -2485,7 +2412,6 @@ export async function setProductMember(
       body: JSON.stringify(input),
     },
   );
-  if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as {
       error?: string;
@@ -2503,7 +2429,6 @@ export async function removeProductMember(
     `/api/v1/products/${encodeURIComponent(productId)}/members/${encodeURIComponent(userId)}`,
     { method: "DELETE" },
   );
-  if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as {
       error?: string;
@@ -2515,7 +2440,6 @@ export async function removeProductMember(
 /** List the organization's members (org-admin only). */
 export async function listOrgMembers(): Promise<OrgMemberRecord[]> {
   const res = await apiFetch("/api/v1/org/members");
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     members?: OrgMemberRecord[];
     error?: string;
@@ -2538,7 +2462,6 @@ export async function updateOrgMember(
       body: JSON.stringify(patch),
     },
   );
-  if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as {
       error?: string;
@@ -2555,7 +2478,6 @@ export async function removeOrgMember(userId: string): Promise<void> {
       method: "DELETE",
     },
   );
-  if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as {
       error?: string;
@@ -2567,7 +2489,6 @@ export async function removeOrgMember(userId: string): Promise<void> {
 /** List the org's invitations (org-admin only). */
 export async function listInvitations(): Promise<OrgInvitationRecord[]> {
   const res = await apiFetch("/api/v1/org/invitations");
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     invitations?: OrgInvitationRecord[];
     error?: string;
@@ -2594,7 +2515,6 @@ export async function createInvitation(input: {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     invitation?: OrgInvitationRecord;
     error?: string;
@@ -2613,7 +2533,6 @@ export async function revokeInvitation(id: string): Promise<void> {
       method: "DELETE",
     },
   );
-  if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as {
       error?: string;
@@ -2630,7 +2549,6 @@ export async function resendInvitation(id: string): Promise<void> {
       method: "POST",
     },
   );
-  if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as {
       error?: string;
@@ -2646,7 +2564,6 @@ export async function updateWorkspace(name: string): Promise<void> {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ name }),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as {
       error?: string;
@@ -2668,7 +2585,6 @@ export async function setDocSpace(input: {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     space?: DocSpace;
     error?: string;
@@ -2688,7 +2604,6 @@ export async function createDocPage(
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     page?: DocPageRecord;
     error?: string;
@@ -2709,7 +2624,6 @@ export async function patchDocPage(
     headers: { "content-type": "application/json" },
     body: JSON.stringify(patch),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     page?: DocPageRecord;
     error?: string;
@@ -2725,7 +2639,6 @@ export async function deleteDocPage(id: string): Promise<void> {
   const res = await apiFetch(`/api/v1/docs/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
-  if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as {
       error?: string;
@@ -2748,7 +2661,6 @@ export async function createGithubDocSpace(input: {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     space?: DocSpace;
     repository?: { owner: string; name: string };
@@ -2781,7 +2693,6 @@ export async function connectGithubDocSpace(input: {
       existing: { owner: input.owner, name: input.name },
     }),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     space?: DocSpace;
     repository?: { owner: string; name: string };
@@ -2811,7 +2722,6 @@ export async function saveGithubDocFile(input: {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     blobSha?: string;
     error?: string;
@@ -2834,7 +2744,6 @@ export async function renameGithubDocFile(input: {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   const body = (await res.json().catch(() => null)) as {
     path?: string;
     blobSha?: string;
@@ -2864,7 +2773,6 @@ export async function deleteGithubDocFile(input: {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  if (res.status === 401) throw new AuthRequiredError();
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as {
       error?: string;
