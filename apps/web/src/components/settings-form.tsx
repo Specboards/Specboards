@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 
-import { updateWorkspace } from "@/lib/api-client";
+import { updateWorkspace } from "@/lib/api-client/organization";
 import { changeEmail, updateUser } from "@/lib/auth-client";
 import { useOrgPath } from "@/lib/use-org";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -91,7 +91,10 @@ export function ProfileCard({
         timezone: nextTimezone,
       });
       if (error) {
-        setStatus({ kind: "error", message: error.message ?? "Couldn't save your profile." });
+        setStatus({
+          kind: "error",
+          message: error.message ?? "Couldn't save your profile.",
+        });
         return;
       }
       setStatus({ kind: "ok", message: "Profile saved." });
@@ -103,7 +106,9 @@ export function ProfileCard({
     <Card>
       <CardHeader>
         <CardTitle>Profile</CardTitle>
-        <CardDescription>Your name, picture, and time zone across Specboards.</CardDescription>
+        <CardDescription>
+          Your name, picture, and time zone across Specboards.
+        </CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={onSubmit} className="space-y-4">
@@ -119,7 +124,12 @@ export function ProfileCard({
             </FormField>
           </div>
           <FormField label="Name">
-            <Input name="name" defaultValue={name} autoComplete="name" required />
+            <Input
+              name="name"
+              defaultValue={name}
+              autoComplete="name"
+              required
+            />
           </FormField>
           <FormField label="Time zone">
             <Select name="timezone" defaultValue={timezone ?? browserZone}>
@@ -146,7 +156,8 @@ export function AppearanceCard() {
       <CardHeader>
         <CardTitle>Appearance</CardTitle>
         <CardDescription>
-          Choose a light or dark theme, or follow your system setting. Saved on this device.
+          Choose a light or dark theme, or follow your system setting. Saved on
+          this device.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -190,9 +201,15 @@ export function EmailCard({ email }: { email: string }) {
     }
     startTransition(async () => {
       setStatus(null);
-      const { error } = await changeEmail({ newEmail, callbackURL: orgHref("/settings") });
+      const { error } = await changeEmail({
+        newEmail,
+        callbackURL: orgHref("/settings"),
+      });
       if (error) {
-        setStatus({ kind: "error", message: error.message ?? "Couldn't change your email." });
+        setStatus({
+          kind: "error",
+          message: error.message ?? "Couldn't change your email.",
+        });
         return;
       }
       form.reset();
@@ -213,8 +230,8 @@ export function EmailCard({ email }: { email: string }) {
       <CardHeader>
         <CardTitle>Email</CardTitle>
         <CardDescription>
-          You sign in with <span className="text-foreground">{email}</span>. Changing it sends a
-          confirmation link to your current address.
+          You sign in with <span className="text-foreground">{email}</span>.
+          Changing it sends a confirmation link to your current address.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -232,14 +249,22 @@ export function EmailCard({ email }: { email: string }) {
   );
 }
 
-export function CompanyCard({ name, canEdit }: { name: string; canEdit: boolean }) {
+export function CompanyCard({
+  name,
+  canEdit,
+}: {
+  name: string;
+  canEdit: boolean;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [status, setStatus] = useState<Status>(null);
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const nextName = String(new FormData(e.currentTarget).get("name") ?? "").trim();
+    const nextName = String(
+      new FormData(e.currentTarget).get("name") ?? "",
+    ).trim();
     if (!nextName) {
       setStatus({ kind: "error", message: "Company name is required." });
       return;
@@ -253,7 +278,10 @@ export function CompanyCard({ name, canEdit }: { name: string; canEdit: boolean 
       } catch (err) {
         setStatus({
           kind: "error",
-          message: err instanceof Error ? err.message : "Couldn't save company details.",
+          message:
+            err instanceof Error
+              ? err.message
+              : "Couldn't save company details.",
         });
       }
     });
@@ -272,7 +300,12 @@ export function CompanyCard({ name, canEdit }: { name: string; canEdit: boolean 
       <CardContent>
         <form onSubmit={onSubmit} className="space-y-4">
           <FormField label="Company name">
-            <Input name="name" defaultValue={name} disabled={!canEdit} required />
+            <Input
+              name="name"
+              defaultValue={name}
+              disabled={!canEdit}
+              required
+            />
           </FormField>
           {canEdit ? (
             <>

@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import {
-  AuthRequiredError,
   createInvitation,
   listInvitations,
   listOrgMembers,
@@ -16,7 +15,8 @@ import {
   resendInvitation,
   revokeInvitation,
   updateOrgMember,
-} from "@/lib/api-client";
+} from "@/lib/api-client/organization";
+import { AuthRequiredError } from "@/lib/api-client/request";
 import type {
   InvitationProductGrant,
   MemberDisplayRole,

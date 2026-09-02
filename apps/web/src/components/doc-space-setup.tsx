@@ -7,13 +7,15 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  AuthRequiredError,
   connectGithubDocSpace,
   createGithubDocSpace,
-  listInstallationRepositories,
   setDocSpace,
+} from "@/lib/api-client/docs";
+import {
+  listInstallationRepositories,
   type InstallationRepo,
-} from "@/lib/api-client";
+} from "@/lib/api-client/repositories";
+import { AuthRequiredError } from "@/lib/api-client/request";
 import type { DocArea } from "@/lib/store/types";
 
 /** What the GitHub option can do for this workspace (computed server-side). */
@@ -53,9 +55,13 @@ export function DocSpaceSetup({
 }) {
   const [externalUrl, setExternalUrl] = useState("");
   const [repoName, setRepoName] = useState(github.suggestedName);
-  const [busy, setBusy] = useState<"external" | "local" | "github" | "connect" | null>(null);
+  const [busy, setBusy] = useState<
+    "external" | "local" | "github" | "connect" | null
+  >(null);
   // The existing-repo picker loads lazily on request; null = not opened yet.
-  const [picker, setPicker] = useState<"loading" | InstallationRepo[] | null>(null);
+  const [picker, setPicker] = useState<"loading" | InstallationRepo[] | null>(
+    null,
+  );
   const [pickedRepo, setPickedRepo] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -101,7 +107,9 @@ export function DocSpaceSetup({
     try {
       const state = await listInstallationRepositories();
       setPicker(state.repositories);
-      setPickedRepo(state.repositories[0] ? repoKey(state.repositories[0]) : "");
+      setPickedRepo(
+        state.repositories[0] ? repoKey(state.repositories[0]) : "",
+      );
       if (state.error) setError(state.error);
     } catch (err) {
       setPicker(null);
@@ -135,7 +143,9 @@ export function DocSpaceSetup({
   return (
     <div className="mx-auto max-w-2xl space-y-4 py-8">
       <div className="space-y-1">
-        <h2 className="text-lg font-semibold">Where does your {areaLabel.toLowerCase()} live?</h2>
+        <h2 className="text-lg font-semibold">
+          Where does your {areaLabel.toLowerCase()} live?
+        </h2>
         <p className="text-sm text-muted-foreground">
           Choose once per product. You can change this later.
         </p>
@@ -144,13 +154,19 @@ export function DocSpaceSetup({
       <div className="space-y-3">
         <div className="rounded-md border p-4">
           <div className="flex items-start gap-3">
-            <ExternalLink className="mt-0.5 h-5 w-5 text-muted-foreground" aria-hidden />
+            <ExternalLink
+              className="mt-0.5 h-5 w-5 text-muted-foreground"
+              aria-hidden
+            />
             <div className="flex-1 space-y-2">
               <div>
-                <p className="text-sm font-medium">Connect an external repository</p>
+                <p className="text-sm font-medium">
+                  Connect an external repository
+                </p>
                 <p className="text-sm text-muted-foreground">
-                  Your team already keeps {areaLabel.toLowerCase()} in SharePoint, Box,
-                  Confluence, or similar. Specboards links out to it.
+                  Your team already keeps {areaLabel.toLowerCase()} in
+                  SharePoint, Box, Confluence, or similar. Specboards links out
+                  to it.
                 </p>
               </div>
               <div className="flex gap-2">
@@ -173,13 +189,16 @@ export function DocSpaceSetup({
 
         <div className="rounded-md border p-4">
           <div className="flex items-start gap-3">
-            <FileText className="mt-0.5 h-5 w-5 text-muted-foreground" aria-hidden />
+            <FileText
+              className="mt-0.5 h-5 w-5 text-muted-foreground"
+              aria-hidden
+            />
             <div className="flex-1 space-y-2">
               <div>
                 <p className="text-sm font-medium">Keep it in Specboards</p>
                 <p className="text-sm text-muted-foreground">
-                  Write and organize pages right here, with folders and rich text
-                  editing.
+                  Write and organize pages right here, with folders and rich
+                  text editing.
                 </p>
               </div>
               <Button
@@ -195,7 +214,10 @@ export function DocSpaceSetup({
 
         <div className="rounded-md border p-4">
           <div className="flex items-start gap-3">
-            <GitBranch className="mt-0.5 h-5 w-5 text-muted-foreground" aria-hidden />
+            <GitBranch
+              className="mt-0.5 h-5 w-5 text-muted-foreground"
+              aria-hidden
+            />
             <div className="flex-1 space-y-2">
               <div>
                 <p className="text-sm font-medium">Use a GitHub repository</p>
@@ -230,11 +252,13 @@ export function DocSpaceSetup({
                       Or connect an existing repository
                     </Button>
                   ) : picker === "loading" ? (
-                    <p className="text-sm text-muted-foreground">Loading repositories…</p>
+                    <p className="text-sm text-muted-foreground">
+                      Loading repositories…
+                    </p>
                   ) : picker.length === 0 ? (
                     <p className="text-sm text-muted-foreground">
-                      The GitHub App can&apos;t access any repositories yet. Grant it
-                      access on GitHub, then try again.
+                      The GitHub App can&apos;t access any repositories yet.
+                      Grant it access on GitHub, then try again.
                     </p>
                   ) : (
                     <div className="flex gap-2">
@@ -255,7 +279,9 @@ export function DocSpaceSetup({
                         onClick={() => void connectExisting()}
                         disabled={busy !== null || !pickedRepo}
                       >
-                        {busy === "connect" ? "Connecting…" : "Connect repository"}
+                        {busy === "connect"
+                          ? "Connecting…"
+                          : "Connect repository"}
                       </Button>
                     </div>
                   )}
@@ -266,7 +292,10 @@ export function DocSpaceSetup({
                     "Only a workspace admin can connect a repository."
                   ) : (
                     <>
-                      <Link href={github.installHref} className="underline hover:text-foreground">
+                      <Link
+                        href={github.installHref}
+                        className="underline hover:text-foreground"
+                      >
                         Connect the GitHub App
                       </Link>{" "}
                       to an organization first.

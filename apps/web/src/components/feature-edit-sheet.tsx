@@ -11,7 +11,8 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { AuthRequiredError, getItemDetail } from "@/lib/api-client";
+import { AuthRequiredError } from "@/lib/api-client/request";
+import { getItemDetail } from "@/lib/api-client/work-items";
 import type { ItemDetailData } from "@/lib/item-detail";
 import { useIsMobile } from "@/lib/use-media-query";
 import { useOrgProductPath } from "@/lib/use-org";
@@ -173,11 +174,7 @@ export function FeatureEditSheet({
           {error ? (
             <p className="text-sm text-destructive">{error}</p>
           ) : data ? (
-            <ItemDetailView
-              data={data}
-              variant="flyout"
-              onSpecSaved={reload}
-            />
+            <ItemDetailView data={data} variant="flyout" onSpecSaved={reload} />
           ) : (
             <p className="text-sm text-muted-foreground">Loading…</p>
           )}

@@ -7,7 +7,8 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { AuthRequiredError, createWorkItem } from "@/lib/api-client";
+import { AuthRequiredError } from "@/lib/api-client/request";
+import { createWorkItem } from "@/lib/api-client/work-items";
 import { cn } from "@/lib/utils";
 
 /**

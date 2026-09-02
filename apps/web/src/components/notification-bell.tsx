@@ -5,11 +5,11 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 import {
-  AuthRequiredError,
   listNotifications,
   markAllNotificationsRead,
   markNotificationRead,
-} from "@/lib/api-client";
+} from "@/lib/api-client/notifications";
+import { AuthRequiredError } from "@/lib/api-client/request";
 import { notificationHeadline as headline } from "@/lib/notification-copy";
 import { useOrgSlug } from "@/lib/use-org";
 import { cn } from "@/lib/utils";
@@ -36,7 +36,11 @@ function timeAgo(iso: string): string {
  * shows an unread badge, and opens a panel of @mention notifications. Clicking
  * one marks it read and deep-links to the item the source comment lives on.
  */
-export function NotificationBell({ collapsed = false }: { collapsed?: boolean }) {
+export function NotificationBell({
+  collapsed = false,
+}: {
+  collapsed?: boolean;
+}) {
   const router = useRouter();
   const org = useOrgSlug();
   const [items, setItems] = useState<NotificationRecord[]>([]);

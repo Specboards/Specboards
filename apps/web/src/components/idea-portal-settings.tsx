@@ -7,7 +7,8 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
-import { AuthRequiredError, updateIdeaSettings } from "@/lib/api-client";
+import { updateIdeaSettings } from "@/lib/api-client/ideas";
+import { AuthRequiredError } from "@/lib/api-client/request";
 import type { IdeaSettings } from "@/lib/store/types";
 
 /**
@@ -72,7 +73,8 @@ export function IdeaPortalSettings({
           </span>
           <span className="block text-xs text-muted-foreground">
             When published, customers can browse open ideas, vote, and submit
-            requests without an account. (Public site coming in a later release.)
+            requests without an account. (Public site coming in a later
+            release.)
           </span>
         </span>
       </label>

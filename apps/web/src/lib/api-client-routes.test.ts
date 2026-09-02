@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -24,7 +24,6 @@ import { describe, expect, it } from "vitest";
 
 const SRC = resolve(__dirname, "..");
 const APP_DIR = join(SRC, "app");
-const CLIENT_ENTRY = join(SRC, "lib", "api-client.ts");
 const CLIENT_DIR = join(SRC, "lib", "api-client");
 
 interface ClientSource {
@@ -32,11 +31,13 @@ interface ClientSource {
   source: string;
 }
 
-/** The compatibility entry point plus every focused client module. */
+/**
+ * Every focused client module. There is no entry point to read any more: the
+ * compatibility barrel is gone and callers import the module that owns the
+ * call, so walking this directory is the whole client.
+ */
 function clientSources(): ClientSource[] {
-  const sources = [
-    { path: CLIENT_ENTRY, source: readFileSync(CLIENT_ENTRY, "utf8") },
-  ];
+  const sources: ClientSource[] = [];
   const walk = (dir: string) => {
     for (const entry of readdirSync(dir)) {
       const full = join(dir, entry);
@@ -218,6 +219,9 @@ describe("api-client reaches routes that exist", () => {
         ),
       ).toBe(true);
     }
+    // The compatibility barrel is retired. If it comes back, every call in it
+    // is a call this walk does not see, and coverage shrinks silently again.
+    expect(existsSync(join(SRC, "lib", "api-client.ts"))).toBe(false);
     expect(calls.length).toBeGreaterThan(80);
     expect(table.size).toBeGreaterThan(50);
   });

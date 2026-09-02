@@ -5,7 +5,8 @@ import { useTransition } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import { AuthRequiredError, deleteWorkItem } from "@/lib/api-client";
+import { AuthRequiredError } from "@/lib/api-client/request";
+import { deleteWorkItem } from "@/lib/api-client/work-items";
 import { useOrgProductPath } from "@/lib/use-org";
 
 /**

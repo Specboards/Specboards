@@ -17,7 +17,6 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  AuthRequiredError,
   createGoal,
   createKeyResult,
   deleteGoal,
@@ -25,7 +24,8 @@ import {
   setGoalLink,
   updateGoal,
   updateKeyResult,
-} from "@/lib/api-client";
+} from "@/lib/api-client/planning";
+import { AuthRequiredError } from "@/lib/api-client/request";
 import { goalStatusLabel, goalStatusTone } from "@/lib/goal-status";
 import { orgProductPath } from "@/lib/org-path";
 import {
@@ -258,7 +258,9 @@ function GoalCard({
   // covers the case nesting cannot: a parent outside the current scope, whose
   // title has to come from the workspace-wide map rather than these rows.
   const parentTitle =
-    orphaned && goal.parentGoalId ? goalTitles[goal.parentGoalId] ?? null : null;
+    orphaned && goal.parentGoalId
+      ? (goalTitles[goal.parentGoalId] ?? null)
+      : null;
 
   function onDelete() {
     if (
@@ -360,7 +362,11 @@ function GoalCard({
             Key results
           </h3>
           {canEdit && !addingKr ? (
-            <Button size="inline" variant="link" onClick={() => setAddingKr(true)}>
+            <Button
+              size="inline"
+              variant="link"
+              onClick={() => setAddingKr(true)}
+            >
               Add key result
             </Button>
           ) : null}
@@ -392,7 +398,11 @@ function GoalCard({
             Contributing work
           </h3>
           {canEdit && !linking ? (
-            <Button size="inline" variant="link" onClick={() => setLinking(true)}>
+            <Button
+              size="inline"
+              variant="link"
+              onClick={() => setLinking(true)}
+            >
               Link work
             </Button>
           ) : null}
@@ -644,7 +654,9 @@ function KeyResultForm({
         ? 1
         : 0
       : Number(data.get("startValue") ?? 0);
-    const targetValue = isBoolean ? undefined : Number(data.get("targetValue") ?? 0);
+    const targetValue = isBoolean
+      ? undefined
+      : Number(data.get("targetValue") ?? 0);
 
     if (!isBoolean) {
       if (!Number.isFinite(startValue) || !Number.isFinite(targetValue!)) {
@@ -747,7 +759,9 @@ function KeyResultForm({
               />
             </label>
             <label className="block space-y-1">
-              <span className="text-xs font-medium text-muted-foreground">To</span>
+              <span className="text-xs font-medium text-muted-foreground">
+                To
+              </span>
               <Input
                 name="targetValue"
                 type="number"
@@ -1094,7 +1108,9 @@ function GoalForm({
 /** Shared error handling: bounce to sign-in on 401, toast otherwise. */
 function handleError(err: unknown, router: ReturnType<typeof useRouter>): void {
   if (err instanceof AuthRequiredError) {
-    router.push(`/sign-in?from=${encodeURIComponent(window.location.pathname)}`);
+    router.push(
+      `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
+    );
     return;
   }
   toast.error(err instanceof Error ? err.message : "Something went wrong.");

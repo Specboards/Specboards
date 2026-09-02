@@ -4,7 +4,8 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 
-import { AuthRequiredError, updateTransitionMode } from "@/lib/api-client";
+import { AuthRequiredError } from "@/lib/api-client/request";
+import { updateTransitionMode } from "@/lib/api-client/workspace-config";
 import type {
   TransitionMode,
   TransitionModeSettings,

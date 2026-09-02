@@ -19,11 +19,11 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import {
-  AuthRequiredError,
-  createWorkItem,
   estimateBreakdown,
   suggestBreakdown,
-} from "@/lib/api-client";
+} from "@/lib/api-client/assistant";
+import { AuthRequiredError } from "@/lib/api-client/request";
+import { createWorkItem } from "@/lib/api-client/work-items";
 import { formatTokenEstimate } from "@/lib/ai/estimate";
 import { pluralLevel, statusLabel } from "@/lib/feature-helpers";
 import type { WorkspaceMember } from "@/lib/workspace";
@@ -137,7 +137,9 @@ export function GenerateChildButton({
       });
     } catch (err) {
       if (err instanceof AuthRequiredError) {
-        router.push(`/sign-in?from=${encodeURIComponent(window.location.pathname)}`);
+        router.push(
+          `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
+        );
         return;
       }
       setModelError(err instanceof Error ? err.message : "That did not work.");
@@ -180,7 +182,9 @@ export function GenerateChildButton({
       );
     } catch (err) {
       if (err instanceof AuthRequiredError) {
-        router.push(`/sign-in?from=${encodeURIComponent(window.location.pathname)}`);
+        router.push(
+          `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
+        );
         return;
       }
       setError(
@@ -275,9 +279,7 @@ export function GenerateChildButton({
             <SheetTitle>Generate {label}</SheetTitle>
             <SheetDescription>
               New {plural} under “{parentTitle}”.
-              {added > 0
-                ? ` ${added} added.`
-                : ""}
+              {added > 0 ? ` ${added} added.` : ""}
             </SheetDescription>
           </SheetHeader>
           {/* Asking is an affordance, not an open panel: most visits to this
@@ -314,7 +316,9 @@ export function GenerateChildButton({
           ) : (
             <div className="space-y-3 rounded-md border border-link/40 bg-link/5 p-3">
               {suggestion.prose ? (
-                <p className="text-xs text-muted-foreground">{suggestion.prose}</p>
+                <p className="text-xs text-muted-foreground">
+                  {suggestion.prose}
+                </p>
               ) : null}
 
               {suggestion.items.length === 0 ? (
@@ -424,7 +428,11 @@ export function GenerateChildButton({
               <span className="text-xs font-medium text-muted-foreground">
                 Status
               </span>
-              <Select name="status" defaultValue={defaultStatus} className="h-8">
+              <Select
+                name="status"
+                defaultValue={defaultStatus}
+                className="h-8"
+              >
                 {workflow.statuses.map((s) => (
                   <option key={s} value={s}>
                     {statusLabel(s, workflow)}

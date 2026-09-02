@@ -10,7 +10,8 @@ import {
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
-import { AuthRequiredError, saveBoardPreferences } from "@/lib/api-client";
+import { AuthRequiredError } from "@/lib/api-client/request";
+import { saveBoardPreferences } from "@/lib/api-client/views";
 import type { BoardKey } from "@/lib/store";
 
 /**

@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 
-import { AuthRequiredError, listItemEvents } from "@/lib/api-client";
+import { AuthRequiredError } from "@/lib/api-client/request";
+import { listItemEvents } from "@/lib/api-client/work-items";
 import { historyEntries, type HistoryContext } from "@/lib/item-history";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -38,9 +39,9 @@ export function ItemHistory({
   /** Spec-backed items carry document history in git, which this does not show. */
   isSpecBacked: boolean;
 }) {
-  const [entries, setEntries] = useState<ReturnType<typeof historyEntries> | null>(
-    null,
-  );
+  const [entries, setEntries] = useState<ReturnType<
+    typeof historyEntries
+  > | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -57,7 +58,9 @@ export function ItemHistory({
           setError("Sign in to see this item's history.");
           return;
         }
-        setError(err instanceof Error ? err.message : "Could not load history.");
+        setError(
+          err instanceof Error ? err.message : "Could not load history.",
+        );
       });
     return () => {
       active = false;
@@ -105,7 +108,9 @@ export function ItemHistory({
             </span>{" "}
             {e.action}
           </span>
-          <span className="text-2xs text-muted-foreground">{when(e.createdAt)}</span>
+          <span className="text-2xs text-muted-foreground">
+            {when(e.createdAt)}
+          </span>
         </li>
       ))}
     </ul>

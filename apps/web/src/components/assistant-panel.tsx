@@ -17,16 +17,15 @@ import type { ContextField } from "@/lib/ai/item-context";
 import { parseAnswer, proposalStarted } from "@/lib/ai/proposals";
 import type { Skill } from "@/lib/ai/skills";
 import {
-  AuthRequiredError,
   askAssistant,
   askReleaseAssistant,
-  getReleaseAssistantThread,
-  resolveReleaseProposal,
   getAssistantThread,
+  getReleaseAssistantThread,
   resolveProposal,
-  ProposalStaleError,
-  SpecConflictError,
-} from "@/lib/api-client";
+  resolveReleaseProposal,
+} from "@/lib/api-client/assistant";
+import { AuthRequiredError } from "@/lib/api-client/request";
+import { ProposalStaleError, SpecConflictError } from "@/lib/api-client/specs";
 import type { AssistantMessageView } from "@/lib/assistant-service";
 import { useOrgPath } from "@/lib/use-org";
 
@@ -281,9 +280,7 @@ function ProposalReview({
           after={draft}
           // Only offered to someone who could act on the selection. A reader
           // ticking boxes that lead to no button is worse than no boxes.
-          {...(canEdit
-            ? { selected: taken, onToggleHunk: toggleHunk }
-            : {})}
+          {...(canEdit ? { selected: taken, onToggleHunk: toggleHunk } : {})}
         />
       )}
 
@@ -386,7 +383,9 @@ function AssistantTurn({
         </span>
       </div>
 
-      <div className={clamped ? "relative max-h-24 overflow-hidden" : undefined}>
+      <div
+        className={clamped ? "relative max-h-24 overflow-hidden" : undefined}
+      >
         {message.role === "assistant" ? (
           <div className="prose prose-sm prose-neutral max-w-none dark:prose-invert">
             <ReactMarkdown>{shown}</ReactMarkdown>
@@ -452,8 +451,7 @@ function AssistantTurn({
  * prop and not a second component.
  */
 type AssistantSubject =
-  | { kind: "item"; specId: string }
-  | { kind: "release"; releaseId: string };
+  { kind: "item"; specId: string } | { kind: "release"; releaseId: string };
 
 export function AssistantPanel({
   subject,
@@ -489,7 +487,9 @@ export function AssistantPanel({
   // refetch forever or need its dependency list lied about.
   const loadThread = useCallback(
     () =>
-      isItem ? getAssistantThread(subjectId) : getReleaseAssistantThread(subjectId),
+      isItem
+        ? getAssistantThread(subjectId)
+        : getReleaseAssistantThread(subjectId),
     [isItem, subjectId],
   );
   const sendTurn = useCallback(
@@ -650,7 +650,9 @@ export function AssistantPanel({
       // would vanish on the next reload anyway.
       if ("cancelled" in outcome) return false;
 
-      setFailure(assistantErrorAdvice(outcome.error.kind, outcome.error.message));
+      setFailure(
+        assistantErrorAdvice(outcome.error.kind, outcome.error.message),
+      );
       // The draft is deliberately left in the composer. Nothing was persisted,
       // so clearing it would lose the question to a failure the person can
       // often fix and retry in one click.
@@ -897,7 +899,9 @@ export function AssistantPanel({
                   key={skill.key}
                   type="button"
                   size="sm"
-                  variant={skill.key === activeSkillKey ? "secondary" : "outline"}
+                  variant={
+                    skill.key === activeSkillKey ? "secondary" : "outline"
+                  }
                   disabled={pending}
                   title={skill.description || undefined}
                   onClick={() => onRunSkill(skill)}
@@ -914,7 +918,10 @@ export function AssistantPanel({
               about it with nothing on screen explaining why. */}
           {running ? (
             <p className="text-xs text-muted-foreground">
-              Running <span className="font-medium text-foreground">{running.name}</span>
+              Running{" "}
+              <span className="font-medium text-foreground">
+                {running.name}
+              </span>
               , so your replies continue it.{" "}
               <button
                 type="button"
@@ -1019,8 +1026,8 @@ export function AssistantPanel({
               {estimate > 0 ? (
                 <p className="text-muted-foreground">
                   That is about {formatTokenEstimate(estimate)} tokens per
-                  question, and it grows as this conversation does. Your provider
-                  bills you for them.
+                  question, and it grows as this conversation does. Your
+                  provider bills you for them.
                 </p>
               ) : null}
               <ul className="space-y-1">

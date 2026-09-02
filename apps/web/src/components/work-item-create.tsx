@@ -20,7 +20,8 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { AuthRequiredError, createWorkItem } from "@/lib/api-client";
+import { AuthRequiredError } from "@/lib/api-client/request";
+import { createWorkItem } from "@/lib/api-client/work-items";
 import { statusLabel } from "@/lib/feature-helpers";
 import type { WorkspaceMember } from "@/lib/workspace";
 
@@ -101,7 +102,9 @@ export function WorkItemCreate({
   // The product this item will belong to, tracked reactively so the release
   // list narrows with the product picker. Releases offered: portfolio releases
   // (no product) plus releases scoped to this product.
-  const chosenProductId = showProductPicker ? selectedProduct : (productId ?? null);
+  const chosenProductId = showProductPicker
+    ? selectedProduct
+    : (productId ?? null);
   const visibleReleases = releases.filter(
     (r) => r.productId === null || r.productId === chosenProductId,
   );
@@ -176,7 +179,11 @@ export function WorkItemCreate({
           </SheetHeader>
           {/* Remount the form each time the drawer opens so a fresh status,
               empty assignee, and the level's template body are restored. */}
-          <form key={open ? "open" : "closed"} onSubmit={onSubmit} className="space-y-3">
+          <form
+            key={open ? "open" : "closed"}
+            onSubmit={onSubmit}
+            className="space-y-3"
+          >
             <label className="block space-y-1.5">
               <span className="text-xs font-medium text-muted-foreground">
                 Title
@@ -187,7 +194,11 @@ export function WorkItemCreate({
               <span className="text-xs font-medium text-muted-foreground">
                 Status
               </span>
-              <Select name="status" defaultValue={defaultStatus} className="h-8">
+              <Select
+                name="status"
+                defaultValue={defaultStatus}
+                className="h-8"
+              >
                 {statuses.map((s) => (
                   <option key={s} value={s}>
                     {statusLabel(s, workflow)}

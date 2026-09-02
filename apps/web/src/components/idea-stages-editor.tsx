@@ -9,7 +9,8 @@ import type { IdeaStage } from "@specboards/core";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { AuthRequiredError, updateIdeaStatuses } from "@/lib/api-client";
+import { updateIdeaStatuses } from "@/lib/api-client/ideas";
+import { AuthRequiredError } from "@/lib/api-client/request";
 
 /** A stage being edited. `key` is empty for stages added this session; the
  *  server assigns one from the label on save (existing keys stay stable). */
@@ -39,7 +40,9 @@ export function IdeaStagesEditor({
 
   const dirty =
     rows.length !== initial.length ||
-    rows.some((r, i) => r.key !== initial[i]?.key || r.label !== initial[i]?.label);
+    rows.some(
+      (r, i) => r.key !== initial[i]?.key || r.label !== initial[i]?.label,
+    );
   const valid = rows.length >= 2 && rows.every((r) => r.label.trim() !== "");
 
   function setLabel(i: number, label: string) {

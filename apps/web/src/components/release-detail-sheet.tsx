@@ -27,11 +27,11 @@ import {
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  AuthRequiredError,
   deleteRelease,
   getReleaseItems,
   updateRelease,
-} from "@/lib/api-client";
+} from "@/lib/api-client/planning";
+import { AuthRequiredError } from "@/lib/api-client/request";
 import { statusLabel } from "@/lib/feature-helpers";
 import type { ReleaseItemGroup } from "@/lib/release-items";
 import { RELEASE_STATUS_LABELS } from "@/lib/release-status";
@@ -113,7 +113,9 @@ export function ReleaseDetailSheet({
 
   function handleAuthError(err: unknown): boolean {
     if (err instanceof AuthRequiredError) {
-      router.push(`/sign-in?from=${encodeURIComponent(window.location.pathname)}`);
+      router.push(
+        `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
+      );
       return true;
     }
     return false;
@@ -156,7 +158,11 @@ export function ReleaseDetailSheet({
     })();
   }
 
-  function setStatus(status: ReleaseStatus, confirmMsg?: string, successMsg?: string) {
+  function setStatus(
+    status: ReleaseStatus,
+    confirmMsg?: string,
+    successMsg?: string,
+  ) {
     if (confirmMsg && !window.confirm(confirmMsg)) return;
     startTransition(async () => {
       try {
@@ -343,13 +349,21 @@ export function ReleaseDetailSheet({
                 )}
               </div>
 
-              <ReleaseNotesSection release={current} canEdit onCommit={commit} />
+              <ReleaseNotesSection
+                release={current}
+                canEdit
+                onCommit={commit}
+              />
 
               {/* The assistant, under the notes it writes. Collapsed by
                   default so it sits beside them rather than competing with
                   them, and because a panel that fetches on open costs nothing
                   to the majority of visits that are not asking anything. */}
-              <DetailSection id="release-assistant" title="Assistant" defaultCollapsed>
+              <DetailSection
+                id="release-assistant"
+                title="Assistant"
+                defaultCollapsed
+              >
                 <AssistantPanel
                   subject={{ kind: "release", releaseId: current.id }}
                   onApplied={() => {
@@ -412,7 +426,9 @@ export function ReleaseDetailSheet({
                       <ReactMarkdown>{current.notes}</ReactMarkdown>
                     </div>
                   ) : (
-                    <p className="text-sm text-muted-foreground">No notes yet.</p>
+                    <p className="text-sm text-muted-foreground">
+                      No notes yet.
+                    </p>
                   )}
                 </div>
               </Box>
@@ -537,9 +553,7 @@ function ReleaseItems({
     <div className="space-y-1.5">
       <div className="flex items-center gap-2">
         <span className="text-xs font-medium text-muted-foreground">Items</span>
-        {groups ? (
-          <Badge variant="counter">{count}</Badge>
-        ) : null}
+        {groups ? <Badge variant="counter">{count}</Badge> : null}
       </div>
 
       {error ? (
@@ -636,7 +650,9 @@ function ReleaseNotesSection({
   onCommit: (patch: ReleasePatch) => void;
 }) {
   // Which editor is open, or null when showing the collapsed/read view.
-  const [draftKind, setDraftKind] = useState<"in_app" | "external" | null>(null);
+  const [draftKind, setDraftKind] = useState<"in_app" | "external" | null>(
+    null,
+  );
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   const urlRef = useRef<HTMLInputElement>(null);
   const mode = release.releaseNotesMode;
@@ -737,7 +753,11 @@ function ReleaseNotesSection({
           >
             Save
           </Button>
-          <Button size="sm" variant="outline" onClick={() => setDraftKind(null)}>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setDraftKind(null)}
+          >
             Cancel
           </Button>
           {mode !== "none" ? (

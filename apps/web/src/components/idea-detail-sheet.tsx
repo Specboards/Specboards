@@ -22,12 +22,12 @@ import {
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  AuthRequiredError,
   deleteIdea,
   promoteIdea,
   setIdeaVote,
   updateIdea,
-} from "@/lib/api-client";
+} from "@/lib/api-client/ideas";
+import { AuthRequiredError } from "@/lib/api-client/request";
 import { orgProductPath } from "@/lib/org-path";
 import type { IdeaRecord } from "@/lib/store/types";
 import { cn } from "@/lib/utils";
@@ -103,7 +103,9 @@ export function IdeaDetailSheet({
 
   function handleAuthError(err: unknown): boolean {
     if (err instanceof AuthRequiredError) {
-      router.push(`/sign-in?from=${encodeURIComponent(window.location.pathname)}`);
+      router.push(
+        `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
+      );
       return true;
     }
     return false;
@@ -192,7 +194,9 @@ export function IdeaDetailSheet({
 
   function remove() {
     if (
-      !window.confirm(`Delete the idea "${current.title}"? This can't be undone.`)
+      !window.confirm(
+        `Delete the idea "${current.title}"? This can't be undone.`,
+      )
     ) {
       return;
     }
@@ -210,7 +214,11 @@ export function IdeaDetailSheet({
   }
 
   const promotedHref = current.promotedFeatureSpecId
-    ? orgProductPath(org, productSlug, `/backlog/${current.promotedFeatureSpecId}`)
+    ? orgProductPath(
+        org,
+        productSlug,
+        `/backlog/${current.promotedFeatureSpecId}`,
+      )
     : null;
   const by = current.submitterName ?? current.authorName ?? null;
 
@@ -238,7 +246,9 @@ export function IdeaDetailSheet({
               )}
             >
               <ChevronUp className="size-4" />
-              <span className="text-sm font-semibold tabular-nums">{votes}</span>
+              <span className="text-sm font-semibold tabular-nums">
+                {votes}
+              </span>
             </button>
             <IdeaStatusSelect
               status={current.status}

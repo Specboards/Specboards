@@ -19,7 +19,7 @@ import {
   type Skill,
   type SkillSurface,
 } from "@/lib/ai/skills";
-import { saveAssistantSkills } from "@/lib/api-client";
+import { saveAssistantSkills } from "@/lib/api-client/assistant";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { FormField } from "@/components/ui/form-field";
@@ -158,7 +158,9 @@ export function AssistantSkillsEditor({
       skills.map((s) =>
         s.key === skill.key ? { ...s, enabled: !s.enabled } : s,
       ),
-      skill.enabled ? `"${skill.name}" switched off.` : `"${skill.name}" switched on.`,
+      skill.enabled
+        ? `"${skill.name}" switched off.`
+        : `"${skill.name}" switched on.`,
     );
   }
 

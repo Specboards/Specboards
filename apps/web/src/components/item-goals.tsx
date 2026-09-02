@@ -10,7 +10,8 @@ import { Target } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
-import { AuthRequiredError, setGoalLink } from "@/lib/api-client";
+import { setGoalLink } from "@/lib/api-client/planning";
+import { AuthRequiredError } from "@/lib/api-client/request";
 import { useOrgProductPath } from "@/lib/use-org";
 import { goalStatusLabel, type ItemGoalRef } from "@/lib/store/types";
 
@@ -56,7 +57,12 @@ export function ItemGoals({
       </div>
 
       {goals.map((goal) => (
-        <GoalRow key={goal.goalId} specId={specId} goal={goal} canEdit={canEdit} />
+        <GoalRow
+          key={goal.goalId}
+          specId={specId}
+          goal={goal}
+          canEdit={canEdit}
+        />
       ))}
 
       {linking ? (
@@ -182,7 +188,9 @@ function LinkGoalForm({
       <Button type="button" size="sm" variant="ghost" onClick={onDone}>
         Cancel
       </Button>
-      {error ? <p className="w-full text-xs text-destructive">{error}</p> : null}
+      {error ? (
+        <p className="w-full text-xs text-destructive">{error}</p>
+      ) : null}
     </form>
   );
 }

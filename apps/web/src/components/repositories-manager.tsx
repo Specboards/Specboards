@@ -2,7 +2,13 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useTransition,
+} from "react";
 
 import {
   connectRepository,
@@ -14,7 +20,6 @@ import {
   saveManualGithubApp,
   scanWorkspaceSpecs,
   setRepositoryProducts,
-  updateRepository,
   type CreatedSpecRepo,
   type ImportResult,
   type InstallationConnectState,
@@ -24,7 +29,8 @@ import {
   type StarterSpecResult,
   type SyncResult,
   type WorkspaceInstallation,
-} from "@/lib/api-client";
+  updateRepository,
+} from "@/lib/api-client/repositories";
 import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 import {
@@ -114,8 +120,7 @@ function syncMessage(sync: SyncResult | { error: string }): {
     parts.push(`${sync.idsInjected} stable id(s) assigned`);
   if (sync.attached > 0)
     parts.push(`${sync.attached} attached to existing item(s)`);
-  if (sync.unparented > 0)
-    parts.push(`${sync.unparented} unassigned`);
+  if (sync.unparented > 0) parts.push(`${sync.unparented} unassigned`);
   return { kind: "ok", message: parts.join(" · ") };
 }
 
@@ -857,7 +862,9 @@ function SettingRow({ label, value }: { label: string; value: string }) {
 
   return (
     <div className="flex items-baseline gap-2 py-0.5">
-      <span className="w-40 shrink-0 text-2xs text-muted-foreground">{label}</span>
+      <span className="w-40 shrink-0 text-2xs text-muted-foreground">
+        {label}
+      </span>
       <code className="min-w-0 flex-1 break-all font-mono text-2xs text-foreground">
         {value}
       </code>
@@ -966,163 +973,172 @@ function ManualGitHubAppForm({
         <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-foreground">
           On GitHub: create the app
         </summary>
-      <ol className="space-y-3 border-t border-input p-3 text-xs text-muted-foreground">
-        <li>
-          <span className="font-medium text-foreground">
-            1. Open the prefilled New GitHub App page.
-          </span>{" "}
-          <a
-            href={createUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="text-link underline underline-offset-4"
-          >
-            Create the app on GitHub
-          </a>
-          <span className="mt-1 block">
-            This link carries every setting below with it, including the
-            permissions. GitHub may ask you to re-enter your password or 2FA
-            first.
-          </span>
-          <span className="mt-1 block">
-            Two pages in an organization&apos;s settings are both called
-            &ldquo;GitHub Apps&rdquo;, and only one of them is this. The app you
-            create appears under{" "}
-            <strong className="text-foreground">Developer settings</strong>, at
-            the very bottom of the sidebar. The{" "}
-            <strong className="text-foreground">Installed GitHub Apps</strong>{" "}
-            page higher up lists apps installed <em>on</em> the organization, and
-            yours will not appear there until step 4.
-          </span>
-        </li>
+        <ol className="space-y-3 border-t border-input p-3 text-xs text-muted-foreground">
+          <li>
+            <span className="font-medium text-foreground">
+              1. Open the prefilled New GitHub App page.
+            </span>{" "}
+            <a
+              href={createUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="text-link underline underline-offset-4"
+            >
+              Create the app on GitHub
+            </a>
+            <span className="mt-1 block">
+              This link carries every setting below with it, including the
+              permissions. GitHub may ask you to re-enter your password or 2FA
+              first.
+            </span>
+            <span className="mt-1 block">
+              Two pages in an organization&apos;s settings are both called
+              &ldquo;GitHub Apps&rdquo;, and only one of them is this. The app
+              you create appears under{" "}
+              <strong className="text-foreground">Developer settings</strong>,
+              at the very bottom of the sidebar. The{" "}
+              <strong className="text-foreground">Installed GitHub Apps</strong>{" "}
+              page higher up lists apps installed <em>on</em> the organization,
+              and yours will not appear there until step 4.
+            </span>
+          </li>
 
-        <li>
-          {/* Shown to be CONFIRMED, not typed. These are GitHub's parameter
+          <li>
+            {/* Shown to be CONFIRMED, not typed. These are GitHub's parameter
               names on our side of the link, so a rename upstream would stop
               prefilling one field without any error. Listing the values means
               that shows up as a visible mismatch here rather than as an
               install that fails later for no stated reason. */}
-          <span className="font-medium text-foreground">
-            2. Check the page matches this.
-          </span>{" "}
-          The link has already set it. Everything not listed can stay as GitHub
-          sets it.
-          <div className="mt-2 space-y-2">
-            <SettingRow
-              label="GitHub App name"
-              value={
-                trimmedOrg ? `Specboards (${trimmedOrg})` : "Specboards"
-              }
-            />
-            <SettingRow label="Homepage URL" value={origin} />
-            <SettingRow
-              label="Callback URL"
-              value={`${origin}/api/v1/github/oauth/callback`}
-            />
-            <SettingRow label="Setup URL" value={`${origin}/api/v1/github/setup`} />
-            <SettingRow label="Redirect on update" value="Ticked" />
-            <SettingRow
-              label="Webhook: Active"
-              value={
-                originIsPublic ? "Ticked" : "Unticked (see the note below)"
-              }
-            />
-            <SettingRow
-              label="Where can this app be installed?"
-              value="Only on this account"
-            />
-            <SettingRow
-              label="Repository permissions"
-              value="Administration: Read and write · Contents: Read and write · Issues: Read-only · Metadata: Read-only · Pull requests: Read and write"
-            />
-            <SettingRow
-              label="Organization permissions"
-              value="Members: Read-only"
-            />
-          </div>
-          <span className="mt-1 block">
-            The name has to be unique across all of GitHub, so change it if
-            GitHub says it is taken. Members is the permission most often missed
-            when this is done by hand: without it Specboards cannot check that
-            whoever installs the app administers the account, and every
-            organization install fails at the last step.
-          </span>
-        </li>
+            <span className="font-medium text-foreground">
+              2. Check the page matches this.
+            </span>{" "}
+            The link has already set it. Everything not listed can stay as
+            GitHub sets it.
+            <div className="mt-2 space-y-2">
+              <SettingRow
+                label="GitHub App name"
+                value={trimmedOrg ? `Specboards (${trimmedOrg})` : "Specboards"}
+              />
+              <SettingRow label="Homepage URL" value={origin} />
+              <SettingRow
+                label="Callback URL"
+                value={`${origin}/api/v1/github/oauth/callback`}
+              />
+              <SettingRow
+                label="Setup URL"
+                value={`${origin}/api/v1/github/setup`}
+              />
+              <SettingRow label="Redirect on update" value="Ticked" />
+              <SettingRow
+                label="Webhook: Active"
+                value={
+                  originIsPublic ? "Ticked" : "Unticked (see the note below)"
+                }
+              />
+              <SettingRow
+                label="Where can this app be installed?"
+                value="Only on this account"
+              />
+              <SettingRow
+                label="Repository permissions"
+                value="Administration: Read and write · Contents: Read and write · Issues: Read-only · Metadata: Read-only · Pull requests: Read and write"
+              />
+              <SettingRow
+                label="Organization permissions"
+                value="Members: Read-only"
+              />
+            </div>
+            <span className="mt-1 block">
+              The name has to be unique across all of GitHub, so change it if
+              GitHub says it is taken. Members is the permission most often
+              missed when this is done by hand: without it Specboards cannot
+              check that whoever installs the app administers the account, and
+              every organization install fails at the last step.
+            </span>
+          </li>
 
-        <li>
-          <span className="font-medium text-foreground">
-            3. Create it, then collect three things.
-          </span>
-          <span className="block">
-            On the app&apos;s page after creating it: the{" "}
-            <strong className="text-foreground">App ID</strong> is shown near the
-            top. Press{" "}
-            <strong className="text-foreground">Generate a new client secret</strong>{" "}
-            and copy it now, because GitHub shows it once. Scroll down and press{" "}
-            <strong className="text-foreground">Generate a private key</strong>,
-            which downloads a <code>.pem</code> file. Paste all three below.
-          </span>
-        </li>
+          <li>
+            <span className="font-medium text-foreground">
+              3. Create it, then collect three things.
+            </span>
+            <span className="block">
+              On the app&apos;s page after creating it: the{" "}
+              <strong className="text-foreground">App ID</strong> is shown near
+              the top. Press{" "}
+              <strong className="text-foreground">
+                Generate a new client secret
+              </strong>{" "}
+              and copy it now, because GitHub shows it once. Scroll down and
+              press{" "}
+              <strong className="text-foreground">
+                Generate a private key
+              </strong>
+              , which downloads a <code>.pem</code> file. Paste all three below.
+            </span>
+          </li>
 
-        <li>
-          <span className="font-medium text-foreground">
-            4. Install the app on your account or organization.
-          </span>{" "}
-          Use <em>Install App</em> in the left sidebar of the app&apos;s settings.
-          GitHub requires the private key to exist before it will let you
-          install.
-          <span className="mt-1 block">
-            Once installed, it shows up on the <em>Installed GitHub Apps</em>{" "}
-            page too. Before that it exists only under Developer settings, which
-            is why a newly created app looks missing if you go looking for it in
-            the wrong list.
-          </span>
-        </li>
-        <li>
-          <span className="font-medium text-foreground">
-            {originIsPublic ? "5. Set up the webhook." : "About the webhook."}
-          </span>{" "}
-          {originIsPublic ? (
-            <>
-              GitHub can reach this instance, so the link armed the webhook and
-              set these already. The secret is the one thing it cannot carry:
-              put the same value here and on GitHub.
-              <div className="mt-2 space-y-1">
-                <SettingRow
-                  label="Webhook URL"
-                  value={`${origin}/api/webhooks/github`}
-                />
-                <SettingRow
-                  label="Subscribe to events"
-                  value="Push · Pull request · Issues"
-                />
-              </div>
-            </>
-          ) : (
-            <>
-              This instance is at <code>{origin}</code>, which GitHub cannot
-              reach, so the link left the webhook off. Specs written here still
-              reach GitHub, because that is an outbound call. Changes pushed on
-              GitHub will not flow back until this instance has a public HTTPS
-              address.
-            </>
-          )}
-        </li>
-      </ol>
+          <li>
+            <span className="font-medium text-foreground">
+              4. Install the app on your account or organization.
+            </span>{" "}
+            Use <em>Install App</em> in the left sidebar of the app&apos;s
+            settings. GitHub requires the private key to exist before it will
+            let you install.
+            <span className="mt-1 block">
+              Once installed, it shows up on the <em>Installed GitHub Apps</em>{" "}
+              page too. Before that it exists only under Developer settings,
+              which is why a newly created app looks missing if you go looking
+              for it in the wrong list.
+            </span>
+          </li>
+          <li>
+            <span className="font-medium text-foreground">
+              {originIsPublic ? "5. Set up the webhook." : "About the webhook."}
+            </span>{" "}
+            {originIsPublic ? (
+              <>
+                GitHub can reach this instance, so the link armed the webhook
+                and set these already. The secret is the one thing it cannot
+                carry: put the same value here and on GitHub.
+                <div className="mt-2 space-y-1">
+                  <SettingRow
+                    label="Webhook URL"
+                    value={`${origin}/api/webhooks/github`}
+                  />
+                  <SettingRow
+                    label="Subscribe to events"
+                    value="Push · Pull request · Issues"
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                This instance is at <code>{origin}</code>, which GitHub cannot
+                reach, so the link left the webhook off. Specs written here
+                still reach GitHub, because that is an outbound call. Changes
+                pushed on GitHub will not flow back until this instance has a
+                public HTTPS address.
+              </>
+            )}
+          </li>
+        </ol>
       </details>
 
       <div className="space-y-1">
         <h4 className="text-xs font-medium text-foreground">
-          Back here: paste {originIsPublic ? "four things" : "three things"} from the app
+          Back here: paste {originIsPublic ? "four things" : "three things"}{" "}
+          from the app
         </h4>
         <p className="text-2xs text-muted-foreground">
-          Specboards signs in as the app to check these before saving, so a wrong
-          value is refused now rather than at your first sync.
+          Specboards signs in as the app to check these before saving, so a
+          wrong value is refused now rather than at your first sync.
         </p>
       </div>
 
       <label className="block space-y-1.5">
-        <span className="text-xs font-medium text-muted-foreground">App ID</span>
+        <span className="text-xs font-medium text-muted-foreground">
+          App ID
+        </span>
         <Input
           value={appId}
           onChange={(e) => setAppId(e.target.value)}
@@ -1239,9 +1255,9 @@ function SetupGitHubCard({
         <CardHeader>
           <CardTitle>Connect Specboards to GitHub</CardTitle>
           <CardDescription>
-            This instance is at <code>{origin}</code>, which GitHub cannot reach,
-            so GitHub will not create an app for it automatically. Create the app
-            yourself and paste its credentials here.
+            This instance is at <code>{origin}</code>, which GitHub cannot
+            reach, so GitHub will not create an app for it automatically. Create
+            the app yourself and paste its credentials here.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -1812,8 +1828,8 @@ function ConnectSection({
       <CardHeader>
         <CardTitle>Connect a repository</CardTitle>
         <CardDescription>
-          Install the Specboards GitHub App on the repositories you want to sync,
-          then connect them here. No copying ids by hand.
+          Install the Specboards GitHub App on the repositories you want to
+          sync, then connect them here. No copying ids by hand.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

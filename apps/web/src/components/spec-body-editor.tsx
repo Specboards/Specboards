@@ -6,13 +6,13 @@ import { toast } from "sonner";
 
 import { MarkdownEditor } from "@/components/markdown-editor";
 import { Button } from "@/components/ui/button";
+import { AuthRequiredError } from "@/lib/api-client/request";
 import {
-  AuthRequiredError,
   SpecConflictError,
-  updateSpecBody,
   type SpecConflict,
   type SpecWriteResult,
-} from "@/lib/api-client";
+  updateSpecBody,
+} from "@/lib/api-client/specs";
 import { saveButtonLabel, saveStatusLine } from "@/lib/spec-save-copy";
 import {
   clearDraft,
@@ -291,7 +291,8 @@ export function SpecBodyEditor({
       {draft ? (
         <div className="space-y-2 rounded-md border border-warning/50 bg-warning/5 p-3">
           <p className="text-sm font-medium">
-            You have unsaved writing on this spec from {draftAge(draft.savedAt, new Date())}
+            You have unsaved writing on this spec from{" "}
+            {draftAge(draft.savedAt, new Date())}
           </p>
           <p className="text-xs text-muted-foreground">
             {/* Which version is which is the whole question here, so it is
@@ -341,9 +342,9 @@ export function SpecBodyEditor({
             <p className="text-xs text-muted-foreground">
               Edits to other parts of the spec are merged in automatically, so
               this is a part you both rewrote. Your version is still in the
-              editor above and has not been saved. Below is what {path} says now.
-              Copy anything you need from it, then keep yours, or start again
-              from theirs.
+              editor above and has not been saved. Below is what {path} says
+              now. Copy anything you need from it, then keep yours, or start
+              again from theirs.
             </p>
           </div>
           <div className="max-h-64 overflow-auto rounded border bg-background p-3">

@@ -5,7 +5,8 @@ import { useTransition } from "react";
 
 import type { StatusWorkflow } from "@specboards/core";
 
-import { AuthRequiredError, patchFeature } from "@/lib/api-client";
+import { AuthRequiredError } from "@/lib/api-client/request";
+import { patchFeature } from "@/lib/api-client/work-items";
 import { Select } from "@/components/ui/select";
 import { statusLabel, statusOptions } from "@/lib/feature-helpers";
 

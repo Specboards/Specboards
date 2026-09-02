@@ -4,11 +4,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
-import {
-  AuthRequiredError,
-  addRelation,
-  removeRelation,
-} from "@/lib/api-client";
+import { AuthRequiredError } from "@/lib/api-client/request";
+import { addRelation, removeRelation } from "@/lib/api-client/work-items";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { useOrgProductPath } from "@/lib/use-org";
