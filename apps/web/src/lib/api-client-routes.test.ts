@@ -200,6 +200,7 @@ describe("api-client reaches routes that exist", () => {
     // must fail loudly rather than pass by checking nothing.
     for (const clientModule of [
       "assistant.ts",
+      "notifications.ts",
       "planning.ts",
       "repositories.ts",
       "specs.ts",
