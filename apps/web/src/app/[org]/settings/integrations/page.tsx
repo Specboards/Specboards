@@ -7,10 +7,8 @@ import { ConnectedAgentsCard } from "@/components/connected-agents-card";
 import { IntegrationsTabs } from "@/components/integrations-tabs";
 import { McpCard } from "@/components/mcp-card";
 import { ModelProviderCard } from "@/components/model-provider-card";
-import {
-  RepositoriesManager,
-  type SetupNotice,
-} from "@/components/repositories-manager";
+import { RepositoriesManager } from "@/components/repositories-manager";
+import type { SetupNotice } from "@/components/repositories-manager/shared";
 import {
   Card,
   CardDescription,
@@ -23,7 +21,10 @@ import { listServiceAccounts } from "@/lib/service-accounts-service";
 import { getServerSessionUser } from "@/lib/auth-session";
 import { getAppDb, getDb } from "@/lib/db";
 import { isGithubConfigured } from "@/lib/github-app";
-import { loadWorkspaceInstallations, NO_INSTALLATIONS } from "@/lib/github-connect";
+import {
+  loadWorkspaceInstallations,
+  NO_INSTALLATIONS,
+} from "@/lib/github-connect";
 import { listMcpConnections } from "@/lib/mcp/workspace-binding";
 import { getModelProvider } from "@/lib/model-provider-service";
 import { leafLevel } from "@specboards/core";
@@ -42,7 +43,9 @@ export const dynamic = "force-dynamic";
 
 /** This deployment's own origin, e.g. https://test.specboards.ai. */
 async function appOrigin(): Promise<string> {
-  const configured = (process.env.APP_URL ?? process.env.BETTER_AUTH_URL)?.trim();
+  const configured = (
+    process.env.APP_URL ?? process.env.BETTER_AUTH_URL
+  )?.trim();
   if (configured) return configured.replace(/\/+$/, "");
   const h = await headers();
   const proto = h.get("x-forwarded-proto") ?? "https";
@@ -56,12 +59,20 @@ async function mcpEndpoint(): Promise<string> {
 }
 
 /** Map the GitHub callback/setup query params to a user-facing banner. */
-function noticeFor(params: Record<string, string | string[] | undefined>): SetupNotice {
+function noticeFor(
+  params: Record<string, string | string[] | undefined>,
+): SetupNotice {
   if (params.setup === "done") {
-    return { kind: "ok", message: "GitHub app created. Now install it on your repositories below." };
+    return {
+      kind: "ok",
+      message: "GitHub app created. Now install it on your repositories below.",
+    };
   }
   if (params.connected === "1") {
-    return { kind: "ok", message: "GitHub installed. Pick the repositories to connect below." };
+    return {
+      kind: "ok",
+      message: "GitHub installed. Pick the repositories to connect below.",
+    };
   }
   const errors: Record<string, string> = {
     forbidden: "Only the owner can set up GitHub.",
@@ -74,14 +85,16 @@ function noticeFor(params: Record<string, string | string[] | undefined>): Setup
       "GitHub connections are temporarily unavailable: the app is missing its OAuth client credentials. Contact your administrator.",
     "install-denied":
       "We couldn't verify that you're an owner or admin of that GitHub account, so the installation wasn't connected.",
-    hosted: "GitHub is managed by Specboards on the hosted plan. Just install the app below.",
+    hosted:
+      "GitHub is managed by Specboards on the hosted plan. Just install the app below.",
     origin_not_public:
       "GitHub can't reach this instance, so it will refuse to create the app. " +
       "Creating a GitHub App requires a webhook URL that GitHub can deliver to over " +
       "the public internet. Set APP_URL to a public HTTPS origin for this instance, " +
       "restart it, and try again.",
   };
-  const err = typeof params.error === "string" ? errors[params.error] : undefined;
+  const err =
+    typeof params.error === "string" ? errors[params.error] : undefined;
   return err ? { kind: "error", message: err } : null;
 }
 
@@ -152,7 +165,9 @@ export default async function IntegrationsSettingsPage({
   // workspace's inference goes and only an owner can change it, so only an
   // owner is shown it.
   const modelProvider = isAdmin
-    ? appDb ? await getModelProvider(appDb, access) : null
+    ? appDb
+      ? await getModelProvider(appDb, access)
+      : null
     : null;
 
   // Owner-only for the same reason the connection is, and one more: the
@@ -213,7 +228,10 @@ export default async function IntegrationsSettingsPage({
         />
       }
       model={
-        <ModelProviderCard initialProvider={modelProvider} canManage={isAdmin} />
+        <ModelProviderCard
+          initialProvider={modelProvider}
+          canManage={isAdmin}
+        />
       }
       usage={<UsageCard initialSummary={usage} canManage={isAdmin} />}
       apiKeys={<ApiKeysCard initialKeys={initialKeys} />}
@@ -252,7 +270,11 @@ export default async function IntegrationsSettingsPage({
           selfHosted={isSingleTenant()}
           appOrigin={origin}
           originIsPublic={isPubliclyReachable(origin)}
-          installUrl={configured ? `/api/v1/github/install-start?org=${encodeURIComponent(access.orgSlug)}` : null}
+          installUrl={
+            configured
+              ? `/api/v1/github/install-start?org=${encodeURIComponent(access.orgSlug)}`
+              : null
+          }
           notice={noticeFor(params)}
           installations={installations}
           products={products.map((p) => ({ id: p.id, name: p.name }))}
