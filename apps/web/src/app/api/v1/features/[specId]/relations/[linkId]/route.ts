@@ -1,11 +1,8 @@
 import { revalidatePath } from "next/cache";
 
 import { authorizeWrite } from "@/lib/auth-session";
-import {
-  FeatureNotFoundError,
-  InvalidPatchError,
-  removeFeatureRelation,
-} from "@/lib/features-service";
+import { removeFeatureRelation } from "@/lib/relations-service";
+import { FeatureNotFoundError, InvalidPatchError } from "@/lib/service-errors";
 import { RelationError } from "@/lib/store/types";
 
 export const dynamic = "force-dynamic";

@@ -1,9 +1,9 @@
 import { authorizeCardsWrite } from "@/lib/api/cards-scope";
 import {
-  InvalidPatchError,
   parseLevelTemplatesUpdate,
   updateLevelTemplates,
-} from "@/lib/features-service";
+} from "@/lib/levels-service";
+import { InvalidPatchError } from "@/lib/service-errors";
 import { revalidateCardPages } from "@/lib/revalidate-cards";
 import { LevelError } from "@/lib/store/types";
 

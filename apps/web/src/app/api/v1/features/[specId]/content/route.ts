@@ -3,10 +3,8 @@ import { revalidatePath } from "next/cache";
 import { readJsonBody } from "@/lib/api/body";
 import { authorizeWrite } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
-import {
-  InvalidPatchError,
-  parseSpecContentInput,
-} from "@/lib/features-service";
+import { InvalidPatchError } from "@/lib/service-errors";
+import { parseSpecContentInput } from "@/lib/specs-service";
 import {
   SpecConflictError,
   SpecContentError,

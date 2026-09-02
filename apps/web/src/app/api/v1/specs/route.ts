@@ -3,11 +3,9 @@ import { revalidatePath } from "next/cache";
 import { readJsonBody } from "@/lib/api/body";
 import { authorizeWrite } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
-import {
-  InvalidPatchError,
-  parseSpecCreateInput,
-  patchFeature,
-} from "@/lib/features-service";
+import { patchFeature } from "@/lib/features-service";
+import { InvalidPatchError } from "@/lib/service-errors";
+import { parseSpecCreateInput } from "@/lib/specs-service";
 import { SpecContentError, createSpec } from "@/lib/spec-content";
 
 export const dynamic = "force-dynamic";

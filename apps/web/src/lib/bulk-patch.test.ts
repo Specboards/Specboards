@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { InvalidPatchError, parseBulkPatchRequest } from "./features-service";
+import { parseBulkPatchRequest } from "./bulk-patch-service";
+import { InvalidPatchError } from "./service-errors";
 
 describe("parseBulkPatchRequest", () => {
   const ids = ["11111111-1111-1111-1111-111111111111"];

@@ -4,11 +4,11 @@ import {
 } from "@/lib/api/cards-scope";
 import { resolveReadScope } from "@/lib/auth-session";
 import {
-  InvalidPatchError,
   createProperty,
   listProperties,
   parsePropertyInput,
-} from "@/lib/features-service";
+} from "@/lib/properties-service";
+import { InvalidPatchError } from "@/lib/service-errors";
 import { revalidateCardPages } from "@/lib/revalidate-cards";
 import { PropertyError } from "@/lib/store/types";
 

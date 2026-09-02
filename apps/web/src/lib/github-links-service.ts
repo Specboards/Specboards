@@ -14,7 +14,7 @@ import {
 import { getDb } from "@/lib/db";
 import { DomainError } from "@/lib/errors";
 import { getGithubApp } from "@/lib/github-app";
-import { FeatureNotFoundError } from "@/lib/features-service";
+import { FeatureNotFoundError } from "./service-errors";
 import {
   getStore,
   type GithubLink,

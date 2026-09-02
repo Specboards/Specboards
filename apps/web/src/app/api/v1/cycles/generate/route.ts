@@ -1,10 +1,7 @@
 import { readJsonBody } from "@/lib/api/body";
 import { authorizeWrite } from "@/lib/auth-session";
-import {
-  InvalidPatchError,
-  generateCycles,
-  parseCycleGenerateInput,
-} from "@/lib/features-service";
+import { generateCycles, parseCycleGenerateInput } from "@/lib/cycles-service";
+import { InvalidPatchError } from "@/lib/service-errors";
 import { revalidateCardPages } from "@/lib/revalidate-cards";
 import { CycleError } from "@/lib/store/types";
 

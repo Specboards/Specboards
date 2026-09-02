@@ -2,7 +2,7 @@ import { revalidatePath } from "next/cache";
 
 import { readJsonBody } from "@/lib/api/body";
 import { authorizeOrgAdmin } from "@/lib/auth-session";
-import { InvalidPatchError } from "@/lib/features-service";
+import { InvalidPatchError } from "@/lib/service-errors";
 import {
   deleteProductGroup,
   parseProductGroupPatch,

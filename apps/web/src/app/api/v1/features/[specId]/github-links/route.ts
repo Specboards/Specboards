@@ -2,7 +2,7 @@ import { revalidatePath } from "next/cache";
 
 import { readJsonBody } from "@/lib/api/body";
 import { authorizeWrite, resolveReadScope } from "@/lib/auth-session";
-import { FeatureNotFoundError } from "@/lib/features-service";
+import { FeatureNotFoundError } from "@/lib/service-errors";
 import {
   GithubNotConfiguredError,
   InvalidGithubLinkError,

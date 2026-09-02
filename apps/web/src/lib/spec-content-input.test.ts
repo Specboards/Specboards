@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { InvalidPatchError, parseSpecContentInput } from "./features-service";
+import { InvalidPatchError } from "./service-errors";
+import { parseSpecContentInput } from "./specs-service";
 
 describe("parseSpecContentInput", () => {
   it("accepts a body with content only", () => {

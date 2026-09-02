@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { InvalidPatchError, parseSpecCreateInput } from "./features-service";
+import { InvalidPatchError } from "./service-errors";
+import { parseSpecCreateInput } from "./specs-service";
 
 const ITEM = "11111111-2222-3333-4444-555555555555";
 const PARENT = "66666666-7777-8888-9999-aaaaaaaaaaaa";

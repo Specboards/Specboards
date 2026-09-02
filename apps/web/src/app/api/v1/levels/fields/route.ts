@@ -2,10 +2,10 @@ import { revalidatePath } from "next/cache";
 
 import { authorizeCardsWrite } from "@/lib/api/cards-scope";
 import {
-  InvalidPatchError,
   parseLevelFieldsUpdate,
   updateLevelFields,
-} from "@/lib/features-service";
+} from "@/lib/levels-service";
+import { InvalidPatchError } from "@/lib/service-errors";
 import { LevelError } from "@/lib/store/types";
 
 export const dynamic = "force-dynamic";

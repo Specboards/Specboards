@@ -1,11 +1,11 @@
 import { readJsonBody } from "@/lib/api/body";
 import { authorizeOrgAdmin } from "@/lib/auth-session";
 import {
-  InvalidPatchError,
   deleteDetailTemplate,
   parseDetailTemplatePatch,
   updateDetailTemplate,
-} from "@/lib/features-service";
+} from "@/lib/detail-templates-service";
+import { InvalidPatchError } from "@/lib/service-errors";
 import { revalidateCardPages } from "@/lib/revalidate-cards";
 import { DetailTemplateError } from "@/lib/store/types";
 

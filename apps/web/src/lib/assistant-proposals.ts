@@ -18,7 +18,7 @@ import {
   resolveAssistantItem,
   type AssistantMessageView,
 } from "@/lib/assistant-service";
-import { patchFeature } from "@/lib/features-service";
+import { patchFeature } from "./features-service";
 import { canEditRelease } from "@/lib/release-notes-service";
 import { getStore } from "@/lib/store";
 import { updateSpecContent } from "@/lib/spec-content";

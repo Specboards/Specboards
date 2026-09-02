@@ -1,11 +1,7 @@
 import { readJsonBody } from "@/lib/api/body";
 import { authorizeWrite, resolveReadScope } from "@/lib/auth-session";
-import {
-  InvalidPatchError,
-  createCycle,
-  listCycles,
-  parseCycleInput,
-} from "@/lib/features-service";
+import { createCycle, listCycles, parseCycleInput } from "@/lib/cycles-service";
+import { InvalidPatchError } from "@/lib/service-errors";
 import { InvalidPageError, paginate, parsePageRequest } from "@/lib/pagination";
 import { revalidateCardPages } from "@/lib/revalidate-cards";
 import { CycleError } from "@/lib/store/types";

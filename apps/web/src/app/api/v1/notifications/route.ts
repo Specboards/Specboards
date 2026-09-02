@@ -1,5 +1,5 @@
 import { resolveReadScope } from "@/lib/auth-session";
-import { listNotifications } from "@/lib/features-service";
+import { listNotifications } from "@/lib/notifications-service";
 
 export const dynamic = "force-dynamic";
 

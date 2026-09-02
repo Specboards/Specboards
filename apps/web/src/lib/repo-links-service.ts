@@ -8,7 +8,7 @@ import {
   type Database,
 } from "@specboards/db";
 
-import { InvalidPatchError } from "@/lib/features-service";
+import { InvalidPatchError } from "./service-errors";
 
 /**
  * Repo → product links (track B). Repositories aren't part of the store layer

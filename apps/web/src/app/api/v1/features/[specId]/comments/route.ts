@@ -1,11 +1,11 @@
 import { readJsonBody } from "@/lib/api/body";
 import { authorizeWrite, resolveReadScope } from "@/lib/auth-session";
 import {
-  InvalidPatchError,
   createComment,
   listComments,
   parseCommentInput,
-} from "@/lib/features-service";
+} from "@/lib/comments-service";
+import { InvalidPatchError } from "@/lib/service-errors";
 import { CommentError } from "@/lib/store/types";
 
 export const dynamic = "force-dynamic";

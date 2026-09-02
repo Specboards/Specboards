@@ -1,7 +1,7 @@
 import { revalidatePath } from "next/cache";
 
 import { authorizeWrite } from "@/lib/auth-session";
-import { FeatureNotFoundError } from "@/lib/features-service";
+import { FeatureNotFoundError } from "@/lib/service-errors";
 import { removeFeatureGithubLink } from "@/lib/github-links-service";
 import { RelationError } from "@/lib/store/types";
 

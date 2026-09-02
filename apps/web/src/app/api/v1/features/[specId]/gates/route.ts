@@ -2,11 +2,8 @@ import { revalidatePath } from "next/cache";
 
 import { readJsonBody } from "@/lib/api/body";
 import { authorizeWrite, resolveReadScope } from "@/lib/auth-session";
-import {
-  FeatureNotFoundError,
-  listGateCompletions,
-  setGateCompletion,
-} from "@/lib/features-service";
+import { FeatureNotFoundError } from "@/lib/service-errors";
+import { listGateCompletions, setGateCompletion } from "@/lib/workflow-service";
 import { getStore } from "@/lib/store";
 import { StageGateError } from "@/lib/store/types";
 

@@ -1,6 +1,6 @@
 import { readJsonBody } from "@/lib/api/body";
 import { resolveReadScope } from "@/lib/auth-session";
-import { InvalidPatchError } from "@/lib/features-service";
+import { InvalidPatchError } from "@/lib/service-errors";
 import {
   canManageProductForScope,
   listProductMembers,

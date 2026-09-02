@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { InvalidPatchError, parseKeyResultInput } from "@/lib/features-service";
+import { parseKeyResultInput } from "./goals-service";
+import { InvalidPatchError } from "./service-errors";
 
 /**
  * The untrusted-body parser for key results, where the yes-no rules live.

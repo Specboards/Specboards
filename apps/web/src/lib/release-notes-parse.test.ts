@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  InvalidPatchError,
   parseReleaseInput,
   parseReleaseNotesPatch,
   parseReleasePatch,
-} from "./features-service";
+} from "./releases-service";
+import { InvalidPatchError } from "./service-errors";
 
 describe("parseReleaseInput - customer-facing release notes", () => {
   it("defaults the release-notes fields to absent when unspecified", () => {

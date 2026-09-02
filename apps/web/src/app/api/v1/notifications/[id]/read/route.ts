@@ -1,5 +1,5 @@
 import { authorizeWrite } from "@/lib/auth-session";
-import { markNotificationRead } from "@/lib/features-service";
+import { markNotificationRead } from "@/lib/notifications-service";
 
 export const dynamic = "force-dynamic";
 
