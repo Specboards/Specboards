@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
 
@@ -16,125 +16,26 @@ import { formatTokenEstimate } from "@/lib/ai/estimate";
 import type { ContextField } from "@/lib/ai/item-context";
 import { parseAnswer, proposalStarted } from "@/lib/ai/proposals";
 import type { Skill } from "@/lib/ai/skills";
-import {
-  askAssistant,
-  askReleaseAssistant,
-  getAssistantThread,
-  getReleaseAssistantThread,
-  resolveProposal,
-  resolveReleaseProposal,
-} from "@/lib/api-client/assistant";
 import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
-import { ProposalStaleError, SpecConflictError } from "@/lib/api-client/specs";
 import type { AssistantMessageView } from "@/lib/assistant-service";
 import { useOrgPath } from "@/lib/use-org";
 
-/**
- * What to tell someone when their own model endpoint refused or could not be
- * reached.
- *
- * Separated from the component and exported so it can be tested directly: the
- * whole reason the adapter returns a `kind` instead of a string is that these
- * five failures need five different actions from the reader, and getting that
- * mapping wrong is invisible until a customer is stuck.
- *
- * `settingsLink` is the discriminator that matters: it is only true where the
- * fix is in Specboards. Sending someone to a settings page when their provider
- * is rate-limiting them wastes their time and teaches them to distrust the
- * message.
- */
-export function assistantErrorAdvice(
-  kind: string,
-  message: string,
-): { text: string; settingsLink: boolean } {
-  switch (kind) {
-    case "not_configured":
-      return { text: message, settingsLink: true };
-    // Not a failure at either end: this workspace decided beforehand how much it
-    // was willing to spend and that decision has now been enforced. The message
-    // already names the cap, what is left of it, and who can raise it, so it is
-    // passed through rather than rewritten, and it links to where that happens.
-    case "capped":
-      return { text: message, settingsLink: true };
-    case "auth":
-      return {
-        text: "The model endpoint rejected the stored key. It may have been revoked or rotated at the provider.",
-        settingsLink: true,
-      };
-    case "model":
-      return {
-        text: "The endpoint does not serve the model this workspace is configured to use.",
-        settingsLink: true,
-      };
-    case "quota":
-      return {
-        text: "The provider says this account is out of credit or has hit a spend cap. Waiting will not clear it; someone has to sort it out with the provider.",
-        settingsLink: false,
-      };
-    case "rate_limit":
-      return {
-        text: "The provider is rate-limiting or overloaded. Trying again shortly usually works.",
-        settingsLink: false,
-      };
-    case "unreachable":
-    case "blocked":
-      return { text: message, settingsLink: true };
-    default:
-      return { text: message, settingsLink: false };
-  }
-}
-
-/**
- * How much of the thread is on screen before anyone asks for more.
- *
- * A conversation is append-only and the interesting end is the bottom, but the
- * panel lives inside an item page rather than in a chat window: left whole, a
- * dozen exchanges push the composer, the goals, the relationships and
- * everything else on the card hundreds of pixels down, and the card stops being
- * about the item. Two exchanges is enough to see what was just asked and how it
- * was answered, which is the context you need to ask the next thing.
- */
-export const RECENT_TURNS = 4;
-
-/**
- * Above this, a settled message is collapsed to a preview.
- *
- * Chosen in characters rather than by measuring rendered height: measuring
- * means a layout pass, a resize observer, and a flash of the full message
- * before it snaps shut. Characters are a coarse proxy and the cost of getting
- * it slightly wrong is one extra "Show more" on a message that did not need it.
- */
-const LONG_MESSAGE_CHARS = 1_200;
-
-/**
- * The slice of the thread to render, and how much is being held back.
- *
- * Kept as a pure function because the off-by-one here is the whole feature: a
- * window that drops the newest turn instead of the oldest looks almost right
- * and is useless, and that is not something you notice by reading it.
- */
-export function threadWindow(
-  messages: AssistantMessageView[],
-  showAll: boolean,
-): { visible: AssistantMessageView[]; hidden: number } {
-  if (showAll || messages.length <= RECENT_TURNS) {
-    return { visible: messages, hidden: 0 };
-  }
-  return {
-    // The tail, not the head: the end of a conversation is the part you are
-    // still in.
-    visible: messages.slice(-RECENT_TURNS),
-    hidden: messages.length - RECENT_TURNS,
-  };
-}
-
-/** Compact clock time for a turn, with the full timestamp on hover. */
-function turnTime(iso: string): string {
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime())
-    ? ""
-    : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
+import {
+  resolutionEffect,
+  resolutionFailure,
+  turnResult,
+} from "@/components/assistant-panel/outcomes";
+import {
+  assistantApi,
+  subjectId as idOf,
+  subjectNoun,
+  type AssistantSubject,
+} from "@/components/assistant-panel/subject";
+import {
+  LONG_MESSAGE_CHARS,
+  threadWindow,
+  turnTime,
+} from "@/components/assistant-panel/thread";
 
 /**
  * A proposed edit, and the decision about it.
@@ -441,18 +342,6 @@ function AssistantTurn({
  * accepts it here. The panel never applies anything itself: accepting posts to
  * the item's own write route, which is the same one a hand-made edit takes.
  */
-/**
- * What a panel is about.
- *
- * A discriminated union rather than two optional ids, so a caller cannot render
- * a panel about both or about neither. The panel itself is almost entirely
- * subject-agnostic: streaming, history, skills, the disclosure and the proposal
- * review are the same job whatever is being discussed, which is why this is a
- * prop and not a second component.
- */
-type AssistantSubject =
-  { kind: "item"; specId: string } | { kind: "release"; releaseId: string };
-
 export function AssistantPanel({
   subject,
   onApplied,
@@ -477,38 +366,17 @@ export function AssistantPanel({
   // The three calls that differ by subject, resolved in one place. Everything
   // below this line reads the same for an item and for a release.
   const isItem = subject.kind === "item";
-  const subjectId = isItem ? subject.specId : subject.releaseId;
+  const id = idOf(subject);
   /** What this panel calls the thing it is about, in copy shown to a person. */
-  const noun = isItem ? "item" : "release";
+  const noun = subjectNoun(subject);
 
-  // Closed over two primitives rather than over `subject`, so each callback is
+  // Memoized on two primitives rather than on `subject`, so the three calls are
   // stable for as long as the subject is. Closing over the prop object would
   // rebuild them every render, and the load effect below would then either
   // refetch forever or need its dependency list lied about.
-  const loadThread = useCallback(
-    () =>
-      isItem
-        ? getAssistantThread(subjectId)
-        : getReleaseAssistantThread(subjectId),
-    [isItem, subjectId],
-  );
-  const sendTurn = useCallback(
-    (message: string, opts: Parameters<typeof askAssistant>[2]) =>
-      isItem
-        ? askAssistant(subjectId, message, opts)
-        : askReleaseAssistant(subjectId, message, opts),
-    [isItem, subjectId],
-  );
-  const sendResolution = useCallback(
-    (
-      messageId: string,
-      action: "accept" | "reject",
-      opts: { body?: string },
-    ) =>
-      isItem
-        ? resolveProposal(subjectId, messageId, action, opts)
-        : resolveReleaseProposal(subjectId, messageId, action, opts),
-    [isItem, subjectId],
+  const { loadThread, sendTurn, sendResolution } = useMemo(
+    () => assistantApi(isItem, id),
+    [isItem, id],
   );
   const [messages, setMessages] = useState<AssistantMessageView[] | null>(null);
   const [context, setContext] = useState<ContextField[]>([]);
@@ -639,20 +507,15 @@ export function AssistantPanel({
         skillKey,
       });
 
-      if (outcome.ok) {
-        setMessages((prev) => [...(prev ?? []), ...outcome.turns]);
+      const result = turnResult(outcome);
+      if (result.kind === "landed") {
+        setMessages((prev) => [...(prev ?? []), ...result.turns]);
         setDraft("");
         return true;
       }
-      // Cancelling is not a failure and gets no error panel. The partial
-      // answer is dropped rather than left on screen, because the server
-      // stored nothing: showing it would imply a turn that does not exist and
-      // would vanish on the next reload anyway.
-      if ("cancelled" in outcome) return false;
+      if (result.kind === "cancelled") return false;
 
-      setFailure(
-        assistantErrorAdvice(outcome.error.kind, outcome.error.message),
-      );
+      setFailure(result.advice);
       // The draft is deliberately left in the composer. Nothing was persisted,
       // so clearing it would lose the question to a failure the person can
       // often fix and retry in one click.
@@ -701,59 +564,21 @@ export function AssistantPanel({
       );
       setItemBody(outcome.body);
 
-      if (action === "reject") {
-        toast.success("Left as it is.");
-        return;
-      }
-      // Before any toast or refresh: the editor above is holding the old body
-      // and will write it back on the next keystroke.
-      if (!outcome.pullRequest) onApplied?.(outcome.body);
-      if (outcome.pullRequest) {
-        toast.success(
-          outcome.pullRequest.created
-            ? `Sent for review as #${outcome.pullRequest.number}`
-            : `Added to review #${outcome.pullRequest.number}`,
-        );
-        // Nothing on the default branch changed, so there is nothing to refetch
-        // and a refresh would redraw the old text as if the accept had failed.
-        return;
-      }
-      toast.success(
-        outcome.mergedWith
-          ? "Applied, and merged with a change made in the meantime."
-          : `Applied to the ${noun}.`,
-      );
+      // In this order. The reseed goes first because the editor above is
+      // holding the old body and will write it back on the next keystroke.
+      const effect = resolutionEffect(action, outcome, subject);
+      if (effect.reseedHost !== null) onApplied?.(effect.reseedHost);
+      toast.success(effect.toast);
       // The description elsewhere on the page is server-rendered, so it keeps
       // showing the old text until this runs.
-      router.refresh();
+      if (effect.refresh) router.refresh();
     } catch (err) {
       if (redirectOnAuthExpiry(err, router)) return;
-      if (err instanceof SpecConflictError) {
-        // The proposal stays open rather than being marked resolved: it was
-        // not applied, and a card claiming otherwise is worse than the error.
-        setProposalError(
-          `${err.message} Open the description and edit it there, or ask the ` +
-            "assistant again now that the spec has moved.",
-        );
-        setItemBody(err.conflict.currentContent);
-        return;
-      }
-      if (err instanceof ProposalStaleError) {
-        // The same shape as the conflict above, and for the same reason: the
-        // proposal stays open, and the diff is redrawn against the text that
-        // won. Without the second line the reviewer is told their base is gone
-        // while still looking at it, which is the stale-diff problem the guard
-        // exists to close rather than a smaller version of it.
-        setProposalError(
-          `${err.message} The diff below now compares against the current ` +
-            `${noun === "release" ? "notes" : "description"}.`,
-        );
-        setItemBody(err.currentBody);
-        return;
-      }
-      setProposalError(
-        err instanceof Error ? err.message : "That did not go through.",
-      );
+      // The proposal stays open rather than being marked resolved: it was not
+      // applied, and a card claiming otherwise is worse than the error.
+      const failed = resolutionFailure(err, subject);
+      setProposalError(failed.message);
+      if (failed.body !== null) setItemBody(failed.body);
     } finally {
       setResolving(null);
     }

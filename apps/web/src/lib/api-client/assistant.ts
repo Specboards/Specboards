@@ -160,7 +160,7 @@ export async function estimateBreakdown(
 }
 
 /** What came back from accepting or rejecting a proposed edit. */
-interface ProposalOutcome {
+export interface ProposalOutcome {
   message: AssistantMessageView;
   /** The item's description afterwards, so the diff baseline moves with it. */
   body: string;
