@@ -25,7 +25,7 @@ import {
   updateGoal,
   updateKeyResult,
 } from "@/lib/api-client/planning";
-import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import { goalStatusLabel, goalStatusTone } from "@/lib/goal-status";
 import { orgProductPath } from "@/lib/org-path";
 import {
@@ -693,7 +693,7 @@ function KeyResultForm({
         onDone();
         router.refresh();
       } catch (err) {
-        if (err instanceof AuthRequiredError) return handleError(err, router);
+        if (redirectOnAuthExpiry(err, router)) return;
         setError(err instanceof Error ? err.message : "Save failed.");
       }
     });
@@ -849,7 +849,7 @@ function LinkForm({
         onDone();
         router.refresh();
       } catch (err) {
-        if (err instanceof AuthRequiredError) return handleError(err, router);
+        if (redirectOnAuthExpiry(err, router)) return;
         setError(err instanceof Error ? err.message : "Link failed.");
       }
     });
@@ -971,7 +971,7 @@ function GoalForm({
         onDone();
         router.refresh();
       } catch (err) {
-        if (err instanceof AuthRequiredError) return handleError(err, router);
+        if (redirectOnAuthExpiry(err, router)) return;
         setError(err instanceof Error ? err.message : "Save failed.");
       }
     });
@@ -1107,11 +1107,6 @@ function GoalForm({
 
 /** Shared error handling: bounce to sign-in on 401, toast otherwise. */
 function handleError(err: unknown, router: ReturnType<typeof useRouter>): void {
-  if (err instanceof AuthRequiredError) {
-    router.push(
-      `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
-    );
-    return;
-  }
+  if (redirectOnAuthExpiry(err, router)) return;
   toast.error(err instanceof Error ? err.message : "Something went wrong.");
 }

@@ -5,7 +5,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { Select } from "@/components/ui/select";
-import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import { patchFeature } from "@/lib/api-client/work-items";
 
 /**
@@ -35,12 +35,7 @@ export function FeatureParentSelect({
       await patchFeature(specId, { parentSpecId: value || null });
       router.refresh();
     } catch (err) {
-      if (err instanceof AuthRequiredError) {
-        router.push(
-          `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
-        );
-        return;
-      }
+      if (redirectOnAuthExpiry(err, router)) return;
       toast.error(err instanceof Error ? err.message : "Save failed.");
     } finally {
       setSaving(false);

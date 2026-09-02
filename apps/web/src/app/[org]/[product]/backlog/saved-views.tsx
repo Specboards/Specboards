@@ -3,7 +3,7 @@
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useState, useTransition } from "react";
 
-import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import { deleteView, saveView } from "@/lib/api-client/views";
 import { withViewParams } from "@/lib/backlog-query";
 import {
@@ -81,10 +81,7 @@ export function SavedViews({
         });
         router.refresh();
       } catch (err) {
-        if (err instanceof AuthRequiredError) {
-          router.push(`/sign-in?from=${encodeURIComponent(pathname)}`);
-          return;
-        }
+        if (redirectOnAuthExpiry(err, router)) return;
         setError(err instanceof Error ? err.message : "Save failed.");
       }
     });
@@ -97,10 +94,7 @@ export function SavedViews({
         await deleteView(id);
         router.refresh();
       } catch (err) {
-        if (err instanceof AuthRequiredError) {
-          router.push(`/sign-in?from=${encodeURIComponent(pathname)}`);
-          return;
-        }
+        if (redirectOnAuthExpiry(err, router)) return;
         setError(err instanceof Error ? err.message : "Delete failed.");
       }
     });

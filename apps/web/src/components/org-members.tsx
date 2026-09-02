@@ -1,5 +1,7 @@
 "use client";
 
+import { useRouter } from "next/navigation";
+
 import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
 
@@ -16,7 +18,7 @@ import {
   revokeInvitation,
   updateOrgMember,
 } from "@/lib/api-client/organization";
-import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import type {
   InvitationProductGrant,
   MemberDisplayRole,
@@ -51,10 +53,6 @@ const PRODUCT_ROLE_LABEL: Record<ProductRole, string> = {
 /** Sentinel for "no access to this product" in the grant picker. */
 const NO_ACCESS = "";
 
-function onAuthError() {
-  window.location.href = "/sign-in";
-}
-
 /**
  * The org's Team roster (Settings → Company & Team). Everyone sees the member
  * list; the owner additionally gets role controls (Owner/Member), remove,
@@ -75,6 +73,7 @@ export function OrgMembers({
   canManage: boolean;
   products: InviteProduct[];
 }) {
+  const router = useRouter();
   const [members, setMembers] = useState<OrgMemberRecord[]>(initialMembers);
   const [invites, setInvites] = useState<OrgInvitationRecord[] | null>(null);
   const [pending, startTransition] = useTransition();
@@ -99,7 +98,7 @@ export function OrgMembers({
     try {
       setMembers(await listOrgMembers());
     } catch (err) {
-      if (err instanceof AuthRequiredError) return onAuthError();
+      if (redirectOnAuthExpiry(err, router)) return;
     }
   }
 
@@ -108,7 +107,7 @@ export function OrgMembers({
       try {
         await action();
       } catch (err) {
-        if (err instanceof AuthRequiredError) return onAuthError();
+        if (redirectOnAuthExpiry(err, router)) return;
         toast.error(
           err instanceof Error ? err.message : "Something went wrong.",
         );
@@ -264,6 +263,7 @@ function InviteForm({
   disabled: boolean;
   onInvited: (inv: OrgInvitationRecord) => void;
 }) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<OrgRole>("member");
@@ -305,7 +305,7 @@ function InviteForm({
         setOpen(false);
         toast.success(`Invitation sent to ${address}.`);
       } catch (err) {
-        if (err instanceof AuthRequiredError) return onAuthError();
+        if (redirectOnAuthExpiry(err, router)) return;
         toast.error(err instanceof Error ? err.message : "Invite failed.");
       }
     });
@@ -429,6 +429,7 @@ function PendingInvites({
   disabled: boolean;
   onChanged: () => void;
 }) {
+  const router = useRouter();
   const [pending, startTransition] = useTransition();
 
   if (invites === null) {
@@ -446,7 +447,7 @@ function PendingInvites({
         toast.success(done);
         onChanged();
       } catch (err) {
-        if (err instanceof AuthRequiredError) return onAuthError();
+        if (redirectOnAuthExpiry(err, router)) return;
         toast.error(err instanceof Error ? err.message : "Action failed.");
       }
     });

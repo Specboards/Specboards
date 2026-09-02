@@ -22,7 +22,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { createIdea, setIdeaVote, updateIdea } from "@/lib/api-client/ideas";
-import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import type { IdeaRecord } from "@/lib/store/types";
 import { cn } from "@/lib/utils";
 
@@ -244,12 +244,7 @@ function IdeaCreate({
         setOpen(false);
         router.refresh();
       } catch (err) {
-        if (err instanceof AuthRequiredError) {
-          router.push(
-            `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
-          );
-          return;
-        }
+        if (redirectOnAuthExpiry(err, router)) return;
         setError(err instanceof Error ? err.message : "Capture failed.");
       }
     });
@@ -346,16 +341,6 @@ function IdeaRow({
     setVotes(idea.voteCount);
   }, [idea.viewerHasVoted, idea.voteCount]);
 
-  function handleAuthError(err: unknown): boolean {
-    if (err instanceof AuthRequiredError) {
-      router.push(
-        `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
-      );
-      return true;
-    }
-    return false;
-  }
-
   function toggleVote() {
     const next = !voted;
     setVoted(next);
@@ -367,7 +352,7 @@ function IdeaRow({
       } catch (err) {
         setVoted(!next);
         setVotes((n) => n + (next ? -1 : 1));
-        if (handleAuthError(err)) return;
+        if (redirectOnAuthExpiry(err, router)) return;
         toast.error(err instanceof Error ? err.message : "Vote failed.");
       }
     });
@@ -380,7 +365,7 @@ function IdeaRow({
         toast.success("Status updated");
         router.refresh();
       } catch (err) {
-        if (handleAuthError(err)) return;
+        if (redirectOnAuthExpiry(err, router)) return;
         toast.error(err instanceof Error ? err.message : "Update failed.");
       }
     });

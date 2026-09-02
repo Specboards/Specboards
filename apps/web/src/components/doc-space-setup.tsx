@@ -1,5 +1,7 @@
 "use client";
 
+import { useRouter } from "next/navigation";
+
 import { ExternalLink, FileText, GitBranch } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
@@ -15,7 +17,7 @@ import {
   listInstallationRepositories,
   type InstallationRepo,
 } from "@/lib/api-client/repositories";
-import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import type { DocArea } from "@/lib/store/types";
 
 /** What the GitHub option can do for this workspace (computed server-side). */
@@ -53,6 +55,7 @@ export function DocSpaceSetup({
   /** Present when a source already exists and this is a change, not setup. */
   onCancel?: () => void;
 }) {
+  const router = useRouter();
   const [externalUrl, setExternalUrl] = useState("");
   const [repoName, setRepoName] = useState(github.suggestedName);
   const [busy, setBusy] = useState<
@@ -66,10 +69,7 @@ export function DocSpaceSetup({
   const [error, setError] = useState<string | null>(null);
 
   function fail(err: unknown) {
-    if (err instanceof AuthRequiredError) {
-      window.location.href = `/sign-in?from=${encodeURIComponent(window.location.pathname)}`;
-      return;
-    }
+    if (redirectOnAuthExpiry(err, router)) return;
     setError(err instanceof Error ? err.message : "Save failed.");
     setBusy(null);
   }

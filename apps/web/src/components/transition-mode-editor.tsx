@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 
-import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import { updateTransitionMode } from "@/lib/api-client/workspace-config";
 import type {
   TransitionMode,
@@ -125,12 +125,7 @@ export function TransitionModeEditor({
         router.refresh();
       } catch (err) {
         setSettings(previous);
-        if (err instanceof AuthRequiredError) {
-          router.push(
-            `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
-          );
-          return;
-        }
+        if (redirectOnAuthExpiry(err, router)) return;
         setError(err instanceof Error ? err.message : "Could not save.");
       }
     });

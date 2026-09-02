@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { CardsOverride } from "@/components/cards-override";
-import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import { updateStageGates } from "@/lib/api-client/workspace-config";
 import { statusDotColor } from "@/lib/feature-helpers";
 import type { StageGate } from "@/lib/store/types";
@@ -131,12 +131,7 @@ export function WorkflowGatesEditor({
         toast.success("Stage gates saved");
         router.refresh();
       } catch (err) {
-        if (err instanceof AuthRequiredError) {
-          router.push(
-            `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
-          );
-          return;
-        }
+        if (redirectOnAuthExpiry(err, router)) return;
         setError(err instanceof Error ? err.message : "Save failed.");
       }
     });

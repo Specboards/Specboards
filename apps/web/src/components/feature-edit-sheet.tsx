@@ -1,5 +1,7 @@
 "use client";
 
+import { useRouter } from "next/navigation";
+
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { Maximize2 } from "lucide-react";
@@ -11,7 +13,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import { getItemDetail } from "@/lib/api-client/work-items";
 import type { ItemDetailData } from "@/lib/item-detail";
 import { useIsMobile } from "@/lib/use-media-query";
@@ -44,6 +46,7 @@ export function FeatureEditSheet({
   specId: string | null;
   onClose: () => void;
 }) {
+  const router = useRouter();
   const [data, setData] = useState<ItemDetailData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [width, setWidth] = useState(DEFAULT_WIDTH);
@@ -78,10 +81,7 @@ export function FeatureEditSheet({
       })
       .catch((err) => {
         if (cancelled) return;
-        if (err instanceof AuthRequiredError) {
-          window.location.href = `/sign-in?from=${encodeURIComponent(window.location.pathname)}`;
-          return;
-        }
+        if (redirectOnAuthExpiry(err, router)) return;
         setError(err instanceof Error ? err.message : "Failed to load item.");
       });
     return () => {

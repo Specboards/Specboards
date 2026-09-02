@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 import { MarkdownEditor } from "@/components/markdown-editor";
-import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import { patchFeature } from "@/lib/api-client/work-items";
 
 /**
@@ -63,12 +63,7 @@ export function FeatureDetailsEditor({
       setStatus("saved");
       router.refresh();
     } catch (err) {
-      if (err instanceof AuthRequiredError) {
-        router.push(
-          `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
-        );
-        return;
-      }
+      if (redirectOnAuthExpiry(err, router)) return;
       setStatus("idle");
       setError(err instanceof Error ? err.message : "Save failed.");
     } finally {

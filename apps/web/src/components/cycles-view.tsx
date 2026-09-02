@@ -24,7 +24,7 @@ import {
   rolloverCycle,
   updateCycle,
 } from "@/lib/api-client/planning";
-import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import { statusLabel } from "@/lib/feature-helpers";
 import { orgProductPath } from "@/lib/org-path";
 import {
@@ -256,12 +256,7 @@ function CycleCard({
         toast.success("Cycle deleted");
         router.refresh();
       } catch (err) {
-        if (err instanceof AuthRequiredError) {
-          router.push(
-            `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
-          );
-          return;
-        }
+        if (redirectOnAuthExpiry(err, router)) return;
         toast.error(err instanceof Error ? err.message : "Delete failed.");
       }
     });
@@ -485,12 +480,7 @@ function GenerateScheduleForm({
         onDone();
         router.refresh();
       } catch (err) {
-        if (err instanceof AuthRequiredError) {
-          router.push(
-            `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
-          );
-          return;
-        }
+        if (redirectOnAuthExpiry(err, router)) return;
         setError(err instanceof Error ? err.message : "Generate failed.");
       }
     });
@@ -722,12 +712,7 @@ function CycleForm({
         onDone();
         router.refresh();
       } catch (err) {
-        if (err instanceof AuthRequiredError) {
-          router.push(
-            `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
-          );
-          return;
-        }
+        if (redirectOnAuthExpiry(err, router)) return;
         setError(err instanceof Error ? err.message : "Save failed.");
       }
     });
@@ -865,12 +850,7 @@ function RolloverForm({
         onDone();
         router.refresh();
       } catch (err) {
-        if (err instanceof AuthRequiredError) {
-          router.push(
-            `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
-          );
-          return;
-        }
+        if (redirectOnAuthExpiry(err, router)) return;
         setError(err instanceof Error ? err.message : "Rollover failed.");
       }
     });

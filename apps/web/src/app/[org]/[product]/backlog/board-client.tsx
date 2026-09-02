@@ -38,7 +38,7 @@ import { FeatureEditSheet } from "@/components/feature-edit-sheet";
 import { MoveMenu, type MoveOption } from "@/components/move-menu";
 import { StatusDot } from "@/components/status-dot";
 import { Badge } from "@/components/ui/badge";
-import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import { patchFeature } from "@/lib/api-client/work-items";
 import { useAnnouncer } from "@/lib/use-announcer";
 import { useIsCoarsePointer, useIsMobile } from "@/lib/use-media-query";
@@ -318,12 +318,7 @@ export function BoardClient({
       .catch((err) => {
         setLists(prevLists);
         setRecords(prevRecords);
-        if (err instanceof AuthRequiredError) {
-          router.push(
-            `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
-          );
-          return;
-        }
+        if (redirectOnAuthExpiry(err, router)) return;
         toast.error(err instanceof Error ? err.message : "Move failed.");
       });
   }
@@ -355,12 +350,7 @@ export function BoardClient({
       .catch((err) => {
         setLists(prevLists);
         setRecords(prevRecords);
-        if (err instanceof AuthRequiredError) {
-          router.push(
-            `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
-          );
-          return;
-        }
+        if (redirectOnAuthExpiry(err, router)) return;
         toast.error(err instanceof Error ? err.message : "Move failed.");
       });
   }

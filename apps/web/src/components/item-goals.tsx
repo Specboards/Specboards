@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { setGoalLink } from "@/lib/api-client/planning";
-import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import { useOrgProductPath } from "@/lib/use-org";
 import { goalStatusLabel, type ItemGoalRef } from "@/lib/store/types";
 
@@ -114,12 +114,7 @@ function GoalRow({
                 await setGoalLink(goal.goalId, specId, false);
                 router.refresh();
               } catch (err) {
-                if (err instanceof AuthRequiredError) {
-                  router.push(
-                    `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
-                  );
-                  return;
-                }
+                if (redirectOnAuthExpiry(err, router)) return;
                 toast.error(
                   err instanceof Error ? err.message : "Unlink failed.",
                 );
@@ -158,12 +153,7 @@ function LinkGoalForm({
         onDone();
         router.refresh();
       } catch (err) {
-        if (err instanceof AuthRequiredError) {
-          router.push(
-            `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
-          );
-          return;
-        }
+        if (redirectOnAuthExpiry(err, router)) return;
         setError(err instanceof Error ? err.message : "Link failed.");
       }
     });

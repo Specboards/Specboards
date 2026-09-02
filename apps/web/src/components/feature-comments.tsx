@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 
-import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import {
   createComment,
   deleteComment,
@@ -86,16 +86,6 @@ export function FeatureComments({
     };
   }, [specId]);
 
-  function handleAuth(err: unknown): boolean {
-    if (err instanceof AuthRequiredError) {
-      router.push(
-        `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
-      );
-      return true;
-    }
-    return false;
-  }
-
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const text = body.trim();
@@ -112,7 +102,7 @@ export function FeatureComments({
         setMentionedUserIds([]);
         setAdding(false);
       } catch (err) {
-        if (handleAuth(err)) return;
+        if (redirectOnAuthExpiry(err, router)) return;
         setActionError(
           err instanceof Error ? err.message : "Could not post comment.",
         );
@@ -127,7 +117,7 @@ export function FeatureComments({
         await deleteComment(id);
         setComments((prev) => (prev ?? []).filter((c) => c.id !== id));
       } catch (err) {
-        if (handleAuth(err)) return;
+        if (redirectOnAuthExpiry(err, router)) return;
         setActionError(
           err instanceof Error ? err.message : "Could not delete comment.",
         );

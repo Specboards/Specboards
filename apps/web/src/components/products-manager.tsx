@@ -49,7 +49,7 @@ import {
   updateProduct,
   updateProductGroup,
 } from "@/lib/api-client/products";
-import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import { productDotColor } from "@/lib/product-color";
 import type {
   ProductGroupPatch,
@@ -207,10 +207,6 @@ export function ProductsManager({
     setProducts((ps) => ps.map((p) => (p.id === product.id ? product : p)));
   }
 
-  function onAuthError() {
-    window.location.href = "/sign-in";
-  }
-
   function onDeleteProduct(product: ProductRecord) {
     if (!confirm(`Delete “${product.name}”? This can't be undone.`)) return;
     startTransition(async () => {
@@ -220,7 +216,7 @@ export function ProductsManager({
         toast.success("Product deleted");
         router.refresh();
       } catch (err) {
-        if (err instanceof AuthRequiredError) return onAuthError();
+        if (redirectOnAuthExpiry(err, router)) return;
         toast.error(err instanceof Error ? err.message : "Delete failed.");
       }
     });
@@ -234,7 +230,7 @@ export function ProductsManager({
         toast.success("Group deleted");
         router.refresh();
       } catch (err) {
-        if (err instanceof AuthRequiredError) return onAuthError();
+        if (redirectOnAuthExpiry(err, router)) return;
         toast.error(err instanceof Error ? err.message : "Delete failed.");
       }
     });
@@ -270,7 +266,7 @@ export function ProductsManager({
       })
       .catch((err) => {
         onProductSaved(prev);
-        if (err instanceof AuthRequiredError) return onAuthError();
+        if (redirectOnAuthExpiry(err, router)) return;
         toast.error(err instanceof Error ? err.message : "Move failed.");
       });
   }
@@ -338,7 +334,7 @@ export function ProductsManager({
       })
       .catch((err) => {
         setGroups(prevGroups);
-        if (err instanceof AuthRequiredError) return onAuthError();
+        if (redirectOnAuthExpiry(err, router)) return;
         toast.error(err instanceof Error ? err.message : "Move failed.");
       });
   }
@@ -945,10 +941,7 @@ function CreateGroupSheet({
         setColor(null);
         router.refresh();
       } catch (err) {
-        if (err instanceof AuthRequiredError) {
-          router.push("/sign-in");
-          return;
-        }
+        if (redirectOnAuthExpiry(err, router)) return;
         setError(err instanceof Error ? err.message : "Create failed.");
       }
     });
@@ -1046,10 +1039,7 @@ function EditGroupSheet({
         onOpenChange(false);
         router.refresh();
       } catch (err) {
-        if (err instanceof AuthRequiredError) {
-          router.push("/sign-in");
-          return;
-        }
+        if (redirectOnAuthExpiry(err, router)) return;
         setError(err instanceof Error ? err.message : "Save failed.");
       }
     });
@@ -1161,10 +1151,7 @@ function EditProductSheet({
         onOpenChange(false);
         router.refresh();
       } catch (err) {
-        if (err instanceof AuthRequiredError) {
-          router.push("/sign-in");
-          return;
-        }
+        if (redirectOnAuthExpiry(err, router)) return;
         setError(err instanceof Error ? err.message : "Save failed.");
       }
     });
@@ -1291,10 +1278,7 @@ function CreateProductSheet({
         onOpenChange(false);
         router.refresh();
       } catch (err) {
-        if (err instanceof AuthRequiredError) {
-          router.push("/sign-in");
-          return;
-        }
+        if (redirectOnAuthExpiry(err, router)) return;
         setError(err instanceof Error ? err.message : "Create failed.");
       }
     });

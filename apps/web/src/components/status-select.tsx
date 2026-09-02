@@ -5,7 +5,7 @@ import { useTransition } from "react";
 
 import type { StatusWorkflow } from "@specboards/core";
 
-import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import { patchFeature } from "@/lib/api-client/work-items";
 import { Select } from "@/components/ui/select";
 import { statusLabel, statusOptions } from "@/lib/feature-helpers";
@@ -41,12 +41,7 @@ export function StatusSelect({
           try {
             await patchFeature(specId, { status: next });
           } catch (err) {
-            if (err instanceof AuthRequiredError) {
-              router.push(
-                `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
-              );
-              return;
-            }
+            if (redirectOnAuthExpiry(err, router)) return;
             // Reverts the optimistic value by re-rendering from the server.
           }
           router.refresh();

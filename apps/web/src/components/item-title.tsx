@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useLayoutEffect, useRef, useState } from "react";
 
-import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import { patchFeature } from "@/lib/api-client/work-items";
 import { cn } from "@/lib/utils";
 
@@ -59,12 +59,7 @@ export function ItemTitle({
       setValue(next);
       router.refresh();
     } catch (err) {
-      if (err instanceof AuthRequiredError) {
-        router.push(
-          `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
-        );
-        return;
-      }
+      if (redirectOnAuthExpiry(err, router)) return;
       setError(err instanceof Error ? err.message : "Rename failed.");
     }
   }

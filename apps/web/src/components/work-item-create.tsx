@@ -20,7 +20,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import { createWorkItem } from "@/lib/api-client/work-items";
 import { statusLabel } from "@/lib/feature-helpers";
 import type { WorkspaceMember } from "@/lib/workspace";
@@ -150,12 +150,7 @@ export function WorkItemCreate({
         setOpen(false);
         router.refresh();
       } catch (err) {
-        if (err instanceof AuthRequiredError) {
-          router.push(
-            `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
-          );
-          return;
-        }
+        if (redirectOnAuthExpiry(err, router)) return;
         setError(err instanceof Error ? err.message : "Create failed.");
       }
     });

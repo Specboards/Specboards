@@ -15,7 +15,7 @@ import { MarkdownEditor } from "@/components/markdown-editor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import {
   createDetailTemplate,
   deleteDetailTemplate,
@@ -124,10 +124,6 @@ export function DetailTemplatesManager({
   );
 }
 
-function onAuthError(router: ReturnType<typeof useRouter>) {
-  router.push(`/sign-in?from=${encodeURIComponent(window.location.pathname)}`);
-}
-
 function TemplateRow({
   template,
   canEdit,
@@ -153,7 +149,7 @@ function TemplateRow({
         toast.success("Template saved");
         router.refresh();
       } catch (err) {
-        if (err instanceof AuthRequiredError) return onAuthError(router);
+        if (redirectOnAuthExpiry(err, router)) return;
         toast.error(err instanceof Error ? err.message : "Save failed.");
       }
     });
@@ -173,7 +169,7 @@ function TemplateRow({
         toast.success("Template deleted");
         router.refresh();
       } catch (err) {
-        if (err instanceof AuthRequiredError) return onAuthError(router);
+        if (redirectOnAuthExpiry(err, router)) return;
         toast.error(err instanceof Error ? err.message : "Delete failed.");
       }
     });
@@ -256,7 +252,7 @@ function TemplateCreate({
         onDone();
         router.refresh();
       } catch (err) {
-        if (err instanceof AuthRequiredError) return onAuthError(router);
+        if (redirectOnAuthExpiry(err, router)) return;
         toast.error(err instanceof Error ? err.message : "Create failed.");
       }
     });
@@ -353,7 +349,7 @@ function LevelTemplateAssign({
         toast.success("Level templates saved");
         router.refresh();
       } catch (err) {
-        if (err instanceof AuthRequiredError) return onAuthError(router);
+        if (redirectOnAuthExpiry(err, router)) return;
         toast.error(err instanceof Error ? err.message : "Save failed.");
       }
     });

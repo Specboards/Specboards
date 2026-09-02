@@ -16,7 +16,7 @@ import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import {
   createProperty,
   deleteProperty,
@@ -240,10 +240,7 @@ function PropertyRow({
         toast.success("Property saved");
         router.refresh();
       } catch (err) {
-        if (err instanceof AuthRequiredError) {
-          window.location.href = "/sign-in";
-          return;
-        }
+        if (redirectOnAuthExpiry(err, router)) return;
         toast.error(err instanceof Error ? err.message : "Save failed.");
       }
     });
@@ -263,10 +260,7 @@ function PropertyRow({
         toast.success("Property deleted");
         router.refresh();
       } catch (err) {
-        if (err instanceof AuthRequiredError) {
-          window.location.href = "/sign-in";
-          return;
-        }
+        if (redirectOnAuthExpiry(err, router)) return;
         toast.error(err instanceof Error ? err.message : "Delete failed.");
       }
     });
@@ -412,10 +406,7 @@ function PropertyCreate({
         onDone();
         router.refresh();
       } catch (err) {
-        if (err instanceof AuthRequiredError) {
-          window.location.href = "/sign-in";
-          return;
-        }
+        if (redirectOnAuthExpiry(err, router)) return;
         toast.error(err instanceof Error ? err.message : "Create failed.");
       }
     });

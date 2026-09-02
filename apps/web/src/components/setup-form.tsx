@@ -7,7 +7,7 @@ import {
   WorkspaceSlugTakenError,
   createWorkspace,
 } from "@/lib/api-client/organization";
-import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import { slugifyOrg } from "@/lib/org-path";
 import { Button } from "@/components/ui/button";
 import {
@@ -55,10 +55,7 @@ export function SetupForm() {
         router.push("/");
         router.refresh();
       } catch (err) {
-        if (err instanceof AuthRequiredError) {
-          router.push("/sign-in?from=/setup");
-          return;
-        }
+        if (redirectOnAuthExpiry(err, router)) return;
         if (err instanceof WorkspaceSlugTakenError) {
           // Surface the conflict and let the user pick a different URL — prefill
           // the slug field with the server's free suggestion when offered.

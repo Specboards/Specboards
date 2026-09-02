@@ -5,7 +5,7 @@ import { useState, useTransition } from "react";
 import { ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 
-import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import { addGithubLink, removeGithubLink } from "@/lib/api-client/work-items";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -62,16 +62,6 @@ export function FeatureGithubLinks({
   // never see this control.
   const showRepoPicker = repos.length > 1;
 
-  function handleAuth(err: unknown): boolean {
-    if (err instanceof AuthRequiredError) {
-      router.push(
-        `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
-      );
-      return true;
-    }
-    return false;
-  }
-
   function onAdd(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const data = new FormData(e.currentTarget);
@@ -95,7 +85,7 @@ export function FeatureGithubLinks({
         toast.success("Linked");
         router.refresh();
       } catch (err) {
-        if (handleAuth(err)) return;
+        if (redirectOnAuthExpiry(err, router)) return;
         setError(err instanceof Error ? err.message : "Could not add link.");
       }
     });
@@ -108,7 +98,7 @@ export function FeatureGithubLinks({
         await removeGithubLink(specId, linkId);
         router.refresh();
       } catch (err) {
-        if (handleAuth(err)) return;
+        if (redirectOnAuthExpiry(err, router)) return;
         setError(err instanceof Error ? err.message : "Could not remove link.");
       }
     });

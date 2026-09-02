@@ -1,5 +1,7 @@
 "use client";
 
+import { useRouter } from "next/navigation";
+
 import { useEffect, useState, useTransition } from "react";
 import { ChevronDown } from "lucide-react";
 import { toast } from "sonner";
@@ -12,7 +14,7 @@ import {
   removeProductMember,
   setProductMember,
 } from "@/lib/api-client/products";
-import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import type { ProductMemberRecord, ProductRole } from "@/lib/store/types";
 import { cn } from "@/lib/utils";
 
@@ -58,6 +60,7 @@ export function ProductMembers({
   /** Workspace members available to grant access to. */
   candidates: { userId: string; name: string; email: string }[];
 }) {
+  const router = useRouter();
   const [members, setMembers] = useState<ProductMemberRecord[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   // null until members load; the first load decides the default (long lists
@@ -88,10 +91,6 @@ export function ProductMembers({
     };
   }, [productId]);
 
-  function onAuthError() {
-    window.location.href = "/sign-in";
-  }
-
   function upsert(userId: string, role: ProductRole) {
     startTransition(async () => {
       setError(null);
@@ -99,7 +98,7 @@ export function ProductMembers({
         await setProductMember(productId, { userId, role });
         setMembers(await listProductMembers(productId));
       } catch (err) {
-        if (err instanceof AuthRequiredError) return onAuthError();
+        if (redirectOnAuthExpiry(err, router)) return;
         setError(err instanceof Error ? err.message : "Update failed.");
       }
     });
@@ -112,7 +111,7 @@ export function ProductMembers({
         await removeProductMember(productId, userId);
         setMembers((ms) => ms?.filter((m) => m.userId !== userId) ?? null);
       } catch (err) {
-        if (err instanceof AuthRequiredError) return onAuthError();
+        if (redirectOnAuthExpiry(err, router)) return;
         setError(err instanceof Error ? err.message : "Remove failed.");
       }
     });

@@ -27,7 +27,7 @@ import {
   setIdeaVote,
   updateIdea,
 } from "@/lib/api-client/ideas";
-import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import { orgProductPath } from "@/lib/org-path";
 import type { IdeaRecord } from "@/lib/store/types";
 import { cn } from "@/lib/utils";
@@ -101,16 +101,6 @@ export function IdeaDetailSheet({
     setEditing(true);
   }
 
-  function handleAuthError(err: unknown): boolean {
-    if (err instanceof AuthRequiredError) {
-      router.push(
-        `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
-      );
-      return true;
-    }
-    return false;
-  }
-
   if (!idea) {
     return (
       <Sheet open={false} onOpenChange={(open) => !open && onClose()}>
@@ -131,7 +121,7 @@ export function IdeaDetailSheet({
       } catch (err) {
         setVoted(!next);
         setVotes((n) => n + (next ? -1 : 1));
-        if (handleAuthError(err)) return;
+        if (redirectOnAuthExpiry(err, router)) return;
         toast.error(err instanceof Error ? err.message : "Vote failed.");
       }
     });
@@ -144,7 +134,7 @@ export function IdeaDetailSheet({
         toast.success("Status updated");
         router.refresh();
       } catch (err) {
-        if (handleAuthError(err)) return;
+        if (redirectOnAuthExpiry(err, router)) return;
         toast.error(err instanceof Error ? err.message : "Update failed.");
       }
     });
@@ -166,7 +156,7 @@ export function IdeaDetailSheet({
         setEditing(false);
         router.refresh();
       } catch (err) {
-        if (handleAuthError(err)) return;
+        if (redirectOnAuthExpiry(err, router)) return;
         toast.error(err instanceof Error ? err.message : "Update failed.");
       }
     });
@@ -186,7 +176,7 @@ export function IdeaDetailSheet({
         toast.success("Promoted to a feature");
         router.refresh();
       } catch (err) {
-        if (handleAuthError(err)) return;
+        if (redirectOnAuthExpiry(err, router)) return;
         toast.error(err instanceof Error ? err.message : "Promote failed.");
       }
     });
@@ -207,7 +197,7 @@ export function IdeaDetailSheet({
         onClose();
         router.refresh();
       } catch (err) {
-        if (handleAuthError(err)) return;
+        if (redirectOnAuthExpiry(err, router)) return;
         toast.error(err instanceof Error ? err.message : "Delete failed.");
       }
     });

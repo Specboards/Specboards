@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
-import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import { addRelation, removeRelation } from "@/lib/api-client/work-items";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
@@ -54,16 +54,6 @@ export function FeatureRelations({
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
 
-  function handleAuth(err: unknown): boolean {
-    if (err instanceof AuthRequiredError) {
-      router.push(
-        `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
-      );
-      return true;
-    }
-    return false;
-  }
-
   function onAdd(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const data = new FormData(e.currentTarget);
@@ -84,7 +74,7 @@ export function FeatureRelations({
         setAdding(false);
         router.refresh();
       } catch (err) {
-        if (handleAuth(err)) return;
+        if (redirectOnAuthExpiry(err, router)) return;
         setError(
           err instanceof Error ? err.message : "Could not add relation.",
         );
@@ -99,7 +89,7 @@ export function FeatureRelations({
         await removeRelation(specId, linkId);
         router.refresh();
       } catch (err) {
-        if (handleAuth(err)) return;
+        if (redirectOnAuthExpiry(err, router)) return;
         setError(
           err instanceof Error ? err.message : "Could not remove relation.",
         );

@@ -1,10 +1,12 @@
 "use client";
 
+import { useRouter } from "next/navigation";
+
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import { updateLevelFields } from "@/lib/api-client/workspace-config";
 import type { CardFieldDef } from "@/lib/card-fields";
 import type { WorkspaceLevel } from "@/lib/store/types";
@@ -31,6 +33,7 @@ export function CardsFieldsEditor({
   catalog: CardFieldDef[];
   canEdit: boolean;
 }) {
+  const router = useRouter();
   const allKeys = catalog.map((f) => f.key);
   const [checked, setChecked] = useState<Record<string, Set<string>>>(() =>
     Object.fromEntries(
@@ -65,10 +68,7 @@ export function CardsFieldsEditor({
         await updateLevelFields(fields, productId);
         toast.success("Card fields saved");
       } catch (err) {
-        if (err instanceof AuthRequiredError) {
-          window.location.href = "/sign-in";
-          return;
-        }
+        if (redirectOnAuthExpiry(err, router)) return;
         setError(err instanceof Error ? err.message : "Save failed.");
       }
     });

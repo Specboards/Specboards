@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { AuthRequiredError } from "@/lib/api-client/request";
+import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import {
   bulkPatchFeatures,
   type BulkTagOps,
@@ -80,12 +80,7 @@ export function BulkActionBar({
       router.refresh();
       onClear();
     } catch (err) {
-      if (err instanceof AuthRequiredError) {
-        router.push(
-          `/sign-in?from=${encodeURIComponent(window.location.pathname)}`,
-        );
-        return;
-      }
+      if (redirectOnAuthExpiry(err, router)) return;
       toast.error(err instanceof Error ? err.message : "Bulk edit failed.");
     } finally {
       setPending(false);
