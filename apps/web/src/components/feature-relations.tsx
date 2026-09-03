@@ -6,6 +6,7 @@ import { useState, useTransition } from "react";
 
 import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import { addRelation, removeRelation } from "@/lib/api-client/work-items";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { useOrgProductPath } from "@/lib/use-org";
@@ -36,17 +37,65 @@ const DISPLAY_ORDER: RelationDirection[] = [
 
 type Candidate = { specId: string; title: string };
 
+/**
+ * The release badge for one relation, or nothing.
+ *
+ * Nothing is the common case: most items are unscheduled, and a badge on every
+ * row would be noise without answering anything. "None" would be worse still,
+ * spending a chip to say the reader already knows.
+ *
+ * Where there is a release, the interesting case is a *mismatch*: a blocker
+ * scheduled three releases out is the thing you wanted to catch before release
+ * time, and it gets the standard release badge that the board and backlog use.
+ * A relation in the same release as the item you are reading is the boring
+ * answer and gets a flatter chip, so a scan of the list lands on the odd one
+ * out rather than on five identical badges.
+ *
+ * When the item being viewed is itself unscheduled there is no comparison to
+ * make, so every badge renders neutral rather than every badge shouting.
+ */
+function RelationRelease({
+  relation,
+  currentReleaseId,
+}: {
+  relation: FeatureRelation;
+  currentReleaseId: string | null;
+}) {
+  if (!relation.otherReleaseName) return null;
+  const sameRelease =
+    currentReleaseId !== null && relation.otherReleaseId === currentReleaseId;
+  return (
+    <Badge
+      variant={sameRelease ? "secondary" : "outline"}
+      size="sm"
+      // Shrinks and truncates before the title does: the title is what the
+      // reader is scanning, and a long release name must not push it out.
+      className="min-w-0 max-w-[45%] shrink truncate"
+      title={
+        sameRelease
+          ? `Same release as this item (${relation.otherReleaseName})`
+          : `Scheduled into ${relation.otherReleaseName}`
+      }
+    >
+      {relation.otherReleaseName}
+    </Badge>
+  );
+}
+
 /** Relations editor for the feature detail sidebar (deps & relations). */
 export function FeatureRelations({
   specId,
   relations,
   candidates,
   canEdit = true,
+  currentReleaseId = null,
 }: {
   specId: string;
   relations: FeatureRelation[];
   candidates: Candidate[];
   canEdit?: boolean;
+  /** The viewed item's own release, so a relation in a different one stands out. */
+  currentReleaseId?: string | null;
 }) {
   const router = useRouter();
   const orgHref = useOrgProductPath();
@@ -122,11 +171,15 @@ export function FeatureRelations({
                 <div key={r.id} className="flex items-center gap-1 text-sm">
                   <Link
                     href={orgHref(`/backlog/${r.otherLevel}/${r.otherSpecId}`)}
-                    className="flex-1 truncate hover:underline"
+                    className="min-w-0 flex-1 truncate hover:underline"
                     title={r.otherTitle}
                   >
                     {r.otherTitle}
                   </Link>
+                  <RelationRelease
+                    relation={r}
+                    currentReleaseId={currentReleaseId}
+                  />
                   {canEdit ? (
                     <button
                       type="button"

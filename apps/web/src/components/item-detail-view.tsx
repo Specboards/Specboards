@@ -342,6 +342,7 @@ export function ItemDetailView({
             relations={feature.relations}
             candidates={relationCandidates}
             canEdit={canEdit}
+            currentReleaseId={feature.releaseId}
           />
         </div>
       </DetailSection>
