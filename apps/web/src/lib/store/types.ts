@@ -201,6 +201,21 @@ export interface FeatureRelation {
   otherTitle: string;
   /** The other feature's level key, for building its typed permalink. */
   otherLevel: string;
+  /**
+   * The release the other feature is scheduled into, or null when it is in
+   * none. Both halves are null together.
+   *
+   * Carried on the edge rather than looked up by the renderer because the
+   * question it answers is about the edge: "does this blocker ship before me?"
+   * A reader who has to open the other card to find out usually does not, and
+   * discovers the mismatch at release time instead.
+   *
+   * Nullable is the common case, not the exception: most items are unscheduled,
+   * and a badge on every row would be noise. See `feature-relations.tsx`, which
+   * renders nothing rather than "None".
+   */
+  otherReleaseId: string | null;
+  otherReleaseName: string | null;
 }
 
 export interface RelationInput {

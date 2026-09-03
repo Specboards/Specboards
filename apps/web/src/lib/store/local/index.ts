@@ -66,6 +66,7 @@ import {
   type DocSpaceInput,
   type LevelUpdate,
   type FeatureDetail,
+  type FeatureRelation,
   type FeaturePatch,
   type FeatureRecord,
   type FeatureStore,
@@ -220,16 +221,25 @@ export class LocalFileStore implements FeatureStore, LocalStoreContext {
   }
 
   async loadAll(): Promise<FeatureDetail[]> {
-    const [files, meta, items, levels, defaultProductId, statuses, doneKey] =
-      await Promise.all([
-        this.walkSpecFiles(specsDir(this.root)),
-        this.readMetadata(),
-        this.readItems(),
-        this.readLevels(),
-        this.defaultProductId(),
-        this.listStatuses(),
-        this.doneStatusKey(),
-      ]);
+    const [
+      files,
+      meta,
+      items,
+      levels,
+      defaultProductId,
+      statuses,
+      doneKey,
+      releases,
+    ] = await Promise.all([
+      this.walkSpecFiles(specsDir(this.root)),
+      this.readMetadata(),
+      this.readItems(),
+      this.readLevels(),
+      this.defaultProductId(),
+      this.listStatuses(),
+      this.doneStatusKey(),
+      releaseStore.readReleases(this),
+    ]);
     const leafKey = leafLevel(levels).key;
     // Where a spec sits before anyone moves it. The first configured stage
     // rather than the literal "backlog": a workflow that renames or drops that
@@ -325,7 +335,7 @@ export class LocalFileStore implements FeatureStore, LocalStoreContext {
         githubLinks: [],
       });
     }
-    this.attachRelations(features, meta);
+    this.attachRelations(features, meta, releases);
     this.attachHierarchy(features, doneKey);
     return features;
   }
@@ -355,11 +365,41 @@ export class LocalFileStore implements FeatureStore, LocalStoreContext {
     }
   }
 
-  /** Resolve stored edges into per-feature relations + blocked counts. */
-  private attachRelations(features: FeatureDetail[], meta: MetadataFile): void {
+  /**
+   * Resolve stored edges into per-feature relations + blocked counts.
+   *
+   * `releases` is here only to name the other end's release. It is passed in
+   * rather than read here because this runs once per load and the file has
+   * already been read: the shape must match db/items-read.ts exactly, and a
+   * field one store populates and the other leaves null is a bug that shows up
+   * in a single deployment shape and nowhere else.
+   */
+  private attachRelations(
+    features: FeatureDetail[],
+    meta: MetadataFile,
+    releases: { id: string; name: string }[],
+  ): void {
     const titleBySpec = new Map(features.map((f) => [f.specId, f.title]));
     const levelBySpec = new Map(features.map((f) => [f.specId, f.level]));
     const bySpec = new Map(features.map((f) => [f.specId, f]));
+    const releaseNameById = new Map(releases.map((r) => [r.id, r.name]));
+    /**
+     * The release badge for one end of an edge.
+     *
+     * A release id pointing at a release that is gone resolves to no badge
+     * rather than a nameless one, matching the db store: both halves are null
+     * together so a caller never has an id it cannot render.
+     */
+    const releaseOf = (
+      specId: string,
+    ): Pick<FeatureRelation, "otherReleaseId" | "otherReleaseName"> => {
+      const releaseId = bySpec.get(specId)?.releaseId ?? null;
+      const name = releaseId ? (releaseNameById.get(releaseId) ?? null) : null;
+      return {
+        otherReleaseId: name ? releaseId : null,
+        otherReleaseName: name,
+      };
+    };
     for (const [fromSpec, m] of Object.entries(meta)) {
       for (const link of m.links ?? []) {
         const from = bySpec.get(fromSpec);
@@ -371,6 +411,7 @@ export class LocalFileStore implements FeatureStore, LocalStoreContext {
             otherSpecId: link.to,
             otherTitle: titleBySpec.get(link.to)!,
             otherLevel: levelBySpec.get(link.to)!,
+            ...releaseOf(link.to),
           });
           if (link.type === "blocks") from.blocksCount += 1;
         }
@@ -381,6 +422,7 @@ export class LocalFileStore implements FeatureStore, LocalStoreContext {
             otherSpecId: fromSpec,
             otherTitle: titleBySpec.get(fromSpec)!,
             otherLevel: levelBySpec.get(fromSpec)!,
+            ...releaseOf(fromSpec),
           });
           if (link.type === "blocks") to.blockedByCount += 1;
         }

@@ -34,6 +34,7 @@ import {
   features,
   inArray,
   or,
+  releases,
   users,
 } from "@specboards/db";
 
@@ -264,6 +265,7 @@ export async function getFeature(
             title: features.title,
             level: features.level,
             productId: features.productId,
+            releaseId: features.releaseId,
           })
           .from(features)
           .where(
@@ -278,18 +280,52 @@ export async function getFeature(
         .filter((o) => canReadProductId(access, productById, o.productId))
         .map((o) => [o.id, o]),
     );
+    // Name the releases the readable others sit in. Driven off `byId` rather
+    // than `others` so an item the caller cannot read does not pull its release
+    // into the query. Nothing would leak if it did, since that relation is
+    // dropped below either way; this just keeps the second query to the rows
+    // that can actually be rendered.
+    const releaseIds = [
+      ...new Set(
+        [...byId.values()]
+          .map((o) => o.releaseId)
+          .filter((id): id is string => id !== null),
+      ),
+    ];
+    const releaseNameById = new Map(
+      releaseIds.length
+        ? (
+            await tx
+              .select({ id: releases.id, name: releases.name })
+              .from(releases)
+              .where(
+                and(
+                  eq(releases.workspaceId, scope!.workspaceId),
+                  inArray(releases.id, releaseIds),
+                ),
+              )
+          ).map((r) => [r.id, r.name])
+        : [],
+    );
     const relations: FeatureRelation[] = links
       .map((l) => {
         const otherId =
           l.fromFeatureId === row.id ? l.toFeatureId : l.fromFeatureId;
         const other = byId.get(otherId);
         if (!other) return null;
+        // A release id whose row is missing resolves to no badge rather than a
+        // named one, which is why the id is dropped alongside the name.
+        const releaseName = other.releaseId
+          ? (releaseNameById.get(other.releaseId) ?? null)
+          : null;
         return {
           id: l.id,
           direction: directionFor(l, row.id),
           otherSpecId: other.specId,
           otherTitle: other.title,
           otherLevel: other.level,
+          otherReleaseId: releaseName ? other.releaseId : null,
+          otherReleaseName: releaseName,
         } satisfies FeatureRelation;
       })
       .filter((r): r is FeatureRelation => r !== null);
