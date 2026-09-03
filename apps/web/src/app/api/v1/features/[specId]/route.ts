@@ -12,9 +12,9 @@ export const dynamic = "force-dynamic";
 
 type Params = { params: Promise<{ specId: string }> };
 
-/** Whether `?advance` asks for a multi-stage status move to be walked. */
-function advanceRequested(req: Request): boolean {
-  const raw = new URL(req.url).searchParams.get("advance");
+/** A flag query param: present and not an explicit off value. */
+function flag(req: Request, name: string): boolean {
+  const raw = new URL(req.url).searchParams.get(name);
   return raw !== null && raw !== "0" && raw !== "false";
 }
 
@@ -43,13 +43,18 @@ export async function GET(req: Request, { params }: Params) {
  * `?advance=1` walks a multi-stage status move through the intermediate stages
  * instead of rejecting it, emitting one status_changed event per hop. Without
  * it, a strict workflow still rejects the jump.
+ *
+ * `?cascadeRelease=1` carries a `releaseId` change down to the descendants that
+ * are not scheduled anywhere yet. Off by default, so an existing caller keeps
+ * today's behaviour exactly; see GET ./release-cascade for what it would do.
  */
 export async function PATCH(req: Request, { params }: Params) {
   const authz = await authorizeWrite(req);
   if (!authz.ok) return authz.response;
 
   const { specId } = await params;
-  const advance = advanceRequested(req);
+  const advance = flag(req, "advance");
+  const cascadeRelease = flag(req, "cascadeRelease");
 
   const parsed = await readJsonBody(req);
   if (!parsed.ok) return parsed.response;
@@ -60,7 +65,7 @@ export async function PATCH(req: Request, { params }: Params) {
       specId,
       parseFeaturePatch(body),
       authz.scope ?? undefined,
-      { advance },
+      { advance, cascadeRelease },
     );
     for (const path of ["/[org]/[product]/backlog", "/[org]/[product]/roadmap"])
       revalidatePath(path, "page");

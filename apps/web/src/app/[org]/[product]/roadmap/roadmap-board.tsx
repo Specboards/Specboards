@@ -39,6 +39,7 @@ import {
 import { FeatureEditSheet } from "@/components/feature-edit-sheet";
 import type { ProductTag } from "@/components/feature-card";
 import { MoveMenu, type MoveOption } from "@/components/move-menu";
+import { offerReleaseCascade } from "@/components/release-cascade-offer";
 import { ReleaseDetailSheet } from "@/components/release-detail-sheet";
 import { StatusDot } from "@/components/status-dot";
 import { Badge } from "@/components/ui/badge";
@@ -236,7 +237,15 @@ export function RoadmapBoard({
     const prev = placement;
     setPlacement({ ...placement, [specId]: targetReleaseId });
     patchFeature(specId, { releaseId: targetReleaseId })
-      .then(() => router.refresh())
+      .then(() => {
+        router.refresh();
+        offerReleaseCascade({
+          specId,
+          releaseId: targetReleaseId,
+          hasChildren: feature.childCount > 0,
+          onApplied: () => router.refresh(),
+        });
+      })
       .catch((err) => {
         setPlacement(prev);
         if (redirectOnAuthExpiry(err, router)) return;
@@ -261,6 +270,12 @@ export function RoadmapBoard({
       .then(() => {
         router.refresh();
         announce(`Moved ${feature.title} to ${columnName}`);
+        offerReleaseCascade({
+          specId,
+          releaseId: targetReleaseId,
+          hasChildren: feature.childCount > 0,
+          onApplied: () => router.refresh(),
+        });
       })
       .catch((err) => {
         setPlacement(prev);

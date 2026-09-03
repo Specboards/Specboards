@@ -28,6 +28,7 @@ import type {
 
 import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import { patchFeature } from "@/lib/api-client/work-items";
+import { offerReleaseCascade } from "@/components/release-cascade-offer";
 import { RiceEditor, type RiceStrings } from "@/components/rice-editor";
 import { StatusDot } from "@/components/status-dot";
 import { Input } from "@/components/ui/input";
@@ -117,6 +118,11 @@ export function ItemProperties({
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inFlightRef = useRef(false);
   const dirtyRef = useRef(false);
+  // The release this panel last persisted. The form posts every field on every
+  // debounced save, so the patch alone cannot say whether the release actually
+  // changed, and offering to move children on an unrelated edit would raise the
+  // prompt over and over for a change the user already answered.
+  const savedReleaseRef = useRef<string | null>(feature.releaseId ?? null);
   const [status, setStatus] = useState<"idle" | "saving" | "saved">("idle");
   const [error, setError] = useState<string | null>(null);
   // Track the selected status locally so the allowed-transitions list
@@ -176,12 +182,14 @@ export function ItemProperties({
     setError(null);
 
     const data = new FormData(form);
+    const releaseId =
+      productReleases.length > 0
+        ? String(data.get("releaseId") ?? "") || null
+        : savedReleaseRef.current;
     try {
       await patchFeature(feature.specId, {
         status: String(data.get("status") ?? feature.status),
-        ...(productReleases.length > 0
-          ? { releaseId: String(data.get("releaseId") ?? "") || null }
-          : {}),
+        ...(productReleases.length > 0 ? { releaseId } : {}),
         ...(productCycles.length > 0
           ? { cycleId: String(data.get("cycleId") ?? "") || null }
           : {}),
@@ -212,6 +220,18 @@ export function ItemProperties({
       });
       setStatus("saved");
       router.refresh();
+      // The save has committed, so the offer is an extra rather than a gate.
+      // Only when the release genuinely moved: this form posts every field on
+      // every keystroke's worth of debounce.
+      if (releaseId !== savedReleaseRef.current) {
+        savedReleaseRef.current = releaseId;
+        offerReleaseCascade({
+          specId: feature.specId,
+          releaseId,
+          hasChildren: feature.childCount > 0,
+          onApplied: () => router.refresh(),
+        });
+      }
     } catch (err) {
       if (redirectOnAuthExpiry(err, router)) return;
       setStatus("idle");

@@ -37,18 +37,63 @@ export async function getItemDetail(specId: string): Promise<ItemDetailData> {
 export async function patchFeature(
   specId: string,
   patch: FeaturePatch,
+  opts?: {
+    /**
+     * Carry a `releaseId` change down to the descendants that are not
+     * scheduled anywhere yet. Off unless asked for, so every existing caller
+     * keeps moving exactly the one row it moved before.
+     */
+    cascadeRelease?: boolean;
+  },
 ): Promise<void> {
-  const res = await apiFetch(`/api/v1/features/${encodeURIComponent(specId)}`, {
-    method: "PATCH",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(patch),
-  });
+  const query = opts?.cascadeRelease ? "?cascadeRelease=1" : "";
+  const res = await apiFetch(
+    `/api/v1/features/${encodeURIComponent(specId)}${query}`,
+    {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(patch),
+    },
+  );
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as {
       error?: string;
     } | null;
     throw new Error(body?.error ?? `PATCH failed with ${res.status}`);
   }
+}
+
+/** What a release change would carry with it, as the prompt needs to say it. */
+interface ReleaseCascadePreview {
+  releaseName: string | null;
+  moveCount: number;
+  skippedCount: number;
+  ineligibleCount: number;
+  depth: number;
+}
+
+/**
+ * Ask what cascading `releaseId` from `specId` would move, without moving it.
+ *
+ * Read-only, and the counts come from the server because no client holds the
+ * whole subtree: a prompt that guessed would be asking the user to approve a
+ * number that might be wrong.
+ */
+export async function getReleaseCascadePreview(
+  specId: string,
+  releaseId: string | null,
+): Promise<ReleaseCascadePreview> {
+  const res = await apiFetch(
+    `/api/v1/features/${encodeURIComponent(specId)}/release-cascade` +
+      `?releaseId=${encodeURIComponent(releaseId ?? "")}`,
+  );
+  const body = (await res.json().catch(() => null)) as
+    | (ReleaseCascadePreview & { error?: string })
+    | null;
+  if (!res.ok || !body) {
+    throw new Error(body?.error ?? `Failed to plan cascade (${res.status}).`);
+  }
+  return body;
 }
 
 /** One item's outcome in a bulk edit (mirrors the server's BulkPatchItemResult). */
