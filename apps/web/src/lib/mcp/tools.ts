@@ -537,9 +537,12 @@ export const TOOLS: McpTool[] = [
       "workflow and its stage gates. On a workspace whose transitions are " +
       "strict, a status several stages ahead is rejected: pass advance: true " +
       "and this walks the item through the intermediate stages in one call " +
-      "(gates still apply at every stage it passes). A spec-backed item's " +
-      "title and body come from git and cannot be patched here (Phase 2). Use " +
-      "this to roll a summary of child specs up into a parent card's details.",
+      "(gates still apply at every stage it passes). Setting releaseId moves " +
+      "this item alone: to schedule the work underneath it too, pass " +
+      "cascadeRelease: true, which gives the same release to every descendant " +
+      "that is not scheduled anywhere yet. A spec-backed item's title and body " +
+      "come from git and cannot be patched here (Phase 2). Use this to roll a " +
+      "summary of child specs up into a parent card's details.",
     inputSchema: {
       type: "object",
       properties: {
@@ -553,6 +556,14 @@ export const TOOLS: McpTool[] = [
         },
         tags: { type: "array", items: { type: "string" } },
         releaseId: { type: ["string", "null"] },
+        cascadeRelease: {
+          type: "boolean",
+          description:
+            "Also give this release to every descendant that is not " +
+            "scheduled into any release yet, at any depth. Descendants " +
+            "already scheduled elsewhere keep what they have, and clearing a " +
+            "release never cascades. Ignored without a releaseId.",
+        },
         cycleId: {
           type: ["string", "null"],
           description:
@@ -581,10 +592,12 @@ export const TOOLS: McpTool[] = [
     scope: { resource: "features", action: "write" },
     run: async (args, ctx) => {
       const specId = requireUuid(args, "specId");
-      // parseFeaturePatch reads only known keys; specId/advance are ignored by it.
+      // parseFeaturePatch reads only known keys, so specId/advance/
+      // cascadeRelease are ignored by it and stay options rather than fields.
       const patch = parseFeaturePatch(args);
       const updated = await patchFeature(specId, patch, ctx.scope, {
         advance: args.advance === true,
+        cascadeRelease: args.cascadeRelease === true,
       });
       return {
         specId: updated.specId,

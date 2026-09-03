@@ -6,6 +6,7 @@ import {
   transitionErrorMessage,
 } from "@specboards/core";
 import { RICE_IMPACT_VALUES } from "@/lib/feature-helpers";
+import { applyItemReleaseCascade } from "@/lib/release-cascade-service";
 import { resolveWorkflowFor } from "@/lib/repo-config";
 import { isUuid } from "@/lib/uuid";
 import { notifyOutbox } from "@/lib/webhooks/events";
@@ -171,14 +172,44 @@ interface PatchOptions {
    * item stops there and the error says where it got to.
    */
   advance?: boolean;
+  /**
+   * After setting `releaseId`, give the same release to the descendants that
+   * are not scheduled anywhere yet.
+   *
+   * Off by default and never inferred. Setting a release on an epic moves one
+   * row, which is how a release came to report four items while holding
+   * twenty-one, but silently rewriting somebody's subtree because they touched
+   * a parent would be the worse bug. What moves and what is deliberately left
+   * alone is decided in `@/lib/release-cascade`.
+   *
+   * Runs after the item's own patch has committed, so it is an extra rather
+   * than a gate: a cascade that fails part-way leaves the parent's change in
+   * place and the items it already moved where they are.
+   */
+  cascadeRelease?: boolean;
 }
 
 /**
  * Apply a validated patch, enforcing the status workflow. With
  * {@link PatchOptions.advance} a multi-stage status move is walked one legal
- * hop at a time instead of rejected.
+ * hop at a time instead of rejected; with {@link PatchOptions.cascadeRelease} a
+ * release change is carried down to the unscheduled work beneath the item.
  */
 export async function patchFeature(
+  specId: string,
+  patch: FeaturePatch,
+  scope?: WorkspaceScope,
+  options?: PatchOptions,
+): Promise<FeatureDetail> {
+  const result = await applyPatch(specId, patch, scope, options);
+  if (options?.cascadeRelease && patch.releaseId !== undefined) {
+    await applyItemReleaseCascade(specId, patch.releaseId, scope);
+  }
+  return result;
+}
+
+/** The patch itself: one hop, or the advance walk. */
+async function applyPatch(
   specId: string,
   patch: FeaturePatch,
   scope?: WorkspaceScope,
