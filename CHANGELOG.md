@@ -25,6 +25,73 @@ for how and when the version is bumped.
 > `pnpm deploy:prod` and the dispatched workflow. See
 > [VERSIONING.md](./VERSIONING.md).
 
+## [1.0.0] - 2026-09-02
+
+Specboards is declared stable.
+
+`MAJOR` has sat at `0` since the first commit, on the rule in
+[VERSIONING.md](./VERSIONING.md) that it stays there "until the product is
+declared stable". This release makes that call. It does not mean the product is
+finished; it means the shapes it is built on - the API, the spec format, the
+store interface, the MCP tool surface - are ones we intend to keep, and that
+breaking them now costs a major version.
+
+Two things earned it. 0.30.0 made self-hosting install and 0.31.0 made it
+connect, so the on-prem path is real rather than aspirational. And the code
+underneath stopped being something we would have been embarrassed to hand to a
+stranger: this release closes a refactor of the whole client and service layer
+that had been running since 0.29.2.
+
+The user-facing changes here are small and both about the same gap, which is
+that release scheduling knew about one item at a time.
+
+### Added
+
+- **Relations show which release the other item is in.** Looking at "Blocked by"
+  and wanting to know whether that blocker ships before you no longer needs a
+  click. A relation in a different release from the item you are reading gets
+  the standard release badge; one in the same release gets a quieter chip, so a
+  scan of the list lands on the mismatch. Unscheduled relations show nothing
+  rather than "None".
+- **Changing an item's release offers to take its children with it.** Setting a
+  release on an epic used to move exactly one row, which is how a release could
+  report four items while holding twenty-one. The offer covers the whole
+  subtree, leaves anything already scheduled elsewhere alone and says how many,
+  and appears only when there is something to move. It is an offer, not a gate:
+  the item's own change is already saved by the time it is made.
+- **`cascadeRelease` on the API and on MCP.** The same behaviour without a
+  prompt, as `PATCH /api/v1/features/:specId?cascadeRelease=1` and
+  `update_item(cascadeRelease: true)`, plus a read-only
+  `GET /api/v1/features/:specId/release-cascade` that reports what a cascade
+  would do. A prompt means nothing to an agent, and an agent is how the
+  scheduling gap was found in the first place.
+
+### Changed
+
+- **The browser API client is split by resource.** One barrel of every call the
+  app can make became fourteen modules behind one route gate, and the
+  compatibility barrel that bridged them is gone rather than left to linger.
+- **The store, the domain services, and the largest components are split.** A
+  104-member `FeatureStore` implemented twice, a 2,579-line `features-service`,
+  and the three biggest React components (`RepositoriesManager`,
+  `ProductsManager`, `AssistantPanel`) were broken up along the seams that were
+  already there. Behaviour is unchanged throughout: every moved declaration was
+  diffed against its original.
+- **Expired sessions are handled by one client policy** instead of eighty
+  hand-written branches.
+- **Dead code fails CI.** Knip runs as a gate, so unused exports are caught at
+  review rather than accumulating.
+- **CI caches the Turborepo outputs and the Playwright browser**, cutting about
+  10% off a run that changes application code.
+
+### Fixed
+
+- **A hand-linked pull request kept reporting as open after it merged.** Only
+  links created by sync were refreshed; a link added by hand or by an agent
+  never was, so an item could show an open PR indefinitely.
+- **Four high and three moderate dependency advisories** cleared from the
+  production tree.
+
 ## [0.31.0] - 2026-09-01
 
 0.30.0 made self-hosting install. This release makes it **connect**.
