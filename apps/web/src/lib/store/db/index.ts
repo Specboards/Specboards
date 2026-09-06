@@ -369,8 +369,20 @@ export class DbStore implements FeatureStore, DbStoreContext {
     return tagStore.renameTag(this, id, name, scope);
   }
 
-  deleteTag(id: string, scope?: WorkspaceScope): Promise<void> {
+  mergeTags(
+    sourceId: string,
+    targetId: string,
+    scope?: WorkspaceScope,
+  ): Promise<TagDef> {
+    return tagStore.mergeTags(this, sourceId, targetId, scope);
+  }
+
+  deleteTag(id: string, scope?: WorkspaceScope): Promise<number> {
     return tagStore.deleteTag(this, id, scope);
+  }
+
+  tagUsageCounts(scope?: WorkspaceScope): Promise<Record<string, number>> {
+    return tagStore.tagUsageCounts(this, scope);
   }
 
   // `levelsIn` is a DbStoreContext member, so it stays a method on the

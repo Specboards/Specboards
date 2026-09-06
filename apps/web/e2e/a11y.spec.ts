@@ -98,6 +98,11 @@ test.describe("a11y: authenticated app", () => {
     { name: "settings: profile", path: () => `/${slug}/settings/profile` },
     { name: "settings: products", path: () => `/${slug}/settings/products` },
     { name: "settings: repositories", path: () => `/${slug}/settings/repositories` },
+    // Tags is the only settings page built around multi-select and a results
+    // table: selection lives on `aria-pressed` buttons wrapping a decorative
+    // checkbox, and the import preview is a real <table>. Neither pattern is
+    // represented by the three pages above.
+    { name: "settings: tags", path: () => `/${slug}/settings/tags` },
   ];
 
   for (const p of PAGES) {

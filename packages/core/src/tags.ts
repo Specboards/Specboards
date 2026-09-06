@@ -7,9 +7,12 @@
  * told anyone the third was a typo.
  *
  * The registry makes one spelling of a tag the spelling. Item values stay in
- * `features.tags`, keyed by name, exactly as `custom_fields` keys by property
- * key: dropping a tag from the registry hides it rather than destroying it, and
- * re-adding it brings the values back.
+ * `features.tags`, keyed by name, the way `custom_fields` keys by property key,
+ * but the two part company on delete: dropping a custom property leaves its
+ * values, while deleting a tag takes it off every item that carried it. A
+ * property's value is content typed into a field; a tag IS the field, so there
+ * is nothing to preserve by keeping it, only a chip on a card that no screen
+ * admits to managing.
  */
 
 /** A tag as the UI consumes it. */

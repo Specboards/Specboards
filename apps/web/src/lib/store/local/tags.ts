@@ -95,7 +95,7 @@ export async function renameTag(
   );
   if (clash) {
     throw new TagError(
-      `"${clash.name}" already exists. Rename this tag to something else, or delete it and re-tag its items.`,
+      `"${clash.name}" already exists. Rename this tag to something else, or merge the two with a bulk upload.`,
     );
   }
   const previous = tag.name;
@@ -106,49 +106,165 @@ export async function renameTag(
   return tag;
 }
 
+/**
+ * Fold one tag into another. Mirrors ./db/tags.ts: items carrying the source
+ * carry the target instead, de-duplicated in place, and the source definition
+ * goes away.
+ */
+export async function mergeTags(
+  ctx: LocalStoreContext,
+  sourceId: string,
+  targetId: string,
+  _scope?: WorkspaceScope,
+): Promise<TagDef> {
+  if (sourceId === targetId) {
+    throw new TagError("A tag cannot be merged into itself.");
+  }
+  const rows = await readTags(ctx);
+  const source = rows.find((t) => t.id === sourceId);
+  if (!source) throw new TagError(`Unknown tag: ${sourceId}`);
+  const target = rows.find((t) => t.id === targetId);
+  if (!target) throw new TagError(`Unknown tag: ${targetId}`);
+
+  await writeTags(
+    ctx,
+    rows.filter((t) => t.id !== sourceId),
+  );
+  await renameOnItems(ctx, source.name, target.name);
+  return target;
+}
+
+/**
+ * Delete a tag: take it off every item that carries it, then drop the
+ * definition. Returns how many items were changed. Mirrors ./db/tags.ts, where
+ * the reasoning for the cascade is written out.
+ */
 export async function deleteTag(
   ctx: LocalStoreContext,
   id: string,
   _scope?: WorkspaceScope,
-): Promise<void> {
+): Promise<number> {
   const rows = await readTags(ctx);
-  if (!rows.some((t) => t.id === id)) throw new TagError(`Unknown tag: ${id}`);
-  // Item values are left in place, as in the db store: dropping a tag hides
-  // values rather than destroying them.
+  const tag = rows.find((t) => t.id === id);
+  if (!tag) throw new TagError(`Unknown tag: ${id}`);
   await writeTags(
     ctx,
     rows.filter((t) => t.id !== id),
   );
+  return removeFromItems(ctx, tag.name);
+}
+
+/** How many items carry each tag, keyed by `tagKey(name)`. */
+export async function tagUsageCounts(
+  ctx: LocalStoreContext,
+  _scope?: WorkspaceScope,
+): Promise<Record<string, number>> {
+  const out: Record<string, number> = {};
+  for (const item of await readItems(ctx)) {
+    if (!Array.isArray(item.tags)) continue;
+    // Counted per item, not per occurrence: an item carrying two casings of
+    // one tag is still one item that loses a chip when the tag goes.
+    for (const key of new Set(item.tags.map((t) => tagKey(t)))) {
+      if (key === "") continue;
+      out[key] = (out[key] ?? 0) + 1;
+    }
+  }
+  return out;
+}
+
+/** One item as the tag rewrites below care about it. */
+interface TaggedItem {
+  tags?: string[];
+}
+
+/** The items file, or an empty list when local mode has not written one yet. */
+async function readItems(ctx: LocalStoreContext): Promise<TaggedItem[]> {
+  try {
+    return JSON.parse(
+      await fs.readFile(localPath(ctx.root, "items"), "utf8"),
+    ) as TaggedItem[];
+  } catch {
+    return [];
+  }
+}
+
+async function writeItems(
+  ctx: LocalStoreContext,
+  items: TaggedItem[],
+): Promise<void> {
+  await fs.writeFile(
+    localPath(ctx.root, "items"),
+    JSON.stringify(items, null, 2) + "\n",
+    "utf8",
+  );
+}
+
+/**
+ * Rewrite every item's tags with `map`, and report how many items changed.
+ *
+ * `map` returns the replacement for one tag, or null to drop it, which is the
+ * only difference between a rename, a merge and a delete. The de-duplication
+ * and the write-only-if-changed are shared, because getting either wrong is
+ * silent: a duplicated tag draws twice on a card, and an unconditional write
+ * churns the file on every no-op.
+ */
+async function rewriteItemTags(
+  ctx: LocalStoreContext,
+  map: (tag: string) => string | null,
+): Promise<number> {
+  const items = await readItems(ctx);
+  let changed = 0;
+  for (const item of items) {
+    if (!Array.isArray(item.tags)) continue;
+    const seen = new Set<string>();
+    const next: string[] = [];
+    for (const tag of item.tags) {
+      const value = map(tag);
+      if (value === null) continue;
+      const key = tagKey(value);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      next.push(value);
+    }
+    if (
+      next.length !== item.tags.length ||
+      next.some((t, i) => t !== item.tags![i])
+    ) {
+      item.tags = next;
+      changed++;
+    }
+  }
+  if (changed > 0) await writeItems(ctx, items);
+  return changed;
 }
 
 /**
  * Carry a rename onto every item that carries the old name, matching
  * case-insensitively so values written before the registry existed (or
  * imported from spec frontmatter) are picked up too.
+ *
+ * De-duplicates, keeping the first occurrence so the author's order survives. A
+ * plain rename rarely needs that (an item would have to carry two legacy
+ * casings of the same tag), but a merge always does: an item tagged with both
+ * `SF` and `Salesforce` must come out carrying `Salesforce` once.
  */
 async function renameOnItems(
   ctx: LocalStoreContext,
   previous: string,
   next: string,
 ): Promise<void> {
-  const file = localPath(ctx.root, "items");
-  let items: { tags?: string[] }[];
-  try {
-    items = JSON.parse(await fs.readFile(file, "utf8")) as { tags?: string[] }[];
-  } catch {
-    return;
-  }
   const from = tagKey(previous);
-  let touched = false;
-  for (const item of items) {
-    if (!Array.isArray(item.tags)) continue;
-    const mapped = item.tags.map((t) => (tagKey(t) === from ? next : t));
-    if (mapped.some((t, i) => t !== item.tags![i])) {
-      item.tags = mapped;
-      touched = true;
-    }
-  }
-  if (touched) {
-    await fs.writeFile(file, JSON.stringify(items, null, 2) + "\n", "utf8");
-  }
+  await rewriteItemTags(ctx, (tag) => (tagKey(tag) === from ? next : tag));
+}
+
+/**
+ * Take a tag off every item that carries it, case-insensitively so a legacy
+ * casing goes with it. Returns how many items changed.
+ */
+async function removeFromItems(
+  ctx: LocalStoreContext,
+  name: string,
+): Promise<number> {
+  const target = tagKey(name);
+  return rewriteItemTags(ctx, (tag) => (tagKey(tag) === target ? null : tag));
 }

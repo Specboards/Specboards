@@ -1586,12 +1586,38 @@ interface WorkspaceConfigStore {
    */
   renameTag(id: string, name: string, scope?: WorkspaceScope): Promise<TagDef>;
   /**
-   * Remove a tag from the registry. Admin-only. Item values are left in place,
-   * the way dropping a custom property leaves its values: re-adding the tag
-   * brings them back, and a settings tidy-up must not delete other people's
-   * work.
+   * Fold `sourceId` into `targetId`: every item carrying the source tag carries
+   * the target instead, and the source definition is dropped. Admin-only.
+   *
+   * Separate from `renameTag`, which refuses to rename onto an existing name.
+   * That refusal is right for someone fixing a typo on one row and wrong for a
+   * bulk mapping file, where consolidating two spellings onto one is the stated
+   * job. An item that already carried both ends up with one, in the position
+   * the surviving tag held first.
    */
-  deleteTag(id: string, scope?: WorkspaceScope): Promise<void>;
+  mergeTags(
+    sourceId: string,
+    targetId: string,
+    scope?: WorkspaceScope,
+  ): Promise<TagDef>;
+  /**
+   * Delete a tag: take it off every item that carries it, then drop the
+   * definition. Admin-only. Returns how many items were changed.
+   *
+   * Unlike `deleteProperty`, which leaves its values in place, this cascades. A
+   * property's value is content typed into a field; a tag IS the field, so a
+   * "hidden" tag was not a value waiting to come back, it was a chip still on a
+   * card and still in the filters, with nowhere left to manage it. The weight
+   * sits on the confirmation instead: the caller types the tag's name, having
+   * been shown how many items it is on (see `tagUsageCounts`).
+   */
+  deleteTag(id: string, scope?: WorkspaceScope): Promise<number>;
+  /**
+   * How many items carry each tag, keyed by `tagKey(name)`. Tags nobody uses
+   * are absent rather than zero. One aggregate for the whole registry, because
+   * the settings list needs every number at once.
+   */
+  tagUsageCounts(scope?: WorkspaceScope): Promise<Record<string, number>>;
   /** The workspace's detail templates, ordered by name. */
   listDetailTemplates(
     scope?: WorkspaceScope,
