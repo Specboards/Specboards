@@ -162,6 +162,7 @@ export function RepositoriesManager({
           installUrl={installUrl}
           connected={allRepos}
           onConnected={bumpScan}
+          onRepoCreated={onRepoCreated}
           initial={installations}
         />
       ) : selfHosted ? (

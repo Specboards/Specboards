@@ -449,6 +449,7 @@ function EmptySpecsState({
         <CreateSpecRepoNudge
           installUrl={installUrl}
           orgInstallationId={orgInstallationId}
+          successHint="Now create your first spec in it below."
           onCreated={onRepoCreated}
         />
       )}

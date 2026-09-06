@@ -28,7 +28,19 @@ export default async function globalSetup() {
   await page.fill('input[name="email"]', ADMIN.email);
   await page.fill('input[name="password"]', ADMIN.password);
   await page.fill('input[name="confirmPassword"]', ADMIN.password);
-  await page.getByRole("button", { name: "Sign up" }).click();
+  // The submit button is "Sign up" normally and "Create admin account" on a
+  // first run (no users yet), which is exactly what a truncated database is.
+  //
+  // Matching only "Sign up" happened to work in CI for a reason worth writing
+  // down: `hasAnyUser` caches its answer in a module-level flag, and the rows
+  // the integration suite leaves in this same database prime that cache to
+  // "yes" when Playwright health-checks the web server, before `truncateAll`
+  // below runs. On a genuinely clean database -- a contributor running the E2E
+  // suite locally -- the first-run copy renders and setup could not get past
+  // this line. Accept both rather than depend on that accident.
+  await page
+    .getByRole("button", { name: /^(Sign up|Create admin account)$/ })
+    .click();
   await page.waitForURL((url) => !url.pathname.startsWith("/sign-up"));
 
   // Fallback for a configuration that does gate on verification, where sign-up
