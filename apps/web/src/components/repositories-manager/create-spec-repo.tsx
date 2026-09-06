@@ -31,11 +31,18 @@ import { Input } from "@/components/ui/input";
 export function CreateSpecRepoNudge({
   installUrl,
   orgInstallationId,
+  successHint,
   onCreated,
 }: {
   installUrl: string | null;
   /** Organization installation to create in; null hides the one-click form. */
   orgInstallationId: string | null;
+  /**
+   * What to do next, said after the repo is created. The caller supplies it
+   * because the two callers sit on opposite sides of the first-spec panel:
+   * from the import panel it is below, from the connect card it is above.
+   */
+  successHint?: string;
   /** Called after a repo is created + connected, so parent panels refresh. */
   onCreated: (repo?: CreatedSpecRepo) => void;
 }) {
@@ -55,6 +62,7 @@ export function CreateSpecRepoNudge({
         {orgInstallationId ? (
           <CreateSpecRepoForm
             installationId={orgInstallationId}
+            successHint={successHint}
             onCreated={onCreated}
           />
         ) : null}
@@ -104,9 +112,11 @@ export function CreateSpecRepoNudge({
  */
 function CreateSpecRepoForm({
   installationId,
+  successHint,
   onCreated,
 }: {
   installationId: string;
+  successHint?: string;
   onCreated: (repo?: CreatedSpecRepo) => void;
 }) {
   const router = useRouter();
@@ -157,7 +167,7 @@ function CreateSpecRepoForm({
         >
           {created.owner}/{created.name}
         </a>
-        . Now create your first spec in it below.
+        .{successHint ? ` ${successHint}` : ""}
       </p>
     );
   }

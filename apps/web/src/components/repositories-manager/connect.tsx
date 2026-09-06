@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useState, useTransition } from "react";
 import {
   connectRepository,
+  type CreatedSpecRepo,
   type InstallationConnectState,
   type InstallationRepo,
   listInstallationRepositories,
@@ -52,12 +53,24 @@ export function ConnectSection({
   installUrl,
   connected,
   onConnected,
+  onRepoCreated,
   initial,
 }: {
   installUrl: string | null;
   connected: ConnectedRepo[];
   /** Called after a repo is connected, so the import panel re-scans. */
   onConnected: () => void;
+  /**
+   * Called with the repo the one-click form just created, so the connected
+   * list can show it without waiting for the server render.
+   *
+   * Separate from `onConnected` because it carries a payload. Connecting an
+   * existing repo goes through an endpoint the page will re-read anyway;
+   * creating one produces a record only this component has seen, and dropping
+   * it here is what left "No repositories connected" on screen next to
+   * "Created and connected acme/specs".
+   */
+  onRepoCreated: (repo?: CreatedSpecRepo) => void;
   /** Server-prefetched picker state, rendered with the initial HTML. */
   initial: InstallationConnectState;
 }) {
@@ -86,6 +99,10 @@ export function ConnectSection({
       setLoading(false);
     }
   }, []);
+
+  // Whether the one-click form below created a repo in this session; see the
+  // comment where the nudge is rendered.
+  const [createdHere, setCreatedHere] = useState(false);
 
   const hasInstallation = installations.length > 0;
   const connectedKeys = new Set(
@@ -142,13 +159,20 @@ export function ConnectSection({
 
         <ManualConnectForm />
 
-        {connected.length === 0 ? (
+        {/* The nudge is for readers with nothing worth connecting, so it goes
+            once something is connected -- unless it is the thing that did the
+            connecting. Unmounting it the instant it succeeds would take its
+            own "Created and connected" confirmation off screen at the moment
+            the reader is looking for it. */}
+        {connected.length === 0 || createdHere ? (
           <CreateSpecRepoNudge
             installUrl={installUrl}
             orgInstallationId={orgInstallationOf(installations)}
-            onCreated={() => {
+            successHint="Create your first spec in it from the panel above."
+            onCreated={(repo) => {
+              setCreatedHere(true);
+              onRepoCreated(repo);
               void load();
-              onConnected();
             }}
           />
         ) : null}
