@@ -356,8 +356,24 @@ export function ItemDetailView({
         />
       </DetailSection>
 
-      {/* Collapsed by default: most people opening an item are not asking what
-          happened to it, and the panel fetches only when it is opened. */}
+      {/* The only section on the card that opens by default, because a comment
+          is usually addressed to someone and waiting to be read. That is also
+          why it sits above History rather than below it: an always-open
+          section under an always-shut one reads as an afterthought. */}
+      <DetailSection id="comments" title="Comments">
+        <FeatureComments
+          specId={feature.specId}
+          currentUserId={currentUserId}
+          members={members
+            .filter((m) => !m.deactivatedAt)
+            .map((m) => ({ userId: m.userId, name: m.name }))}
+        />
+      </DetailSection>
+
+      {/* Last of the sections, and collapsed by default: most people opening an
+          item are not asking what happened to it, and the panel fetches only
+          when it is opened. Anything added to the card goes above this, not
+          below. */}
       <DetailSection id="history" title="History" defaultCollapsed>
         <ItemHistory
           specId={feature.specId}
@@ -368,16 +384,6 @@ export function ItemDetailView({
             releases: releases.map((r) => ({ id: r.id, name: r.name })),
             cycles: cycles.map((c) => ({ id: c.id, name: c.name })),
           }}
-        />
-      </DetailSection>
-
-      <DetailSection id="comments" title="Comments">
-        <FeatureComments
-          specId={feature.specId}
-          currentUserId={currentUserId}
-          members={members
-            .filter((m) => !m.deactivatedAt)
-            .map((m) => ({ userId: m.userId, name: m.name }))}
         />
       </DetailSection>
 
