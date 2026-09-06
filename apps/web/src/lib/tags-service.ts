@@ -1,10 +1,14 @@
 import {
   TagError,
+  TAG_IMPORT_MAX_BYTES,
   normalizeTagName,
+  planTagImport,
   resolveTagNames,
   tagKey,
   tagNameError,
   type TagDef,
+  type TagImportPlan,
+  type TagImportWrite,
 } from "@specboards/core";
 
 import { InvalidPatchError } from "@/lib/service-errors";
@@ -64,6 +68,157 @@ export async function deleteTag(
 ): Promise<void> {
   const store = await getStore();
   await store.deleteTag(id, scope);
+}
+
+/** What a bulk operation did to one tag. */
+interface TagBulkOutcome {
+  id: string;
+  ok: boolean;
+  error?: string;
+}
+
+interface TagBulkResult {
+  okCount: number;
+  failCount: number;
+  results: TagBulkOutcome[];
+}
+
+/**
+ * Delete several tag definitions at once.
+ *
+ * Each id is deleted on its own and reported on its own, the same bargain
+ * `/api/v1/features/bulk` makes: one id that no longer exists (someone else
+ * deleted it while this list was on screen) must not throw away the other
+ * nineteen deletions the admin asked for.
+ *
+ * Like the single delete, this removes definitions only. Items keep the tags
+ * they already carry, so a bulk tidy-up of the picker is never a silent edit to
+ * other people's cards.
+ */
+export async function deleteTags(
+  ids: readonly string[],
+  scope?: WorkspaceScope,
+): Promise<TagBulkResult> {
+  const store = await getStore();
+  const results: TagBulkOutcome[] = [];
+  // De-duplicated, because the second delete of an id would report "Unknown
+  // tag" for work that in fact succeeded.
+  for (const id of [...new Set(ids)]) {
+    try {
+      await store.deleteTag(id, scope);
+      results.push({ id, ok: true });
+    } catch (err) {
+      results.push({
+        id,
+        ok: false,
+        error: err instanceof Error ? err.message : "Delete failed.",
+      });
+    }
+  }
+  return {
+    okCount: results.filter((r) => r.ok).length,
+    failCount: results.filter((r) => !r.ok).length,
+    results,
+  };
+}
+
+/** A planned import, plus what happened when it ran. */
+interface TagImportResult {
+  plan: TagImportPlan;
+  /** Null on a preview; per-action outcomes once applied. */
+  applied: { line: number; ok: boolean; error?: string }[] | null;
+}
+
+/**
+ * Plan a CSV against the live registry, and optionally run it.
+ *
+ * Planning happens here rather than being trusted from the client even when the
+ * client has already previewed, so the file is always measured against the
+ * registry as it is at the moment of writing. A tag someone else added in
+ * between changes the plan (a create becomes a no-op, a rename becomes a merge)
+ * instead of failing halfway through.
+ *
+ * Actions run in file order, and each is committed on its own. That ordering is
+ * load-bearing: a file may create `Salesforce` on one line and merge `sfdc`
+ * into it on the next, which only works if the first line has landed and ids
+ * are resolved by name as we go.
+ */
+export async function importTags(
+  csv: string,
+  apply: boolean,
+  scope?: WorkspaceScope,
+): Promise<TagImportResult> {
+  if (Buffer.byteLength(csv, "utf8") > TAG_IMPORT_MAX_BYTES) {
+    throw new InvalidPatchError(
+      `That file is too large. Uploads are limited to ${Math.round(TAG_IMPORT_MAX_BYTES / 1024)} KB.`,
+    );
+  }
+
+  const store = await getStore();
+  const registry = await store.listTags(scope);
+  const plan = planTagImport(csv, registry);
+  if (!apply) return { plan, applied: null };
+
+  const applied: { line: number; ok: boolean; error?: string }[] = [];
+  // Names are resolved against this map as the run proceeds, so each action
+  // sees the effect of the ones before it.
+  let byKey = new Map(registry.map((t) => [tagKey(t.name), t]));
+
+  for (const action of plan.actions) {
+    if (action.kind === "unchanged" || action.kind === "error") continue;
+    try {
+      byKey = await runImportAction(store, action, byKey, scope);
+      applied.push({ line: action.line, ok: true });
+    } catch (err) {
+      applied.push({
+        line: action.line,
+        ok: false,
+        error: err instanceof Error ? err.message : "Failed.",
+      });
+    }
+  }
+
+  return { plan, applied };
+}
+
+/**
+ * Execute one planned action and return the registry index it leaves behind.
+ *
+ * The index is updated from what each write returns rather than by re-listing
+ * the registry, so a thousand-row file costs a thousand writes and not a
+ * thousand extra reads. `ensureTags` hands back the whole registry anyway;
+ * rename and merge each hand back the surviving definition, which is all the
+ * two keys that changed need.
+ */
+async function runImportAction(
+  store: FeatureStore,
+  action: TagImportWrite,
+  byKey: Map<string, TagDef>,
+  scope?: WorkspaceScope,
+): Promise<Map<string, TagDef>> {
+  const next = new Map(byKey);
+
+  if (action.kind === "create") {
+    const registry = await store.ensureTags([action.name], scope);
+    return new Map(registry.map((t) => [tagKey(t.name), t]));
+  }
+
+  const source = next.get(tagKey(action.from));
+  if (!source) throw new TagError(`No tag named "${action.from}".`);
+
+  if (action.kind === "rename") {
+    const renamed = await store.renameTag(source.id, action.to, scope);
+    next.delete(tagKey(action.from));
+    next.set(tagKey(renamed.name), renamed);
+    return next;
+  }
+
+  const target = next.get(tagKey(action.to));
+  if (!target) throw new TagError(`No tag named "${action.to}".`);
+  await store.mergeTags(source.id, target.id, scope);
+  // The source is gone; the target keeps its key and its row.
+  next.delete(tagKey(action.from));
+  return next;
 }
 
 /**

@@ -106,6 +106,34 @@ export async function renameTag(
   return tag;
 }
 
+/**
+ * Fold one tag into another. Mirrors ./db/tags.ts: items carrying the source
+ * carry the target instead, de-duplicated in place, and the source definition
+ * goes away.
+ */
+export async function mergeTags(
+  ctx: LocalStoreContext,
+  sourceId: string,
+  targetId: string,
+  _scope?: WorkspaceScope,
+): Promise<TagDef> {
+  if (sourceId === targetId) {
+    throw new TagError("A tag cannot be merged into itself.");
+  }
+  const rows = await readTags(ctx);
+  const source = rows.find((t) => t.id === sourceId);
+  if (!source) throw new TagError(`Unknown tag: ${sourceId}`);
+  const target = rows.find((t) => t.id === targetId);
+  if (!target) throw new TagError(`Unknown tag: ${targetId}`);
+
+  await writeTags(
+    ctx,
+    rows.filter((t) => t.id !== sourceId),
+  );
+  await renameOnItems(ctx, source.name, target.name);
+  return target;
+}
+
 export async function deleteTag(
   ctx: LocalStoreContext,
   id: string,
@@ -125,6 +153,11 @@ export async function deleteTag(
  * Carry a rename onto every item that carries the old name, matching
  * case-insensitively so values written before the registry existed (or
  * imported from spec frontmatter) are picked up too.
+ *
+ * De-duplicates afterwards, keeping the first occurrence so the author's order
+ * survives. A plain rename rarely needs this (an item would have to carry two
+ * legacy casings of the same tag), but a merge always does: an item tagged with
+ * both `SF` and `Salesforce` must come out carrying `Salesforce` once.
  */
 async function renameOnItems(
   ctx: LocalStoreContext,
@@ -142,8 +175,19 @@ async function renameOnItems(
   let touched = false;
   for (const item of items) {
     if (!Array.isArray(item.tags)) continue;
-    const mapped = item.tags.map((t) => (tagKey(t) === from ? next : t));
-    if (mapped.some((t, i) => t !== item.tags![i])) {
+    const seen = new Set<string>();
+    const mapped: string[] = [];
+    for (const tag of item.tags) {
+      const value = tagKey(tag) === from ? next : tag;
+      const key = tagKey(value);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      mapped.push(value);
+    }
+    if (
+      mapped.length !== item.tags.length ||
+      mapped.some((t, i) => t !== item.tags![i])
+    ) {
       item.tags = mapped;
       touched = true;
     }

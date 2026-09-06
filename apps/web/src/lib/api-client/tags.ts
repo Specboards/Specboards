@@ -1,6 +1,6 @@
 "use client";
 
-import type { TagDef } from "@specboards/core";
+import type { TagDef, TagImportPlan } from "@specboards/core";
 
 import { apiFetch } from "@/lib/api-client/request";
 
@@ -47,4 +47,61 @@ export async function deleteTag(id: string): Promise<void> {
     } | null;
     throw new Error(body?.error ?? `Delete tag failed with ${res.status}`);
   }
+}
+
+/** What a bulk delete did, per tag id. Inferred at the call site. */
+interface TagBulkResult {
+  okCount: number;
+  failCount: number;
+  results: { id: string; ok: boolean; error?: string }[];
+}
+
+/**
+ * Delete several tag definitions at once. Admin-only. Item values are left in
+ * place, exactly as the single delete leaves them.
+ */
+export async function deleteTags(ids: string[]): Promise<TagBulkResult> {
+  const res = await apiFetch("/api/v1/tags/bulk", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ids }),
+  });
+  const body = (await res.json().catch(() => null)) as
+    | (TagBulkResult & { error?: string })
+    | null;
+  if (!res.ok || !body?.results) {
+    throw new Error(body?.error ?? `Delete tags failed with ${res.status}`);
+  }
+  return body;
+}
+
+/** A previewed or applied CSV import. `applied` is null on a preview. */
+interface TagImportResponse {
+  plan: TagImportPlan;
+  applied: { line: number; ok: boolean; error?: string }[] | null;
+}
+
+/**
+ * Plan a CSV against the registry, and run it when `apply` is set.
+ *
+ * The plan is always recomputed on the server, so calling this twice (preview,
+ * then apply) is not sending a stale decision back: the second call measures
+ * the file against whatever the registry looks like at that moment.
+ */
+export async function importTags(
+  csv: string,
+  apply: boolean,
+): Promise<TagImportResponse> {
+  const res = await apiFetch("/api/v1/tags/import", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ csv, apply }),
+  });
+  const body = (await res.json().catch(() => null)) as
+    | (TagImportResponse & { error?: string })
+    | null;
+  if (!res.ok || !body?.plan) {
+    throw new Error(body?.error ?? `Tag import failed with ${res.status}`);
+  }
+  return body;
 }

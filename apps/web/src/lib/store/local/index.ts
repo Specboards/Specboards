@@ -564,6 +564,14 @@ export class LocalFileStore implements FeatureStore, LocalStoreContext {
     return tagStore.renameTag(this, id, name, scope);
   }
 
+  mergeTags(
+    sourceId: string,
+    targetId: string,
+    scope?: WorkspaceScope,
+  ): Promise<TagDef> {
+    return tagStore.mergeTags(this, sourceId, targetId, scope);
+  }
+
   deleteTag(id: string, scope?: WorkspaceScope): Promise<void> {
     return tagStore.deleteTag(this, id, scope);
   }

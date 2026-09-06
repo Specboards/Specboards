@@ -1586,6 +1586,21 @@ interface WorkspaceConfigStore {
    */
   renameTag(id: string, name: string, scope?: WorkspaceScope): Promise<TagDef>;
   /**
+   * Fold `sourceId` into `targetId`: every item carrying the source tag carries
+   * the target instead, and the source definition is dropped. Admin-only.
+   *
+   * Separate from `renameTag`, which refuses to rename onto an existing name.
+   * That refusal is right for someone fixing a typo on one row and wrong for a
+   * bulk mapping file, where consolidating two spellings onto one is the stated
+   * job. An item that already carried both ends up with one, in the position
+   * the surviving tag held first.
+   */
+  mergeTags(
+    sourceId: string,
+    targetId: string,
+    scope?: WorkspaceScope,
+  ): Promise<TagDef>;
+  /**
    * Remove a tag from the registry. Admin-only. Item values are left in place,
    * the way dropping a custom property leaves its values: re-adding the tag
    * brings them back, and a settings tidy-up must not delete other people's

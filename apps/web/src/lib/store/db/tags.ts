@@ -168,6 +168,71 @@ export async function renameTag(
 }
 
 /**
+ * Fold one tag into another: rewrite the source name to the target's on every
+ * item, then drop the source definition.
+ *
+ * This is what a bulk mapping file needs and what `renameTag` deliberately
+ * refuses. The distinction is about intent, not capability: renaming one row in
+ * settings is a typo fix, where quietly absorbing another tag would be a
+ * surprise, whereas a CSV that maps `SF` to an existing `Salesforce` is asking
+ * for exactly this and says so in the preview before it runs.
+ *
+ * The rewrite de-duplicates, because an item tagged with both spellings would
+ * otherwise end up carrying the survivor twice. `DISTINCT ON (lower(t))`
+ * ordered by ordinality keeps the first occurrence, and the outer `array_agg`
+ * puts the array back in its original order, so a merge never reshuffles tags
+ * an author arranged.
+ */
+export async function mergeTags(
+  ctx: DbStoreContext,
+  sourceId: string,
+  targetId: string,
+  scope?: WorkspaceScope,
+): Promise<TagDef> {
+  return ctx.scoped(scope, async (tx) => {
+    const ws = scope!.workspaceId;
+    if (sourceId === targetId) {
+      throw new TagError("A tag cannot be merged into itself.");
+    }
+    const existing = await tagsIn(tx, ws);
+    const source = existing.find((t) => t.id === sourceId);
+    if (!source) throw new TagError(`Unknown tag: ${sourceId}`);
+    const target = existing.find((t) => t.id === targetId);
+    if (!target) throw new TagError(`Unknown tag: ${targetId}`);
+
+    await tx.execute(sql`
+      UPDATE ${features}
+      SET tags = (
+        SELECT COALESCE(array_agg(t ORDER BY ord), ARRAY[]::text[])
+        FROM (
+          SELECT DISTINCT ON (lower(t)) t, ord
+          FROM (
+            SELECT
+              CASE WHEN lower(raw) = lower(${source.name}) THEN ${target.name} ELSE raw END AS t,
+              ord
+            FROM unnest(${features}.tags) WITH ORDINALITY AS u(raw, ord)
+          ) mapped
+          ORDER BY lower(t), ord
+        ) deduped
+      )
+      WHERE ${features}.workspace_id = ${ws}
+        AND EXISTS (
+          SELECT 1 FROM unnest(${features}.tags) AS raw
+          WHERE lower(raw) = lower(${source.name})
+        )
+    `);
+
+    const removed = await tx
+      .delete(workspaceTags)
+      .where(eq(workspaceTags.id, sourceId))
+      .returning({ id: workspaceTags.id });
+    if (removed.length === 0) throw new TagError(`Unknown tag: ${sourceId}`);
+
+    return target;
+  });
+}
+
+/**
  * Drop a tag from the registry, leaving item values alone.
  *
  * The same bargain `deleteProperty` makes: a definition going away hides values
