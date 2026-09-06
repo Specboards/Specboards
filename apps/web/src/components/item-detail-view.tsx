@@ -255,37 +255,30 @@ export function ItemDetailView({
       <DetailSection id="relationships" title="Relationships" defaultCollapsed>
         <div className="space-y-5">
           {parentKey && parentLevelLabel ? (
-            <div className="space-y-2">
-              <FeatureParentSelect
-                specId={feature.specId}
-                parentSpecId={feature.parentSpecId}
-                parentLabel={parentLevelLabel}
-                candidates={parentCandidates}
-                canEdit={canEdit}
-              />
-              {feature.parentSpecId ? (
-                <p className="text-sm">
-                  <span className="text-muted-foreground">Parent: </span>
-                  <Link
-                    href={orgHref(
-                      `/backlog/${parentKey}/${feature.parentSpecId}`,
-                    )}
-                    className="text-link hover:underline"
-                  >
-                    {feature.parentTitle ?? feature.parentSpecId}
-                  </Link>
-                </p>
-              ) : null}
-            </div>
+            <FeatureParentSelect
+              specId={feature.specId}
+              parentSpecId={feature.parentSpecId}
+              parentTitle={feature.parentTitle}
+              parentLevelKey={parentKey}
+              parentLabel={parentLevelLabel}
+              candidates={parentCandidates}
+              canEdit={canEdit}
+            />
           ) : null}
 
           {childKey && childLabel ? (
             <div className="space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
+                {/* Always a heading, with the empty case as a subordinate line
+                    below it rather than in place of it. The old version put
+                    "No work items yet." where the heading goes, which made a
+                    negative sentence the most prominent text in a section that
+                    might well be showing a parent and a goal. */}
                 <p className="text-xs font-medium text-muted-foreground">
+                  {pluralLevel(childLabel)}
                   {feature.children.length > 0
-                    ? `${pluralLevel(childLabel)} · ${feature.childDoneCount}/${feature.childCount} done`
-                    : `No ${pluralLevel(childLabel.toLowerCase())} yet.`}
+                    ? ` · ${feature.childDoneCount}/${feature.childCount} done`
+                    : ""}
                 </p>
                 {canEdit ? (
                   <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
@@ -320,6 +313,11 @@ export function ItemDetailView({
                   </div>
                 ) : null}
               </div>
+              {feature.children.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  No {pluralLevel(childLabel.toLowerCase())} yet.
+                </p>
+              ) : null}
               {feature.children.map((c) => (
                 <div key={c.specId} className="flex items-center gap-2 text-sm">
                   <StatusDot status={c.status} />
