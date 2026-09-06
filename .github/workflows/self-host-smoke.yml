@@ -55,12 +55,22 @@ jobs:
         run: ./setup.sh
 
       # 1. The process serves. `/` redirects an anonymous visitor to sign-in.
-      - name: Serves a sign-in page
+      # A freshly installed instance has no users, so `/` redirects to /sign-up
+      # in first-run mode, not to /sign-in. See the comment in app/page.tsx: a
+      # "Welcome back" password form is a dead end for someone who has just run
+      # setup.sh and has no account yet.
+      #
+      # This asserted "Sign in" and so has failed every run since that redirect
+      # changed, on a workflow that only runs on a schedule and on infra/**
+      # changes, which is why it went unnoticed. Asserting on the first-run
+      # heading checks the thing that actually matters: a self-hoster following
+      # the README lands on the step that makes them the administrator.
+      - name: Serves the first-run admin sign-up page
         run: |
           code="$(curl -s -o /dev/null -w '%{http_code}' -L http://localhost:3000/)"
           [ "$code" = "200" ] || { echo "GET / returned $code"; exit 1; }
-          curl -fsS -L http://localhost:3000/ | grep -q "Sign in" \
-            || { echo "The page served is not the sign-in page."; exit 1; }
+          curl -fsS -L http://localhost:3000/ | grep -q "Create the admin account" \
+            || { echo "GET / is not the first-run admin sign-up page."; exit 1; }
 
       # 2. Migrations actually ran. The failure this exists for was an app that
       # started healthy against an empty database, so "it responds" is not
