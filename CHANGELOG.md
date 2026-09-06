@@ -25,6 +25,73 @@ for how and when the version is bumped.
 > `pnpm deploy:prod` and the dispatched workflow. See
 > [VERSIONING.md](./VERSIONING.md).
 
+## [1.0.1] - 2026-09-06
+
+The first round of fixes from the 1.0 feedback, and they turned out to share a
+theme: the app kept opening forms at people. An empty "New email" field, a
+pre-filled company name beside a Save button, a repo-link form above the links
+you already had. Each one reads as a task waiting to be completed when there was
+nothing to complete. Most of what follows is the app showing you what is there
+first, and offering the form only when you ask.
+
+### Added
+
+- **Upload a profile picture.** The only way to have an avatar was to host the
+  file somewhere else and paste its URL, which is not a thing most people can
+  do, so almost nobody had one. Pick a file instead: the browser centre-crops
+  and downsamples to a 512px square before uploading, so a photo straight off a
+  phone becomes about 30 KB. Pasting a URL still works for anyone already using
+  one, and for pictures supplied by an OAuth provider.
+- **Stage gates can require a field, not just a ticked box.** A gate used to be
+  a checklist item somebody confirms by hand, which answers "did we do the
+  thing" but not "is the data actually there". An admin can now require that a
+  field is populated before an item leaves a stage, naming either a built-in
+  (assignee, release, cycle, parent, tags) or any custom property. It reads the
+  item's own data, so it cannot be waved through, and it re-opens if the value
+  is later cleared. Both kinds sit in one checklist on the item, because to the
+  person reading it they are one question: what is left before this can move.
+- **Tags come from a workspace registry rather than free text.** The same tag
+  can no longer be spelled two ways. Anyone can still add one from a card;
+  renaming it in Settings renames it on every item that carries it.
+- **A work item shows when it ships**, derived from its release rather than from
+  a date field added to every card.
+- **The roadmap board sorts.**
+- **Custom properties can be reordered** from Settings without deleting and
+  re-creating them.
+
+### Changed
+
+- **Settings show a value before they offer to edit it.** Your name, sign-in
+  email, time zone and the company name now render as text with an Edit control
+  beside them; the input appears on request and collapses again on save or
+  cancel. The sign-in email also moves into the Profile card, out of a card of
+  its own that had been sitting below the GitHub connection: it is a fact about
+  your identity, not about an integration. The principle and, importantly, the
+  reason work items get the opposite treatment are written down in the project's
+  UX conventions.
+- **An item's existing GitHub links are listed above the form that adds more**,
+  for the same reason.
+- **Goals moved into Relationships** as a sub-section, since a goal is something
+  the item relates to rather than a section of its own.
+- **Comments sit above History** on the item detail. History is a reference you
+  consult; comments are a conversation you join.
+- **One Avatar component.** There were three implementations of the same circle
+  with two different fallback treatments. The fallback is an initial on the
+  muted surface at 24, 28 or 64px, and it is now recorded in the design system
+  so it cannot drift again.
+
+### Fixed
+
+- **A product's own stage gates were ignored everywhere except the settings page
+  that configured them.** Both the API's transition check and the item's
+  checklist resolved the workspace default instead of the product's set, so a
+  product that had overridden its gates was not actually guarded by them. The
+  MCP server had the mirror-image bug, matching gates by stage key across the
+  whole workspace so that one product's checklist blocked another product's
+  work. Both now resolve per product.
+- **The self-host smoke test asserted a page it never actually reached**, and so
+  had been failing on `main` since 1.0.0 without telling anyone anything true.
+
 ## [1.0.0] - 2026-09-02
 
 Specboards is declared stable.
