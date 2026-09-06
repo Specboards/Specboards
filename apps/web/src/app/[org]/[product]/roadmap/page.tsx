@@ -25,7 +25,15 @@ import {
 import { getBoardPreferences } from "@/lib/board-preferences-service";
 import { cardFieldCatalog, resolveCardFields } from "@/lib/card-fields";
 import { LOCAL_ORG_SLUG, orgProductPath } from "@/lib/org-path";
-import { sortFeatures } from "@/lib/feature-helpers";
+import { SortControl } from "@/components/sort-control";
+import {
+  CUSTOM_SORT_PREFIX,
+  compareByCustomField,
+  compareByRiceScore,
+  parseSortMode,
+  sortableProperties,
+  sortFeatures,
+} from "@/lib/feature-helpers";
 import { getDb } from "@/lib/db";
 import { resolveWorkflowForProducts } from "@/lib/repo-config";
 import { getStore } from "@/lib/store";
@@ -184,7 +192,46 @@ export default async function RoadmapPage({
     activeProduct?.id ?? null,
   );
   const activeLevel = resolveActiveLevel(levels, sp.level);
-  const features = scoped.filter((f) => f.level === activeLevel.key);
+  // Sort options are the workspace's sortable custom properties plus RICE, the
+  // same set the Backlog offers, parsed from the same `?sort=` param so a sort
+  // chosen on one page carries to the other. `parseSortMode` only honours a
+  // `cf:` key that still exists, so a stale or hand-typed param falls back to
+  // default rather than ordering by a property that has been deleted.
+  const sortableProps = sortableProperties(properties);
+  const sort = parseSortMode(
+    sp.sort,
+    sortableProps.map((p) => p.key),
+  );
+  const customSorts = sortableProps.map((p) => ({
+    value: `${CUSTOM_SORT_PREFIX}${p.key}`,
+    label: p.label,
+  }));
+  const cfSortKey = sort.startsWith(CUSTOM_SORT_PREFIX)
+    ? sort.slice(CUSTOM_SORT_PREFIX.length)
+    : null;
+
+  // The board preserves this array's order within each column (see
+  // RoadmapBoard's `byColumn`), so sorting here sorts inside every release
+  // column while the columns themselves stay in schedule order. Release order
+  // is the roadmap's whole point and is never what the user is asking to
+  // change.
+  //
+  // "Default" stays the alphabetical order the page has always used. Aligning
+  // it with the Backlog board's manual rank would be defensible, but it would
+  // silently reorder every existing roadmap on deploy for something nobody
+  // asked for.
+  const unsorted = scoped.filter((f) => f.level === activeLevel.key);
+  const features =
+    sort === "rice"
+      ? [...unsorted].sort(compareByRiceScore)
+      : cfSortKey
+        ? [...unsorted].sort(
+            compareByCustomField(
+              cfSortKey,
+              customFieldTypes[cfSortKey] ?? "text",
+            ),
+          )
+        : unsorted;
   const parentKey = parentLevelKey(activeLevel.key, levels);
   const parents = parentKey
     ? scoped
@@ -569,7 +616,13 @@ export default async function RoadmapPage({
               <LevelSwitcher levels={levels} active={activeLevel.key} />
               {showShipped || showTimeline ? (
                 <Link
-                  href={roadmapViewHref(org, productSlug, sp.level, "board")}
+                  href={roadmapViewHref(
+                    org,
+                    productSlug,
+                    sp.level,
+                    "board",
+                    sp.sort,
+                  )}
                   className="text-xs text-link hover:underline"
                 >
                   ← Roadmap board
@@ -582,6 +635,7 @@ export default async function RoadmapPage({
                       productSlug,
                       sp.level,
                       "timeline",
+                      sp.sort,
                     )}
                     className="text-xs text-link hover:underline"
                   >
@@ -594,6 +648,7 @@ export default async function RoadmapPage({
                         productSlug,
                         sp.level,
                         "shipped",
+                        sp.sort,
                       )}
                       className="text-xs text-link hover:underline"
                     >
@@ -609,6 +664,12 @@ export default async function RoadmapPage({
             <div className="flex flex-wrap items-center gap-2">
               {releaseCtaInEmptyState ? null : newReleaseButton}
               {itemCtaInEmptyState ? null : newItemButton}
+              {/* Board views only. The timeline is ordered by date and the
+                  ladder by hierarchy, so a title or RICE order means nothing
+                  there and offering it would be a control that does nothing. */}
+              {features.length > 0 && !showTimeline ? (
+                <SortControl sort={sort} customSorts={customSorts} />
+              ) : null}
               {features.length > 0 && canEdit && !showTimeline ? (
                 <CardFieldsMenu
                   catalog={catalog}
@@ -792,11 +853,17 @@ function roadmapViewHref(
   product: string,
   level: string | string[] | undefined,
   view: "board" | "timeline" | "shipped",
+  sort?: string | string[] | undefined,
 ): string {
   const params = new URLSearchParams();
   const levelKey = Array.isArray(level) ? level[0] : level;
   if (levelKey) params.set("level", levelKey);
   if (view !== "board") params.set("view", view);
+  // Carried like `level`: the board and the shipped view share one ordering,
+  // so switching between them and losing the sort would read as the control
+  // having been ignored.
+  const sortKey = Array.isArray(sort) ? sort[0] : sort;
+  if (sortKey) params.set("sort", sortKey);
   const qs = params.toString();
   return orgProductPath(org, product, `/roadmap${qs ? `?${qs}` : ""}`);
 }
