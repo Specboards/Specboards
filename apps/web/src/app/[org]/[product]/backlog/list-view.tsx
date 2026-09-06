@@ -9,6 +9,7 @@ import {
 } from "@/components/board-selection";
 import { EmptyState } from "@/components/empty-state";
 import { LevelSwitcher } from "@/components/level-switcher";
+import { ConnectRepoPrompt } from "@/components/connect-repo-prompt";
 import { NoSpecsEmptyState } from "@/components/no-specs-empty-state";
 import { WorkItemCreate } from "@/components/work-item-create";
 import { WorkViewTabs } from "@/components/work-view-tabs";
@@ -336,16 +337,21 @@ export async function ListView({
               createAction={newItemButton}
             />
           ) : (
-            <EmptyState
-              className="mt-8"
-              title={`No ${activeLevel.label.toLowerCase()} items yet`}
-              description={
-                canEdit
-                  ? `${activeLevel.label} items collect the work one level down so this table can show progress at a higher altitude. Create the first one and it appears here, ready to move through your workflow.`
-                  : `${activeLevel.label} items collect the work one level down. Once someone with edit access creates one, it appears here.`
-              }
-              action={newItemButton}
-            />
+            // Mirrors the board view: the leaf empty state already offers
+            // "Connect a repository", the levels above it did not.
+            <div className="space-y-4">
+              <EmptyState
+                className="mt-8"
+                title={`No ${activeLevel.label.toLowerCase()} items yet`}
+                description={
+                  canEdit
+                    ? `${activeLevel.label} items collect the work one level down so this table can show progress at a higher altitude. Create the first one and it appears here, ready to move through your workflow.`
+                    : `${activeLevel.label} items collect the work one level down. Once someone with edit access creates one, it appears here.`
+                }
+                action={newItemButton}
+              />
+              <ConnectRepoPrompt access={access} />
+            </div>
           )
         ) : (
           <>

@@ -18,7 +18,7 @@ import {
 } from "@/lib/workspace";
 
 /** Tenant scope, the caller's role, and the active org slug for a content page. */
-type PageAccess = WorkspaceScope & { role: MemberRole; orgSlug: string };
+export type PageAccess = WorkspaceScope & { role: MemberRole; orgSlug: string };
 
 /**
  * Whether the viewer can connect a GitHub repository (owner-only). `null`
