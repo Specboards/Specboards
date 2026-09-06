@@ -20,6 +20,7 @@ import {
 import type { CreateFeatureInput } from "@/lib/store/types";
 import { assertCustomFieldTypes, parseCustomFields } from "@/lib/custom-fields";
 import { FeatureNotFoundError, InvalidPatchError } from "@/lib/service-errors";
+import { resolveTags } from "@/lib/tags-service";
 
 /**
  * An item: reading a patch off the wire, and applying it.
@@ -272,6 +273,15 @@ async function applyFeaturePatch(
   if (patch.customFields && Object.keys(patch.customFields).length > 0) {
     const properties = await store.listProperties(scope, "item");
     assertCustomFieldTypes(patch.customFields, properties);
+  }
+
+  // Tags go through the registry, so a value written here is always a spelling
+  // the workspace has agreed on and an unknown name becomes a new registry row.
+  // Done at this depth rather than in the form handler because the API, the MCP
+  // tools and spec import all arrive here and none of them should have to
+  // remember to ask.
+  if (patch.tags !== undefined) {
+    patch = { ...patch, tags: await resolveTags(store, patch.tags, scope) };
   }
 
   if (patch.title !== undefined && !feature.isDbNative) {

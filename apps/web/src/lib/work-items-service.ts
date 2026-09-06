@@ -10,6 +10,7 @@ import {
 } from "@/lib/store";
 import type { CreateFeatureInput } from "@/lib/store/types";
 import { InvalidPatchError } from "@/lib/service-errors";
+import { resolveTags } from "@/lib/tags-service";
 
 /**
  * Creating and deleting a work item, which is the card itself rather than any
@@ -42,9 +43,16 @@ export async function createWorkItem(
           details: await levelTemplateBody(store, input.level, scope),
         }
       : input;
+  // Same registry pass the patch path makes, so a card created with tags gets
+  // the workspace's spelling of each one and any genuinely new name is added to
+  // the registry rather than becoming a private variant of an existing tag.
+  const tagged =
+    seeded.tags && seeded.tags.length > 0
+      ? { ...seeded, tags: await resolveTags(store, seeded.tags, scope) }
+      : seeded;
   // The store records item.created in the create transaction (it builds the data
   // from the new row, since specId is generated there).
-  const created = await store.createFeature(seeded, scope, "item.created");
+  const created = await store.createFeature(tagged, scope, "item.created");
   notifyOutbox();
   return created;
 }

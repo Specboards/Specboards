@@ -5,6 +5,7 @@ import { CardsScopePicker } from "@/components/cards-scope-picker";
 import { CollapsibleSettingsGroup } from "@/components/collapsible-settings-group";
 import { DetailTemplatesManager } from "@/components/detail-templates-manager";
 import { PropertiesManager } from "@/components/properties-manager";
+import { TagsManager } from "@/components/tags-manager";
 import { TransitionModeEditor } from "@/components/transition-mode-editor";
 import { WorkflowEditor } from "@/components/workflow-editor";
 import { WorkflowGatesEditor } from "@/components/workflow-gates-editor";
@@ -60,6 +61,7 @@ export default async function CardsSettingsPage({
     stageGates,
     transitionModes,
     overrides,
+    tags,
   ] = await Promise.all([
     store.listLevels(access ?? undefined, productId),
     store.listProperties(access ?? undefined, undefined, productId),
@@ -68,6 +70,9 @@ export default async function CardsSettingsPage({
     store.listStageGates(access ?? undefined, productId),
     store.listTransitionModes(access ?? undefined),
     store.cardsOverrides(access ?? undefined, productId),
+    // Workspace-wide, so it ignores the product scope picker above: see the
+    // migration for why tags are not scoped per product the way properties are.
+    store.listTags(access ?? undefined),
   ]);
 
   const isOwner = !access || access.role === "owner";
@@ -165,6 +170,12 @@ export default async function CardsSettingsPage({
             productId={productId}
             overridden={overrides.properties}
           />
+        </Subsection>
+        <Subsection
+          title="Tags"
+          description="The workspace's shared tag list, so the same tag can't be spelled two ways. Anyone can add a tag from a card; renaming one here renames it on every item that carries it. Tags are workspace-wide and are not affected by the product picker above."
+        >
+          <TagsManager tags={tags} canEdit={isOwner} />
         </Subsection>
       </CollapsibleSettingsGroup>
 

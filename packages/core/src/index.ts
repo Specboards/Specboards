@@ -16,3 +16,4 @@ export * from "./product-groups.js";
 export * from "./permissions.js";
 export * from "./email-domains.js";
 export * from "./org-slug.js";
+export * from "./tags.js";
