@@ -57,6 +57,7 @@ export function FeatureGithubLinks({
   const [pending, startTransition] = useTransition();
   const [kind, setKind] = useState<GithubLinkKind>("pull_request");
   const [error, setError] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
   // A DB-native card has no repo of its own, so in a multi-repo workspace the
   // server can't infer one; let the user say which. Single-repo workspaces
   // never see this control.
@@ -82,6 +83,7 @@ export function FeatureGithubLinks({
       try {
         await addGithubLink(specId, input);
         form.reset();
+        setAdding(false);
         toast.success("Linked");
         router.refresh();
       } catch (err) {
@@ -111,9 +113,10 @@ export function FeatureGithubLinks({
     <div className="space-y-3">
       <span className="text-xs font-medium text-muted-foreground">GitHub</span>
 
-      {links.length === 0 ? (
+      {links.length === 0 && !adding ? (
         <p className="text-xs text-muted-foreground">No GitHub links yet.</p>
-      ) : (
+      ) : null}
+      {links.length > 0 ? (
         <ul className="space-y-1.5">
           {direct.map((l) => (
             <li key={l.id} className="flex items-center gap-1.5 text-sm">
@@ -143,9 +146,26 @@ export function FeatureGithubLinks({
             </li>
           ))}
         </ul>
-      )}
+      ) : null}
 
-      {canEdit ? (
+      {/* Start as an "Add link" affordance; reveal the form on opt-in (see the
+          "add" UX rule in CLAUDE.md, and the same shape in FeatureRelations).
+          This section is usually read, not written: an item has its PR linked
+          once and is then opened many times to see it. Four permanently-open
+          controls under a single 13px row of link meant the form outweighed
+          the link it sat beneath. */}
+      {canEdit && !adding ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() => setAdding(true)}
+        >
+          Add link
+        </Button>
+      ) : null}
+
+      {canEdit && adding ? (
         <form onSubmit={onAdd} className="space-y-2">
           <Select
             name="kind"
@@ -188,9 +208,23 @@ export function FeatureGithubLinks({
               className="h-8"
             />
           )}
-          <Button type="submit" size="sm" variant="outline" disabled={pending}>
-            {pending ? "Saving…" : "Add link"}
-          </Button>
+          <div className="flex gap-2">
+            <Button type="submit" size="sm" disabled={pending}>
+              {pending ? "Saving…" : "Add link"}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setAdding(false);
+                setError(null);
+              }}
+              disabled={pending}
+            >
+              Cancel
+            </Button>
+          </div>
         </form>
       ) : null}
 
@@ -205,7 +239,11 @@ function LinkRow({ link }: { link: GithubLink }) {
       href={link.url}
       target="_blank"
       rel="noreferrer"
-      className="flex flex-1 items-center gap-1.5 truncate hover:underline"
+      // Sized to its content rather than `flex-1`, so the remove control beside
+      // it sits next to the link instead of at the far edge of a very wide
+      // row. `min-w-0` keeps the title truncating when the row runs out of
+      // space, which is the only reason the row was stretched to begin with.
+      className="flex min-w-0 items-center gap-1.5 truncate hover:underline"
       title={link.title ?? link.url}
     >
       <span className="font-mono text-xs">{linkLabel(link)}</span>
