@@ -32,9 +32,10 @@ import { useOrgProductPath } from "@/lib/use-org";
 
 /**
  * The single source of truth for how an item's detail is laid out: title,
- * Notion-style property block, editable body, then Relationships and
- * Integrations. Both the full item page and the resizable flyout render this,
- * so the two views are identical by construction.
+ * Notion-style property block, editable body, then Assistant, Relationships
+ * (parent, children, goals, relations), Integrations, Comments and History.
+ * Both the full item page and the resizable flyout render this, so the two
+ * views are identical by construction.
  */
 export function ItemDetailView({
   data,
@@ -242,18 +243,15 @@ export function ItemDetailView({
         />
       </DetailSection>
 
-      {/* Why this work exists. Sits above the containment relationships below,
-          because a goal is a different kind of link: many-to-many, measured,
-          and reachable from any level. */}
-      <DetailSection id="goals" title="Goals" defaultCollapsed>
-        <ItemGoals
-          specId={feature.specId}
-          goals={goals}
-          linkable={linkableGoals}
-          canEdit={canEdit}
-        />
-      </DetailSection>
-
+      {/* Every link this item has, in one section: the hierarchy above and
+          below it, the goals it ladders up to, and its lateral relations.
+          Goals used to be a section of their own. It is a different kind of
+          link (many-to-many, measured, reachable from any level) but it is
+          still a link between two records in this model, and splitting it out
+          meant a reader looking for "what is this connected to" had two places
+          to look. Integrations deliberately stays separate: a GitHub PR is a
+          pointer at another system, not a record here, and folding it in would
+          make this section the whole card. */}
       <DetailSection id="relationships" title="Relationships" defaultCollapsed>
         <div className="space-y-5">
           {parentKey && parentLevelLabel ? (
@@ -336,6 +334,17 @@ export function ItemDetailView({
               ))}
             </div>
           ) : null}
+
+          {/* After the hierarchy and before the lateral relations: the
+              parent/child pair is what people open this section for, and
+              putting goals below them keeps the child controls exactly where
+              `openDetailSection("relationships")` used to land them. */}
+          <ItemGoals
+            specId={feature.specId}
+            goals={goals}
+            linkable={linkableGoals}
+            canEdit={canEdit}
+          />
 
           <FeatureRelations
             specId={feature.specId}
