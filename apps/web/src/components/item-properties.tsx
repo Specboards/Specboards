@@ -34,6 +34,7 @@ import { StatusDot } from "@/components/status-dot";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { isFieldAvailable } from "@/lib/card-fields";
+import { shipDateLabel } from "@/lib/release-dates";
 import {
   formatRiceScore,
   statusLabel,
@@ -114,6 +115,15 @@ export function ItemProperties({
       : cycles.filter((c) => c.productId === null),
     feature.cycleId ?? null,
   );
+  // The item's ship date is its release's, looked up in the full list rather
+  // than in `productReleases`: the scoped list drops shipped releases, and a
+  // shipped release is exactly the case with a real ship date to report.
+  const shipDate = feature.releaseId
+    ? (() => {
+        const release = releases.find((r) => r.id === feature.releaseId);
+        return release ? shipDateLabel(release) : null;
+      })()
+    : null;
   const formRef = useRef<HTMLFormElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inFlightRef = useRef(false);
@@ -312,18 +322,30 @@ export function ItemProperties({
 
       {productReleases.length > 0 ? (
         <PropertyRow icon={Rocket} label="Release">
-          <Select
-            name="releaseId"
-            defaultValue={feature.releaseId ?? ""}
-            className={INLINE_SELECT}
-          >
-            <option value="">None</option>
-            {productReleases.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.name}
-              </option>
-            ))}
-          </Select>
+          {/* The picker plus, when the release has a date, when it ships.
+              Derived rather than stored: see shipDateLabel for why an item
+              does not get a ship date of its own. Rendered beside the control
+              rather than as its own property row, because it is a fact about
+              the value in that control, not a second thing to fill in. */}
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2">
+            <Select
+              name="releaseId"
+              defaultValue={feature.releaseId ?? ""}
+              className={INLINE_SELECT}
+            >
+              <option value="">None</option>
+              {productReleases.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name}
+                </option>
+              ))}
+            </Select>
+            {shipDate ? (
+              <span className="px-2 text-xs text-muted-foreground">
+                {shipDate}
+              </span>
+            ) : null}
+          </div>
         </PropertyRow>
       ) : null}
 
@@ -546,7 +568,9 @@ function ReadOnlyProperties({
   show: (key: string) => boolean;
 }) {
   const assignee = members.find((m) => m.userId === feature.assigneeId)?.name;
-  const release = releases.find((r) => r.id === feature.releaseId)?.name;
+  const releaseRecord = releases.find((r) => r.id === feature.releaseId);
+  const release = releaseRecord?.name;
+  const shipDate = releaseRecord ? shipDateLabel(releaseRecord) : null;
   return (
     <div className="space-y-0.5">
       <PropertyRow icon={Loader} label="Status">
@@ -562,7 +586,14 @@ function ReadOnlyProperties({
       ) : null}
       {release ? (
         <PropertyRow icon={Rocket} label="Release">
-          <span className="px-2 py-1 text-sm">{release}</span>
+          <span className="px-2 py-1 text-sm">
+            {release}
+            {shipDate ? (
+              <span className="ml-2 text-xs text-muted-foreground">
+                {shipDate}
+              </span>
+            ) : null}
+          </span>
         </PropertyRow>
       ) : null}
       {show("tags") && feature.tags.length > 0 ? (
