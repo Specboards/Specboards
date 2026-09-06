@@ -14,6 +14,7 @@ import type {
   PropertyEntity,
   PropertyType,
   SpecSection,
+  TagDef,
   TransitionMode,
   WorkspaceLevel,
 } from "@specboards/core";
@@ -1565,6 +1566,32 @@ interface WorkspaceConfigStore {
   ): Promise<PropertyDef>;
   /** Delete a property definition (stored item values are left in place). */
   deleteProperty(id: string, scope?: WorkspaceScope): Promise<void>;
+  /** The workspace's tag registry, ordered by position. */
+  listTags(scope?: WorkspaceScope): Promise<TagDef[]>;
+  /**
+   * Add tags to the registry, ignoring any whose name already exists
+   * (case-insensitively). Returns the full registry afterwards.
+   *
+   * Plural and idempotent because the caller is usually an item write that has
+   * just resolved several names at once and does not know, or need to know,
+   * which of them were new. Any member may call this: creating a tag from a
+   * card is the point, and someone who can already write arbitrary text into
+   * `features.tags` gains nothing from also being refused the row that names
+   * it.
+   */
+  ensureTags(names: string[], scope?: WorkspaceScope): Promise<TagDef[]>;
+  /**
+   * Rename a tag, rewriting the old name to the new one across every item that
+   * carries it. Admin-only.
+   */
+  renameTag(id: string, name: string, scope?: WorkspaceScope): Promise<TagDef>;
+  /**
+   * Remove a tag from the registry. Admin-only. Item values are left in place,
+   * the way dropping a custom property leaves its values: re-adding the tag
+   * brings them back, and a settings tidy-up must not delete other people's
+   * work.
+   */
+  deleteTag(id: string, scope?: WorkspaceScope): Promise<void>;
   /** The workspace's detail templates, ordered by name. */
   listDetailTemplates(
     scope?: WorkspaceScope,

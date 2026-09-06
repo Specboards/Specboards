@@ -43,18 +43,27 @@ export function ItemGoals({
 
   return (
     <div className="space-y-2">
+      {/* A named sub-section of Relationships, so it reads as one of the kinds
+          of link an item has rather than as a stray control. Same heading
+          shape as Relations and GitHub next to it. */}
       <div className="flex items-center justify-between gap-2">
-        <p className="text-xs font-medium text-muted-foreground">
-          {goals.length > 0
-            ? `Laddering up to ${goals.length} goal${goals.length === 1 ? "" : "s"}`
-            : "Not linked to a goal yet."}
-        </p>
+        <span className="text-xs font-medium text-muted-foreground">Goals</span>
         {canEdit && !linking && linkable.length > 0 ? (
           <Button size="inline" variant="link" onClick={() => setLinking(true)}>
             Link a goal
           </Button>
         ) : null}
       </div>
+
+      {/* Only when there is nothing to show. The old line counted the goals
+          ("Laddering up to 1 goal") directly above the one goal it was
+          counting, which spent a line of muted text restating the rows
+          underneath it. */}
+      {goals.length === 0 && !linking ? (
+        <p className="text-xs text-muted-foreground">
+          Not linked to a goal yet.
+        </p>
+      ) : null}
 
       {goals.map((goal) => (
         <GoalRow

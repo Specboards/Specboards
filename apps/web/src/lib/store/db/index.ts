@@ -2,6 +2,7 @@ import {
   type IdeaStage,
   type PropertyDef,
   type PropertyEntity,
+  type TagDef,
   type TransitionMode,
   type WorkspaceLevel,
 } from "@specboards/core";
@@ -91,6 +92,7 @@ import {
 } from "./context";
 import * as collabStore from "./collaboration";
 import * as configStore from "./workspace-config";
+import * as tagStore from "./tags";
 import * as cycleStore from "./cycles";
 import * as goalStore from "./goals";
 import * as ideaStore from "./ideas";
@@ -348,6 +350,27 @@ export class DbStore implements FeatureStore, DbStoreContext {
 
   deleteProperty(id: string, scope?: WorkspaceScope): Promise<void> {
     return configStore.deleteProperty(this, id, scope);
+  }
+
+  // Implemented in ./tags.ts.
+  listTags(scope?: WorkspaceScope): Promise<TagDef[]> {
+    return tagStore.listTags(this, scope);
+  }
+
+  ensureTags(names: string[], scope?: WorkspaceScope): Promise<TagDef[]> {
+    return tagStore.ensureTags(this, names, scope);
+  }
+
+  renameTag(
+    id: string,
+    name: string,
+    scope?: WorkspaceScope,
+  ): Promise<TagDef> {
+    return tagStore.renameTag(this, id, name, scope);
+  }
+
+  deleteTag(id: string, scope?: WorkspaceScope): Promise<void> {
+    return tagStore.deleteTag(this, id, scope);
   }
 
   // `levelsIn` is a DbStoreContext member, so it stays a method on the

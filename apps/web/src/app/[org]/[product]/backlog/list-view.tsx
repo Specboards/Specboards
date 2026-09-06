@@ -41,6 +41,7 @@ import {
 } from "@/lib/feature-helpers";
 import { resolveWorkflowForProducts } from "@/lib/repo-config";
 import { getStore } from "@/lib/store";
+import { mergeTagOptions } from "@/lib/tags-service";
 import { selectableCycles, selectableReleases } from "@/lib/store/types";
 import { listWorkspaceMembers } from "@/lib/workspace";
 import {
@@ -51,7 +52,7 @@ import {
 import { BacklogFilters, type FilterOptions } from "./backlog-filters";
 import { BacklogTable } from "./backlog-table";
 import { SavedViews } from "./saved-views";
-import { SortControl } from "./sort-control";
+import { SortControl } from "@/components/sort-control";
 
 /**
  * List view of the backlog: a prioritized table of features. Status edits here
@@ -108,9 +109,10 @@ export async function ListView({
   const features = sortFeatures(await store.listFeatures(access ?? undefined))
     .filter((f) => f.status !== "archived")
     .filter((f) => inScope(f.productId));
-  const [releases, cycles] = await Promise.all([
+  const [releases, cycles, tagRegistry] = await Promise.all([
     store.listReleases(access ?? undefined),
     store.listCycles(access ?? undefined),
+    store.listTags(access ?? undefined),
   ]);
   const releaseNames = Object.fromEntries(releases.map((r) => [r.id, r.name]));
 
@@ -189,7 +191,12 @@ export async function ListView({
   const options: FilterOptions = {
     statuses: workflow.statuses.filter((s) => s !== "archived"),
     assignees: members.map((m) => ({ userId: m.userId, name: m.name })),
-    tags: [...new Set(features.flatMap((f) => f.tags))].sort(),
+    // From the registry, plus any tag still sitting on an item that the
+    // registry no longer lists (dropping a tag hides values rather than
+    // destroying them, so those exist and must stay filterable). Registry order
+    // first, then the strays, so the menu reads as the workspace's vocabulary
+    // rather than an alphabetised sample of what happens to be in view.
+    tags: mergeTagOptions(tagRegistry, features),
     epics: features
       .filter((f) => f.childCount > 0)
       .map((f) => ({ specId: f.specId, title: f.title })),

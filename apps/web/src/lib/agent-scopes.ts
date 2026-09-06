@@ -40,6 +40,7 @@ export const SCOPE_GROUPS: ScopeGroup[] = [
       { resource: "statuses", label: "Stages" },
       { resource: "stage-gates", label: "Stage gates" },
       { resource: "properties", label: "Custom properties" },
+      { resource: "tags", label: "Tags" },
       { resource: "detail-templates", label: "Detail templates" },
       { resource: "levels", label: "Hierarchy levels" },
     ],

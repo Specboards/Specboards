@@ -33,10 +33,11 @@ import {
   parseFeatureFilters,
 } from "@/lib/feature-filters";
 import { parseSortMode, sortableProperties } from "@/lib/feature-helpers";
-import { SortControl } from "./sort-control";
+import { SortControl } from "@/components/sort-control";
 import { getDb } from "@/lib/db";
 import { resolveWorkflowForProducts } from "@/lib/repo-config";
 import { getStore } from "@/lib/store";
+import { mergeTagOptions } from "@/lib/tags-service";
 import { selectableCycles, selectableReleases } from "@/lib/store/types";
 import { listWorkspaceMembers, type WorkspaceMember } from "@/lib/workspace";
 import {
@@ -78,8 +79,14 @@ export async function BoardView({
   const activeProduct = scope.kind === "product" ? scope.product : null;
   const productIds = scopeProductIds(scope);
 
-  const [allFeatures, properties, releases, cycles, detailTemplates] =
-    await Promise.all([
+  const [
+    allFeatures,
+    properties,
+    releases,
+    cycles,
+    detailTemplates,
+    tagRegistry,
+  ] = await Promise.all([
       store.listFeatures(access ?? undefined),
       // Union across the products in view, for the same reason the stages are:
       // a column defined by only one of them should still appear rather than
@@ -91,6 +98,8 @@ export async function BoardView({
       // a combined view offers the workspace default rather than a union that
       // could suggest a skeleton the chosen product does not have.
       store.listDetailTemplates(access ?? undefined, activeProduct?.id ?? null),
+      // Workspace-wide, so no product scoping: see the tag registry migration.
+      store.listTags(access ?? undefined),
     ]);
 
   // Date-typed custom fields add a from/to range filter; parse those params now
@@ -232,7 +241,12 @@ export async function BoardView({
   const filterOptions: FilterOptions = {
     statuses: allColumns,
     assignees: members.map((m) => ({ userId: m.userId, name: m.name })),
-    tags: [...new Set(filterableFeatures.flatMap((f) => f.tags))].sort(),
+    // From the registry, plus any tag still sitting on an item that the
+    // registry no longer lists (dropping a tag hides values rather than
+    // destroying them, so those exist and must stay filterable). Registry order
+    // first, then the strays, so the menu reads as the workspace's vocabulary
+    // rather than an alphabetised sample of what happens to be in view.
+    tags: mergeTagOptions(tagRegistry, filterableFeatures),
     epics: filterableFeatures
       .filter((f) => f.childCount > 0)
       .map((f) => ({ specId: f.specId, title: f.title })),

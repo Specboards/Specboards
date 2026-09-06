@@ -13,11 +13,18 @@ interface CustomSortOption {
 }
 
 /**
- * Backlog sort control. Like the filter bar it holds no state of its own - the
- * active sort lives in the URL (`?sort=`), parsed server-side - so a sorted view
- * is shareable and survives refresh. "Default" keeps each view's natural order
- * (hierarchy/rank); "RICE score" ranks by computed priority, highest first;
- * `customSorts` add one option per sortable workspace custom property.
+ * Sort control for the Backlog and the Roadmap. Like the filter bar it holds no
+ * state of its own - the active sort lives in the URL (`?sort=`), parsed
+ * server-side - so a sorted view is shareable and survives refresh, and the two
+ * pages share the param, so a sort chosen on one carries to the other.
+ *
+ * "Default" keeps each view's natural order (hierarchy or rank on the Backlog,
+ * title within each release column on the Roadmap); "RICE score" ranks by
+ * computed priority, highest first; `customSorts` add one option per sortable
+ * workspace custom property.
+ *
+ * Lives in components/ rather than under one page's route folder because both
+ * pages import it.
  */
 export function SortControl({
   sort,

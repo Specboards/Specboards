@@ -34,6 +34,7 @@ const FILES = {
   releases: "local-releases.json",
   stageGates: "local-stage-gates.json",
   statuses: "local-statuses.json",
+  tags: "local-tags.json",
   views: "local-views.json",
 } as const;
 

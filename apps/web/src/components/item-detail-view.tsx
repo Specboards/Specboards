@@ -32,9 +32,10 @@ import { useOrgProductPath } from "@/lib/use-org";
 
 /**
  * The single source of truth for how an item's detail is laid out: title,
- * Notion-style property block, editable body, then Relationships and
- * Integrations. Both the full item page and the resizable flyout render this,
- * so the two views are identical by construction.
+ * Notion-style property block, editable body, then Assistant, Relationships
+ * (parent, children, goals, relations), Integrations, Comments and History.
+ * Both the full item page and the resizable flyout render this, so the two
+ * views are identical by construction.
  */
 export function ItemDetailView({
   data,
@@ -135,6 +136,7 @@ export function ItemDetailView({
         workflow={workflow}
         canEdit={canEdit}
         availableFields={availableFields}
+        tags={data.tags}
       />
 
       {/* Exit-criteria checklist for the stage this item currently sits in.
@@ -240,52 +242,42 @@ export function ItemDetailView({
         />
       </DetailSection>
 
-      {/* Why this work exists. Sits above the containment relationships below,
-          because a goal is a different kind of link: many-to-many, measured,
-          and reachable from any level. */}
-      <DetailSection id="goals" title="Goals" defaultCollapsed>
-        <ItemGoals
-          specId={feature.specId}
-          goals={goals}
-          linkable={linkableGoals}
-          canEdit={canEdit}
-        />
-      </DetailSection>
-
+      {/* Every link this item has, in one section: the hierarchy above and
+          below it, the goals it ladders up to, and its lateral relations.
+          Goals used to be a section of their own. It is a different kind of
+          link (many-to-many, measured, reachable from any level) but it is
+          still a link between two records in this model, and splitting it out
+          meant a reader looking for "what is this connected to" had two places
+          to look. Integrations deliberately stays separate: a GitHub PR is a
+          pointer at another system, not a record here, and folding it in would
+          make this section the whole card. */}
       <DetailSection id="relationships" title="Relationships" defaultCollapsed>
         <div className="space-y-5">
           {parentKey && parentLevelLabel ? (
-            <div className="space-y-2">
-              <FeatureParentSelect
-                specId={feature.specId}
-                parentSpecId={feature.parentSpecId}
-                parentLabel={parentLevelLabel}
-                candidates={parentCandidates}
-                canEdit={canEdit}
-              />
-              {feature.parentSpecId ? (
-                <p className="text-sm">
-                  <span className="text-muted-foreground">Parent: </span>
-                  <Link
-                    href={orgHref(
-                      `/backlog/${parentKey}/${feature.parentSpecId}`,
-                    )}
-                    className="text-link hover:underline"
-                  >
-                    {feature.parentTitle ?? feature.parentSpecId}
-                  </Link>
-                </p>
-              ) : null}
-            </div>
+            <FeatureParentSelect
+              specId={feature.specId}
+              parentSpecId={feature.parentSpecId}
+              parentTitle={feature.parentTitle}
+              parentLevelKey={parentKey}
+              parentLabel={parentLevelLabel}
+              candidates={parentCandidates}
+              canEdit={canEdit}
+            />
           ) : null}
 
           {childKey && childLabel ? (
             <div className="space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
+                {/* Always a heading, with the empty case as a subordinate line
+                    below it rather than in place of it. The old version put
+                    "No work items yet." where the heading goes, which made a
+                    negative sentence the most prominent text in a section that
+                    might well be showing a parent and a goal. */}
                 <p className="text-xs font-medium text-muted-foreground">
+                  {pluralLevel(childLabel)}
                   {feature.children.length > 0
-                    ? `${pluralLevel(childLabel)} · ${feature.childDoneCount}/${feature.childCount} done`
-                    : `No ${pluralLevel(childLabel.toLowerCase())} yet.`}
+                    ? ` · ${feature.childDoneCount}/${feature.childCount} done`
+                    : ""}
                 </p>
                 {canEdit ? (
                   <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
@@ -320,6 +312,11 @@ export function ItemDetailView({
                   </div>
                 ) : null}
               </div>
+              {feature.children.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  No {pluralLevel(childLabel.toLowerCase())} yet.
+                </p>
+              ) : null}
               {feature.children.map((c) => (
                 <div key={c.specId} className="flex items-center gap-2 text-sm">
                   <StatusDot status={c.status} />
@@ -334,6 +331,17 @@ export function ItemDetailView({
               ))}
             </div>
           ) : null}
+
+          {/* After the hierarchy and before the lateral relations: the
+              parent/child pair is what people open this section for, and
+              putting goals below them keeps the child controls exactly where
+              `openDetailSection("relationships")` used to land them. */}
+          <ItemGoals
+            specId={feature.specId}
+            goals={goals}
+            linkable={linkableGoals}
+            canEdit={canEdit}
+          />
 
           <FeatureRelations
             specId={feature.specId}
@@ -354,8 +362,24 @@ export function ItemDetailView({
         />
       </DetailSection>
 
-      {/* Collapsed by default: most people opening an item are not asking what
-          happened to it, and the panel fetches only when it is opened. */}
+      {/* The only section on the card that opens by default, because a comment
+          is usually addressed to someone and waiting to be read. That is also
+          why it sits above History rather than below it: an always-open
+          section under an always-shut one reads as an afterthought. */}
+      <DetailSection id="comments" title="Comments">
+        <FeatureComments
+          specId={feature.specId}
+          currentUserId={currentUserId}
+          members={members
+            .filter((m) => !m.deactivatedAt)
+            .map((m) => ({ userId: m.userId, name: m.name }))}
+        />
+      </DetailSection>
+
+      {/* Last of the sections, and collapsed by default: most people opening an
+          item are not asking what happened to it, and the panel fetches only
+          when it is opened. Anything added to the card goes above this, not
+          below. */}
       <DetailSection id="history" title="History" defaultCollapsed>
         <ItemHistory
           specId={feature.specId}
@@ -366,16 +390,6 @@ export function ItemDetailView({
             releases: releases.map((r) => ({ id: r.id, name: r.name })),
             cycles: cycles.map((c) => ({ id: c.id, name: c.name })),
           }}
-        />
-      </DetailSection>
-
-      <DetailSection id="comments" title="Comments">
-        <FeatureComments
-          specId={feature.specId}
-          currentUserId={currentUserId}
-          members={members
-            .filter((m) => !m.deactivatedAt)
-            .map((m) => ({ userId: m.userId, name: m.name }))}
         />
       </DetailSection>
 

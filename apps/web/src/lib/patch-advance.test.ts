@@ -45,6 +45,10 @@ const store = {
     },
   ),
   listProperties: vi.fn(async () => []),
+  // The registry a tag patch is canonicalized against. Empty, so every name in
+  // these tests is new and passes through unchanged.
+  listTags: vi.fn(async () => []),
+  ensureTags: vi.fn(async () => []),
   listLevels: vi.fn(async () => []),
   // One gate per blocked stage, never completed, so a forward move over it fails.
   listStageGates: vi.fn(async () =>
