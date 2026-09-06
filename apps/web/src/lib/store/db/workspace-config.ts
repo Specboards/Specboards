@@ -606,9 +606,15 @@ export async function replaceStageGates(
     const resolved = gates.map((g) => {
       const pos = perStage.get(g.stageKey) ?? 0;
       perStage.set(g.stageKey, pos + 1);
+      const kind = g.kind === "field" ? "field" : "checklist";
       return {
         id: g.id,
         stageKey: g.stageKey,
+        kind,
+        // Normalized rather than passed through: the CHECK in 0080 rejects a
+        // checklist gate that carries a field key, and a client that sends one
+        // is confused rather than malicious.
+        fieldKey: kind === "field" ? (g.fieldKey ?? null) : null,
         label: g.label,
         position: pos,
       };
@@ -646,7 +652,13 @@ export async function replaceStageGates(
       if (g.id && keepIds.has(g.id)) {
         await tx
           .update(workspaceStageGates)
-          .set({ stageKey: g.stageKey, label: g.label, position: g.position })
+          .set({
+            stageKey: g.stageKey,
+            kind: g.kind,
+            fieldKey: g.fieldKey,
+            label: g.label,
+            position: g.position,
+          })
           .where(
             and(
               eq(workspaceStageGates.id, g.id),
@@ -658,6 +670,8 @@ export async function replaceStageGates(
           workspaceId: ws,
           productId: target,
           stageKey: g.stageKey,
+          kind: g.kind,
+          fieldKey: g.fieldKey,
           label: g.label,
           position: g.position,
         });
@@ -1153,6 +1167,10 @@ async function stageGatesIn(
   return source.map((r) => ({
     id: r.id,
     stageKey: r.stageKey,
+    // Rows written before 0080 carry the column default, so the coalesce here
+    // is only a guard against a hand-edited row.
+    kind: r.kind === "field" ? "field" : "checklist",
+    fieldKey: r.fieldKey ?? null,
     label: r.label,
     position: r.position,
   }));

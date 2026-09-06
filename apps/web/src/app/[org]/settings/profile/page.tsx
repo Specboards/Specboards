@@ -5,14 +5,18 @@ import { getDb } from "@/lib/db";
 import { getGithubConnection } from "@/lib/github-user-token";
 import { requireWorkspaceAccess } from "@/lib/workspace-access";
 import { GithubAccountCard } from "@/components/github-account-card";
-import { AppearanceCard, EmailCard, ProfileCard } from "@/components/settings-form";
+import { AppearanceCard, ProfileCard } from "@/components/settings-form";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Profile settings: name, picture, time zone, appearance (theme), and the
- * sign-in email. In local file mode there's no account, so only Appearance
- * (which is device-local) renders.
+ * Profile settings: picture, name, sign-in email, time zone, appearance
+ * (theme), and the connected GitHub account. In local file mode there's no
+ * account, so only Appearance (which is device-local) renders.
+ *
+ * The email is part of the Profile card rather than a card of its own. It is a
+ * fact about your identity, and it had been sitting below the GitHub
+ * connection, which is a fact about an integration.
  */
 export default async function ProfileSettingsPage() {
   const access = await requireWorkspaceAccess();
@@ -43,12 +47,12 @@ export default async function ProfileSettingsPage() {
     <div className="space-y-6">
       <ProfileCard
         name={user.name}
+        email={user.email}
         image={profile?.image ?? null}
         timezone={profile?.timezone ?? null}
       />
       <AppearanceCard />
       <GithubAccountCard connection={connection} orgSlug={access.orgSlug} />
-      <EmailCard email={user.email} />
     </div>
   );
 }

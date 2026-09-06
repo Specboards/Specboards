@@ -186,6 +186,12 @@ describe("the resource vocabulary", () => {
       // could repoint inference at an endpoint of its choosing and read
       // everything the assistant is asked, so it is never delegable.
       "model-provider",
+      // Your own profile picture. There is no user id in the request: the
+      // route acts on whoever the session cookie says is calling, so a key has
+      // nothing to act as. Delegable identity edits are also not a thing worth
+      // inventing, since the picture is what everyone else uses to recognize a
+      // person's comments and reviews.
+      "profile",
     ]);
 
     const missing = entries

@@ -10,6 +10,7 @@ import { WorkflowEditor } from "@/components/workflow-editor";
 import { WorkflowGatesEditor } from "@/components/workflow-gates-editor";
 import { BUILTIN_METADATA_FIELDS } from "@/lib/card-fields";
 import { statusLabel } from "@/lib/feature-helpers";
+import { gateFieldCatalog } from "@/lib/gate-fields";
 import { resolveWorkflowFor } from "@/lib/repo-config";
 import { getStore } from "@/lib/store";
 import { requireWorkspaceAccess } from "@/lib/workspace-access";
@@ -125,11 +126,12 @@ export default async function CardsSettingsPage({
         </Subsection>
         <Subsection
           title="Stage gates"
-          description="Per-stage checklists that must be completed before an item can advance forward. Members tick them off on the item; an incomplete checklist blocks the move."
+          description="Exit criteria that must be met before an item can advance forward out of a stage. A checklist item is ticked off by hand on the item; a required field is met by the item's own data, so it can't be waved through and it re-opens if the value is cleared."
         >
           <WorkflowGatesEditor
             stages={stages}
             initial={stageGates}
+            fields={gateFieldCatalog(properties)}
             canEdit={canEdit}
             productId={productId}
             overridden={overrides.stageGates}

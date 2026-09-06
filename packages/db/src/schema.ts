@@ -2,6 +2,7 @@ import { relations, sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
+  customType,
   doublePrecision,
   foreignKey,
   index,
@@ -32,6 +33,18 @@ import {
  * clearly attributed, and can never be an org owner.
  */
 export const memberRole = pgEnum("member_role", ["owner", "member", "service"]);
+
+/**
+ * Raw bytes. drizzle-orm has no first-class `bytea`, and the one column that
+ * needs it (`user_avatars.bytes`) is small and read by a single route, so a
+ * local custom type is cheaper than a dependency. postgres-js hands back a
+ * Uint8Array, which is what `Buffer.from` and `new Response(...)` both take.
+ */
+const bytea = customType<{ data: Uint8Array; driverData: Uint8Array }>({
+  dataType() {
+    return "bytea";
+  },
+});
 
 /** A product's read visibility: `org` (every member can read) or `private`
  * (read requires org-admin or explicit product membership). */
@@ -961,6 +974,20 @@ export const workspaceStageGates = pgTable(
     }),
     /** The stage this gate guards (a `workspace_statuses.key` or built-in key). */
     stageKey: text("stage_key").notNull(),
+    /**
+     * How the gate decides it is satisfied. `checklist` is a box a member ticks
+     * (a row in `feature_gate_completions`); `field` is satisfied by the item's
+     * own data, so it can never be waved through and un-sets itself if the
+     * value is later cleared. See 0080 for why one table carries both.
+     */
+    kind: text("kind").notNull().default("checklist"),
+    /**
+     * For `kind = 'field'`, the field that must be populated: a built-in key
+     * (`assignee`, `release`, `cycle`, `parent`, `tags`) or a custom property
+     * key prefixed `cf:`. Null for checklist gates. Deliberately not an FK; see
+     * 0080.
+     */
+    fieldKey: text("field_key"),
     label: text("label").notNull(),
     /** Manual ordering within a stage's checklist; ascending. */
     position: integer("position").notNull().default(0),
@@ -1779,6 +1806,31 @@ export const users = pgTable("users", {
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+/**
+ * A profile picture uploaded to Specboards rather than hosted elsewhere.
+ *
+ * `users.image` stays a URL either way. For an uploaded picture it points at
+ * `/api/avatars/<user id>?v=<updatedAt millis>`, so replacing the file changes
+ * the URL and no stale copy survives a browser cache. An externally hosted
+ * picture (pasted, or supplied by an OAuth provider) puts its own URL there and
+ * owns no row here. Not tenant-scoped and carrying no RLS, like the auth tables
+ * above: a person has one face across every workspace they belong to. See 0080
+ * for why the bytes live in Postgres.
+ */
+export const userAvatars = pgTable("user_avatars", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  /** Constrained to png/jpeg/webp by a CHECK: it is echoed as a Content-Type. */
+  mimeType: text("mime_type").notNull(),
+  bytes: bytea("bytes").notNull(),
+  /** Denormalized so Content-Length never has to read the blob. */
+  byteSize: integer("byte_size").notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

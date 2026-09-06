@@ -2,10 +2,16 @@ import {
   canTransition,
   isForwardTransition,
   isValidParentLevel,
+  type PropertyDef,
   shortestTransitionPath,
   transitionErrorMessage,
 } from "@specboards/core";
 import { RICE_IMPACT_VALUES } from "@/lib/feature-helpers";
+import {
+  gateDisplayLabel,
+  gateFieldCatalog,
+  gateSatisfied,
+} from "@/lib/gate-fields";
 import { applyItemReleaseCascade } from "@/lib/release-cascade-service";
 import { resolveWorkflowFor } from "@/lib/repo-config";
 import { isUuid } from "@/lib/uuid";
@@ -17,7 +23,7 @@ import {
   type OutboxEmit,
   type WorkspaceScope,
 } from "@/lib/store";
-import type { CreateFeatureInput } from "@/lib/store/types";
+import type { CreateFeatureInput, FeatureRecord } from "@/lib/store/types";
 import { assertCustomFieldTypes, parseCustomFields } from "@/lib/custom-fields";
 import { FeatureNotFoundError, InvalidPatchError } from "@/lib/service-errors";
 
@@ -289,7 +295,13 @@ async function applyFeaturePatch(
     // Stage gates block only forward moves; pulling back or archiving is free.
     if (isForwardTransition(feature.status, patch.status, workflow)) {
       await assertGatesSatisfied(
-        specId,
+        // The item as it will be after this patch, not as it is now. A field
+        // gate reads the item's data, and the natural way to satisfy one is to
+        // set the field in the same edit that moves the stage (the board's own
+        // "assign and advance" does exactly that). Checking the pre-patch row
+        // would reject the move and then apply the value, so the second
+        // identical attempt would succeed and the first looked like a bug.
+        { ...feature, ...patch },
         feature.status,
         patch.status,
         workflow,
@@ -368,10 +380,15 @@ async function applyFeaturePatch(
 /**
  * Enforce the exit-criteria stage gates for a forward move `from -> to`. Every
  * gate on every stage the item advances *past* (the source stage and any stages
- * skipped over, i.e. the half-open range [from, to)) must be checked off, or the
+ * skipped over, i.e. the half-open range [from, to)) must be satisfied, or the
  * move is rejected. Checking the whole range, not just the source, stops a
  * multi-stage jump from bypassing an intermediate stage's checklist under open
  * (any-to-any) workflows.
+ *
+ * Two kinds of gate, satisfied two ways: a checklist gate needs a completion
+ * row, a field gate needs the named field populated on `feature` (see
+ * `gate-fields.ts`). `feature` is the item as it will be after the patch, so a
+ * single edit that sets the field and advances the stage is allowed.
  *
  * This is the single point where gate policy is applied for the web API, so
  * future rules (per-item-type bypass, admin "skip with reason") slot in here.
@@ -380,7 +397,7 @@ async function applyFeaturePatch(
  * helper. No-op when no passed-over stage has gates.
  */
 async function assertGatesSatisfied(
-  specId: string,
+  feature: FeatureRecord,
   from: string,
   to: string,
   workflow: { statuses: readonly string[] },
@@ -391,16 +408,37 @@ async function assertGatesSatisfied(
   // Stages advanced past: source up to (not including) the destination.
   const passed = new Set(workflow.statuses.slice(fromIndex, toIndex));
   const store = await getStore();
-  const gates = (await store.listStageGates(scope)).filter((g) =>
-    passed.has(g.stageKey),
+  // Resolved for the item's own product, matching how the workflow itself was
+  // resolved above. Reading the workspace default here was a latent bug: a
+  // product with its own gates had them ignored on every API write.
+  const gates = (await store.listStageGates(scope, feature.productId)).filter(
+    (g) => passed.has(g.stageKey),
   );
   if (gates.length === 0) return;
-  const done = new Set(await store.listGateCompletions(specId, scope));
-  const open = gates.filter((g) => !done.has(g.id));
+
+  const needsCompletions = gates.some((g) => g.kind !== "field");
+  const needsFields = gates.some((g) => g.kind === "field");
+  const [done, properties] = await Promise.all([
+    needsCompletions
+      ? store.listGateCompletions(feature.specId, scope)
+      : Promise.resolve<string[]>([]),
+    needsFields
+      ? store.listProperties(scope, "item", feature.productId)
+      : Promise.resolve<PropertyDef[]>([]),
+  ]);
+  const catalog = gateFieldCatalog(properties);
+  const completed = new Set(done);
+
+  const open = gates.filter((g) => !gateSatisfied(g, feature, completed, catalog));
   if (open.length === 0) return;
-  const labels = open.map((g) => `"${g.label}"`).join(", ");
+
+  const labels = open
+    .map((g) => `"${gateDisplayLabel(g, catalog)}"`)
+    .join(", ");
+  // Worded to cover both kinds, because a stage can mix them and the remaining
+  // list would otherwise tell somebody to tick a box that is not tickable.
   throw new InvalidPatchError(
-    `This item can't advance until its stage checklist is complete. Remaining: ${labels}.`,
+    `This item can't advance until its stage checklist is complete and its required fields are set. Remaining: ${labels}.`,
   );
 }
 

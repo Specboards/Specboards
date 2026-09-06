@@ -25,9 +25,14 @@ import type {
   FeatureDetail,
   ItemGoalRef,
   ReleaseRecord,
-  StageGate,
+  StageGateKind,
   WorkspaceScope,
 } from "@/lib/store/types";
+import {
+  gateDisplayLabel,
+  gateFieldCatalog,
+  gateSatisfied,
+} from "@/lib/gate-fields";
 import {
   listWorkspaceMembers,
   type MemberRole,
@@ -48,6 +53,16 @@ export interface ItemRef {
   title: string;
 }
 
+/** One exit criterion on the item's current stage, as the checklist shows it. */
+export interface ResolvedGate {
+  id: string;
+  kind: StageGateKind;
+  /** Display text: a checklist gate's own label, or the field's current name. */
+  label: string;
+  /** Whether the item meets it right now. */
+  satisfied: boolean;
+}
+
 /**
  * Everything the item detail UI needs, resolved once on the server. Shared by
  * the full item page and the flyout's context endpoint so both render the exact
@@ -66,10 +81,17 @@ export interface ItemDetailData {
   /** Goals the item could be linked to, for the "Link goal" picker. */
   linkableGoals: { id: string; title: string }[];
   workflow: StatusWorkflow;
-  /** Exit-criteria gates for the item's *current* stage, in checklist order. */
-  stageGates: StageGate[];
-  /** Which of `stageGates` are checked off for this item. */
-  completedGateIds: string[];
+  /**
+   * Exit-criteria gates for the item's *current* stage, in checklist order,
+   * already resolved against this item: label as it should read now, and
+   * whether the item meets it.
+   *
+   * Resolved here rather than in the view because a field gate's answer needs
+   * the workspace's property definitions, which the flyout has no other reason
+   * to carry, and because the same resolution has to agree with what the
+   * transition check will say when the move is attempted.
+   */
+  stageGates: ResolvedGate[];
   canEdit: boolean;
   /**
    * Whether this item's Markdown body may be edited *as a spec*, meaning the
@@ -171,17 +193,29 @@ export async function getItemDetailData(
       store.listFeatures(access ?? undefined),
       store.listLevels(access ?? undefined, feature.productId),
       store.listProducts(access ?? undefined),
-      store.listStageGates(access ?? undefined),
+      // Resolved for the item's own product, like the workflow and the
+      // properties above: a product with its own gates is governed by those.
+      store.listStageGates(access ?? undefined, feature.productId),
       store.listGateCompletions(feature.specId, access ?? undefined),
     ]);
 
-  // Only the current stage's gates are actionable on the item (exit criteria),
-  // and completedGateIds is scoped to those so it matches stageGates 1:1.
-  const stageGates = allGates.filter((g) => g.stageKey === feature.status);
-  const stageGateIds = new Set(stageGates.map((g) => g.id));
-  const completedGateIds = allCompletedGateIds.filter((id) =>
-    stageGateIds.has(id),
-  );
+  // Only the current stage's gates are actionable on the item (exit criteria).
+  // Each is resolved to what it should say and whether the item meets it, using
+  // the same helper the transition check uses, so the checklist and the block
+  // message can never disagree. The catalog is built from every item property,
+  // not just those at this item's level: a gate can name a property that is not
+  // offered here, and "unsatisfiable, go and fix the gate" is a better answer
+  // than silently treating it as met.
+  const gateCatalog = gateFieldCatalog(allProperties);
+  const completed = new Set(allCompletedGateIds);
+  const stageGates: ResolvedGate[] = allGates
+    .filter((g) => g.stageKey === feature.status)
+    .map((g) => ({
+      id: g.id,
+      kind: g.kind,
+      label: gateDisplayLabel(g, gateCatalog),
+      satisfied: gateSatisfied(g, feature, completed, gateCatalog),
+    }));
 
   const properties = allProperties.filter((p) =>
     propertyAppliesToLevel(p, feature.level),
@@ -268,7 +302,6 @@ export async function getItemDetailData(
       .map((g) => ({ id: g.id, title: g.title })),
     workflow,
     stageGates,
-    completedGateIds,
     canEdit,
     canEditSpec,
     specWriteMode,
