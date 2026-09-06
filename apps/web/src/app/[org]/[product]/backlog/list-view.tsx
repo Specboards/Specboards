@@ -51,7 +51,7 @@ import {
 import { BacklogFilters, type FilterOptions } from "./backlog-filters";
 import { BacklogTable } from "./backlog-table";
 import { SavedViews } from "./saved-views";
-import { SortControl } from "./sort-control";
+import { SortControl } from "@/components/sort-control";
 
 /**
  * List view of the backlog: a prioritized table of features. Status edits here

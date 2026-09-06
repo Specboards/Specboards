@@ -33,7 +33,7 @@ import {
   parseFeatureFilters,
 } from "@/lib/feature-filters";
 import { parseSortMode, sortableProperties } from "@/lib/feature-helpers";
-import { SortControl } from "./sort-control";
+import { SortControl } from "@/components/sort-control";
 import { getDb } from "@/lib/db";
 import { resolveWorkflowForProducts } from "@/lib/repo-config";
 import { getStore } from "@/lib/store";
