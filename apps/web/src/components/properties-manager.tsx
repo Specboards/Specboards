@@ -4,6 +4,8 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 
+import { ChevronDown, ChevronUp } from "lucide-react";
+
 import type {
   PropertyDef,
   PropertyEntity,
@@ -17,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
+import { reorderProperty } from "@/lib/property-order";
 import {
   createProperty,
   deleteProperty,
@@ -108,16 +111,11 @@ export function PropertiesManager({
           />
         ) : null}
         {properties.length > 0 ? (
-          <div className="space-y-3">
-            {properties.map((property) => (
-              <PropertyRow
-                key={property.id}
-                property={property}
-                levels={levels}
-                canEdit={canEdit}
-              />
-            ))}
-          </div>
+          <PropertyList
+            properties={properties}
+            levels={levels}
+            canEdit={canEdit}
+          />
         ) : null}
         {/* Start as an "Add property" affordance; reveal the form on opt-in (see
           the "add" UX rule in CLAUDE.md). */}
@@ -135,6 +133,84 @@ export function PropertiesManager({
         ) : null}
       </div>
     </CardsOverride>
+  );
+}
+
+/**
+ * The ordered property list, and the only thing that writes `position`.
+ *
+ * Reordering was previously impossible: the column, the patch field and the
+ * `ORDER BY` have all existed since positions were introduced, but nothing in
+ * the UI ever sent one. The only way to put Start Date above End Date was to
+ * delete and re-create both, and that is not a lossless operation - a
+ * re-created property gets a fresh key from `propertyKeyFromLabel`, so every
+ * value already stored against the old key is orphaned.
+ *
+ * Buttons rather than drag: keyboard-reachable, announceable, testable, and
+ * the smaller correct slice. Drag can be layered on the same field later.
+ */
+function PropertyList({
+  properties,
+  levels,
+  canEdit,
+}: {
+  properties: PropertyDef[];
+  levels: WorkspaceLevel[];
+  canEdit: boolean;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+
+  /**
+   * Move one property one place. `reorderProperty` decides what that means and
+   * which rows have to be written; see it for why this is a renumber rather
+   * than a swap of two positions.
+   */
+  function move(property: PropertyDef, delta: -1 | 1) {
+    const writes = reorderProperty(properties, property.id, delta);
+    if (writes.length === 0) return;
+    startTransition(async () => {
+      try {
+        for (const write of writes) {
+          await updateProperty(write.id, { position: write.position });
+        }
+        router.refresh();
+      } catch (err) {
+        if (redirectOnAuthExpiry(err, router)) return;
+        toast.error(err instanceof Error ? err.message : "Reorder failed.");
+      }
+    });
+  }
+
+  /** Position of a property within its own entity group, and that group's size. */
+  function place(property: PropertyDef): { index: number; total: number } {
+    const peers = properties.filter((p) => p.entity === property.entity);
+    return {
+      index: peers.findIndex((p) => p.id === property.id),
+      total: peers.length,
+    };
+  }
+
+  return (
+    <div className="space-y-3">
+      {properties.map((property) => {
+        const { index, total } = place(property);
+        return (
+          <PropertyRow
+            key={property.id}
+            property={property}
+            levels={levels}
+            canEdit={canEdit}
+            // Only offered where there is somewhere to go: a group of one
+            // shows a disabled pair rather than controls that do nothing.
+            canMoveUp={index > 0}
+            canMoveDown={index < total - 1}
+            moving={pending}
+            onMove={(delta) => move(property, delta)}
+          />
+        );
+      })}
+    </div>
   );
 }
 
@@ -191,10 +267,20 @@ function PropertyRow({
   property,
   levels,
   canEdit,
+  canMoveUp,
+  canMoveDown,
+  moving,
+  onMove,
 }: {
   property: PropertyDef;
   levels: WorkspaceLevel[];
   canEdit: boolean;
+  /** Whether there is a same-entity neighbour above / below to swap with. */
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  /** A reorder is in flight somewhere in the list. */
+  moving: boolean;
+  onMove: (delta: -1 | 1) => void;
 }) {
   const router = useRouter();
   const [label, setLabel] = useState(property.label);
@@ -269,6 +355,33 @@ function PropertyRow({
   return (
     <fieldset className="space-y-3 rounded-md border p-4">
       <div className="flex flex-wrap items-end gap-2">
+        {/* First in the row because they act on the property as a whole, not
+            on any one field of it. Disabled rather than hidden at the ends of
+            the list, so the row's controls never shift position as it moves. */}
+        {canEdit ? (
+          <div className="flex gap-1">
+            <Button
+              type="button"
+              size="icon"
+              variant="outline"
+              aria-label={`Move ${property.label} up`}
+              disabled={moving || !canMoveUp}
+              onClick={() => onMove(-1)}
+            >
+              <ChevronUp aria-hidden />
+            </Button>
+            <Button
+              type="button"
+              size="icon"
+              variant="outline"
+              aria-label={`Move ${property.label} down`}
+              disabled={moving || !canMoveDown}
+              onClick={() => onMove(1)}
+            >
+              <ChevronDown aria-hidden />
+            </Button>
+          </div>
+        ) : null}
         <label className="min-w-40 flex-1 space-y-1.5">
           <span className="text-xs font-medium text-muted-foreground">
             Label
