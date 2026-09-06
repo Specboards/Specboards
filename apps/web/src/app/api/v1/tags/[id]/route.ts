@@ -44,11 +44,15 @@ export async function PATCH(req: Request, { params }: Params) {
 }
 
 /**
- * DELETE /api/v1/tags/:id — drop a tag from the registry. Admin-only.
+ * DELETE /api/v1/tags/:id — delete a tag. Admin-only.
  *
- * Item values are left in place, the way dropping a custom property leaves its
- * values: re-adding the tag brings them back, and an admin tidying a settings
- * list must not silently delete other people's work.
+ * Cascades: the tag comes off every item that carried it, and the response
+ * reports how many items changed. This is not the bargain `deleteProperty`
+ * makes; see `store/types.ts` for why tags are the exception.
+ *
+ * The API takes the caller at their word. The typed-name confirmation that
+ * guards this in the UI is a guard against a slip, not an authorization check,
+ * so it lives there rather than as a body field a script would have to fake.
  */
 export async function DELETE(req: Request, { params }: Params) {
   const authz = await authorizeOrgAdmin(req);
@@ -56,9 +60,9 @@ export async function DELETE(req: Request, { params }: Params) {
 
   const { id } = await params;
   try {
-    await deleteTag(id, authz.scope ?? undefined);
+    const itemCount = await deleteTag(id, authz.scope ?? undefined);
     revalidateCardPages();
-    return Response.json({ ok: true });
+    return Response.json({ ok: true, itemCount });
   } catch (err) {
     if (err instanceof TagError) {
       return Response.json({ error: err.message }, { status: 422 });

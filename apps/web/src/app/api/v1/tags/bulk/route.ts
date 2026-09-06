@@ -12,7 +12,9 @@ const MAX_IDS = 500;
  * POST /api/v1/tags/bulk — delete many tag definitions. Body: { ids }.
  *
  * Admin-only, like the single delete on `/api/v1/tags/:id`, and with the same
- * bargain: definitions go, item values stay.
+ * cascade: each tag comes off every item that carried it. Each result carries
+ * its own `itemCount`; there is no total, because summing them would
+ * double-count an item that carried two of the selected tags.
  *
  * POST rather than DELETE-with-a-body because a request body on DELETE is
  * allowed but poorly supported, and proxies are within their rights to drop it.

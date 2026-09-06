@@ -11,6 +11,7 @@ import { EmptyState } from "@/components/empty-state";
 import { TagImportPanel } from "@/components/tag-import-panel";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import {
@@ -24,6 +25,28 @@ import {
 const FILTER_THRESHOLD = 8;
 
 /**
+ * What a bulk delete asks the user to type when more than one tag is selected.
+ *
+ * A single tag is confirmed by its own name, which is the safeguard that
+ * actually reads the user's intent. Several tags have no one name to ask for,
+ * and asking for twenty would be a transcription exercise rather than a check,
+ * so the fixed word carries it. A selection of exactly one still asks for the
+ * name: the count should not decide how careful the confirmation is.
+ */
+const BULK_PHRASE = "DELETE";
+
+/** Items carrying `tag`, from the workspace-wide usage map. */
+function usageOf(usage: Record<string, number>, tag: TagDef): number {
+  return usage[tagKey(tag.name)] ?? 0;
+}
+
+/** "14 items" / "1 item" / "no items". */
+function itemsPhrase(n: number): string {
+  if (n === 0) return "no items";
+  return `${n} ${n === 1 ? "item" : "items"}`;
+}
+
+/**
  * Settings -> Tags: the workspace's tag registry.
  *
  * Renaming is the operation this list exists for. Before the registry a tag was
@@ -32,10 +55,14 @@ const FILTER_THRESHOLD = 8;
  * tag. Renaming here rewrites the tag on every item that carries it, in one
  * transaction.
  *
- * Deleting only removes the definition. Item values stay where they are, the
- * same bargain custom properties make: re-adding the tag brings them back, and
- * an admin tidying this list must not silently delete other people's work. The
- * bulk delete is deliberately no more destructive than the single one.
+ * Deleting now does the same thing in the other direction: the tag comes off
+ * every item that carried it. It used to remove only the definition, on the
+ * reasoning custom properties use, that hiding values beats destroying them.
+ * For tags that reasoning did not hold up. A property's value is content typed
+ * into a field; a tag IS the field, so a "hidden" tag was a chip still drawn on
+ * cards, still in the filters, and gone from the one screen that claimed to
+ * manage it. Since the delete is now destructive and has no undo, both paths go
+ * through a typed confirmation that shows the item count first.
  *
  * Rows show the name as text with an Edit control rather than sitting open as
  * inputs. That is the settings convention in CLAUDE.md, and here it also frees
@@ -45,9 +72,12 @@ const FILTER_THRESHOLD = 8;
  */
 export function TagsManager({
   tags,
+  usage,
   canEdit,
 }: {
   tags: TagDef[];
+  /** Items per tag, keyed by `tagKey(name)`. Missing means none. */
+  usage: Record<string, number>;
   canEdit: boolean;
 }) {
   const router = useRouter();
@@ -55,6 +85,7 @@ export function TagsManager({
   const [importing, setImporting] = useState(false);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [confirmingBulk, setConfirmingBulk] = useState(false);
   const [pending, startTransition] = useTransition();
 
   const visible = useMemo(() => {
@@ -92,17 +123,10 @@ export function TagsManager({
 
   function onBulkDelete() {
     const ids = selectedVisible.map((t) => t.id);
-    const names = selectedVisible.map((t) => t.name);
-    if (
-      !window.confirm(
-        `Remove ${ids.length} ${ids.length === 1 ? "tag" : "tags"} from the registry?\n\n${names.slice(0, 10).join(", ")}${names.length > 10 ? `, and ${names.length - 10} more` : ""}\n\nItems keep the tags they already have, but these disappear from the picker and the filters.`,
-      )
-    ) {
-      return;
-    }
     startTransition(async () => {
       try {
         const result = await deleteTags(ids);
+        setConfirmingBulk(false);
         setSelected(new Set());
         if (result.failCount > 0) {
           toast.warning(
@@ -110,7 +134,7 @@ export function TagsManager({
           );
         } else {
           toast.success(
-            `Removed ${result.okCount} ${result.okCount === 1 ? "tag" : "tags"}`,
+            `Removed ${result.okCount} ${result.okCount === 1 ? "tag" : "tags"} from the workspace and its items`,
           );
         }
         router.refresh();
@@ -120,6 +144,14 @@ export function TagsManager({
       }
     });
   }
+
+  // With exactly one tag selected the bulk path is the single path, so it asks
+  // the same question.
+  const soleSelected = selectedVisible.length === 1 ? selectedVisible[0] : null;
+  const bulkItemTotal = selectedVisible.reduce(
+    (n, t) => n + usageOf(usage, t),
+    0,
+  );
 
   if (tags.length === 0 && !adding && !importing) {
     return (
@@ -188,16 +220,57 @@ export function TagsManager({
                 type="button"
                 size="sm"
                 variant="outline"
-                onClick={onBulkDelete}
+                onClick={() => setConfirmingBulk(true)}
                 disabled={pending}
               >
                 <Trash2 aria-hidden />
-                {pending ? "Removing…" : "Remove"}
+                Delete
               </Button>
             </div>
           ) : null}
         </div>
       ) : null}
+
+      <ConfirmDialog
+        open={confirmingBulk}
+        onOpenChange={setConfirmingBulk}
+        title={
+          soleSelected
+            ? `Delete the "${soleSelected.name}" tag?`
+            : `Delete ${selectedVisible.length} tags?`
+        }
+        description={
+          soleSelected
+            ? `This removes it from ${itemsPhrase(usageOf(usage, soleSelected))} and deletes it from the workspace. This can't be undone.`
+            : `These are removed from every item that carries them and deleted from the workspace. This can't be undone.`
+        }
+        phrase={soleSelected ? soleSelected.name : BULK_PHRASE}
+        confirmLabel={
+          soleSelected ? "Delete tag" : `Delete ${selectedVisible.length} tags`
+        }
+        pending={pending}
+        onConfirm={onBulkDelete}
+      >
+        {soleSelected ? null : (
+          <div className="space-y-1.5">
+            <p className="text-xs text-muted-foreground">
+              {bulkItemTotal === 0
+                ? "None of these are on any item."
+                : `Across ${itemsPhrase(bulkItemTotal)} in total (an item carrying two of these is counted twice).`}
+            </p>
+            <ul className="max-h-40 space-y-1 overflow-auto rounded-md border p-2 text-xs">
+              {selectedVisible.map((tag) => (
+                <li key={tag.id} className="flex justify-between gap-3">
+                  <span className="truncate">{tag.name}</span>
+                  <span className="shrink-0 text-muted-foreground">
+                    {itemsPhrase(usageOf(usage, tag))}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </ConfirmDialog>
 
       {visible.length > 0 ? (
         <ul className="space-y-2">
@@ -205,6 +278,7 @@ export function TagsManager({
             <TagRow
               key={tag.id}
               tag={tag}
+              itemCount={usageOf(usage, tag)}
               canEdit={canEdit}
               selected={selected.has(tag.id)}
               onToggle={() => toggle(tag.id)}
@@ -243,17 +317,20 @@ export function TagsManager({
 
 function TagRow({
   tag,
+  itemCount,
   canEdit,
   selected,
   onToggle,
 }: {
   tag: TagDef;
+  itemCount: number;
   canEdit: boolean;
   selected: boolean;
   onToggle: () => void;
 }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [name, setName] = useState(tag.name);
   const [pending, startTransition] = useTransition();
   const dirty = name.trim() !== tag.name;
@@ -275,17 +352,15 @@ function TagRow({
   }
 
   function onDelete() {
-    if (
-      !window.confirm(
-        `Remove the "${tag.name}" tag? Items keep the tag they already have, but it disappears from the picker and the filters.`,
-      )
-    ) {
-      return;
-    }
     startTransition(async () => {
       try {
-        await deleteTag(tag.id);
-        toast.success("Tag removed");
+        const removed = await deleteTag(tag.id);
+        setConfirming(false);
+        toast.success(
+          removed === 0
+            ? "Tag deleted"
+            : `Tag deleted and removed from ${itemsPhrase(removed)}`,
+        );
         router.refresh();
       } catch (err) {
         if (redirectOnAuthExpiry(err, router)) return;
@@ -341,8 +416,14 @@ function TagRow({
         ) : (
           <>
             <span className="min-w-0 flex-1 truncate text-sm">{tag.name}</span>
+            {/* The usage count lives on the row, not just in the dialog: it is
+                what tells you a tag is dead weight before you go looking for
+                the delete. */}
+            <span className="shrink-0 text-xs text-muted-foreground">
+              {itemsPhrase(itemCount)}
+            </span>
             {canEdit ? (
-              <div className="ml-auto flex gap-1">
+              <div className="flex gap-1">
                 <Button
                   type="button"
                   size="sm"
@@ -358,18 +439,29 @@ function TagRow({
                   type="button"
                   size="sm"
                   variant="ghost"
-                  aria-label={`Remove ${tag.name}`}
-                  onClick={onDelete}
+                  aria-label={`Delete ${tag.name}`}
+                  onClick={() => setConfirming(true)}
                   disabled={pending}
                 >
                   <Trash2 aria-hidden />
-                  Remove
+                  Delete
                 </Button>
               </div>
             ) : null}
           </>
         )}
       </div>
+
+      <ConfirmDialog
+        open={confirming}
+        onOpenChange={setConfirming}
+        title={`Delete the "${tag.name}" tag?`}
+        description={`This removes it from ${itemsPhrase(itemCount)} and deletes it from the workspace. This can't be undone.`}
+        phrase={tag.name}
+        confirmLabel="Delete tag"
+        pending={pending}
+        onConfirm={onDelete}
+      />
     </li>
   );
 }

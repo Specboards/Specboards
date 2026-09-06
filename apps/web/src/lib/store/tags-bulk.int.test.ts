@@ -209,16 +209,104 @@ describe.skipIf(!OWNER_URL)("bulk tag management (store)", () => {
   });
 
   describe("deleteTag", () => {
-    it("leaves the tag on the items that carry it", async () => {
-      // Bulk delete is a loop over this, so the bargain it keeps is this one.
+    it("takes the tag off the items that carry it", async () => {
+      // This used to leave item values alone. It cascades now: a tag deleted
+      // from the registry must not stay drawn on a card with nowhere left to
+      // manage it. Bulk delete is a loop over this, so it inherits the same.
       await store.ensureTags(["retired"], asOwner);
       const [retired] = await store.listTags(asOwner);
       const item = await itemWith(["retired", "tier-1"]);
 
+      const changed = await store.deleteTag(retired!.id, asOwner);
+
+      expect(changed).toBe(1);
+      expect(await names()).toEqual([]);
+      expect(await tagsOn(item)).toEqual(["tier-1"]);
+    });
+
+    it("leaves an item with no tags rather than a null array", async () => {
+      // COALESCE in the rebuild: array_agg over an empty filter returns NULL,
+      // and a null tags column breaks every reader downstream.
+      await store.ensureTags(["only"], asOwner);
+      const [only] = await store.listTags(asOwner);
+      const item = await itemWith(["only"]);
+
+      await store.deleteTag(only!.id, asOwner);
+
+      expect(await tagsOn(item)).toEqual([]);
+    });
+
+    it("strips a legacy casing along with the registry's spelling", async () => {
+      await store.ensureTags(["Retired"], asOwner);
+      const [retired] = await store.listTags(asOwner);
+      const item = await itemWith(["RETIRED", "tier-1"]);
+
       await store.deleteTag(retired!.id, asOwner);
 
-      expect(await names()).toEqual([]);
-      expect(await tagsOn(item)).toEqual(["retired", "tier-1"]);
+      expect(await tagsOn(item)).toEqual(["tier-1"]);
+    });
+
+    it("keeps the order of the tags it leaves behind", async () => {
+      await store.ensureTags(["mid"], asOwner);
+      const [mid] = await store.listTags(asOwner);
+      const item = await itemWith(["zeta", "mid", "alpha"]);
+
+      await store.deleteTag(mid!.id, asOwner);
+
+      expect(await tagsOn(item)).toEqual(["zeta", "alpha"]);
+    });
+
+    it("does not reach into another workspace's items", async () => {
+      await store.ensureTags(["shared"], asOwner);
+      const [shared] = await store.listTags(asOwner);
+      const foreign = await itemWith(["shared"], otherWs);
+
+      const changed = await store.deleteTag(shared!.id, asOwner);
+
+      expect(changed).toBe(0);
+      expect(await tagsOn(foreign)).toEqual(["shared"]);
+    });
+
+    it("reports how many items it changed", async () => {
+      await store.ensureTags(["wide"], asOwner);
+      const [wide] = await store.listTags(asOwner);
+      await itemWith(["wide"]);
+      await itemWith(["wide", "other"]);
+      await itemWith(["untouched"]);
+
+      expect(await store.deleteTag(wide!.id, asOwner)).toBe(2);
+    });
+
+    it("refuses an unknown tag", async () => {
+      await expect(store.deleteTag(randomUUID(), asOwner)).rejects.toThrow(
+        /Unknown tag/,
+      );
+    });
+  });
+
+  describe("tagUsageCounts", () => {
+    it("counts items per tag, keyed case-insensitively", async () => {
+      await store.ensureTags(["area:web", "unused"], asOwner);
+      await itemWith(["area:web", "tier-1"]);
+      await itemWith(["AREA:WEB"]);
+
+      const counts = await store.tagUsageCounts(asOwner);
+
+      expect(counts["area:web"]).toBe(2);
+      expect(counts["tier-1"]).toBe(1);
+      // A tag nobody uses is absent, not zero; the caller reads that as none.
+      expect(counts["unused"]).toBeUndefined();
+    });
+
+    it("counts an item once however many casings it carries", async () => {
+      await itemWith(["dup", "DUP"]);
+      expect((await store.tagUsageCounts(asOwner))["dup"]).toBe(1);
+    });
+
+    it("does not count another workspace's items", async () => {
+      await itemWith(["mine"]);
+      await itemWith(["mine"], otherWs);
+      expect((await store.tagUsageCounts(asOwner))["mine"]).toBe(1);
     });
   });
 });

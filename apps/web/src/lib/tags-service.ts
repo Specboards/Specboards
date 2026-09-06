@@ -62,18 +62,25 @@ export async function renameTag(
   return store.renameTag(id, normalizeTagName(name), scope);
 }
 
+/**
+ * Delete a tag and take it off every item that carried it. Returns how many
+ * items changed, so the caller can say what it actually did.
+ */
 export async function deleteTag(
   id: string,
   scope?: WorkspaceScope,
-): Promise<void> {
+): Promise<number> {
   const store = await getStore();
-  await store.deleteTag(id, scope);
+  return store.deleteTag(id, scope);
 }
+
 
 /** What a bulk operation did to one tag. */
 interface TagBulkOutcome {
   id: string;
   ok: boolean;
+  /** Items this tag was taken off. Absent when the delete failed. */
+  itemCount?: number;
   error?: string;
 }
 
@@ -83,6 +90,15 @@ interface TagBulkResult {
   results: TagBulkOutcome[];
 }
 
+/*
+ * There is deliberately no workspace-wide "items changed" total here. Each tag
+ * is deleted in its own transaction and reports its own count, and summing
+ * those would double-count an item that carried two of the selected tags --
+ * the normal case in a bulk tidy-up, and the one where an inflated number
+ * would be most alarming. The per-tag counts are exact, the confirmation shows
+ * them before the run, and that is where the number belongs.
+ */
+
 /**
  * Delete several tag definitions at once.
  *
@@ -91,9 +107,10 @@ interface TagBulkResult {
  * deleted it while this list was on screen) must not throw away the other
  * nineteen deletions the admin asked for.
  *
- * Like the single delete, this removes definitions only. Items keep the tags
- * they already carry, so a bulk tidy-up of the picker is never a silent edit to
- * other people's cards.
+ * Like the single delete, this cascades: each tag comes off every item that
+ * carried it. That is the behaviour the confirmation in front of it is sized
+ * for, and the two paths must not differ -- a bulk action that was quietly
+ * gentler than the single one would be its own trap.
  */
 export async function deleteTags(
   ids: readonly string[],
@@ -105,8 +122,8 @@ export async function deleteTags(
   // tag" for work that in fact succeeded.
   for (const id of [...new Set(ids)]) {
     try {
-      await store.deleteTag(id, scope);
-      results.push({ id, ok: true });
+      const itemCount = await store.deleteTag(id, scope);
+      results.push({ id, ok: true, itemCount });
     } catch (err) {
       results.push({
         id,
@@ -263,11 +280,17 @@ export async function resolveTags(
  * The tag options a filter menu should offer: the registry, in its own order,
  * followed by any tag still on an item that the registry no longer lists.
  *
- * Both halves matter. Building the list from the items in view (what the
- * filter bars did before the registry) means a tag nobody has used yet is
- * invisible, and a tag scrolls out of the menu the moment a filter narrows the
- * set. Building it from the registry alone would drop the tags left behind by a
- * deleted definition, which still sit on items and still need filtering.
+ * Building the list from the items in view (what the filter bars did before the
+ * registry) means a tag nobody has used yet is invisible, and a tag scrolls out
+ * of the menu the moment a filter narrows the set. So the registry leads.
+ *
+ * The stray half used to carry most of the weight, because deleting a tag left
+ * its values on items and those values still needed filtering. Deleting now
+ * takes the tag off the items too, so that source of strays is gone. What is
+ * left is data the registry never saw: rows written before the registry
+ * existed, and anything that reached `features.tags` without going through
+ * `resolveTags`. Those are rarer, still real, and still unfilterable if this
+ * drops them, so the second half stays.
  *
  * Comparison is case-insensitive so a legacy `Area:Web` on an old card does not
  * appear beside the registry's `area:web`.

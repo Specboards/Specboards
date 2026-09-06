@@ -38,27 +38,32 @@ export async function renameTag(id: string, name: string): Promise<TagDef> {
   return body.tag;
 }
 
-/** Drop a tag definition. Item values are left in place. Admin-only. */
-export async function deleteTag(id: string): Promise<void> {
+/**
+ * Delete a tag and take it off every item that carried it. Admin-only.
+ * Resolves with the number of items changed.
+ */
+export async function deleteTag(id: string): Promise<number> {
   const res = await apiFetch(`/api/v1/tags/${id}`, { method: "DELETE" });
+  const body = (await res.json().catch(() => null)) as {
+    itemCount?: number;
+    error?: string;
+  } | null;
   if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as {
-      error?: string;
-    } | null;
     throw new Error(body?.error ?? `Delete tag failed with ${res.status}`);
   }
+  return body?.itemCount ?? 0;
 }
 
 /** What a bulk delete did, per tag id. Inferred at the call site. */
 interface TagBulkResult {
   okCount: number;
   failCount: number;
-  results: { id: string; ok: boolean; error?: string }[];
+  results: { id: string; ok: boolean; itemCount?: number; error?: string }[];
 }
 
 /**
- * Delete several tag definitions at once. Admin-only. Item values are left in
- * place, exactly as the single delete leaves them.
+ * Delete several tags at once. Admin-only. Each comes off every item that
+ * carried it, exactly as the single delete does.
  */
 export async function deleteTags(ids: string[]): Promise<TagBulkResult> {
   const res = await apiFetch("/api/v1/tags/bulk", {

@@ -21,7 +21,13 @@ export const dynamic = "force-dynamic";
 export default async function TagsSettingsPage() {
   const access = await requireWorkspaceAccess();
   const store = await getStore();
-  const tags = await store.listTags(access ?? undefined);
+  // Usage counts come with the list because deleting a tag now takes it off
+  // every item that carries it: "used on 14 items" has to be on screen before
+  // the delete, not discoverable after it.
+  const [tags, usage] = await Promise.all([
+    store.listTags(access ?? undefined),
+    store.tagUsageCounts(access ?? undefined),
+  ]);
   const isOwner = !access || access.role === "owner";
 
   return (
@@ -32,10 +38,10 @@ export default async function TagsSettingsPage() {
           One shared tag list for the whole workspace, so the same tag can&rsquo;t
           be spelled two ways. Tags are not tied to a product. Anyone can add one
           from a card; renaming one here renames it on every item that carries
-          it.
+          it, and deleting one removes it from them.
         </p>
       </div>
-      <TagsManager tags={tags} canEdit={isOwner} />
+      <TagsManager tags={tags} usage={usage} canEdit={isOwner} />
     </div>
   );
 }

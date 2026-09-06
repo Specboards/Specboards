@@ -7,19 +7,20 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LocalFileStore } from "./local";
 
 /**
- * Local file mode's half of the tag merge.
+ * Local file mode's half of the tag writes that reach items: merge, delete, and
+ * the usage counts the delete confirmation is sized from.
  *
- * The db store rebuilds the item's `text[]` in SQL and is covered by
- * `tags-bulk.int.test.ts`; this is the same contract carried out by rewriting a
- * JSON file, and the two must not drift. The case worth guarding is the one a
- * plain find-and-replace gets wrong: an item that already carried both
- * spellings has to come out carrying the survivor once, in the position it
- * first appeared.
+ * The db store does this in SQL and is covered by `tags-bulk.int.test.ts`; this
+ * is the same contract carried out by rewriting a JSON file, and the two must
+ * not drift. Both cases worth guarding are ones a naive implementation gets
+ * wrong: an item carrying both spellings has to come out of a merge with the
+ * survivor once, and an item losing its only tag has to come out of a delete
+ * with an empty list rather than a missing one.
  */
 
 const ITEMS = "local-items.json";
 
-describe("LocalFileStore tag merge", () => {
+describe("LocalFileStore tag writes", () => {
   let root: string;
   let store: LocalFileStore;
 
@@ -112,15 +113,52 @@ describe("LocalFileStore tag merge", () => {
     await expect(store.mergeTags("nope", sf!.id)).rejects.toThrow(/Unknown tag/);
   });
 
-  it("still leaves item values alone when a tag is deleted", async () => {
-    // The bargain bulk delete inherits: definitions go, values stay.
+  it("takes a deleted tag off the items that carry it", async () => {
+    // Deleting used to leave item values alone. It cascades now, and bulk
+    // delete is a loop over this, so it inherits the same behaviour.
     await store.ensureTags(["retired"]);
-    await seedItems([["retired", "tier-1"]]);
+    await seedItems([["retired", "tier-1"], ["tier-1"]]);
     const [retired] = await store.listTags();
 
-    await store.deleteTag(retired!.id);
+    const changed = await store.deleteTag(retired!.id);
 
+    expect(changed).toBe(1);
     expect(await store.listTags()).toEqual([]);
-    expect(await tagsOnItems()).toEqual([["retired", "tier-1"]]);
+    expect(await tagsOnItems()).toEqual([["tier-1"], ["tier-1"]]);
+  });
+
+  it("strips a legacy casing, and keeps what it leaves in order", async () => {
+    await store.ensureTags(["Mid"]);
+    await seedItems([["zeta", "MID", "alpha"]]);
+    const [mid] = await store.listTags();
+
+    await store.deleteTag(mid!.id);
+
+    expect(await tagsOnItems()).toEqual([["zeta", "alpha"]]);
+  });
+
+  it("leaves an item with an empty tag list, not a missing one", async () => {
+    await store.ensureTags(["only"]);
+    await seedItems([["only"]]);
+    const [only] = await store.listTags();
+
+    await store.deleteTag(only!.id);
+
+    expect(await tagsOnItems()).toEqual([[]]);
+  });
+
+  it("refuses an unknown tag", async () => {
+    await expect(store.deleteTag("nope")).rejects.toThrow(/Unknown tag/);
+  });
+
+  it("counts items per tag, case-insensitively and once per item", async () => {
+    await seedItems([["area:web", "tier-1"], ["AREA:WEB"], ["dup", "DUP"]]);
+
+    const counts = await store.tagUsageCounts();
+
+    expect(counts["area:web"]).toBe(2);
+    expect(counts["tier-1"]).toBe(1);
+    expect(counts["dup"]).toBe(1);
+    expect(counts["unused"]).toBeUndefined();
   });
 });
