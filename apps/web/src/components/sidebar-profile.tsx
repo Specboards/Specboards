@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 
 import { ThemeToggle } from "@/components/theme-toggle";
+import { Avatar } from "@/components/ui/avatar";
 import { signOut, useSession } from "@/lib/auth-client";
 import { useOrgPath } from "@/lib/use-org";
 import { cn } from "@/lib/utils";
@@ -112,21 +113,3 @@ export function SidebarProfile({ collapsed = false }: { collapsed?: boolean }) {
   );
 }
 
-function Avatar({ name, image }: { name: string; image?: string | null }) {
-  if (image) {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={image}
-        alt=""
-        className="h-7 w-7 shrink-0 rounded-full object-cover"
-      />
-    );
-  }
-  const initial = name.trim().charAt(0).toUpperCase() || "?";
-  return (
-    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-secondary text-xs font-medium text-secondary-foreground">
-      {initial}
-    </span>
-  );
-}

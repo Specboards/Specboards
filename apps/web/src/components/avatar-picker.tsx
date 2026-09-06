@@ -8,6 +8,7 @@ import { removeAvatar, uploadAvatar } from "@/lib/api-client/profile";
 import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import { updateUser } from "@/lib/auth-client";
 import { AVATAR_MAX_EDGE, MAX_AVATAR_BYTES } from "@/lib/avatars";
+import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FormField } from "@/components/ui/form-field";
@@ -92,7 +93,7 @@ export function AvatarPicker({
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-4">
-        <Avatar name={name} image={image} />
+        <Avatar name={name} image={image} size="lg" />
         <div className="flex flex-wrap items-center gap-2">
           <input
             ref={fileRef}
@@ -223,24 +224,4 @@ async function downsample(file: File): Promise<Blob> {
   } catch {
     return file;
   }
-}
-
-/** The picture, or the initial-letter placeholder when there isn't one. */
-function Avatar({ name, image }: { name: string; image: string | null }) {
-  if (image) {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={image}
-        alt=""
-        className="size-16 shrink-0 rounded-full object-cover"
-      />
-    );
-  }
-  const initial = name.trim().charAt(0).toUpperCase() || "?";
-  return (
-    <div className="flex size-16 shrink-0 items-center justify-center rounded-full bg-muted text-lg font-medium text-muted-foreground">
-      {initial}
-    </div>
-  );
 }
