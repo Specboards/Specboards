@@ -577,12 +577,29 @@ export interface StatusStageInput {
   label: string;
 }
 
-/** A stage gate (one checklist item on a workflow stage) as the UI consumes it. */
+/**
+ * How a stage gate decides it has been satisfied.
+ *
+ * `checklist` is a box a member ticks, recorded per item. `field` is satisfied
+ * by the item's own data, so nobody can wave it through and it un-satisfies
+ * itself if the value is later cleared. See migration 0080 for why both live in
+ * one table.
+ */
+export type StageGateKind = "checklist" | "field";
+
+/** A stage gate (one exit criterion on a workflow stage) as the UI consumes it. */
 export interface StageGate {
   /** Opaque id used to toggle completions and to reorder/remove the gate. */
   id: string;
   /** The stage key this gate guards (a WorkspaceStatus.key or built-in key). */
   stageKey: string;
+  kind: StageGateKind;
+  /**
+   * For a `field` gate, which field must be populated: a built-in key
+   * (see GATE_FIELD_KEYS) or a custom property key prefixed `cf:`. Null for a
+   * checklist gate.
+   */
+  fieldKey: string | null;
   label: string;
   /** Ordering within the stage's checklist; ascending. */
   position: number;
@@ -593,6 +610,9 @@ export interface StageGateInput {
   /** Existing gate id to keep (preserves its completions); omit for a new gate. */
   id?: string;
   stageKey: string;
+  /** Defaults to `checklist` when a client omits it, so older callers still work. */
+  kind?: StageGateKind;
+  fieldKey?: string | null;
   label: string;
 }
 

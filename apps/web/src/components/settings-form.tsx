@@ -1,13 +1,13 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useTransition } from "react";
+import { useMemo } from "react";
 
 import { updateWorkspace } from "@/lib/api-client/organization";
 import { changeEmail, updateUser } from "@/lib/auth-client";
 import { useOrgPath } from "@/lib/use-org";
+import { AvatarPicker } from "@/components/avatar-picker";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -18,25 +18,8 @@ import {
 import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-
-type Status = { kind: "ok" | "error"; message: string } | null;
-
-/**
- * Async save result. Announced when it appears: an error interrupts (role=alert,
- * assertive), a success is polite (role=status). The success/error text pairs
- * with the visible styling so it never relies on color alone (SC 1.4.1).
- */
-function StatusLine({ status }: { status: Status }) {
-  if (!status) return null;
-  return (
-    <p
-      role={status.kind === "error" ? "alert" : "status"}
-      className={`text-xs ${status.kind === "ok" ? "text-muted-foreground" : "text-destructive"}`}
-    >
-      {status.message}
-    </p>
-  );
-}
+import { Separator } from "@/components/ui/separator";
+import { SettingRow } from "@/components/ui/setting-row";
 
 /** The set of IANA time zones for the picker, with a sensible fallback. */
 function useTimeZones(): string[] {
@@ -54,85 +37,122 @@ function useTimeZones(): string[] {
   }, []);
 }
 
+/**
+ * Everything about *you*: picture, name, sign-in email, time zone.
+ *
+ * The email used to sit in a card of its own further down the page, below the
+ * GitHub connection, which put a fact about your identity behind a fact about
+ * an integration. It is here now.
+ *
+ * Every value shows itself before it offers a field, per the Settings
+ * convention in CLAUDE.md, so arriving on this page is reading rather than a
+ * form waiting to be filled in. `SettingRow` owns that behaviour; see its notes
+ * for why work items get the opposite treatment.
+ */
 export function ProfileCard({
   name,
+  email,
   image,
   timezone,
 }: {
   name: string;
+  email: string;
   image: string | null;
   timezone: string | null;
 }) {
   const router = useRouter();
-  const [pending, startTransition] = useTransition();
-  const [status, setStatus] = useState<Status>(null);
+  const orgHref = useOrgPath();
   const zones = useTimeZones();
   const browserZone =
     typeof Intl !== "undefined"
       ? Intl.DateTimeFormat().resolvedOptions().timeZone
       : "UTC";
-
-  function onSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const data = new FormData(e.currentTarget);
-    const nextName = String(data.get("name") ?? "").trim();
-    const nextImage = String(data.get("image") ?? "").trim();
-    const nextTimezone = String(data.get("timezone") ?? "").trim();
-    if (!nextName) {
-      setStatus({ kind: "error", message: "Name is required." });
-      return;
-    }
-    startTransition(async () => {
-      setStatus(null);
-      // Send the empty string (not undefined) so clearing the field removes the picture.
-      const { error } = await updateUser({
-        name: nextName,
-        image: nextImage,
-        timezone: nextTimezone,
-      });
-      if (error) {
-        setStatus({
-          kind: "error",
-          message: error.message ?? "Couldn't save your profile.",
-        });
-        return;
-      }
-      setStatus({ kind: "ok", message: "Profile saved." });
-      router.refresh();
-    });
-  }
+  const effectiveZone = timezone ?? browserZone;
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>Profile</CardTitle>
         <CardDescription>
-          Your name, picture, and time zone across Specboards.
+          How you appear across Specboards, and the address you sign in with.
         </CardDescription>
       </CardHeader>
-      <CardContent>
-        <form onSubmit={onSubmit} className="space-y-4">
-          <div className="flex items-center gap-4">
-            <Avatar name={name} image={image} />
-            <FormField label="Profile picture URL" className="flex-1">
-              <Input
-                name="image"
-                type="url"
-                defaultValue={image ?? ""}
-                placeholder="https://…"
-              />
-            </FormField>
-          </div>
+      <CardContent className="space-y-4">
+        <AvatarPicker name={name} image={image} />
+
+        <Separator />
+
+        <SettingRow
+          label="Name"
+          value={name}
+          successMessage="Name saved."
+          onSave={async (data) => {
+            const next = String(data.get("name") ?? "").trim();
+            if (!next) throw new Error("Name is required.");
+            const { error } = await updateUser({ name: next });
+            if (error) throw new Error(error.message ?? "Couldn't save your name.");
+            router.refresh();
+          }}
+        >
           <FormField label="Name">
-            <Input
-              name="name"
-              defaultValue={name}
-              autoComplete="name"
-              required
-            />
+            <Input name="name" defaultValue={name} autoComplete="name" required />
           </FormField>
+        </SettingRow>
+
+        <SettingRow
+          label="Email"
+          value={email}
+          editLabel="Change"
+          submitLabel="Send confirmation"
+          hint="You sign in with this address."
+          onSave={async (data) => {
+            const newEmail = String(data.get("email") ?? "").trim();
+            if (!newEmail || newEmail === email) {
+              throw new Error("Enter a different email address.");
+            }
+            const { error } = await changeEmail({
+              newEmail,
+              callbackURL: orgHref("/settings/profile"),
+            });
+            if (error) {
+              throw new Error(error.message ?? "Couldn't change your email.");
+            }
+            // Better Auth reports success even when the new address already
+            // belongs to another account (it sends nothing, so as not to leak
+            // that the address exists). Worded so somebody who never receives
+            // the email understands why, without us confirming either way. The
+            // link always goes to the current, verified address.
+            return `We've sent a confirmation link to ${email}. Open it to finish the change. If it doesn't arrive, the new address may already be in use by another account.`;
+          }}
+        >
+          <FormField
+            label="New email"
+            hint={`Changing this sends a confirmation link to ${email}. The change takes effect when you open it.`}
+          >
+            <Input name="email" type="email" autoComplete="email" required />
+          </FormField>
+        </SettingRow>
+
+        <SettingRow
+          label="Time zone"
+          value={effectiveZone}
+          hint={
+            timezone
+              ? undefined
+              : "Not set yet, so dates follow this browser's time zone."
+          }
+          successMessage="Time zone saved."
+          onSave={async (data) => {
+            const next = String(data.get("timezone") ?? "").trim();
+            const { error } = await updateUser({ timezone: next });
+            if (error) {
+              throw new Error(error.message ?? "Couldn't save your time zone.");
+            }
+            router.refresh();
+          }}
+        >
           <FormField label="Time zone">
-            <Select name="timezone" defaultValue={timezone ?? browserZone}>
+            <Select name="timezone" defaultValue={effectiveZone}>
               {zones.map((z) => (
                 <option key={z} value={z}>
                   {z}
@@ -140,11 +160,7 @@ export function ProfileCard({
               ))}
             </Select>
           </FormField>
-          <StatusLine status={status} />
-          <Button type="submit" disabled={pending}>
-            {pending ? "…" : "Save profile"}
-          </Button>
-        </form>
+        </SettingRow>
       </CardContent>
     </Card>
   );
@@ -167,88 +183,6 @@ export function AppearanceCard() {
   );
 }
 
-function Avatar({ name, image }: { name: string; image: string | null }) {
-  if (image) {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={image}
-        alt=""
-        className="h-12 w-12 shrink-0 rounded-full object-cover"
-      />
-    );
-  }
-  const initial = name.trim().charAt(0).toUpperCase() || "?";
-  return (
-    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-medium text-muted-foreground">
-      {initial}
-    </div>
-  );
-}
-
-export function EmailCard({ email }: { email: string }) {
-  const [pending, startTransition] = useTransition();
-  const [status, setStatus] = useState<Status>(null);
-  const orgHref = useOrgPath();
-
-  function onSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const form = e.currentTarget;
-    const newEmail = String(new FormData(form).get("email") ?? "").trim();
-    if (!newEmail || newEmail === email) {
-      setStatus({ kind: "error", message: "Enter a different email address." });
-      return;
-    }
-    startTransition(async () => {
-      setStatus(null);
-      const { error } = await changeEmail({
-        newEmail,
-        callbackURL: orgHref("/settings"),
-      });
-      if (error) {
-        setStatus({
-          kind: "error",
-          message: error.message ?? "Couldn't change your email.",
-        });
-        return;
-      }
-      form.reset();
-      // Better Auth returns success even when the new address already belongs to
-      // another account (it sends nothing, to avoid leaking that the address
-      // exists). Word this so a user who never gets the email understands why,
-      // without us confirming either way. The link always goes to the current
-      // (verified) address.
-      setStatus({
-        kind: "ok",
-        message: `We've sent a confirmation link to ${email}. Open it to finish the change. If it doesn't arrive, the new address may already be in use by another account.`,
-      });
-    });
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Email</CardTitle>
-        <CardDescription>
-          You sign in with <span className="text-foreground">{email}</span>.
-          Changing it sends a confirmation link to your current address.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <form onSubmit={onSubmit} className="space-y-4">
-          <FormField label="New email">
-            <Input name="email" type="email" autoComplete="email" required />
-          </FormField>
-          <StatusLine status={status} />
-          <Button type="submit" disabled={pending}>
-            {pending ? "…" : "Change email"}
-          </Button>
-        </form>
-      </CardContent>
-    </Card>
-  );
-}
-
 export function CompanyCard({
   name,
   canEdit,
@@ -257,35 +191,6 @@ export function CompanyCard({
   canEdit: boolean;
 }) {
   const router = useRouter();
-  const [pending, startTransition] = useTransition();
-  const [status, setStatus] = useState<Status>(null);
-
-  function onSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const nextName = String(
-      new FormData(e.currentTarget).get("name") ?? "",
-    ).trim();
-    if (!nextName) {
-      setStatus({ kind: "error", message: "Company name is required." });
-      return;
-    }
-    startTransition(async () => {
-      setStatus(null);
-      try {
-        await updateWorkspace(nextName);
-        setStatus({ kind: "ok", message: "Company saved." });
-        router.refresh();
-      } catch (err) {
-        setStatus({
-          kind: "error",
-          message:
-            err instanceof Error
-              ? err.message
-              : "Couldn't save company details.",
-        });
-      }
-    });
-  }
 
   return (
     <Card>
@@ -298,24 +203,22 @@ export function CompanyCard({
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <form onSubmit={onSubmit} className="space-y-4">
+        <SettingRow
+          label="Company name"
+          value={name || <span className="text-muted-foreground">Not set</span>}
+          canEdit={canEdit}
+          successMessage="Company saved."
+          onSave={async (data) => {
+            const next = String(data.get("name") ?? "").trim();
+            if (!next) throw new Error("Company name is required.");
+            await updateWorkspace(next);
+            router.refresh();
+          }}
+        >
           <FormField label="Company name">
-            <Input
-              name="name"
-              defaultValue={name}
-              disabled={!canEdit}
-              required
-            />
+            <Input name="name" defaultValue={name} required />
           </FormField>
-          {canEdit ? (
-            <>
-              <StatusLine status={status} />
-              <Button type="submit" disabled={pending}>
-                {pending ? "…" : "Save company"}
-              </Button>
-            </>
-          ) : null}
-        </form>
+        </SettingRow>
       </CardContent>
     </Card>
   );

@@ -14,6 +14,7 @@ import {
   renderCommentBody,
   type MentionCandidate,
 } from "@/components/mention-input";
+import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { CommentRecord } from "@/lib/store/types";
@@ -34,11 +35,6 @@ function timeAgo(iso: string): string {
 }
 
 /** First letter of a name (or "?") for the avatar circle. */
-function initial(name: string | null): string {
-  const c = (name ?? "").trim()[0];
-  return c ? c.toUpperCase() : "?";
-}
-
 /**
  * Comments on an item: a list plus an "Add comment" affordance that reveals a
  * composer on opt-in (see the "add" UX rule in CLAUDE.md). Fetches its own list
@@ -140,12 +136,8 @@ export function FeatureComments({
         <ul className="space-y-4">
           {comments.map((c) => (
             <li key={c.id} className="flex gap-3">
-              <div
-                aria-hidden
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium text-muted-foreground"
-              >
-                {initial(c.authorName)}
-              </div>
+              {/* Decorative: the author's name is spelled out beside it. */}
+              <Avatar name={c.authorName} aria-hidden />
               <div className="min-w-0 flex-1 space-y-1">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium">

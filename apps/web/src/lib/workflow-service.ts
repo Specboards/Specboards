@@ -1,11 +1,12 @@
 import { propertyKeyFromLabel } from "@specboards/core";
 import { getStore, type WorkspaceScope } from "@/lib/store";
-import type {
-  StageGate,
-  StageGateInput,
-  StatusStageInput,
-  TransitionMode,
-  WorkspaceStatus,
+import {
+  StageGateError,
+  type StageGate,
+  type StageGateInput,
+  type StatusStageInput,
+  type TransitionMode,
+  type WorkspaceStatus,
 } from "@/lib/store/types";
 import { FeatureNotFoundError, InvalidPatchError } from "@/lib/service-errors";
 
@@ -133,9 +134,16 @@ export async function replaceStageGates(
 
 /**
  * Parse and validate an untrusted stage-gates replacement body: `{ gates:
- * [{ stageKey, label }] }`. Each entry needs a non-empty `stageKey` and a
- * non-empty `label`. Order within a stage is preserved (it becomes the
- * checklist position). An empty array clears all gates.
+ * [{ stageKey, kind?, fieldKey?, label }] }`. Each entry needs a non-empty
+ * `stageKey` and a non-empty `label`. Order within a stage is preserved (it
+ * becomes the checklist position). An empty array clears all gates.
+ *
+ * `kind` defaults to `checklist`, so a client written before field gates
+ * existed keeps working unchanged. A `field` gate must name a `fieldKey`; the
+ * key is NOT checked against the workspace's properties here, deliberately. A
+ * gate pointing at a field that has since been deleted is a state the product
+ * has to handle anyway (see `gate-fields.ts`), and validating on write would
+ * only mean an admin cannot re-save a page that already contains one.
  */
 export function parseStageGates(body: unknown): StageGateInput[] {
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
@@ -155,12 +163,31 @@ export function parseStageGates(body: unknown): StageGateInput[] {
     const e = entry as Record<string, unknown>;
     const stageKey = typeof e.stageKey === "string" ? e.stageKey.trim() : "";
     if (!stageKey) throw new InvalidPatchError("Each gate needs a stageKey.");
+
+    const kind = e.kind === undefined ? "checklist" : e.kind;
+    if (kind !== "checklist" && kind !== "field") {
+      throw new InvalidPatchError("A gate's kind must be checklist or field.");
+    }
+    const fieldKey = typeof e.fieldKey === "string" ? e.fieldKey.trim() : "";
+    if (kind === "field" && !fieldKey) {
+      throw new InvalidPatchError("A field gate needs a fieldKey.");
+    }
+    if (fieldKey.length > 200) {
+      throw new InvalidPatchError("A gate fieldKey is too long (max 200 chars).");
+    }
+
     const label = typeof e.label === "string" ? e.label.trim() : "";
     if (!label) throw new InvalidPatchError("Each gate needs a label.");
     if (label.length > 200) {
       throw new InvalidPatchError("A gate label is too long (max 200 chars).");
     }
-    const gate: StageGateInput = { stageKey, label };
+
+    const gate: StageGateInput = {
+      stageKey,
+      kind,
+      fieldKey: kind === "field" ? fieldKey : null,
+      label,
+    };
     if (typeof e.id === "string" && e.id) gate.id = e.id;
     return gate;
   });
@@ -175,7 +202,15 @@ export async function listGateCompletions(
   return store.listGateCompletions(specId, scope);
 }
 
-/** Mark a gate complete/incomplete for a feature. Returns the new set. */
+/**
+ * Mark a gate complete/incomplete for a feature. Returns the new set.
+ *
+ * A field gate cannot be ticked. Its whole point is that it is answered by the
+ * item's data rather than by somebody saying so, and a completion row against
+ * one would sit in the table looking authoritative while enforcement ignored
+ * it. Refused here rather than only hidden in the UI, because the API and the
+ * MCP tools reach this too.
+ */
 export async function setGateCompletion(
   specId: string,
   gateId: string,
@@ -185,6 +220,16 @@ export async function setGateCompletion(
   const store = await getStore();
   const feature = await store.getFeature(specId, scope);
   if (!feature) throw new FeatureNotFoundError(specId);
+
+  const gate = (await store.listStageGates(scope, feature.productId)).find(
+    (g) => g.id === gateId,
+  );
+  if (gate?.kind === "field") {
+    throw new StageGateError(
+      `"${gate.label}" is satisfied by setting the field on this item, not by ticking it off.`,
+    );
+  }
+
   await store.setGateCompletion(specId, gateId, completed, scope);
   return store.listGateCompletions(specId, scope);
 }

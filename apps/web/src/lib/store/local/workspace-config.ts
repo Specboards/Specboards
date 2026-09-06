@@ -515,7 +515,13 @@ export async function replaceStatuses(
   if (kept.length !== gates.length) {
     await replaceStageGates(
       ctx,
-      kept.map((g) => ({ id: g.id, stageKey: g.stageKey, label: g.label })),
+      kept.map((g) => ({
+        id: g.id,
+        stageKey: g.stageKey,
+        kind: g.kind,
+        fieldKey: g.fieldKey,
+        label: g.label,
+      })),
     );
   }
   return rows;
@@ -536,7 +542,15 @@ export async function listStageGates(
       .sort(
         (a, b) =>
           a.stageKey.localeCompare(b.stageKey) || a.position - b.position,
-      );
+      )
+      // A file written before field gates existed has neither key, and this is
+      // somebody's working directory rather than a database that ran a
+      // migration, so the default is applied on read.
+      .map((g) => ({
+        ...g,
+        kind: g.kind === "field" ? "field" : "checklist",
+        fieldKey: g.fieldKey ?? null,
+      }));
   } catch {
     return [];
   }
@@ -555,7 +569,15 @@ export async function replaceStageGates(
     const pos = perStage.get(g.stageKey) ?? 0;
     perStage.set(g.stageKey, pos + 1);
     const id = g.id && existingIds.has(g.id) ? g.id : randomUUID();
-    return { id, stageKey: g.stageKey, label: g.label, position: pos };
+    const kind = g.kind === "field" ? "field" : "checklist";
+    return {
+      id,
+      stageKey: g.stageKey,
+      kind,
+      fieldKey: kind === "field" ? (g.fieldKey ?? null) : null,
+      label: g.label,
+      position: pos,
+    };
   });
   const sorted = rows
     .slice()

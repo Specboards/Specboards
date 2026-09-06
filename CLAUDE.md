@@ -116,6 +116,31 @@
   without saving. Do not leave empty input fields sitting open by default: a
   blank always-on form reads as unfinished and adds visual noise for the common
   case where the user is not adding anything right now.
+- **Settings show a value; work items edit one.** This is the split that decides
+  whether a field renders as text with an "Edit" affordance or as a live input,
+  and it follows from what the user came to the screen to do.
+  - **In Settings, a configured value is displayed, not opened.** Your name, the
+    company name, the sign-in email, a connected repo: show the current value as
+    text, with an "Edit" control beside it that reveals the input, and collapse
+    back to the displayed value on save or cancel. Nobody opens Settings to
+    retype something that is already right, so a pre-filled input sitting next
+    to a Save button is a form asking to be completed when there was nothing to
+    complete. It also makes the destructive case (clearing a field by accident)
+    take a deliberate click first.
+  - **On a work item, a field is the thing being worked on, so edit it in
+    place.** Status, assignee, tags, custom properties, the detail body: these
+    change many times a day, often several in a row, and an Edit click before
+    every one is friction on the product's core loop. Keep them directly
+    editable, with the value visible as its own display when not focused.
+  - **The test is frequency and intent, not the widget.** Would a typical user
+    change this more than once in a session, and did they come here to change
+    it? Yes to both means edit in place. Otherwise show the value and let them
+    ask for the field. A few things sit on the line: a repo's default branch is
+    settings-shaped even though it lives on a card, and an item's title is
+    item-shaped even though it is edited rarely. Decide by what the screen is
+    for.
+  - This is the same instinct as "Add" starting as an affordance above: an input
+    on screen is a claim that the user has something to type.
 - **Reveal organizing features only once there's something to organize.** A
   feature whose only job is to group or arrange other items (e.g. product
   groups) should stay hidden until there are enough items to make it useful,

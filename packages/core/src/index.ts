@@ -11,6 +11,7 @@ export * from "./levels.js";
 export * from "./detail-templates.js";
 export * from "./feature-grouping.js";
 export * from "./properties.js";
+export * from "./gates.js";
 export * from "./products.js";
 export * from "./product-groups.js";
 export * from "./permissions.js";

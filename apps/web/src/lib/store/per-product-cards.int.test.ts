@@ -318,6 +318,56 @@ describe.skipIf(!OWNER_URL)("per-product Cards settings (store)", () => {
       expect(rows.length).toBe(1);
     });
 
+    it("round-trips a field gate, and defaults an unmarked one to checklist", async () => {
+      await resetToInherited();
+      const saved = await store.replaceStageGates(
+        [
+          { stageKey: "doing", label: "Spec reviewed" },
+          {
+            stageKey: "doing",
+            kind: "field",
+            fieldKey: "cf:target_end_date",
+            label: "Target End Date",
+          },
+        ],
+        asOwner,
+        alpha,
+      );
+      expect(saved.map((g) => [g.kind, g.fieldKey])).toEqual([
+        ["checklist", null],
+        ["field", "cf:target_end_date"],
+      ]);
+      // And again on the way back out of the database, not just from the write.
+      expect(
+        (await store.listStageGates(asOwner, alpha)).map((g) => [
+          g.kind,
+          g.fieldKey,
+        ]),
+      ).toEqual([
+        ["checklist", null],
+        ["field", "cf:target_end_date"],
+      ]);
+    });
+
+    it("does not let a checklist gate carry a field key", async () => {
+      // The pairing is refused by a CHECK in 0080, so a client that sends one
+      // has to be normalized on the way in rather than reaching Postgres.
+      await resetToInherited();
+      const [gate] = await store.replaceStageGates(
+        [
+          {
+            stageKey: "doing",
+            kind: "checklist",
+            fieldKey: "assignee",
+            label: "Confused",
+          },
+        ],
+        asOwner,
+        alpha,
+      );
+      expect(gate!.fieldKey).toBeNull();
+    });
+
     it("refuses a product admin on another product, and a member anywhere", async () => {
       await resetToInherited();
       await expect(

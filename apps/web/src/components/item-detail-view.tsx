@@ -64,7 +64,6 @@ export function ItemDetailView({
     linkableGoals,
     workflow,
     stageGates,
-    completedGateIds,
     canEdit,
     canEditSpec,
     canAttachSpec,
@@ -148,7 +147,6 @@ export function ItemDetailView({
         specId={feature.specId}
         stageLabel={statusLabel(feature.status, workflow)}
         gates={stageGates}
-        completedGateIds={completedGateIds}
         canEdit={canEdit}
       />
 

@@ -13,12 +13,17 @@ import {
   configPinsTransitions,
   defaultWorkflow,
   descendantGroupIds,
+  fieldGateSatisfied,
+  gateFieldCatalog,
+  gateFieldLabel,
   isForwardTransition,
   isTransitionMode,
   resolveWorkflow,
   safeParseRepoConfig,
   transitionErrorMessage,
   workflowFromStages,
+  type GateField,
+  type GateSubject,
   type ProductAccess,
   type StatusWorkflow,
   type TransitionMode,
@@ -35,6 +40,7 @@ import {
   products,
   repositories,
   workspaces,
+  workspaceProperties,
   workspaceStageGates,
   workspaceStatuses,
   type Database,
@@ -671,11 +677,13 @@ server.tool(
         const fromIndex = workflow.statuses.indexOf(row.status);
         const toIndex = workflow.statuses.indexOf(status);
         const passed = workflow.statuses.slice(fromIndex, toIndex);
-        const open = await openGates(scope.workspaceId, row.id, passed);
+        const open = await openGates(scope.workspaceId, row, passed);
         if (open.length > 0) {
           return errorResult(
             new McpUserError(
-              `Blocked by stage gates. Complete first: ${open
+              // "Complete or set" because a stage can mix the two kinds and a
+              // field gate is satisfied by writing the value, not by ticking.
+              `Blocked by stage gates. Complete or set first: ${open
                 .map((g) => `"${g}"`)
                 .join(", ")}.`,
             ),
@@ -777,19 +785,41 @@ async function resolveTransitionMode(
 }
 
 /**
- * Labels of the gates on `stageKeys` not yet completed for feature `featureId`.
- * Empty when those stages have no gates or they're all checked off. Mirrors the
- * web app's exit-criteria enforcement so agents can't advance an item past a
- * checklist, including by jumping over an intermediate stage.
+ * Labels of the gates on `stageKeys` that `feature` does not yet satisfy. Empty
+ * when those stages have no gates, or all of them are met. Mirrors the web
+ * app's exit-criteria enforcement (`assertGatesSatisfied` in
+ * `features-service.ts`) so agents can't advance an item past a checklist,
+ * including by jumping over an intermediate stage.
+ *
+ * Two kinds, satisfied two ways: a checklist gate needs a completion row, a
+ * field gate needs the named field populated on the item itself. The rules for
+ * the second are in `@specboards/core`, shared with the web app rather than
+ * restated here, because a gate that stops a person but not an agent is the
+ * whole failure this function exists to prevent.
  */
 async function openGates(
   workspaceId: string,
-  featureId: string,
+  feature: {
+    id: string;
+    productId: string | null;
+    assigneeId: string | null;
+    releaseId: string | null;
+    cycleId: string | null;
+    parentId: string | null;
+    tags: string[] | null;
+    customFields: unknown;
+  },
   stageKeys: string[],
 ): Promise<string[]> {
   if (stageKeys.length === 0) return [];
-  const gates = await db()
-    .select({ id: workspaceStageGates.id, label: workspaceStageGates.label })
+  const rows = await db()
+    .select({
+      id: workspaceStageGates.id,
+      label: workspaceStageGates.label,
+      kind: workspaceStageGates.kind,
+      fieldKey: workspaceStageGates.fieldKey,
+      productId: workspaceStageGates.productId,
+    })
     .from(workspaceStageGates)
     .where(
       and(
@@ -797,13 +827,71 @@ async function openGates(
         inArray(workspaceStageGates.stageKey, stageKeys),
       ),
     );
+  // Set-level inheritance, matching `stageGatesIn` in the web store: a product
+  // with gates of its own is governed by those, otherwise by the workspace
+  // default. Previously every product's gates applied to every item, so one
+  // product's checklist blocked another product's work.
+  const own = feature.productId
+    ? rows.filter((r) => r.productId === feature.productId)
+    : [];
+  const gates = own.length > 0 ? own : rows.filter((r) => r.productId === null);
   if (gates.length === 0) return [];
-  const completed = await db()
-    .select({ gateId: featureGateCompletions.gateId })
-    .from(featureGateCompletions)
-    .where(eq(featureGateCompletions.featureId, featureId));
-  const done = new Set(completed.map((c) => c.gateId));
-  return gates.filter((g) => !done.has(g.id)).map((g) => g.label);
+
+  const done = new Set<string>();
+  if (gates.some((g) => g.kind !== "field")) {
+    const completed = await db()
+      .select({ gateId: featureGateCompletions.gateId })
+      .from(featureGateCompletions)
+      .where(eq(featureGateCompletions.featureId, feature.id));
+    for (const c of completed) done.add(c.gateId);
+  }
+
+  let catalog: GateField[] = [];
+  if (gates.some((g) => g.kind === "field")) {
+    const properties = await db()
+      .select({
+        key: workspaceProperties.key,
+        label: workspaceProperties.label,
+        entity: workspaceProperties.entity,
+      })
+      .from(workspaceProperties)
+      .where(
+        and(
+          eq(workspaceProperties.workspaceId, workspaceId),
+          feature.productId
+            ? or(
+                eq(workspaceProperties.productId, feature.productId),
+                isNull(workspaceProperties.productId),
+              )
+            : isNull(workspaceProperties.productId),
+        ),
+      );
+    catalog = gateFieldCatalog(properties);
+  }
+
+  const subject: GateSubject = {
+    assigneeId: feature.assigneeId,
+    releaseId: feature.releaseId,
+    cycleId: feature.cycleId,
+    parentId: feature.parentId,
+    tags: feature.tags ?? [],
+    customFields:
+      feature.customFields && typeof feature.customFields === "object"
+        ? (feature.customFields as Record<string, unknown>)
+        : {},
+  };
+
+  return gates
+    .filter((g) =>
+      g.kind === "field"
+        ? !(g.fieldKey && fieldGateSatisfied(g.fieldKey, subject, catalog))
+        : !done.has(g.id),
+    )
+    .map((g) =>
+      g.kind === "field" && g.fieldKey
+        ? gateFieldLabel(g.fieldKey, catalog, g.label)
+        : g.label,
+    );
 }
 
 async function main() {
