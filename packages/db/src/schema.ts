@@ -900,6 +900,49 @@ export const workspaceProperties = pgTable(
 );
 
 /**
+ * The workspace's tag registry (Settings -> Cards).
+ *
+ * Tags were free text: `features.tags` is a `text[]` and the editor was a
+ * comma-separated input, so `area:web`, `Area:Web` and `area:web ` were three
+ * distinct tags. This makes one spelling the spelling.
+ *
+ * Item values stay in `features.tags`, keyed by name, exactly as
+ * `custom_fields` keys by property key. Deleting a tag here therefore hides
+ * values rather than destroying them, and re-adding it brings them back, which
+ * is the same bargain `workspace_properties` makes and for the same reason: an
+ * admin tidying a settings list must not silently delete other people's work.
+ *
+ * Workspace-wide rather than per product, unlike `workspace_properties`. Tags
+ * cross products by nature (`area:web` means the same thing everywhere), and
+ * per-product registries would weaken the one guarantee this table exists to
+ * give, since two products could each define their own `area:web`. If a
+ * product ever needs its own vocabulary, a nullable `product_id` where NULL is
+ * the workspace default is a pure addition, which is the shape
+ * `workspace_properties` already uses.
+ */
+export const workspaceTags = pgTable(
+  "workspace_tags",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    /** Canonical display name, and the value stored in `features.tags`. */
+    name: text("name").notNull(),
+    /** Manual ordering in the picker and in settings; ascending. */
+    position: integer("position").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("workspace_tags_ws_idx").on(t.workspaceId),
+    // Uniqueness is case-insensitive and lives in a functional index Drizzle
+    // cannot express (`lower(name)`); see the migration.
+  ],
+);
+
+/**
  * An admin-defined workflow stage (Settings -> Workflow). The ordered set of
  * stages a feature moves through on the board. `key` is the stable slug stored
  * in `features.status`; `label` is the editable display name (renaming a stage

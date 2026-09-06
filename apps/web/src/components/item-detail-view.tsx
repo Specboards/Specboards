@@ -137,6 +137,7 @@ export function ItemDetailView({
         workflow={workflow}
         canEdit={canEdit}
         availableFields={availableFields}
+        tags={data.tags}
       />
 
       {/* Exit-criteria checklist for the stage this item currently sits in.

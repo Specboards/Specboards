@@ -108,6 +108,8 @@ export interface ItemDetailData {
   currentUserId: string | null;
   /** Built-in field keys available at this level; null = all. */
   availableFields: string[] | null;
+  /** The workspace's tag registry, offered by the item's tag picker. */
+  tags: string[];
   levelLabel: string;
   /** The item's current product slug (for building permalinks / redirects). */
   productSlug: string;
@@ -158,7 +160,7 @@ export async function getItemDetailData(
   // flyout offers exactly what a save would accept, whichever board opened it.
   const workflow = await resolveWorkflowFor(access, feature.productId);
 
-  const [allProperties, releases, cycles, itemGoals, allGoals, allFeatures, levels, products, allGates, allCompletedGateIds] =
+  const [allProperties, releases, cycles, itemGoals, allGoals, allFeatures, levels, products, allGates, allCompletedGateIds, tags] =
     await Promise.all([
       // The item's own product decides which fields it carries. A product that
       // has narrowed its set leaves the dropped values on the row, so this
@@ -173,6 +175,10 @@ export async function getItemDetailData(
       store.listProducts(access ?? undefined),
       store.listStageGates(access ?? undefined),
       store.listGateCompletions(feature.specId, access ?? undefined),
+      // The tag registry the picker offers. Workspace-wide, so unlike the
+      // properties above it takes no product: see the migration for why tags
+      // are not scoped per product.
+      store.listTags(access ?? undefined),
     ]);
 
   // Only the current stage's gates are actionable on the item (exit criteria),
@@ -276,6 +282,7 @@ export async function getItemDetailData(
     canCreateChildSpec,
     currentUserId: access?.userId ?? null,
     availableFields,
+    tags: tags.map((t) => t.name),
     levelLabel,
     productSlug,
     parentKey,

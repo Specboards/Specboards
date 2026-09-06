@@ -31,6 +31,7 @@ import { patchFeature } from "@/lib/api-client/work-items";
 import { offerReleaseCascade } from "@/components/release-cascade-offer";
 import { RiceEditor, type RiceStrings } from "@/components/rice-editor";
 import { StatusDot } from "@/components/status-dot";
+import { TagPicker } from "@/components/tag-picker";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { isFieldAvailable } from "@/lib/card-fields";
@@ -83,6 +84,7 @@ export function ItemProperties({
   workflow,
   canEdit = true,
   availableFields = null,
+  tags = [],
 }: {
   feature: FeatureDetail;
   members?: WorkspaceMember[];
@@ -94,6 +96,8 @@ export function ItemProperties({
   canEdit?: boolean;
   /** Built-in metadata field keys available at this item's level; null = all. */
   availableFields?: string[] | null;
+  /** The workspace's tag registry, offered by the tag picker. */
+  tags?: string[];
 }) {
   const router = useRouter();
   // An item can only be scheduled into a release from its own product, or a
@@ -133,6 +137,12 @@ export function ItemProperties({
   // changed, and offering to move children on an unrelated edit would raise the
   // prompt over and over for a change the user already answered.
   const savedReleaseRef = useRef<string | null>(feature.releaseId ?? null);
+  // Tags are held locally because the picker is not a form control the browser
+  // serializes on its own: it writes a hidden input, and setting a hidden
+  // input's value fires no change event, so the form's onChange autosave would
+  // never see the edit. Seeded from the item and re-seeded by `key` when the
+  // flyout swaps to another item.
+  const [tagValue, setTagValue] = useState<string[]>(feature.tags);
   const [status, setStatus] = useState<"idle" | "saving" | "saved">("idle");
   const [error, setError] = useState<string | null>(null);
   // Track the selected status locally so the allowed-transitions list
@@ -203,14 +213,11 @@ export function ItemProperties({
         ...(productCycles.length > 0
           ? { cycleId: String(data.get("cycleId") ?? "") || null }
           : {}),
-        ...(show("tags")
-          ? {
-              tags: String(data.get("tags") ?? "")
-                .split(",")
-                .map((t) => t.trim())
-                .filter(Boolean),
-            }
-          : {}),
+        // From the picker's state rather than the serialized hidden input, so
+        // there is one source of truth. The server canonicalizes each name
+        // against the registry and creates any that are new (`resolveTags`),
+        // so what comes back may differ in casing from what was sent.
+        ...(show("tags") ? { tags: tagValue } : {}),
         ...(members.length > 0 && show("assignee")
           ? { assigneeId: String(data.get("assigneeId") ?? "") || null }
           : {}),
@@ -370,11 +377,17 @@ export function ItemProperties({
 
       {show("tags") ? (
         <PropertyRow icon={Tags} label="Tags">
-          <Input
+          <TagPicker
             name="tags"
-            defaultValue={feature.tags.join(", ")}
-            placeholder="Comma-separated"
-            className={INLINE_INPUT}
+            value={tagValue}
+            options={tags}
+            onCommit={(next) => {
+              setTagValue(next);
+              // Straight away rather than on the form's 600ms typing debounce:
+              // adding or removing a chip is a committed choice, the way a
+              // select is, not a half-finished word.
+              queueSave(0);
+            }}
           />
         </PropertyRow>
       ) : null}

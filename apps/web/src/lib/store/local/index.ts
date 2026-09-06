@@ -7,6 +7,7 @@ import {
   type IdeaStage,
   type PropertyDef,
   type PropertyEntity,
+  type TagDef,
   type WorkspaceLevel,
 } from "@specboards/core";
 
@@ -26,6 +27,7 @@ import * as docStore from "./docs";
 import * as releaseStore from "./releases";
 import * as viewStore from "./views";
 import * as configStore from "./workspace-config";
+import * as tagStore from "./tags";
 import {
   type LocalItem,
   localDirection,
@@ -543,6 +545,27 @@ export class LocalFileStore implements FeatureStore, LocalStoreContext {
 
   deleteProperty(id: string, scope?: WorkspaceScope): Promise<void> {
     return configStore.deleteProperty(this, id, scope);
+  }
+
+  // Implemented in ./tags.ts.
+  listTags(scope?: WorkspaceScope): Promise<TagDef[]> {
+    return tagStore.listTags(this, scope);
+  }
+
+  ensureTags(names: string[], scope?: WorkspaceScope): Promise<TagDef[]> {
+    return tagStore.ensureTags(this, names, scope);
+  }
+
+  renameTag(
+    id: string,
+    name: string,
+    scope?: WorkspaceScope,
+  ): Promise<TagDef> {
+    return tagStore.renameTag(this, id, name, scope);
+  }
+
+  deleteTag(id: string, scope?: WorkspaceScope): Promise<void> {
+    return tagStore.deleteTag(this, id, scope);
   }
 
   listStatuses(scope?: WorkspaceScope): Promise<WorkspaceStatus[]> {

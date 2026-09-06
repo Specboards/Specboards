@@ -66,6 +66,10 @@ export const SCOPE_RESOURCES = [
   "docs",
   "doc-spaces",
   "properties",
+  // Its own resource rather than a path under `features`: a key that may edit
+  // items should not thereby be able to rename a tag across every item in the
+  // workspace, which is what `PATCH /api/v1/tags/:id` does.
+  "tags",
   "levels",
   "statuses",
   "stage-gates",
