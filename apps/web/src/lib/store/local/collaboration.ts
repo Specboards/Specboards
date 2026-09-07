@@ -20,6 +20,7 @@ import {
   type CommentInput,
   type CommentRecord,
   type NotificationList,
+  type NotificationQuery,
   type WorkspaceScope,
 } from "../types";
 
@@ -96,11 +97,17 @@ export async function deleteComment(
 // a single user with no members to mention, so the inbox is always empty.
 export async function listNotifications(
   _scope?: WorkspaceScope,
+  _query?: NotificationQuery,
 ): Promise<NotificationList> {
-  return { items: [], unreadCount: 0 };
+  return { items: [], unreadCount: 0, nextCursor: null };
 }
 
 export async function markNotificationRead(
+  _id: string,
+  _scope?: WorkspaceScope,
+): Promise<void> {}
+
+export async function markNotificationUnread(
   _id: string,
   _scope?: WorkspaceScope,
 ): Promise<void> {}

@@ -72,3 +72,48 @@ export const NOTIFICATION_DEFAULTS: Record<
   spec_change_closed: { in_app: true, email: true },
   "release.shipped": { in_app: true, email: false },
 };
+
+/**
+ * Human labels, and the one-line explanation the preference matrix will show.
+ *
+ * Generated from the catalog rather than hand-listed per surface, so a new
+ * event type appears in the type filter and (later) in the preference grid
+ * without a UI change.
+ */
+export const NOTIFICATION_EVENT_LABELS: Record<
+  NotificationEventType,
+  { label: string; description: string }
+> = {
+  "item.assigned": {
+    label: "An item is assigned to me",
+    description: "Somebody puts an item in your name.",
+  },
+  "item.status_changed": {
+    label: "An item I follow changes status",
+    description: "An item you are assigned to, or watching, moves stage.",
+  },
+  "item.created": {
+    label: "An item is added under mine",
+    description: "A child is created under an item you are assigned to.",
+  },
+  "comment.mentioned": {
+    label: "Somebody mentions me",
+    description: "You are named with an @mention in a comment.",
+  },
+  "comment.created": {
+    label: "Somebody comments on an item I follow",
+    description: "A comment lands on an item you are assigned to or watching.",
+  },
+  spec_change_merged: {
+    label: "My proposed change is merged",
+    description: "A spec change you proposed went live.",
+  },
+  spec_change_closed: {
+    label: "My proposed change is closed",
+    description: "A spec change you proposed was closed without merging.",
+  },
+  "release.shipped": {
+    label: "A release I have work in ships",
+    description: "A release containing an item of yours is marked shipped.",
+  },
+};

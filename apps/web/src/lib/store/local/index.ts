@@ -38,6 +38,7 @@ import {
   type CommentInput,
   type CommentRecord,
   type NotificationList,
+  type NotificationQuery,
   type BoardKey,
   type BoardPreferences,
   type CreateFeatureInput,
@@ -958,8 +959,15 @@ export class LocalFileStore implements FeatureStore, LocalStoreContext {
     return collabStore.deleteComment(this, commentId, scope);
   }
 
-  listNotifications(scope?: WorkspaceScope): Promise<NotificationList> {
-    return collabStore.listNotifications(scope);
+  listNotifications(
+    scope?: WorkspaceScope,
+    query?: NotificationQuery,
+  ): Promise<NotificationList> {
+    return collabStore.listNotifications(scope, query);
+  }
+
+  markNotificationUnread(id: string, scope?: WorkspaceScope): Promise<void> {
+    return collabStore.markNotificationUnread(id, scope);
   }
 
   markNotificationRead(id: string, scope?: WorkspaceScope): Promise<void> {

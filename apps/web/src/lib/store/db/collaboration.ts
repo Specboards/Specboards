@@ -27,7 +27,10 @@ import {
   desc,
   eq,
   features,
+  inArray,
   isNull,
+  lt,
+  or,
   notifications,
   products,
   users,
@@ -38,6 +41,7 @@ import {
   type CommentInput,
   type CommentRecord,
   type NotificationList,
+  type NotificationQuery,
   type WorkspaceScope,
 } from "../types";
 
@@ -171,13 +175,58 @@ export async function deleteComment(
   });
 }
 
+/** Page size ceiling, so a hand-written `limit` cannot ask for the whole table. */
+const NOTIFICATION_PAGE_MAX = 100;
+const NOTIFICATION_PAGE_DEFAULT = 30;
+
 export async function listNotifications(
   ctx: DbStoreContext,
   scope?: WorkspaceScope,
+  query: NotificationQuery = {},
 ): Promise<NotificationList> {
   return ctx.scoped(scope, async (tx) => {
     const ws = scope!.workspaceId;
     const uid = scope!.userId;
+    const limit = Math.min(
+      Math.max(query.limit ?? NOTIFICATION_PAGE_DEFAULT, 1),
+      NOTIFICATION_PAGE_MAX,
+    );
+
+    const mine = and(
+      eq(notifications.workspaceId, ws),
+      eq(notifications.recipientId, uid),
+    );
+    const filters = [mine];
+    if (query.unreadOnly) filters.push(isNull(notifications.readAt));
+    if (query.types && query.types.length > 0) {
+      filters.push(inArray(notifications.type, query.types));
+    }
+    if (query.productKey) filters.push(eq(products.key, query.productKey));
+    if (query.before) {
+      const cursor = parseCursor(query.before);
+      // Strictly after the cursor row in the same order the page is sorted by.
+      // The second clause is what stops a tie at the page boundary from losing
+      // rows: notifications written in one transaction share `created_at`, so
+      // `created_at < T` alone would skip every other row at T.
+      //
+      // Without an id half (a hand-written `before=<iso>`) there is no tie to
+      // break, and comparing a uuid column against an empty string would fail
+      // in the database rather than degrade.
+      filters.push(
+        cursor.id
+          ? or(
+              lt(notifications.createdAt, cursor.createdAt),
+              and(
+                eq(notifications.createdAt, cursor.createdAt),
+                lt(notifications.id, cursor.id),
+              ),
+            )!
+          : lt(notifications.createdAt, cursor.createdAt),
+      );
+    }
+
+    // One extra row, to learn whether there is another page without counting
+    // the whole table on every request.
     const [rows, unread] = await Promise.all([
       tx
         .select({
@@ -198,26 +247,22 @@ export async function listNotifications(
         .innerJoin(features, eq(features.id, notifications.featureId))
         .leftJoin(products, eq(products.id, features.productId))
         .leftJoin(users, eq(users.id, notifications.actorId))
-        .where(
-          and(
-            eq(notifications.workspaceId, ws),
-            eq(notifications.recipientId, uid),
-          ),
-        )
-        .orderBy(desc(notifications.createdAt))
-        .limit(50),
+        .where(and(...filters))
+        // `id` is the tiebreaker, so the order is total and a cursor built
+        // from the last row names exactly one position in it.
+        .orderBy(desc(notifications.createdAt), desc(notifications.id))
+        .limit(limit + 1),
+      // Deliberately unfiltered beyond "mine and unread": this is the badge
+      // number, and a count that moved when somebody changed a filter would be
+      // answering a question nobody asked.
       tx
         .select({ n: count() })
         .from(notifications)
-        .where(
-          and(
-            eq(notifications.workspaceId, ws),
-            eq(notifications.recipientId, uid),
-            isNull(notifications.readAt),
-          ),
-        ),
+        .where(and(mine, isNull(notifications.readAt))),
     ]);
-    const items = rows.map((r) => ({
+
+    const page = rows.slice(0, limit);
+    const items = page.map((r) => ({
       id: r.id,
       type: r.type,
       actorId: r.actorId,
@@ -232,8 +277,37 @@ export async function listNotifications(
       read: r.readAt !== null,
       createdAt: r.createdAt.toISOString(),
     }));
-    return { items, unreadCount: Number(unread[0]?.n ?? 0) };
+    return {
+      items,
+      unreadCount: Number(unread[0]?.n ?? 0),
+      nextCursor: rows.length > limit ? cursorFor(page.at(-1)) : null,
+    };
   });
+}
+
+/**
+ * The inbox cursor: a timestamp and the id of the row it names, so the position
+ * is exact even when several rows share the timestamp.
+ */
+function cursorFor(
+  row: { id: string; createdAt: Date } | undefined,
+): string | null {
+  return row ? `${row.createdAt.toISOString()}|${row.id}` : null;
+}
+
+function parseCursor(raw: string): { createdAt: Date; id: string } {
+  const sep = raw.lastIndexOf("|");
+  // The id half is optional so a cursor from an older client (or a hand-written
+  // `before=<iso>`) still works; it just cannot break a tie.
+  const stamp = sep === -1 ? raw : raw.slice(0, sep);
+  const id = sep === -1 ? "" : raw.slice(sep + 1);
+  const createdAt = new Date(stamp);
+  // A cursor we cannot parse is a caller error, and starting from "now" would
+  // silently serve page one again forever.
+  if (Number.isNaN(createdAt.getTime())) {
+    throw new CommentError("That notification cursor is not valid.");
+  }
+  return { createdAt, id };
 }
 
 export async function markNotificationRead(
@@ -251,6 +325,25 @@ export async function markNotificationRead(
           eq(notifications.workspaceId, scope!.workspaceId),
           eq(notifications.recipientId, scope!.userId),
           isNull(notifications.readAt),
+        ),
+      );
+  });
+}
+
+export async function markNotificationUnread(
+  ctx: DbStoreContext,
+  id: string,
+  scope?: WorkspaceScope,
+): Promise<void> {
+  await ctx.scoped(scope, async (tx) => {
+    await tx
+      .update(notifications)
+      .set({ readAt: null })
+      .where(
+        and(
+          eq(notifications.id, id),
+          eq(notifications.workspaceId, scope!.workspaceId),
+          eq(notifications.recipientId, scope!.userId),
         ),
       );
   });

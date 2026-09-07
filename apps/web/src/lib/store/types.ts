@@ -944,8 +944,9 @@ export class CommentError extends DomainError {}
 export interface NotificationRecord {
   id: string;
   /**
-   * Kind of notification: "mention", or the outcome of a spec change the
-   * recipient proposed ("spec_change_merged" / "spec_change_closed").
+   * Kind of notification: a key from the notification catalog (see
+   * lib/notifications/catalog.ts). Rows written before that catalog existed
+   * carry "mention", which readers still have to understand.
    */
   type: string;
   actorId: string | null;
@@ -964,10 +965,52 @@ export interface NotificationRecord {
   createdAt: string;
 }
 
+/**
+ * How to read a slice of the inbox.
+ *
+ * Filters and a cursor rather than "everything, newest first". Once assignment
+ * and status changes reach the inbox, a busy board produces more rows than a
+ * page can hold, and the questions people bring to a notification centre are
+ * narrow ones: what have I not read, what happened on this product, what
+ * happened to the items I own.
+ */
+export interface NotificationQuery {
+  /** Only rows the recipient has not read yet. */
+  unreadOnly?: boolean;
+  /** Restrict to these notification types (catalog keys). Empty = all. */
+  types?: string[];
+  /** Restrict to items in this product, by product key. */
+  productKey?: string;
+  /** Page size; the store clamps it. */
+  limit?: number;
+  /**
+   * Opaque cursor from a previous page's `nextCursor`: return only rows that
+   * sort after it.
+   *
+   * Keyset rather than an offset, because the inbox grows at the top while
+   * somebody is reading it and an offset would skip or repeat rows as it did.
+   * It carries an id as well as a timestamp because a timestamp alone is not a
+   * total order here: rows written in one transaction share `created_at` to the
+   * microsecond, so a page boundary landing on a tie would drop the rest of the
+   * tie from somebody's history without any sign that it had.
+   */
+  before?: string;
+}
+
 /** The inbox payload: the recipient's notifications plus their unread total. */
 export interface NotificationList {
   items: NotificationRecord[];
+  /**
+   * Unread across the whole inbox, not just this page or this filter. It is
+   * what the bell badge shows, and a count that moved when somebody changed a
+   * filter would be reporting something nobody asked about.
+   */
   unreadCount: number;
+  /**
+   * Cursor for the next page, or null at the end. Pass it back as `before`;
+   * its contents are the store's business.
+   */
+  nextCursor: string | null;
 }
 
 // Cycle helpers live in core (they are pure date logic shared with the CLI);
@@ -1824,10 +1867,26 @@ interface CollaborationStore {
   ): Promise<CommentRecord>;
   /** Delete a comment; the author or the workspace owner only. */
   deleteComment(commentId: string, scope?: WorkspaceScope): Promise<void>;
-  /** The caller's notifications (newest first) plus their unread total. */
-  listNotifications(scope?: WorkspaceScope): Promise<NotificationList>;
+  /**
+   * A page of the caller's notifications (newest first), their unread total,
+   * and a cursor for the next page. See {@link NotificationQuery}; omitting it
+   * returns the newest page unfiltered, which is what the bell asks for.
+   */
+  listNotifications(
+    scope?: WorkspaceScope,
+    query?: NotificationQuery,
+  ): Promise<NotificationList>;
   /** Mark one of the caller's notifications read (no-op if already read/gone). */
   markNotificationRead(id: string, scope?: WorkspaceScope): Promise<void>;
+  /**
+   * Mark one of the caller's notifications unread again.
+   *
+   * The counterpart to reading one, and not merely symmetry: the inbox exists
+   * to answer "what do I still need to deal with", and marking something back
+   * is how a reader who opened a row by accident, or who cannot act on it now,
+   * keeps that list honest.
+   */
+  markNotificationUnread(id: string, scope?: WorkspaceScope): Promise<void>;
   /** Mark all of the caller's notifications read. */
   markAllNotificationsRead(scope?: WorkspaceScope): Promise<void>;
 }

@@ -10,6 +10,7 @@ import {
   ideaSettings,
   ideaStatuses,
   ideas,
+  notifications,
   isNull,
   ne,
   outboxEvents,
@@ -88,6 +89,65 @@ export async function resetBoard(workspaceId: string): Promise<void> {
   // they exist to protect the hosted app, and weakening them for tests would
   // mean the thing under test is not the thing that ships.
   await db().delete(schema.operationLimits);
+}
+
+/**
+ * Put rows in the admin's inbox, oldest first, and return their ids.
+ *
+ * Seeded rather than produced through the app on purpose. The fan-out never
+ * tells you about your own action, so making a real notification needs a second
+ * signed-in person, and who receives what is already pinned precisely in the
+ * fan-out's own integration suite. What is under test here is the page: whether
+ * a reader can find, group, filter and clear what has arrived.
+ */
+export async function seedNotifications(
+  workspaceId: string,
+  rows: {
+    /** The item the notice points at, by stable spec id. */
+    specId: string;
+    type: string;
+    snippet: string;
+    read?: boolean;
+    /** Minutes into the past; higher is older. Defaults to the row's index. */
+    minutesAgo?: number;
+  }[],
+): Promise<void> {
+  const [admin] = await db()
+    .select({ id: schema.users.id })
+    .from(schema.users)
+    .limit(1);
+  if (!admin) throw new Error("No user found; global setup did not run?");
+  for (const [i, row] of rows.entries()) {
+    const [feature] = await db()
+      .select({ id: features.id })
+      .from(features)
+      .where(
+        and(
+          eq(features.workspaceId, workspaceId),
+          eq(features.specId, row.specId),
+        ),
+      );
+    if (!feature) throw new Error(`No item ${row.specId} to notify about.`);
+    await db()
+      .insert(notifications)
+      .values({
+        workspaceId,
+        recipientId: admin.id,
+        actorId: null,
+        type: row.type,
+        featureId: feature.id,
+        snippet: row.snippet,
+        readAt: row.read ? new Date() : null,
+        createdAt: new Date(Date.now() - (row.minutesAgo ?? i) * 60_000),
+      });
+  }
+}
+
+/** Empty the workspace's notifications. */
+export async function resetNotifications(workspaceId: string): Promise<void> {
+  await db()
+    .delete(notifications)
+    .where(eq(notifications.workspaceId, workspaceId));
 }
 
 /** Remove every release in the workspace (items are unscheduled by SET NULL). */

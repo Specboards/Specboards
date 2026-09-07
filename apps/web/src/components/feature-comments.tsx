@@ -15,6 +15,7 @@ import {
   renderCommentBody,
   type MentionCandidate,
 } from "@/components/mention-input";
+import { openDetailSection } from "@/components/detail-section";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -42,6 +43,19 @@ function timeAgo(iso: string): string {
  * client-side and updates it in place on create/delete. Plain text for now;
  * @mention autocomplete arrives in a later slice.
  */
+/**
+ * The DOM id a notification's comment deep link points at.
+ *
+ * Not exported: the other half of the pair is a hash the notification centre
+ * builds, and the two are kept in step by the e2e that follows a mention
+ * through to the comment rather than by a shared constant nothing else uses.
+ */
+function commentAnchor(commentId: string): string {
+  return `${COMMENT_ANCHOR_PREFIX}${commentId}`;
+}
+
+const COMMENT_ANCHOR_PREFIX = "comment-";
+
 export function FeatureComments({
   specId,
   currentUserId,
@@ -87,6 +101,31 @@ export function FeatureComments({
       active = false;
     };
   }, [specId]);
+
+  /**
+   * Land on the comment a notification pointed at.
+   *
+   * The browser's own hash handling cannot do this: comments are fetched after
+   * the page renders, so when the hash fires there is nothing at that id yet.
+   * Runs once the rows are in the DOM, and opens the Comments section first in
+   * case the reader had collapsed it, since scrolling to something inside a
+   * collapsed section scrolls to nothing.
+   */
+  useEffect(() => {
+    if (comments === null || comments.length === 0) return;
+    const hash = window.location.hash.slice(1);
+    if (!hash.startsWith(COMMENT_ANCHOR_PREFIX)) return;
+    const id = hash.slice(COMMENT_ANCHOR_PREFIX.length);
+    if (!comments.some((c) => c.id === id)) return;
+    openDetailSection("comments");
+    // After the section has been told to open, so the target has a box to be
+    // scrolled into.
+    requestAnimationFrame(() => {
+      document
+        .getElementById(hash)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }, [comments]);
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -141,7 +180,10 @@ export function FeatureComments({
       ) : (
         <ul className="space-y-4">
           {comments.map((c) => (
-            <li key={c.id} className="flex gap-3">
+            // Anchored so a notification about this comment can land on it.
+            // The scroll itself is not the browser's: comments load after the
+            // page, so the hash has nothing to find when it fires.
+            <li id={commentAnchor(c.id)} key={c.id} className="flex gap-3">
               {/* Decorative: the author's name is spelled out beside it. */}
               <Avatar name={c.authorName} aria-hidden />
               <div className="min-w-0 flex-1 space-y-1">
