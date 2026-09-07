@@ -52,7 +52,7 @@ function invoicingSpec(): string {
 async function importSpec(page: import("@playwright/test").Page, slug: string) {
   await page.goto(`/${slug}/settings/repositories`);
   await page.getByRole("button", { name: /Create 1 card/i }).click();
-  await expect(page.getByText(/Imported\s+1\s+spec/i)).toBeVisible();
+  await expect(page.getByText(/Created\s+1\s+card/i)).toBeVisible();
 }
 
 /** Type at the end of the spec body and send it, waiting for the write. */

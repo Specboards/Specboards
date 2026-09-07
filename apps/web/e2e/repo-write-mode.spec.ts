@@ -53,7 +53,7 @@ test.describe("settings: how spec edits reach a repository", () => {
 
     await page.goto(`/${ws.slug}/settings/repositories`);
     await page.getByRole("button", { name: /Create 1 card/i }).click();
-    await expect(page.getByText(/Imported\s+1\s+spec/i)).toBeVisible();
+    await expect(page.getByText(/Created\s+1\s+card/i)).toBeVisible();
 
     // The settings page says what happens and where the decision came from,
     // so nobody has to open a YAML file to find out.

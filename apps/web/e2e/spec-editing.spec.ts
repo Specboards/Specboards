@@ -63,7 +63,7 @@ test.describe("spec editing: edit a spec body in the app", () => {
     // Import the spec so there is a board row pointing at the file.
     await page.goto(`/${ws.slug}/settings/repositories`);
     await page.getByRole("button", { name: /Create 1 card/i }).click();
-    await expect(page.getByText(/Imported\s+1\s+spec/i)).toBeVisible();
+    await expect(page.getByText(/Created\s+1\s+card/i)).toBeVisible();
 
     // Open the spec-backed item's full page.
     await page.goto(`/${ws.slug}/all/backlog/work/${SPEC_ID}`);

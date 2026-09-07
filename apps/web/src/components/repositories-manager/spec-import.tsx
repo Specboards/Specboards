@@ -106,6 +106,20 @@ export function SpecImportPanel({
     await runScan();
   }, [runScan]);
 
+  /**
+   * "Scan again", as offered under an import summary: re-scan *and* leave that
+   * summary behind.
+   *
+   * The plain `rescan` cannot do this, because `runImport` calls it to refresh
+   * the scan behind a summary it has just set. Without the split, the summary
+   * outlived every rescan and the button read as doing nothing: the panel had
+   * quietly learned that everything was imported and had no way to say so.
+   */
+  const scanAgain = useCallback(async () => {
+    setResult(null);
+    await rescan();
+  }, [rescan]);
+
   // Clearing the prior import result belongs to the change of repos, not to the
   // scan: it must be gone in the render that starts the new scan, not one
   // render later, or the panel briefly reports the last repo's import as this
@@ -186,13 +200,13 @@ export function SpecImportPanel({
           <ImportResultView
             result={result}
             boardHref={importedBoardHref}
-            onRescan={() => void rescan()}
+            onRescan={() => void scanAgain()}
           />
         ) : totalSpecs === 0 ? (
           <EmptySpecsState
             repos={repos}
             boardHref={importedBoardHref}
-            onRescan={() => void rescan()}
+            onRescan={() => void scanAgain()}
             loading={loading}
             installUrl={installUrl}
             orgInstallationId={orgInstallationId}
@@ -202,7 +216,7 @@ export function SpecImportPanel({
           <AllImportedState
             total={totalSpecs}
             boardHref={importedBoardHref}
-            onRescan={() => void rescan()}
+            onRescan={() => void scanAgain()}
             loading={loading}
           />
         ) : (
@@ -231,7 +245,7 @@ export function SpecImportPanel({
               <Button
                 size="sm"
                 variant="ghost"
-                onClick={() => void rescan()}
+                onClick={() => void scanAgain()}
                 disabled={importing || loading}
               >
                 Rescan
