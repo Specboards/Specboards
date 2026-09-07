@@ -74,7 +74,9 @@ permalinks therefore keep working.
 For each existing workspace whose leaf is still `feature` (the old default):
 add a `work` leaf, demote `feature` to a grouping, and **wrap each existing spec
 1:1** in a new Feature grouping (inheriting the spec's former parent), moving the
-spec down to `work`. See `infra/migrations/0014_work_item_leaf_backfill.sql`.
+spec down to `work`. See `infra/migrations/0014_work_item_leaf_backfill.sql`,
+folded into `0000_baseline.sql` by the v1.0.2 squash and readable in git
+history before that release.
 Workspaces with a customized leaf are left untouched.
 
 ## Consequences

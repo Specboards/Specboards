@@ -102,6 +102,65 @@ async function appliedCount(sql: postgres.Sql): Promise<number | null> {
   }
 }
 
+/**
+ * A table the baseline contains and no partly-applied older history does.
+ *
+ * `user_avatars` arrived in the last migration before the squash
+ * (0080_user_avatars_and_field_gates), so its presence is the cheapest honest
+ * answer to "is this database at least as new as the baseline".
+ */
+const BASELINE_SENTINEL = "public.user_avatars";
+
+/**
+ * Refuse to run against a database that is behind the baseline.
+ *
+ * The 81 migrations this replaced are gone, and Drizzle decides what to apply
+ * purely by timestamp: it runs a migration only when the newest one the
+ * database has recorded is older than that file. The baseline deliberately
+ * carries the timestamp the original 0000 had, which is what makes it a no-op
+ * on a database that ran the old history.
+ *
+ * The failure that buys is silent. A database left part-way through the old
+ * history (a self-host that upgraded once, a long time ago) is *newer* than the
+ * baseline by that comparison, so the baseline is skipped, and there is nothing
+ * else left to apply. Measured on a database stopped at 0040: 46 tables and 47
+ * policies where there should be 65 and 87, and this runner reported "already
+ * up to date, nothing to apply" and let the release through. Nineteen missing
+ * tables is a broken deploy; forty missing row-level security policies is worse
+ * than that.
+ *
+ * So the timestamp is not trusted on its own. Any database that has applied
+ * something must already contain the baseline's schema, and the only way out of
+ * this error is to catch up on the old history first, from a release that still
+ * has it.
+ */
+async function assertNotBehindBaseline(sql: postgres.Sql): Promise<void> {
+  const applied = await appliedCount(sql);
+  // Zero (or unreadable) means nothing has run here yet: the baseline is about
+  // to build the whole schema, which is exactly right.
+  if (applied === null || applied === 0) return;
+
+  const rows = await sql<{ present: boolean }[]>`
+    SELECT to_regclass(${BASELINE_SENTINEL}) IS NOT NULL AS present
+  `;
+  if (rows[0]?.present) return;
+
+  throw new Error(
+    [
+      "This database has applied migrations but is behind the squashed baseline,",
+      "so there is no path from where it is to where this release expects it.",
+      "",
+      "The per-migration history was replaced by a single baseline in v1.0.2.",
+      "A database that stopped part-way through that history cannot be caught up",
+      "by this release, because the migrations it still needs no longer exist here.",
+      "",
+      "To recover: deploy v1.0.1 (or any earlier release) against this database",
+      "first and let it migrate to the end, then upgrade to this one. Nothing has",
+      "been changed by this run.",
+    ].join("\n"),
+  );
+}
+
 async function main(): Promise<void> {
   const sql = postgres(connectionString(), {
     // A release machine runs one short task: a single connection, no pooling
@@ -121,6 +180,9 @@ async function main(): Promise<void> {
     // migration. The session lock makes the second wait for the first, then
     // find nothing left to do.
     await sql`SELECT pg_advisory_lock(${LOCK_KEY})`;
+    // Inside the lock, so two releases cannot race the check itself, and before
+    // anything is written.
+    await assertNotBehindBaseline(sql);
     const started = Date.now();
     // Count the journal either side so the summary can distinguish "created
     // the whole schema" from "there was nothing to do". Reporting "schema up

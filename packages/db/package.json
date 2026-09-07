@@ -19,7 +19,6 @@
     "build": "tsc -b",
     "dev": "tsc -b --watch",
     "typecheck": "tsc --noEmit",
-    "generate": "drizzle-kit generate",
     "migrate": "tsx src/migrate.ts",
     "seed": "tsx src/seed.ts",
     "lint": "eslint src",
@@ -32,7 +31,6 @@
   },
   "devDependencies": {
     "@types/node": "^22.20.0",
-    "drizzle-kit": "^0.31.10",
     "esbuild": "^0.28.2",
     "tsx": "^4.23.12"
   }

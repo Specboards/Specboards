@@ -1,1 +1,0 @@
-ALTER TABLE "features" ALTER COLUMN "level" SET DEFAULT 'work';

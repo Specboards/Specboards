@@ -51,9 +51,12 @@ Re-running `infra/rls-role.sql` / `infra/worker-role.sql` afterward is safe
 (idempotent) and reconciles the grants under the new name. Fresh databases skip
 this part: the scripts create the roles under the new names directly.
 
-The RLS helper functions (`specboards_is_member`, ...) are renamed by the drizzle
+The RLS helper functions (`specboards_is_member`, ...) were renamed by the drizzle
 migration `0046_rebrand_specboard_to_specboards.sql`, applied via `pnpm db:migrate`
-as usual; that is independent of this role rename.
+as usual; that is independent of this role rename. That file was folded into
+`0000_baseline.sql` when the history was squashed in v1.0.2, so the names it
+produced are what a database now starts with; read it in git history before
+that release if you need the rename itself.
 
 ---
 
