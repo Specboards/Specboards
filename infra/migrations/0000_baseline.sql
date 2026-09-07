@@ -3806,12 +3806,6 @@ ALTER TABLE public.item_events ENABLE ROW LEVEL SECURITY;
 CREATE POLICY item_events_member_all ON public.item_events USING (public.specboards_is_member(workspace_id)) WITH CHECK (public.specboards_is_member(workspace_id));
 
 --
--- Name: item_events item_events_worker_all; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY item_events_worker_all ON public.item_events TO specboards_worker USING (true) WITH CHECK (true);
-
---
 -- Name: key_results; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -3914,12 +3908,6 @@ CREATE POLICY notifications_read ON public.notifications FOR SELECT USING ((publ
 CREATE POLICY notifications_update ON public.notifications FOR UPDATE USING ((public.specboards_is_member(workspace_id) AND (recipient_id = (NULLIF(current_setting('app.user_id'::text, true), ''::text))::uuid))) WITH CHECK ((public.specboards_is_member(workspace_id) AND (recipient_id = (NULLIF(current_setting('app.user_id'::text, true), ''::text))::uuid)));
 
 --
--- Name: notifications notifications_worker_all; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY notifications_worker_all ON public.notifications TO specboards_worker USING (true) WITH CHECK (true);
-
---
 -- Name: outbox_events; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -4008,12 +3996,6 @@ CREATE POLICY product_repositories_admin_update ON public.product_repositories F
 --
 
 CREATE POLICY product_repositories_member_select ON public.product_repositories FOR SELECT USING (public.specboards_is_member(workspace_id));
-
---
--- Name: product_repositories product_repositories_worker_all; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY product_repositories_worker_all ON public.product_repositories TO specboards_worker USING (true) WITH CHECK (true);
 
 --
 -- Name: product_settings; Type: ROW SECURITY; Schema: public; Owner: -
@@ -4346,6 +4328,12 @@ CREATE POLICY workspaces_admin_update ON public.workspaces FOR UPDATE USING (pub
 --
 
 CREATE POLICY workspaces_member_select ON public.workspaces FOR SELECT USING (public.specboards_is_member(id));
+
+--
+-- Name: FUNCTION specboards_resolve_provider_credential(p_workspace_id uuid, p_credential_id uuid); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.specboards_resolve_provider_credential(p_workspace_id uuid, p_credential_id uuid) FROM PUBLIC;
 
 --
 -- PostgreSQL database dump complete

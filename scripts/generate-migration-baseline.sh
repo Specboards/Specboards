@@ -53,6 +53,30 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# The optional roles (`specboards_app`, `specboards_worker`) must NOT exist on
+# the cluster this runs against. Every role-dependent statement in the migration
+# history is wrapped in `IF EXISTS (SELECT 1 FROM pg_roles ...)`, so the schema
+# a fresh install gets is the one where those blocks are SKIPPED. Generate on a
+# cluster that happens to have the roles and pg_dump writes the grants and
+# role-targeted policies out unconditionally, producing a baseline that dies on
+# any cluster without them with `role "specboards_worker" does not exist`.
+#
+# That is exactly how this went wrong the first time, and it survived a
+# byte-for-byte schema diff because both sides of the diff were built on the
+# contaminated cluster. Roles are cluster-wide, so an empty database is not
+# enough: the check has to be here.
+echo "==> checking for optional roles"
+LEAKED="$(psql "$ADMIN_URL" -tAc "SELECT string_agg(rolname, ', ') FROM pg_roles WHERE rolname IN ('specboards_app', 'specboards_worker', 'specboards_admin_ro');")"
+if [ -n "$LEAKED" ]; then
+  echo "refusing to generate: this cluster has $LEAKED." >&2
+  echo "" >&2
+  echo "Those roles are provisioned by infra/rls-role.sql and infra/worker-role.sql," >&2
+  echo "not by migrations, and the history only grants to them when they already" >&2
+  echo "exist. Generating here would bake that in and break every install without" >&2
+  echo "them. Use a cluster that has never had them (initdb a scratch one)." >&2
+  exit 1
+fi
+
 echo "==> creating scratch database $SCRATCH_DB"
 psql "$ADMIN_URL" -q -c "CREATE DATABASE \"$SCRATCH_DB\";"
 
@@ -61,7 +85,13 @@ DATABASE_URL="$(scratch_url)" pnpm --filter @specboards/db migrate
 
 echo "==> dumping the realised schema"
 RAW="$(mktemp)"
-pg_dump "$(scratch_url)" --schema-only --no-owner --no-privileges -n public > "$RAW"
+# `--no-privileges` is deliberately NOT used. It would strip
+# `REVOKE ALL ON FUNCTION specboards_resolve_provider_credential FROM PUBLIC`,
+# leaving a SECURITY DEFINER function that resolves provider credentials
+# callable by every role. The role check above is what makes keeping privileges
+# safe: on a cluster without the optional roles there are no role grants to bake
+# in, and the REVOKE survives.
+pg_dump "$(scratch_url)" --schema-only --no-owner -n public > "$RAW"
 
 echo "==> cleaning the dump into a migration"
 python3 - "$RAW" "$OUT" <<'PY'
@@ -119,6 +149,14 @@ if secdef and pinned < secdef:
         f"vector; the last time this happened the cleaning step had eaten the "
         f"pins as if they were session settings."
     )
+
+for role in ("specboards_app", "specboards_worker", "specboards_admin_ro"):
+    if role in body:
+        sys.exit(
+            f"refusing to write: {role} appears in the dump. The history grants "
+            f"to it only when it already exists, so a baseline naming it fails "
+            f"on every cluster that does not have it."
+        )
 
 header = open(out_path).read()
 marker = "--\n-- PostgreSQL database dump"

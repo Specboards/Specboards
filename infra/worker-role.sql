@@ -74,6 +74,17 @@ grant select, insert                    on item_events        to specboards_work
 -- author. Insert and select only: the worker raises notifications and never
 -- reads or clears anyone's inbox. Also granted in migration 0058.
 grant select, insert                    on notifications      to specboards_worker;
+-- Sync canonicalises a spec's tags against the workspace registry and creates
+-- any that are new (see `resolveTags`), so ingestion inserts here. Select and
+-- insert only: the worker never renames or retires a tag. Also granted by the
+-- migration that added the registry, which is why a database provisioned before
+-- this line was added still has it and one provisioned after did not -- the
+-- omission was only reachable on a fresh install, where the migration's own
+-- grant is skipped because the role does not exist yet.
+--
+-- No role-targeted policy, deliberately: it matches what the migration did, and
+-- adding one here would give the worker cross-workspace reach it has never had.
+grant select, insert                    on workspace_tags     to specboards_worker;
 grant select, insert, update            on products           to specboards_worker;
 -- Sync resolves each repo's default product from its links (read-only).
 grant select                            on product_repositories to specboards_worker;
