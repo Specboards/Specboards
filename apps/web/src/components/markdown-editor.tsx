@@ -7,6 +7,7 @@ import { useState } from "react";
 import { Markdown } from "tiptap-markdown";
 
 import { Textarea } from "@/components/ui/textarea";
+import { cspNonce } from "@/lib/csp-nonce";
 import { cn } from "@/lib/utils";
 
 /** Read the serialized Markdown from the tiptap-markdown storage (untyped). */
@@ -59,6 +60,11 @@ export function MarkdownEditor({
     // Next.js renders client components on the server first; deferring the
     // first paint avoids a hydration mismatch (TipTap SSR guidance).
     immediatelyRender: false,
+    // TipTap appends ProseMirror's base rules as a runtime `<style>`, which our
+    // `style-src 'self' 'nonce-…'` refuses unless it is labelled. Unlabelled,
+    // the editor silently lost `white-space: pre-wrap` and the rest of the
+    // ProseMirror baseline, and every item detail logged a CSP error.
+    injectNonce: cspNonce(),
     editorProps: {
       attributes: {
         class: cn(
