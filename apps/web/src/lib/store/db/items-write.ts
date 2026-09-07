@@ -683,6 +683,83 @@ export async function updateFeature(
   });
 }
 
+/**
+ * See FeatureStore.convertFeatureLevel.
+ *
+ * A separate method rather than a `level` on FeaturePatch, deliberately. Every
+ * other field on an item is one value among many; the level decides which
+ * parent is legal, which children are legal, whether a spec may be attached and
+ * which fields exist. Letting it ride along in the general patch path would put
+ * that behind any caller that happened to pass the key, and the checks that
+ * make a conversion safe live one layer up in the service.
+ *
+ * The rules are NOT re-derived here: this writes what the service has already
+ * planned and approved. What it does own is that the level and the parent move
+ * together, in one transaction, because a promotion that detached the parent
+ * and then failed to change the level would leave the item orphaned for no
+ * reason.
+ */
+export async function convertFeatureLevel(
+  ctx: DbStoreContext,
+  specId: string,
+  input: { level: string; detachParent: boolean },
+  scope?: WorkspaceScope,
+  emit?: OutboxEmit,
+): Promise<void> {
+  await ctx.scoped(scope, async (tx) => {
+    const ws = scope!.workspaceId;
+    const current = await tx
+      .select({
+        id: features.id,
+        productId: features.productId,
+        title: features.title,
+        level: features.level,
+        parentId: features.parentId,
+      })
+      .from(features)
+      .where(and(eq(features.specId, specId), eq(features.workspaceId, ws)))
+      .limit(1);
+    if (!current[0]) throw new FeatureError(`Unknown work item: ${specId}`);
+    const access = await ctx.accessIn(tx, scope!);
+    if (!canWriteProductId(access, current[0].productId)) {
+      throw new FeatureError("Your role does not permit editing this product.");
+    }
+
+    const set: Record<string, unknown> = {
+      level: input.level,
+      updatedAt: new Date(),
+    };
+    if (input.detachParent) {
+      set.parentId = null;
+      set.parentSetBy = null;
+    }
+    await tx
+      .update(features)
+      .set(set)
+      .where(and(eq(features.specId, specId), eq(features.workspaceId, ws)));
+
+    const changes: ItemFieldChange[] = [
+      { field: "level", before: current[0].level, after: input.level },
+    ];
+    if (input.detachParent && current[0].parentId !== null) {
+      changes.push({ field: "parentId", before: current[0].parentId, after: null });
+    }
+    await writeItemEvents(
+      ctx,
+      tx,
+      scope!,
+      {
+        featureId: current[0].id,
+        specId,
+        title: current[0].title,
+        productId: current[0].productId,
+      },
+      changes,
+    );
+    if (emit) await ctx.writeOutbox(tx, scope!, emit);
+  });
+}
+
 export async function addRelation(
   ctx: DbStoreContext,
   specId: string,

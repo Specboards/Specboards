@@ -23,6 +23,9 @@ export interface HistoryContext {
   members: { userId: string; name: string }[];
   releases: { id: string; name: string }[];
   cycles: { id: string; name: string }[];
+  /** Hierarchy levels, so a conversion reads as "Feature to Epic" rather than
+   * as the stored keys. Optional: a caller without them gets the keys. */
+  levels?: { key: string; label: string }[];
 }
 
 /** One history entry, ready to render. */
@@ -47,6 +50,7 @@ export const FIELD_LABELS: Record<string, string> = {
   assigneeId: "assignee",
   customFields: "properties",
   details: "description",
+  level: "type",
   parentId: "parent",
   riceReach: "RICE reach",
   riceImpact: "RICE impact",
@@ -102,6 +106,12 @@ function renderValue(
       const member = ctx.members.find((m) => m.userId === value);
       // A departed teammate still has to render as something.
       return member?.name ?? "someone no longer in the workspace";
+    }
+    case "level": {
+      const level = ctx.levels?.find((l) => l.key === value);
+      // A level that has since been removed from the hierarchy still has to
+      // render as the thing the item was at the time.
+      return level?.label ?? (typeof value === "string" ? value : null);
     }
     case "releaseId":
       return name(ctx.releases, value) ?? "a release that no longer exists";

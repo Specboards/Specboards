@@ -222,6 +222,38 @@ export async function updateFeature(
   await ctx.writeMetadata(meta);
 }
 
+/**
+ * See FeatureStore.convertFeatureLevel. Local file mode keeps a DB-native
+ * item's level in its own record and a spec's in the metadata sidecar, so the
+ * write is the same two-branch shape as `updateFeature` above.
+ */
+export async function convertFeatureLevel(
+  ctx: LocalStoreContext,
+  specId: string,
+  input: { level: string; detachParent: boolean },
+  _scope?: WorkspaceScope,
+  _emit?: OutboxEmit, // DB-only; ignored in local file mode
+): Promise<void> {
+  const items = await ctx.readItems();
+  const idx = items.findIndex((i) => i.id === specId);
+  if (idx >= 0) {
+    const it = items[idx]!;
+    it.level = input.level;
+    if (input.detachParent) it.parentSpecId = null;
+    await ctx.writeItems(items);
+    return;
+  }
+  // A spec file is the leaf level by definition, and the metadata sidecar has
+  // no level to write because there was never a choice to record. The service
+  // refuses this before it gets here (a spec cannot leave the leaf, and the
+  // leaf is where it already is); this is the guard for a future caller that
+  // skips that check rather than a case anyone can reach today.
+  throw new FeatureError(
+    "A spec is always a leaf item, so its type cannot be changed. Detach the " +
+      "spec first if the work belongs at another level.",
+  );
+}
+
 export async function addRelation(
   ctx: LocalStoreContext,
   specId: string,

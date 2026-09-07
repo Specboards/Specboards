@@ -133,6 +133,11 @@ export interface ItemDetailData {
   /** The workspace's tag registry, offered by the item's tag picker. */
   tags: string[];
   levelLabel: string;
+  /**
+   * The workspace's hierarchy levels, for the type picker and for reading a
+   * level key back as a label in the change history.
+   */
+  levels: { key: string; label: string }[];
   /** The item's current product slug (for building permalinks / redirects). */
   productSlug: string;
   parentKey: string | null;
@@ -317,6 +322,7 @@ export async function getItemDetailData(
     availableFields,
     tags: tags.map((t) => t.name),
     levelLabel,
+    levels: levels.map((l) => ({ key: l.key, label: l.label })),
     productSlug,
     parentKey,
     parentLevelLabel,

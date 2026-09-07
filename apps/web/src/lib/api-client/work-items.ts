@@ -1,6 +1,7 @@
 "use client";
 
 import { apiFetch } from "@/lib/api-client/request";
+import type { ConversionPlan } from "@/lib/convert-item";
 import type { ItemDetailData } from "@/lib/item-detail";
 import type {
   CommentInput,
@@ -60,6 +61,49 @@ export async function patchFeature(
       error?: string;
     } | null;
     throw new Error(body?.error ?? `PATCH failed with ${res.status}`);
+  }
+}
+
+/**
+ * Ask what converting `specId` to another level would do, without doing it.
+ *
+ * Read-only, and re-asked whenever the picker changes, because the answer is
+ * specific to the target: the parent that survives one conversion is dropped by
+ * the next. The server owns the plan; a client that guessed would be asking
+ * somebody to approve a preview the write would not honour.
+ */
+export async function previewItemConversion(
+  specId: string,
+  to: string,
+): Promise<ConversionPlan> {
+  const res = await apiFetch(
+    `/api/v1/features/${encodeURIComponent(specId)}/convert?to=${encodeURIComponent(to)}`,
+  );
+  const body = (await res.json().catch(() => null)) as {
+    plan?: ConversionPlan;
+    error?: string;
+  } | null;
+  if (!res.ok || !body?.plan) {
+    throw new Error(body?.error ?? `Failed to plan the conversion (${res.status}).`);
+  }
+  return body.plan;
+}
+
+/** Change an item's level. Refused, with reasons, when the plan has blockers. */
+export async function convertItem(specId: string, to: string): Promise<void> {
+  const res = await apiFetch(
+    `/api/v1/features/${encodeURIComponent(specId)}/convert`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ to }),
+    },
+  );
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(body?.error ?? `Convert failed with ${res.status}`);
   }
 }
 
