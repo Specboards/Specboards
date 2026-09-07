@@ -39,6 +39,7 @@ import { MoveMenu, type MoveOption } from "@/components/move-menu";
 import { StatusDot } from "@/components/status-dot";
 import { Badge } from "@/components/ui/badge";
 import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
+import { useResetOnChange } from "@/lib/use-reset-on-change";
 import { patchFeature } from "@/lib/api-client/work-items";
 import { useAnnouncer } from "@/lib/use-announcer";
 import { useIsCoarsePointer, useIsMobile } from "@/lib/use-media-query";
@@ -149,10 +150,11 @@ export function BoardClient({
   const clearSelection = useCallback(() => setSelected(new Set()), []);
 
   // Leaving multi-select (the toggle, Escape, or the bulk bar) drops whatever
-  // was selected, so re-entering never resurrects a stale selection.
-  useEffect(() => {
+  // was selected, so re-entering never resurrects a stale selection. On the
+  // transition, so the render that leaves the mode already has nothing selected.
+  useResetOnChange(selectMode, () => {
     if (!selectMode) setSelected(new Set());
-  }, [selectMode]);
+  });
 
   // Re-seed from the server whenever the data set changes. Every mutation (a
   // field edit in the drawer, a newly created item, a drag we just persisted)
@@ -161,10 +163,20 @@ export function BoardClient({
   // this the board would keep showing stale cards until a full page reload.
   // router.refresh() only fires after the write has resolved, so re-seeding to
   // server truth never clobbers an in-flight optimistic drag.
-  useEffect(() => {
+  //
+  // On the transition rather than in an effect: the effect version painted the
+  // previous data set once, committed it, then replaced it, which on a board is
+  // a visible flash of the cards you just moved away from.
+  useResetOnChange(features, () => {
     setRecords(Object.fromEntries(features.map((f) => [f.specId, f])));
     setLists(groupIntoColumns(features, columns, sortMode, customFieldTypes));
-  }, [features, columns, sortMode, customFieldTypes]);
+  });
+  // The grouping inputs are separate keys: `features` is a fresh array on every
+  // server render, so it already changes identity whenever the data does, while
+  // these change only when the reader picks a different sort or column set.
+  useResetOnChange(`${sortMode}|${columns.length}`, () => {
+    setLists(groupIntoColumns(features, columns, sortMode, customFieldTypes));
+  });
 
   // Below md the board is a swipe-column carousel: dragging is disabled (see
   // SortableCard) and horizontal swipes scroll between columns. On coarse

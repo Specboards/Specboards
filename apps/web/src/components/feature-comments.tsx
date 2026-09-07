@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 
 import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
+import { useResetOnChange } from "@/lib/use-reset-on-change";
 import {
   createComment,
   deleteComment,
@@ -62,10 +63,15 @@ export function FeatureComments({
   const [pending, startTransition] = useTransition();
   const memberNames = members.map((m) => m.name);
 
-  useEffect(() => {
-    let active = true;
+  // Blanking belongs to the change of item, not to the fetch: the previous
+  // item's comments are never shown under the new item.
+  useResetOnChange(specId, () => {
     setComments(null);
     setLoadError(null);
+  });
+
+  useEffect(() => {
+    let active = true;
     listComments(specId)
       .then((rows) => {
         if (active) setComments(rows);

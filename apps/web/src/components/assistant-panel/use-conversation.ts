@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { ContextField } from "@/lib/ai/item-context";
+import { useResetOnChange } from "@/lib/use-reset-on-change";
 import type { Skill } from "@/lib/ai/skills";
 import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import type { AssistantMessageView } from "@/lib/assistant-service";
@@ -94,10 +95,15 @@ export function useConversation(
   // running and the customer keeps paying for tokens that have nowhere to go.
   useEffect(() => () => abortRef.current?.abort(), []);
 
-  useEffect(() => {
-    let active = true;
+  // Blanking belongs to the change of thread, not to the fetch that reloads it:
+  // the previous item's conversation is never shown under the new item.
+  useResetOnChange(loadThread, () => {
     setMessages(null);
     setLoadError(null);
+  });
+
+  useEffect(() => {
+    let active = true;
     loadThread()
       .then((res) => {
         if (!active) return;

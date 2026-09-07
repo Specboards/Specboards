@@ -6,8 +6,9 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode } from "react";
 
+import { SpecboardsMark } from "@/components/specboards-mark";
 import { OrgSwitcher } from "@/components/org-switcher";
 import { ProductSwitcher } from "@/components/product-switcher";
 import { NotificationBell } from "@/components/notification-bell";
@@ -21,6 +22,7 @@ import type { ProductGroupRecord, ProductRecord } from "@/lib/store";
 import { versionLabel } from "@/lib/source-info";
 import { useOrgPath, useOrgProductPath, useProductSlug } from "@/lib/use-org";
 import { cn } from "@/lib/utils";
+import { useStoredValue } from "@/lib/use-stored-value";
 
 export type SidebarData = {
   /** The signed-in user's orgs, for the switcher (empty hides it). */
@@ -37,6 +39,11 @@ export function useNavHidden(): boolean {
   return HIDDEN_PREFIXES.some((p) => pathname.startsWith(p));
 }
 
+/** Where the rail's collapsed state is persisted, per browser. */
+const COLLAPSED_KEY = "sb:collapsed";
+const parseCollapsed = (raw: string | null) => raw === "1";
+const serializeCollapsed = (value: boolean) => (value ? "1" : "0");
+
 /**
  * Left navigation rail (desktop). Hidden below `lg`, where the mobile top bar
  * and drawer take over (see MobileNav). Renders on every app page so there's no
@@ -45,19 +52,18 @@ export function useNavHidden(): boolean {
 export function AppSidebar({ orgs = [], products = [], groups = [] }: SidebarData) {
   const hidden = useNavHidden();
 
-  // Collapsed = icon rail (mark + area icons only). Persisted per browser;
-  // starts expanded on first paint (matches SSR), then reflects the stored
-  // choice after mount to avoid a hydration mismatch.
-  const [collapsed, setCollapsed] = useState(false);
-  useEffect(() => {
-    setCollapsed(localStorage.getItem("sb:collapsed") === "1");
-  }, []);
+  // Collapsed = icon rail (mark + area icons only). Persisted per browser, and
+  // read as an external store: the server renders expanded, hydration agrees,
+  // and the stored choice is in place from the first client render rather than
+  // corrected by an effect a render later.
+  const [collapsed, setCollapsed] = useStoredValue(
+    COLLAPSED_KEY,
+    parseCollapsed,
+    serializeCollapsed,
+    false,
+  );
   function toggleCollapsed() {
-    setCollapsed((v) => {
-      const next = !v;
-      localStorage.setItem("sb:collapsed", next ? "1" : "0");
-      return next;
-    });
+    setCollapsed(!collapsed);
   }
 
   if (hidden) return null;
@@ -117,7 +123,7 @@ export function BrandMark({ showWord = true }: { showWord?: boolean }) {
       aria-label="Specboards home"
       className="flex items-center gap-2 text-sm font-semibold tracking-tight"
     >
-      <img src="/brand/specboards-mark.png" alt="" className="h-6 w-6" />
+      <SpecboardsMark />
       {showWord ? (
         <span>
           Spec<span className="text-muted-foreground">boards</span>

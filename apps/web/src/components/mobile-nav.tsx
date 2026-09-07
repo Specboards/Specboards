@@ -2,7 +2,7 @@
 
 import { Menu } from "lucide-react";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import {
   BrandMark,
@@ -10,6 +10,7 @@ import {
   useNavHidden,
   type SidebarData,
 } from "@/components/app-sidebar";
+import { useResetOnChange } from "@/lib/use-reset-on-change";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 
 /**
@@ -24,10 +25,10 @@ export function MobileNav({ orgs = [], products = [], groups = [] }: SidebarData
   const [open, setOpen] = useState(false);
 
   // Close the drawer whenever the route changes (navigating via a link, the
-  // command palette, or a back/forward gesture).
-  useEffect(() => {
-    setOpen(false);
-  }, [pathname]);
+  // command palette, or a back/forward gesture). Done on the transition rather
+  // than in an effect, so the drawer is already closed in the render that shows
+  // the new route instead of being closed a frame later.
+  useResetOnChange(pathname, () => setOpen(false));
 
   if (hidden) return null;
 

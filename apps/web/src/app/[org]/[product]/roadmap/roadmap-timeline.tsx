@@ -1,12 +1,14 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useMemo } from "react";
 import Link from "next/link";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
 import { EmptyState } from "@/components/empty-state";
 import { StatusDot } from "@/components/status-dot";
 import { statusDotColor, statusLabel } from "@/lib/feature-helpers";
+import { newSet } from "@/lib/new-set";
+import { useStoredIdSet } from "@/lib/use-stored-id-set";
 import { orgProductPath } from "@/lib/org-path";
 import {
   releaseStatusDotColor,
@@ -135,28 +137,8 @@ export function RoadmapTimeline({
 
   // Releases start expanded: the timeline's job is to show the work, and
   // collapsing is what the reader reaches for when there is too much of it.
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
-  const [restored, setRestored] = useState(false);
+  const [collapsed, setCollapsed] = useStoredIdSet(storageKey, newSet);
 
-  useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem(storageKey);
-      if (saved) setCollapsed(new Set(JSON.parse(saved) as string[]));
-      else setCollapsed(new Set());
-    } catch {
-      // A quota-blocked or private-mode browser just gets the default shape.
-    }
-    setRestored(true);
-  }, [storageKey]);
-
-  useEffect(() => {
-    if (!restored) return;
-    try {
-      window.localStorage.setItem(storageKey, JSON.stringify([...collapsed]));
-    } catch {
-      // Persistence is a nicety; never let it break the view.
-    }
-  }, [collapsed, restored, storageKey]);
 
   const collapsibleIds = useMemo(
     () => groups.filter((g) => g.rows.length > 0).map((g) => g.release.id),
@@ -166,12 +148,10 @@ export function RoadmapTimeline({
     collapsibleIds.length > 0 && collapsibleIds.every((id) => collapsed.has(id));
 
   function toggle(releaseId: string): void {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(releaseId)) next.delete(releaseId);
-      else next.add(releaseId);
-      return next;
-    });
+    const next = new Set(collapsed);
+    if (next.has(releaseId)) next.delete(releaseId);
+    else next.add(releaseId);
+    setCollapsed(next);
   }
 
   function itemHref(level: string, specId: string): string {

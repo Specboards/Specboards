@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import { useBoardSelection } from "@/components/board-selection";
 import { Badge } from "@/components/ui/badge";
@@ -23,7 +23,10 @@ import { type ProductTag } from "@/components/feature-card";
 import { StatusDot } from "@/components/status-dot";
 import { StatusSelect } from "@/components/status-select";
 import { productBadge } from "@/lib/product-color";
+import { useResetOnChange } from "@/lib/use-reset-on-change";
 import type { FeatureRecord } from "@/lib/store/types";
+import { newSet } from "@/lib/new-set";
+import { useStoredIdSet } from "@/lib/use-stored-id-set";
 import { useOrgProductPath } from "@/lib/use-org";
 import { cn } from "@/lib/utils";
 import { BulkActionBar, type BulkOptions } from "./bulk-action-bar";
@@ -65,7 +68,7 @@ export function BacklogTable({
    * (editors only). */
   bulkOptions?: BulkOptions;
 }) {
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [collapsed, setCollapsed] = useStoredIdSet(STORAGE_KEY, newSet);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // Multi-select is opt-in: the checkbox column appears only once turned on.
   // The mode lives in BoardSelectionProvider so the toolbar owns the toggle;
@@ -73,29 +76,17 @@ export function BacklogTable({
   const { selectMode, exit: exitSelect } = useBoardSelection();
   const orgHref = useOrgProductPath();
 
-  // Hydrate persisted collapsed set after mount (avoids SSR/client mismatch).
-  useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (raw) setCollapsed(new Set(JSON.parse(raw) as string[]));
-    } catch {
-      // Ignore unparseable/unavailable storage — default to all expanded.
-    }
-  }, []);
-
-  const toggle = useCallback((specId: string) => {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
+  const toggle = useCallback(
+    (specId: string) => {
+      const next = new Set(collapsed);
       if (next.has(specId)) next.delete(specId);
       else next.add(specId);
-      try {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify([...next]));
-      } catch {
-        // Persistence is best-effort.
-      }
-      return next;
-    });
-  }, []);
+      // Persisting is the store's job now, so the try/catch that used to wrap
+      // the write lives there instead of at every call site.
+      setCollapsed(next);
+    },
+    [collapsed, setCollapsed],
+  );
 
   const visible = rows.filter(
     ({ feature }) =>
@@ -113,10 +104,11 @@ export function BacklogTable({
   const clearSelection = useCallback(() => setSelected(new Set()), []);
 
   // Leaving multi-select drops whatever was selected, so re-entering never
-  // resurrects a stale selection.
-  useEffect(() => {
+  // resurrects a stale selection. On the transition, so the render that leaves
+  // the mode already has nothing selected.
+  useResetOnChange(selectMode, () => {
     if (!selectMode) setSelected(new Set());
-  }, [selectMode]);
+  });
 
   // Select-all toggles just the currently visible rows (collapsed epics' hidden
   // children are left alone, matching what the user can see).

@@ -61,6 +61,11 @@ export function NotificationBell({
   }, []);
 
   useEffect(() => {
+    // `refresh` is async and every setState in it happens after `await
+    // listNotifications()`, so nothing is set during this effect. The rule
+    // cannot see past the call. Polling is a subscription, which is what
+    // effects are for; there is no render-phase equivalent to move it to.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     refresh();
     const t = setInterval(refresh, POLL_MS);
     return () => clearInterval(t);

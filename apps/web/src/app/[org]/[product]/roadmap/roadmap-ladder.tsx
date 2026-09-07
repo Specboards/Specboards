@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import Link from "next/link";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
 import { StatusDot } from "@/components/status-dot";
 import { statusDotColor, statusLabel } from "@/lib/feature-helpers";
+import { useStoredIdSet } from "@/lib/use-stored-id-set";
 import { orgProductPath } from "@/lib/org-path";
 import {
   visibleRows,
@@ -57,29 +58,13 @@ export function RoadmapLadder({
 
   // Everything below the root level starts collapsed: an initiative row is the
   // altitude leadership reads first, and it expands on demand.
-  const [collapsed, setCollapsed] = useState<Set<string>>(
-    () => new Set(rows.filter((r) => r.childRowCount > 0).map((r) => r.item.specId)),
+  // Rows with children start collapsed, which is the ladder's whole point:
+  // show the top of the tree and let the reader open what they want. Captured
+  // once, as the `useState` initializer this replaces was.
+  const [collapsed, setCollapsed] = useStoredIdSet(storageKey, () =>
+    new Set(rows.filter((r) => r.childRowCount > 0).map((r) => r.item.specId)),
   );
-  const [restored, setRestored] = useState(false);
 
-  useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem(storageKey);
-      if (saved) setCollapsed(new Set(JSON.parse(saved) as string[]));
-    } catch {
-      // A quota-blocked or private-mode browser just gets the default shape.
-    }
-    setRestored(true);
-  }, [storageKey]);
-
-  useEffect(() => {
-    if (!restored) return;
-    try {
-      window.localStorage.setItem(storageKey, JSON.stringify([...collapsed]));
-    } catch {
-      // Persistence is a nicety; never let it break the view.
-    }
-  }, [collapsed, restored, storageKey]);
 
   const shown = useMemo(() => visibleRows(rows, collapsed), [rows, collapsed]);
   const indexBySpec = useMemo(
@@ -129,12 +114,10 @@ export function RoadmapLadder({
   );
 
   function toggle(specId: string): void {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(specId)) next.delete(specId);
-      else next.add(specId);
-      return next;
-    });
+    const next = new Set(collapsed);
+    if (next.has(specId)) next.delete(specId);
+    else next.add(specId);
+    setCollapsed(next);
   }
 
   // Expanding or collapsing the whole ladder in one action, rather than working

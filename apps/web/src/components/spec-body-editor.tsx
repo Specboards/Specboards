@@ -7,6 +7,8 @@ import { toast } from "sonner";
 import { MarkdownEditor } from "@/components/markdown-editor";
 import { Button } from "@/components/ui/button";
 import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
+import { useHydrated } from "@/lib/use-hydrated";
+import { useResetOnChange } from "@/lib/use-reset-on-change";
 import {
   SpecConflictError,
   type SpecConflict,
@@ -114,7 +116,14 @@ export function SpecBodyEditor({
   // Sha the next save is guarded by. Starts as the one the page loaded and
   // moves forward on every write, so a second save in the same session is
   // guarded against the first rather than against a sha that is now stale.
-  const shaRef = useRef<string | null>(blobSha ?? null);
+  //
+  // State, not a ref, because the draft banner reads it during render to say
+  // whether the spec has moved since the draft was written. A ref read in
+  // render is invisible to React: the sentence was decided by whatever the ref
+  // happened to hold when something else re-rendered, and would not update when
+  // the sha itself changed. Every write below already sets other state in the
+  // same handler, so this costs no extra render.
+  const [sha, setSha] = useState<string | null>(blobSha ?? null);
   // The editor is uncontrolled once mounted, so adopting the incoming version
   // means remounting it with a new starting point rather than setting a value.
   const [base, setBase] = useState(initial);
@@ -150,13 +159,20 @@ export function SpecBodyEditor({
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
 
-  // Offer back anything left over from a previous visit, once, on mount.
-  useEffect(() => {
+  // Offer back anything left over from a previous visit. Keyed by the spec: a
+  // different item is a different draft.
+  //
+  // The key is null until hydration, so this fires once when it flips to the
+  // spec id and again whenever the spec changes. That gating is load-bearing
+  // twice over: the draft lives in localStorage, which the server cannot read,
+  // and rendering the banner before hydration would be a mismatch on the one
+  // component where a mismatch costs someone their unsaved writing.
+  const hydrated = useHydrated();
+  useResetOnChange(hydrated ? specId : null, () => {
+    if (!hydrated) return;
     const stored = readDraft(specId);
-    if (isDraftWorthOffering(stored, initial)) setDraft(stored);
-    // Keyed by the spec: a different item is a different draft.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [specId]);
+    setDraft(isDraftWorthOffering(stored, initial) ? stored : null);
+  });
 
   function onChange(markdown: string) {
     draftRef.current = markdown;
@@ -169,7 +185,7 @@ export function SpecBodyEditor({
       writeDraft(specId, {
         body: markdown,
         savedAt: new Date().toISOString(),
-        baseSha: shaRef.current,
+        baseSha: sha,
       });
     } else {
       clearDraft(specId);
@@ -190,10 +206,10 @@ export function SpecBodyEditor({
     setError(null);
     try {
       const result = await updateSpecBody(specId, value, {
-        expectedBlobSha: guardWith ?? shaRef.current,
+        expectedBlobSha: guardWith ?? sha,
       });
       savedRef.current = value;
-      shaRef.current = result.blobSha;
+      setSha(result.blobSha);
       setDirty(false);
       // The text is in git now, so the local copy has nothing left to protect.
       clearDraft(specId);
@@ -264,7 +280,7 @@ export function SpecBodyEditor({
   function adoptTheirs(incoming: SpecConflict) {
     draftRef.current = incoming.currentContent;
     savedRef.current = incoming.currentContent;
-    shaRef.current = incoming.currentBlobSha;
+    setSha(incoming.currentBlobSha);
     setBase(incoming.currentContent);
     setEditorKey((k) => k + 1);
     setDirty(false);
@@ -294,7 +310,7 @@ export function SpecBodyEditor({
                 answered before either button. */}
             The editor is showing the version that is live. Your unsaved writing
             was never published; it stayed in this browser.
-            {hasMovedSince(draft, shaRef.current)
+            {hasMovedSince(draft, sha)
               ? " The spec has also changed since you wrote it, so restoring will not include that change."
               : ""}
           </p>

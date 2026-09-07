@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { ChevronUp } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
@@ -31,6 +31,7 @@ import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import { orgProductPath } from "@/lib/org-path";
 import type { IdeaRecord } from "@/lib/store/types";
 import { cn } from "@/lib/utils";
+import { useResetOnChange } from "@/lib/use-reset-on-change";
 
 /** Format an ISO timestamp as a short, locale-aware date. */
 function formatDate(iso: string): string {
@@ -81,18 +82,16 @@ export function IdeaDetailSheet({
   // Return to view mode when the drawer opens on a different idea. Keyed on the
   // id (not the whole record) so an in-flight vote refresh doesn't kick the user
   // out of an unsaved edit.
-  useEffect(() => {
-    setEditing(false);
-  }, [idea?.id]);
+  useResetOnChange(idea?.id, () => setEditing(false));
 
-  // Reconcile the optimistic vote with the server after each refresh. Depending
-  // on the primitive fields (not the record identity) means it only fires when
-  // the server value actually changes, never mid-optimistic-update.
-  useEffect(() => {
+  // Reconcile the optimistic vote with the server after each refresh. Keyed on
+  // the primitive fields (not the record identity) so it only fires when the
+  // server value actually changes, never mid-optimistic-update.
+  useResetOnChange(`${idea?.viewerHasVoted}|${idea?.voteCount}`, () => {
     if (!idea) return;
     setVoted(idea.viewerHasVoted);
     setVotes(idea.voteCount);
-  }, [idea?.viewerHasVoted, idea?.voteCount, idea]);
+  });
 
   function startEdit() {
     if (!idea) return;

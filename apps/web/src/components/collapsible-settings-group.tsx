@@ -1,36 +1,13 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { type ReactNode } from "react";
 
 import { ChevronDown } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { useCollapsedSection } from "@/lib/use-collapsed-section";
 
 const STORAGE_KEY = "specboard:settings:sections";
-
-/**
- * Read the per-section collapsed map. A section with no entry falls back to its
- * `defaultCollapsed`, so an explicit "expanded" choice is distinguishable from
- * "never touched".
- */
-function readState(): Record<string, boolean> {
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as Record<string, boolean>) : {};
-  } catch {
-    return {};
-  }
-}
-
-function writeState(id: string, collapsed: boolean) {
-  try {
-    const map = readState();
-    map[id] = collapsed;
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
-  } catch {
-    // Persistence is best-effort.
-  }
-}
 
 /**
  * A titled, bordered settings panel whose body collapses. The header keeps the
@@ -55,18 +32,14 @@ export function CollapsibleSettingsGroup({
   defaultCollapsed?: boolean;
   children: ReactNode;
 }) {
-  const [collapsed, setCollapsed] = useState(defaultCollapsed);
-
-  useEffect(() => {
-    const stored = readState()[id];
-    setCollapsed(stored ?? defaultCollapsed);
-  }, [id, defaultCollapsed]);
+  const [collapsed, setCollapsed] = useCollapsedSection(
+    STORAGE_KEY,
+    id,
+    defaultCollapsed,
+  );
 
   function toggle() {
-    setCollapsed((prev) => {
-      writeState(id, !prev);
-      return !prev;
-    });
+    setCollapsed(!collapsed);
   }
 
   return (

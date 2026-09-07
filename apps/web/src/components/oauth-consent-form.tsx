@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 
+import { SpecboardsMark } from "@/components/specboards-mark";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -49,6 +50,11 @@ function SwitchAccountLink() {
       onClick={() =>
         startTransition(async () => {
           await signOut();
+          // A full page load on purpose. `router.push` would keep the router
+          // cache, the RSC payloads and this component's state from the session
+          // that just ended, on the one screen whose whole job is to prove who
+          // you are before authorizing something on your behalf.
+          // eslint-disable-next-line @next/next/no-location-assign-relative-destination
           window.location.assign("/sign-in");
         })
       }
@@ -67,7 +73,7 @@ export function NoWorkspaceNotice({ userEmail }: { userEmail: string }) {
   return (
     <Card className="mx-auto mt-16 w-full max-w-sm">
       <CardHeader>
-        <img src="/brand/specboards-mark.png" alt="Specboards" className="mb-2 h-8 w-8" />
+        <SpecboardsMark alt="Specboards" className="mb-2 h-8 w-8" />
         <CardTitle>No workspace to authorize</CardTitle>
         <CardDescription>
           You&rsquo;re signed in as{" "}
@@ -155,7 +161,7 @@ export function OAuthConsentForm({
   return (
     <Card className="mx-auto mt-16 w-full max-w-sm">
       <CardHeader>
-        <img src="/brand/specboards-mark.png" alt="Specboards" className="mb-2 h-8 w-8" />
+        <SpecboardsMark alt="Specboards" className="mb-2 h-8 w-8" />
         <CardTitle>Authorize {clientName}</CardTitle>
         <CardDescription>
           <span className="font-medium text-foreground">{clientName}</span> wants to
