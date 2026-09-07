@@ -25,6 +25,48 @@ for how and when the version is bumped.
 > `pnpm deploy:prod` and the dispatched workflow. See
 > [VERSIONING.md](./VERSIONING.md).
 
+## [1.0.4] - 2026-09-07
+
+Opening an item on a phone killed the tab. The cause was not mobile at all: a
+loop in the assistant panel that only ran once you had left that section
+expanded, which is a per-browser choice, so it looked like a device problem for
+as long as nobody checked a desktop with the same setting. Chasing it turned up
+the pages the app never had, and three stylesheets the browser had been quietly
+refusing all along.
+
+### Added
+
+- **A 404 and an error page of our own.** The app had neither, so both fell
+  through to the ones Next ships. Those tell a reader nothing they can act on,
+  and they style themselves with an inline `<style>` that our content-security
+  policy refuses, so they arrived unstyled with a policy error on top of
+  whatever had actually gone wrong. There is now a 404 that keeps the
+  navigation, and a real error boundary: a retry that re-renders the section
+  without a reload, and a reference you can quote to us when it does not help.
+
+### Fixed
+
+- **Opening an item no longer takes the page down.** With the Assistant section
+  expanded, the item panel re-rendered without bound: it re-fetched the
+  conversation on every render, never painted the card, and React eventually
+  abandoned the page. On iOS Safari the runaway loop got the tab killed
+  outright, so the reader saw "This page couldn't load" and nothing else. The
+  section's expanded state is remembered per browser, which is why this looked
+  like a phone bug and why a desktop with the same section open was equally
+  affected. It hit every item, on the backlog and the roadmap alike.
+- **Opening the navigation menu no longer opens the product picker with it.**
+  On a phone, tapping the menu popped the product list over the navigation
+  before you had touched anything, whichever product you were already on. The
+  drawer was handing focus to the first control inside it, and iOS opens a
+  picker the moment one is focused. A drawer now opens on itself and activates
+  nothing. The same fix covers the item panel, which was doing this to its
+  status control.
+- **The description editor gets its own stylesheet back.** The editor injects
+  its base styling at runtime, and that injection was unlabelled, so the policy
+  refused it: long words did not wrap the way the editor expects, selections
+  and empty-line behaviour were subtly wrong, and every item detail logged a
+  refusal to the console. It carries the right label now.
+
 ## [1.0.3] - 2026-09-06
 
 Filters stop shouting. The board's filter row had grown a dropdown per field, so
