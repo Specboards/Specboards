@@ -57,27 +57,27 @@ const noCycle = feature({ specId: "c", cycleId: null });
 describe("cycle filter", () => {
   it("round-trips through the query string", () => {
     const filters = parseFeatureFilters({ cycle: "c1" });
-    expect(filters.cycle).toBe("c1");
+    expect(filters.cycle).toEqual(["c1"]);
     expect(filtersToQuery(filters)).toContain("cycle=c1");
   });
 
   it("narrows to one cycle", () => {
     const out = applyFeatureFilters([inCycle, otherCycle, noCycle], {
-      cycle: "c1",
+      cycle: ["c1"],
     });
     expect(out.map((f) => f.specId)).toEqual(["a"]);
   });
 
   it('treats "none" as "in no cycle"', () => {
     const out = applyFeatureFilters([inCycle, otherCycle, noCycle], {
-      cycle: "none",
+      cycle: ["none"],
     });
     expect(out.map((f) => f.specId)).toEqual(["c"]);
   });
 
   it("counts toward the active-filter total", () => {
-    expect(countActiveFilters({ cycle: "c1" })).toBe(1);
-    expect(countActiveFilters({ cycle: "c1", release: "r1" })).toBe(2);
+    expect(countActiveFilters({ cycle: ["c1"] })).toBe(1);
+    expect(countActiveFilters({ cycle: ["c1"], release: ["r1"] })).toBe(2);
   });
 
   it("is independent of the release filter (AND across the two axes)", () => {
@@ -88,21 +88,43 @@ describe("cycle filter", () => {
 
     // Each alone matches on its own axis...
     expect(
-      applyFeatureFilters(items, { cycle: "c1" }).map((f) => f.specId),
+      applyFeatureFilters(items, { cycle: ["c1"] }).map((f) => f.specId),
     ).toEqual(["both", "cycleOnly"]);
     expect(
-      applyFeatureFilters(items, { release: "r1" }).map((f) => f.specId),
+      applyFeatureFilters(items, { release: ["r1"] }).map((f) => f.specId),
     ).toEqual(["both", "releaseOnly"]);
     // ...and together they intersect rather than one overriding the other.
     expect(
-      applyFeatureFilters(items, { cycle: "c1", release: "r1" }).map(
+      applyFeatureFilters(items, { cycle: ["c1"], release: ["r1"] }).map(
         (f) => f.specId,
       ),
     ).toEqual(["both"]);
   });
 
+  it("ORs within the cycle axis while still ANDing across axes", () => {
+    const items = [inCycle, otherCycle, noCycle];
+    expect(
+      applyFeatureFilters(items, { cycle: ["c1", "c2"] }).map((f) => f.specId),
+    ).toEqual(["a", "b"]);
+    // The "none" sentinel is just another accepted value, so it can be OR'd
+    // with a real cycle: "scheduled into c1, or not scheduled at all".
+    expect(
+      applyFeatureFilters(items, { cycle: ["c1", "none"] }).map((f) => f.specId),
+    ).toEqual(["a", "c"]);
+    // Widening one axis must not loosen the other.
+    expect(
+      applyFeatureFilters(items, {
+        cycle: ["c1", "c2"],
+        release: ["r1"],
+      }),
+    ).toHaveLength(0);
+  });
+
   it("does not filter when unset", () => {
     const items = [inCycle, otherCycle, noCycle];
     expect(applyFeatureFilters(items, {})).toHaveLength(3);
+    // An empty list is "no opinion", not "match nothing": it is what a
+    // dimension looks like for the instant between untick and re-render.
+    expect(applyFeatureFilters(items, { cycle: [] })).toHaveLength(3);
   });
 });

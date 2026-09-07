@@ -9,6 +9,11 @@ import {
   BoardSelectionProvider,
 } from "@/components/board-selection";
 import { CardFieldsMenu } from "@/components/card-fields-menu";
+import {
+  ItemFilterBar,
+  ItemFilterMenu,
+  type FilterOptions,
+} from "@/components/item-filters";
 import { EmptyState } from "@/components/empty-state";
 import { NoSpecsEmptyState } from "@/components/no-specs-empty-state";
 import { LevelSwitcher } from "@/components/level-switcher";
@@ -23,6 +28,12 @@ import {
   scopeProductIds,
 } from "@/lib/active-product";
 import { getBoardPreferences } from "@/lib/board-preferences-service";
+import {
+  applyFeatureFilters,
+  hasActiveFilters,
+  parseCustomDateFilters,
+  parseFeatureFilters,
+} from "@/lib/feature-filters";
 import { cardFieldCatalog, resolveCardFields } from "@/lib/card-fields";
 import { LOCAL_ORG_SLUG, orgProductPath } from "@/lib/org-path";
 import { SortControl } from "@/components/sort-control";
@@ -37,7 +48,12 @@ import {
 import { getDb } from "@/lib/db";
 import { resolveWorkflowForProducts } from "@/lib/repo-config";
 import { getStore } from "@/lib/store";
-import { compareShippedReleases, goalsForProduct } from "@/lib/store/types";
+import {
+  compareShippedReleases,
+  goalsForProduct,
+  selectableCycles,
+} from "@/lib/store/types";
+import { mergeTagOptions } from "@/lib/tags-service";
 import { listWorkspaceMembers, type WorkspaceMember } from "@/lib/workspace";
 import {
   canConnectRepos,
@@ -113,7 +129,12 @@ export default async function RoadmapPage({
   const allFeatures = sortFeatures(
     await store.listFeatures(access ?? undefined),
   ).filter((f) => f.status !== "archived");
-  const releases = await store.listReleases(access ?? undefined);
+  const [releases, cycles, tagRegistry] = await Promise.all([
+    store.listReleases(access ?? undefined),
+    store.listCycles(access ?? undefined),
+    // Workspace-wide, so no product scoping: see the tag registry migration.
+    store.listTags(access ?? undefined),
+  ]);
   // Templates seed a NEW card, always created in one product, so a combined
   // view offers the workspace default rather than a union.
   const detailTemplates = await store.listDetailTemplates(
@@ -192,6 +213,20 @@ export default async function RoadmapPage({
     activeProduct?.id ?? null,
   );
   const activeLevel = resolveActiveLevel(levels, sp.level);
+
+  // Filters. Same URL-driven state and the same components as the backlog, so
+  // a filter set on one page means the same thing on the other, and a link is
+  // shareable either way. Date-typed custom properties add a from/to range,
+  // parsed from the properties in view so a param naming a removed field is
+  // ignored rather than filtering by nothing.
+  const filters = parseFeatureFilters(sp);
+  const dateProps = properties.filter((p) => p.type === "date");
+  const customDates = parseCustomDateFilters(
+    sp,
+    dateProps.map((p) => p.key),
+  );
+  if (Object.keys(customDates).length > 0) filters.customDates = customDates;
+  const filtersActive = hasActiveFilters(filters);
   // Sort options are the workspace's sortable custom properties plus RICE, the
   // same set the Backlog offers, parsed from the same `?sort=` param so a sort
   // chosen on one page carries to the other. `parseSortMode` only honours a
@@ -220,7 +255,13 @@ export default async function RoadmapPage({
   // it with the Backlog board's manual rank would be defensible, but it would
   // silently reorder every existing roadmap on deploy for something nobody
   // asked for.
-  const unsorted = scoped.filter((f) => f.level === activeLevel.key);
+  const unsortedForLevel = scoped.filter((f) => f.level === activeLevel.key);
+  // Filters narrow the cards, never the columns: the columns are the releases,
+  // and a roadmap that dropped a release because nothing in it matched would
+  // hide the very gap the filter was asked to expose.
+  const unsorted = filtersActive
+    ? applyFeatureFilters(unsortedForLevel, filters)
+    : unsortedForLevel;
   const features =
     sort === "rice"
       ? [...unsorted].sort(compareByRiceScore)
@@ -247,6 +288,37 @@ export default async function RoadmapPage({
   const templateBody =
     detailTemplates.find((t) => t.id === activeLevel.detailTemplateId)?.body ??
     "";
+
+  // What the filter menu can offer here. Two deliberate differences from the
+  // backlog's set:
+  //
+  // No release filter. The columns *are* the releases, so narrowing to one
+  // would leave a board of empty columns beside the one you asked for, which
+  // the level switcher and the shipped view already do better.
+  //
+  // No "Show shipped" toggle. Shipped releases are a peer view here
+  // (?view=shipped) rather than rows hidden inside this one.
+  const filterOptions: FilterOptions = {
+    statuses: workflow.statuses.filter((st) => st !== "archived"),
+    assignees: members.map((m) => ({ userId: m.userId, name: m.name })),
+    // Registry order first, then any tag still sitting on a card that the
+    // registry no longer lists, so the menu reads as the workspace's
+    // vocabulary rather than a sample of what happens to be on screen.
+    tags: mergeTagOptions(tagRegistry, scoped),
+    // The parent level's items in scope, which is exactly what `parents`
+    // already collects for the create drawer.
+    epics: parents.map((pa) => ({ specId: pa.specId, title: pa.title })),
+    releases: [],
+    cycles: selectableCycles(cycles, filters.cycle ?? null).map((c) => ({
+      id: c.id,
+      name: c.name,
+    })),
+    products: productsById
+      ? scopedProducts.map((pr) => ({ id: pr.id, name: pr.name }))
+      : undefined,
+    dateFields: dateProps.map((pr) => ({ key: pr.key, label: pr.label })),
+    canShowShipped: false,
+  };
 
   // Releases are per-product: a product roadmap shows that product's releases
   // plus workspace-wide (portfolio) releases; a group scope shows its products'
@@ -616,13 +688,9 @@ export default async function RoadmapPage({
               <LevelSwitcher levels={levels} active={activeLevel.key} />
               {showShipped || showTimeline ? (
                 <Link
-                  href={roadmapViewHref(
-                    org,
-                    productSlug,
-                    sp.level,
-                    "board",
-                    sp.sort,
-                  )}
+                  href={roadmapParamHref(org, productSlug, sp, {
+                    view: null,
+                  })}
                   className="text-xs text-link hover:underline"
                 >
                   ← Roadmap board
@@ -630,26 +698,18 @@ export default async function RoadmapPage({
               ) : (
                 <>
                   <Link
-                    href={roadmapViewHref(
-                      org,
-                      productSlug,
-                      sp.level,
-                      "timeline",
-                      sp.sort,
-                    )}
+                    href={roadmapParamHref(org, productSlug, sp, {
+                      view: "timeline",
+                    })}
                     className="text-xs text-link hover:underline"
                   >
                     Timeline →
                   </Link>
                   {shippedReleases.length > 0 ? (
                     <Link
-                      href={roadmapViewHref(
-                        org,
-                        productSlug,
-                        sp.level,
-                        "shipped",
-                        sp.sort,
-                      )}
+                      href={roadmapParamHref(org, productSlug, sp, {
+                        view: "shipped",
+                      })}
                       className="text-xs text-link hover:underline"
                     >
                       Shipped releases ({shippedReleases.length}) →
@@ -679,9 +739,14 @@ export default async function RoadmapPage({
                   }))}
                 />
               ) : null}
+              {/* The roadmap had no filters at all before this. It gets the
+                backlog's, behind the same single button: the fields are the
+                same, so there is nothing here for a second design to add. */}
+              <ItemFilterMenu filters={filters} options={filterOptions} />
               <BoardSelectToggle />
             </div>
           </div>
+          <ItemFilterBar filters={filters} options={filterOptions} />
           {showTimeline ? (
             <>
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -841,31 +906,6 @@ export default async function RoadmapPage({
       </BoardSelectionProvider>
     </BoardPrefsProvider>
   );
-}
-
-/**
- * Build a roadmap link that switches the view while keeping the level, so
- * moving between the board, the timeline, and shipped releases never silently
- * resets the altitude the user was working at.
- */
-function roadmapViewHref(
-  org: string,
-  product: string,
-  level: string | string[] | undefined,
-  view: "board" | "timeline" | "shipped",
-  sort?: string | string[] | undefined,
-): string {
-  const params = new URLSearchParams();
-  const levelKey = Array.isArray(level) ? level[0] : level;
-  if (levelKey) params.set("level", levelKey);
-  if (view !== "board") params.set("view", view);
-  // Carried like `level`: the board and the shipped view share one ordering,
-  // so switching between them and losing the sort would read as the control
-  // having been ignored.
-  const sortKey = Array.isArray(sort) ? sort[0] : sort;
-  if (sortKey) params.set("sort", sortKey);
-  const qs = params.toString();
-  return orgProductPath(org, product, `/roadmap${qs ? `?${qs}` : ""}`);
 }
 
 /**

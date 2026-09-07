@@ -58,7 +58,7 @@ test.describe("item detail: a change waiting for review", () => {
 
     await page.goto(`/${ws.slug}/settings/repositories`);
     await page.getByRole("button", { name: /Create 1 card/i }).click();
-    await expect(page.getByText(/Imported\s+1\s+spec/i)).toBeVisible();
+    await expect(page.getByText(/Created\s+1\s+card/i)).toBeVisible();
     await page.goto(`/${ws.slug}/all/backlog/work/${SPEC_ID}`);
   });
 

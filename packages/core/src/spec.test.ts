@@ -55,15 +55,25 @@ describe("hasSpecId", () => {
 });
 
 describe("previewSpec", () => {
-  it("reads the frontmatter title and id presence without throwing", () => {
+  it("reads the frontmatter title and id without throwing", () => {
     const preview = previewSpec(SAMPLE);
     expect(preview.title).toBe("Example Feature");
     expect(preview.hasId).toBe(true);
+    // The id itself, not just its presence: the import scan looks it up to
+    // decide whether this file would create a card or attach to one.
+    expect(preview.id).toBe("3f1a8c2e-0b7d-4e2a-9c11-2a6b8d4e1f00");
+  });
+
+  it("treats a blank id as no id", () => {
+    const preview = previewSpec(`---\nid: "   "\ntitle: T\n---\n\nbody`);
+    expect(preview.id).toBeNull();
+    expect(preview.hasId).toBe(false);
   });
 
   it("falls back to the first heading when there's no frontmatter title", () => {
     const preview = previewSpec(`---\nkind: feature\n---\n\n# Checkout flow\n\nbody`);
     expect(preview.title).toBe("Checkout flow");
+    expect(preview.id).toBeNull();
     expect(preview.hasId).toBe(false);
   });
 

@@ -179,7 +179,16 @@ export function hasSpecId(raw: string): boolean {
 export interface SpecPreview {
   /** Frontmatter `title`, else the first markdown heading, else null. */
   title: string | null;
-  /** Whether the file already has a stable `id` (false means import injects one). */
+  /**
+   * The stable `id` in frontmatter, or null when the file has none yet.
+   *
+   * The id is what decides whether importing this file would create a card:
+   * sync upserts on it, so a file whose id already names a work item attaches
+   * to that item rather than making a second one. A preview that only reported
+   * *whether* an id existed could not tell those two apart.
+   */
+  id: string | null;
+  /** Whether the file already has a stable id (false means import injects one). */
   hasId: boolean;
 }
 
@@ -204,9 +213,12 @@ export function previewSpec(raw: string): SpecPreview {
     typeof data.title === "string" && data.title.trim()
       ? data.title.trim()
       : null;
+  const id =
+    typeof data.id === "string" && data.id.trim() !== "" ? data.id.trim() : null;
   return {
     title: fmTitle ?? firstHeading(body),
-    hasId: typeof data.id === "string" && data.id.length > 0,
+    id,
+    hasId: id !== null,
   };
 }
 

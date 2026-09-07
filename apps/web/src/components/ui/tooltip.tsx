@@ -92,4 +92,4 @@ function InfoTip({
   );
 }
 
-export { InfoTip };
+export { InfoTip, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger };

@@ -52,7 +52,7 @@ test.describe("item history: changes made in git", () => {
 
     await page.goto(`/${ws.slug}/settings/repositories`);
     await page.getByRole("button", { name: /Create 1 card/i }).click();
-    await expect(page.getByText(/Imported\s+1\s+spec/i)).toBeVisible();
+    await expect(page.getByText(/Created\s+1\s+card/i)).toBeVisible();
 
     // The import itself is not a change. An item's history should not open with
     // a fictional edit describing the moment it came into existence.

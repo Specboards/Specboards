@@ -29,5 +29,12 @@ export async function GET(req: Request) {
 
   const repos = await scanWorkspaceSpecs(db, authz.scope.workspaceId);
   const totalSpecs = repos.reduce((sum, r) => sum + r.specs.length, 0);
-  return Response.json({ repos, totalSpecs });
+  // What pressing "Create cards" would actually create. Reported alongside the
+  // total rather than instead of it, because the two together are the honest
+  // sentence ("1 new, 2 already on your board") and either alone is not.
+  const newSpecs = repos.reduce(
+    (sum, r) => sum + r.specs.filter((spec) => !spec.alreadyImported).length,
+    0,
+  );
+  return Response.json({ repos, totalSpecs, newSpecs });
 }

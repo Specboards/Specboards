@@ -53,7 +53,13 @@ export interface RepoScan {
   repoId: string;
   owner: string;
   name: string;
-  specs: { path: string; title: string; hasId: boolean }[];
+  specs: {
+    path: string;
+    title: string;
+    hasId: boolean;
+    /** Already on the board: importing would update its item, not create one. */
+    alreadyImported: boolean;
+  }[];
   error?: string;
 }
 
@@ -64,17 +70,33 @@ export interface RepoScan {
 export async function scanWorkspaceSpecs(): Promise<{
   repos: RepoScan[];
   totalSpecs: number;
+  /** Of `totalSpecs`, how many would actually become new cards. */
+  newSpecs: number;
 }> {
   const res = await apiFetch("/api/v1/repositories/scan");
   const body = (await res.json().catch(() => null)) as {
     repos?: RepoScan[];
     totalSpecs?: number;
+    newSpecs?: number;
     error?: string;
   } | null;
   if (!res.ok) {
     throw new Error(body?.error ?? `Scan failed with ${res.status}`);
   }
-  return { repos: body?.repos ?? [], totalSpecs: body?.totalSpecs ?? 0 };
+  const repos = body?.repos ?? [];
+  return {
+    repos,
+    totalSpecs: body?.totalSpecs ?? 0,
+    // Derived from the rows when the field is missing, so a client talking to
+    // an older deployment degrades to "everything found is new" (what the
+    // prompt claimed before this existed) rather than to "nothing to import".
+    newSpecs:
+      body?.newSpecs ??
+      repos.reduce(
+        (sum, r) => sum + r.specs.filter((s) => !s.alreadyImported).length,
+        0,
+      ),
+  };
 }
 
 /** The outcome of seeding a starter spec into a repo and importing it. */

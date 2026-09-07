@@ -78,7 +78,7 @@ describe("applyFeatureFilters with customDates", () => {
 
 describe("customDates in filter bookkeeping", () => {
   const filters: FeatureFilters = {
-    status: "backlog",
+    status: ["backlog"],
     customDates: { due: { from: "2026-07-01" } },
   };
 

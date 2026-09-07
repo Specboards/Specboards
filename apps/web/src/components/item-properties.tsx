@@ -143,7 +143,20 @@ export function ItemProperties({
   // input's value fires no change event, so the form's onChange autosave would
   // never see the edit. Seeded from the item and re-seeded by `key` when the
   // flyout swaps to another item.
+  //
+  // The ref is what `save` actually reads, for the same reason `riceRef`
+  // exists: `queueSave` schedules the `save` closure from the render it was
+  // called in, so a save queued by the picker's own commit would post the tag
+  // list from *before* that commit. That is one edit behind, which for the
+  // first tag added to an item means posting an empty list -- the panel says
+  // "Saved", the chip stays on screen because it is local state, and the new
+  // tag is gone on the next load.
   const [tagValue, setTagValue] = useState<string[]>(feature.tags);
+  const tagValueRef = useRef(tagValue);
+  function updateTags(next: string[]) {
+    tagValueRef.current = next;
+    setTagValue(next);
+  }
   const [status, setStatus] = useState<"idle" | "saving" | "saved">("idle");
   const [error, setError] = useState<string | null>(null);
   // Track the selected status locally so the allowed-transitions list
@@ -174,6 +187,12 @@ export function ItemProperties({
   // which on the flyout (it keeps the same component mounted across items) was
   // a visible flash of the wrong item's values.
   useResetOnChange(feature.status, () => setStatusValue(feature.status));
+  // Tags travel with the item, so re-seed them (ref included) when the panel is
+  // pointed at another one. The flyout keeps this component mounted across
+  // items, so without this the previous item's chips would carry over.
+  useResetOnChange(`${feature.specId}|${feature.tags.join(",")}`, () =>
+    updateTags(feature.tags),
+  );
   // One key covering every RICE field, because they are edited and saved as a
   // set. `Object.is` needs a primitive, so the four numbers are joined rather
   // than passed as a tuple that would be a new array every render.
@@ -221,7 +240,7 @@ export function ItemProperties({
         // there is one source of truth. The server canonicalizes each name
         // against the registry and creates any that are new (`resolveTags`),
         // so what comes back may differ in casing from what was sent.
-        ...(show("tags") ? { tags: tagValue } : {}),
+        ...(show("tags") ? { tags: tagValueRef.current } : {}),
         ...(members.length > 0 && show("assignee")
           ? { assigneeId: String(data.get("assigneeId") ?? "") || null }
           : {}),
@@ -297,8 +316,11 @@ export function ItemProperties({
       className="space-y-0.5"
     >
       <PropertyRow icon={Loader} label="Status">
-        <div className="flex items-center gap-2">
-          <StatusDot status={statusValue} />
+        {/* The stage colour sits *after* the picker, the way the release's ship
+            date does. Leading it pushed this one control right by the dot plus
+            its gap, so Status was the only row whose value did not start on the
+            column's left edge. */}
+        <div className="flex min-w-0 items-center gap-2">
           <Select
             name="status"
             value={statusValue}
@@ -311,6 +333,7 @@ export function ItemProperties({
               </option>
             ))}
           </Select>
+          <StatusDot status={statusValue} />
         </div>
       </PropertyRow>
 
@@ -386,7 +409,7 @@ export function ItemProperties({
             value={tagValue}
             options={tags}
             onCommit={(next) => {
-              setTagValue(next);
+              updateTags(next);
               // Straight away rather than on the form's 600ms typing debounce:
               // adding or removing a chip is a committed choice, the way a
               // select is, not a half-finished word.
@@ -591,9 +614,11 @@ function ReadOnlyProperties({
   return (
     <div className="space-y-0.5">
       <PropertyRow icon={Loader} label="Status">
+        {/* Dot after the label, matching the editable block above, so the
+            status value starts on the same left edge as every other row. */}
         <div className="flex items-center gap-2 px-2 py-1 text-sm">
-          <StatusDot status={feature.status} />
           {statusLabel(feature.status, workflow)}
+          <StatusDot status={feature.status} />
         </div>
       </PropertyRow>
       {show("assignee") && assignee ? (

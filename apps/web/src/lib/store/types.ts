@@ -1011,9 +1011,17 @@ export function releasesForProduct(
  */
 export function selectableReleases(
   releases: ReleaseRecord[],
-  keepId: string | null = null,
+  /**
+   * The id (or ids) to keep regardless. One when a card is showing its own
+   * release; several when a filter menu is showing the releases it is filtering
+   * on, since a filter must never disappear from the menu that would clear it.
+   */
+  keep: string | readonly string[] | null = null,
 ): ReleaseRecord[] {
-  return releases.filter((r) => r.status !== "shipped" || r.id === keepId);
+  const kept = keep === null ? [] : typeof keep === "string" ? [keep] : keep;
+  return releases.filter(
+    (r) => r.status !== "shipped" || kept.includes(r.id),
+  );
 }
 
 /** Dated releases first (ascending target date), undated last, then by name. */
@@ -1358,8 +1366,26 @@ export interface OutboxEmit {
   data: Record<string, unknown>;
 }
 
-/** Serialized backlog filter bundle persisted with a saved view. */
-export type SavedViewFilters = Record<string, string | number>;
+/**
+ * Serialized backlog filter bundle persisted with a saved view.
+ *
+ * A value is a list now that a filter dimension accepts several values. The
+ * scalar shape stays legal because it is what every view saved before then
+ * holds: this is a jsonb column, so those rows were never rewritten, and
+ * reading one has to keep working. Readers normalize with
+ * {@link savedFilterValues}.
+ */
+export type SavedViewFilters = Record<string, string | number | string[]>;
+
+/** One saved dimension's values, normalizing the legacy scalar shape. */
+export function savedFilterValues(
+  value: string | number | string[] | undefined,
+): string[] {
+  if (value === undefined) return [];
+  if (Array.isArray(value)) return value.map(String).filter((v) => v !== "");
+  const one = String(value);
+  return one === "" ? [] : [one];
+}
 
 /** A user's named, saved backlog filter ("custom view"). */
 export interface SavedView {

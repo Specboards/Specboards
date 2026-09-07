@@ -210,12 +210,22 @@ export async function setBoardPreferences(
   });
 }
 
-/** Normalize the jsonb filters column into the typed filter bundle. */
+/**
+ * Normalize the jsonb filters column into the typed filter bundle.
+ *
+ * Both shapes are accepted: a list, which is what a view saved since filters
+ * became multi-value holds, and a bare scalar, which is what every older row
+ * still holds. Nothing rewrites those rows, so this is the only place that
+ * difference is allowed to exist.
+ */
 function toSavedViewFilters(value: unknown): SavedViewFilters {
   const out: SavedViewFilters = {};
   if (value && typeof value === "object" && !Array.isArray(value)) {
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
       if (typeof v === "string" || typeof v === "number") out[k] = v;
+      else if (Array.isArray(v) && v.every((e) => typeof e === "string")) {
+        out[k] = v as string[];
+      }
     }
   }
   return out;
