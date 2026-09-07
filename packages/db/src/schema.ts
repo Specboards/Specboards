@@ -86,14 +86,6 @@ export const workspaces = pgTable("workspaces", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
   slug: text("slug").notNull().unique(),
-  /**
-   * @deprecated Superseded by `product_settings.transition_mode`. Migration
-   * 0064 copied every workspace's value into its default `product_settings`
-   * row and nothing reads this column any more. It survives only so the
-   * previously-deployed version keeps working across a release or a rollback;
-   * a follow-up migration drops it. Do not read or write it.
-   */
-  transitionMode: text("transition_mode").notNull().default("flexible"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
