@@ -1,5 +1,7 @@
 "use client";
 
+import { setCspNonce } from "@/lib/csp-nonce";
+
 // `__webpack_nonce__` is a webpack "free variable": reads compile to
 // `__webpack_require__.nc` and writes set it. Declaring it here is type-only
 // (erased at build) so the assignment below typechecks.
@@ -29,5 +31,10 @@ export function WebpackNonce({ nonce }: { nonce?: string }) {
   if (nonce) {
     __webpack_nonce__ = nonce;
   }
+  // Webpack's runtime does not know about a library that appends a `<style>`
+  // through plain DOM calls, so those need the nonce handed to them directly.
+  // TipTap is the one we have (see lib/csp-nonce). Seeded from the same place
+  // and at the same moment, so the two can never disagree.
+  setCspNonce(nonce);
   return null;
 }

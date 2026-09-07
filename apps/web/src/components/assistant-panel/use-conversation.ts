@@ -97,7 +97,16 @@ export function useConversation(
 
   // Blanking belongs to the change of thread, not to the fetch that reloads it:
   // the previous item's conversation is never shown under the new item.
-  useResetOnChange(loadThread, () => {
+  //
+  // Keyed on the subject, not on `loadThread`. `useResetOnChange` compares with
+  // `Object.is` and sets state during render, so a key that is a closure rather
+  // than a primitive is an infinite render-phase loop: any render that rebuilds
+  // the memo hands this a "new" key, which sets state, which renders again. That
+  // is React error #301 ("Too many re-renders"), and it took the whole item
+  // panel down for anyone who had left the Assistant section expanded, on the
+  // full page and in the flyout alike. These are the two primitives the memo
+  // above is keyed on, so the reset still fires exactly when the thread changes.
+  useResetOnChange(`${isItem}:${id}`, () => {
     setMessages(null);
     setLoadError(null);
   });

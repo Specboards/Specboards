@@ -40,6 +40,24 @@ const SheetContent = React.forwardRef<
     <SheetOverlay />
     <SheetPrimitive.Content
       ref={ref}
+      // The panel takes focus itself, so a drawer opens on its own heading
+      // rather than on whatever control happens to be first inside it.
+      tabIndex={-1}
+      // Radix's focus trap otherwise focuses the first tabbable control on
+      // open, skipping links (see removeLinks in @radix-ui/react-focus-scope).
+      // In the nav drawer that is the product <select>, and iOS Safari opens a
+      // select's picker as soon as it is focused: the picker covered the
+      // navigation every time the menu was opened, before the user had touched
+      // it. The item flyout had the same problem with its Status select.
+      // Focusing the panel keeps the trap, Escape, and the announced dialog
+      // title, and activates nothing.
+      onOpenAutoFocus={(event) => {
+        event.preventDefault();
+        // Radix dispatches this on the content element itself.
+        (event.currentTarget as HTMLElement | null)?.focus({
+          preventScroll: true,
+        });
+      }}
       className={cn(
         "fixed inset-y-0 z-50 flex h-full w-full max-w-md flex-col gap-4 overflow-y-auto bg-background p-6 shadow-lg transition ease-in-out data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:duration-200 data-[state=open]:duration-300",
         side === "right"

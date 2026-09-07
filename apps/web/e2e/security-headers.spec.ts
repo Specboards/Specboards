@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { getWorkspace } from "./helpers/db";
+
 /**
  * The production Content-Security-Policy must contain script injection: a
  * per-request nonce, `strict-dynamic`, and NO `'unsafe-inline'` in script-src
@@ -141,5 +143,66 @@ test.describe("security headers", () => {
     await expect(email).toHaveValue("hydration@probe.test");
 
     expect(violations, "no CSP violations logged while loading").toEqual([]);
+  });
+
+  test("a 404 renders our own page rather than Next's un-nonced fallback", async ({
+    page,
+  }) => {
+    // Next's built-in not-found (and its error boundary) style themselves with
+    // an inline <style> that carries no nonce, so `style-src` refuses it: the
+    // reader gets an unstyled page and a CSP error on top of whatever went
+    // wrong. app/not-found.tsx and app/error.tsx exist to keep those fallbacks
+    // off the screen.
+    const violations: string[] = [];
+    page.on("console", (msg) => {
+      const text = msg.text();
+      if (/Content Security Policy|Refused to (execute|apply|load)/i.test(text)) {
+        violations.push(text);
+      }
+    });
+
+    const { slug } = await getWorkspace();
+    await page.goto(
+      `/${slug}/all/backlog/feature/00000000-0000-0000-0000-000000000000`,
+    );
+
+    await expect(
+      page.getByText("We could not find that page"),
+    ).toBeVisible();
+    expect(
+      await page.locator("style").count(),
+      "no inline <style> to be refused",
+    ).toBe(0);
+    expect(violations, "no CSP violations logged on a 404").toEqual([]);
+  });
+
+  test("the rich-text editor's runtime styles carry the nonce", async ({
+    page,
+  }) => {
+    // TipTap appends ProseMirror's base rules as a `<style>` through plain DOM
+    // calls, which webpack's runtime nonce does not reach. Unlabelled it was
+    // refused, so the editor lost `white-space: pre-wrap` and the rest of the
+    // ProseMirror baseline while looking almost right.
+    const violations: string[] = [];
+    page.on("console", (msg) => {
+      const text = msg.text();
+      if (/Content Security Policy|Refused to (execute|apply|load)/i.test(text)) {
+        violations.push(text);
+      }
+    });
+
+    const { slug } = await getWorkspace();
+    await page.goto(`/${slug}/all/roadmap`);
+    await page.getByRole("button", { name: "New feature" }).click();
+    await expect(page.locator(".tiptap")).toBeVisible();
+
+    // The attribute is hidden by the browser once applied; the property is not.
+    const unnonced = await page.evaluate(() =>
+      [...document.querySelectorAll("style")].filter((s) => !s.nonce).length,
+    );
+    expect(unnonced, "every runtime <style> carries a nonce").toBe(0);
+    expect(violations, "no CSP violations logged with an editor open").toEqual(
+      [],
+    );
   });
 });
