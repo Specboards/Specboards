@@ -25,6 +25,73 @@ for how and when the version is bumped.
 > `pnpm deploy:prod` and the dispatched workflow. See
 > [VERSIONING.md](./VERSIONING.md).
 
+## [1.0.3] - 2026-09-06
+
+Filters stop shouting. The board's filter row had grown a dropdown per field, so
+every release, cycle, tag and date property added another empty control above
+the cards, and the roadmap had none at all. They now live behind one button and
+show only what you have actually set. The theme repeats in the fixes: a count
+that described the repository rather than the work, a tag that said it saved and
+did not, a column that outlived the feature it existed for.
+
+### Added
+
+- **Filters hide until you want them, and each one accepts several values.**
+  The backlog's filter row rendered one dropdown per filterable field, and it
+  grew with the workspace: every release, cycle, tag and date-typed custom
+  property added another empty select above the board. In the common case,
+  where nothing is being filtered, all of them were controls doing nothing.
+  They now sit behind a single button in the toolbar. The filters you set
+  appear beneath it as removable chips, with a "+ Filter" affordance to add
+  another, and nothing is on screen when nothing is filtered. Each dimension
+  now takes a list rather than one value, so "Ready or In progress, assigned to
+  me" is a question you can ask; values are OR'd within a field and AND'd
+  across fields, and the count on the button tracks fields rather than values,
+  so widening a filter never makes it climb. Links and saved views written
+  before this still work.
+- **The roadmap has filters.** It had none: sort, card fields and select, and
+  no way to narrow the work inside its release columns. It now uses the same
+  control as the backlog, so a filter means the same thing on both pages and a
+  link is shareable either way. Two deliberate omissions: no release filter,
+  because the columns *are* releases and narrowing to one would leave a board
+  of empty columns beside the one you asked for; and no "show shipped", because
+  shipped releases are already a separate view there.
+
+### Changed
+
+- **The import prompt counts the cards it would create, not the files in your
+  repository.** With two specs in a repo, both already on the board, it offered
+  "Create 2 cards" and then reported "Imported 1 spec": three numbers, no two
+  of them the same. On an established workspace the gap is much wider, since a
+  re-sync of 200 specs was offered as 200 new cards when the true answer is
+  zero. The scan now asks which specs the board already holds, so the prompt
+  reads "1 new spec to import (2 already on your board)", and the preview list
+  shows only the specs the button will create. When everything is imported the
+  panel recedes to a line and two links with no create action, keeping "Rescan"
+  reachable, because that is exactly the state you land in after merging a spec
+  PR. The summary afterwards separates cards created from existing ones
+  refreshed from git, which is what made the old number match neither the
+  button nor the board.
+- **"Scan again" goes back to the scan.** It re-scanned and then left the
+  previous import summary on screen, so the button read as doing nothing.
+
+### Fixed
+
+- **A new tag typed on a card is actually saved.** The panel said "Saved", the
+  chip stayed on screen, and the tag was gone on the next load. The autosave
+  posted the tag list from before the edit that triggered it, which for a
+  card's first tag meant posting an empty list.
+- **The Status row on an item lines up with the rest.** Its stage dot sat in
+  the value column ahead of the picker, so Status was the only property whose
+  value did not start on the same left edge as the others.
+- **A vestigial column and the write privilege behind it are gone.** The
+  transition mode moved to per-product settings two releases ago;
+  `workspaces.transition_mode` stayed behind as a compatibility shim so the
+  previously-deployed version kept working across that release. It is now
+  dropped, along with the policy that let an org admin write to `workspaces`,
+  which had no app path behind it once the setting moved. Any workspace the
+  original backfill never reached keeps its setting.
+
 ## [1.0.2] - 2026-09-06
 
 Tags get somewhere to live, a fresh instance stops leaving the operator to guess
