@@ -25,6 +25,79 @@ for how and when the version is bumped.
 > `pnpm deploy:prod` and the dispatched workflow. See
 > [VERSIONING.md](./VERSIONING.md).
 
+## [1.0.2] - 2026-09-06
+
+Tags get somewhere to live, a fresh instance stops leaving the operator to guess
+what to do next, and the parts of the codebase that were only warning at us stop
+warning. The theme underneath most of it is the same as 1.0.1's: the app saying
+what it knows, at the moment it knows it, rather than a moment later.
+
+### Added
+
+- **Tags have their own settings section, and can be managed in bulk.** They
+  lived under Settings -> Cards, whose every other panel is scoped by a product
+  picker sitting directly above them. Tags are workspace-wide, so the picker did
+  not apply to them and read as though it did. They now have their own section,
+  with the room bulk work needs: select several and remove them together, and
+  upload a CSV to add tags or rename them. One column adds, two columns rename
+  (`SF,Salesforce`) and re-tag every item that carried the old name. Nothing is
+  written until a preview has been shown and approved, and the file is measured
+  against the registry again at the moment it runs, so a tag somebody else added
+  in between changes the outcome rather than breaking the run half way through.
+  Renaming onto a name that already exists merges the two, labelled as a merge
+  in the preview; the single-tag rename still refuses, because someone fixing a
+  typo is not asking to absorb another tag.
+- **A fresh instance says to connect a repository.** A brand-new install offered
+  no prompt anywhere. The dashboard reported "0 items", the backlog offered only
+  "New feature" (which creates a card with no spec behind it), and the sidebar
+  had no setup entry. For a product whose premise is git-backed specs, the empty
+  state pointed at the one path that never involves git, so an operator could
+  build a whole board before being told, out of band, that they had set it up
+  wrong. The prompt names the step and links to the page that does it, on the
+  dashboard and on the empty board, and goes away once a repository exists.
+
+### Changed
+
+- **Deleting a tag now removes it from every item that carried it.** It used to
+  remove only the definition, on the reasoning custom properties use: hiding
+  values beats destroying them. That reasoning does not hold for tags. A
+  property's value is content typed into a field; a tag *is* the field, so a
+  "hidden" tag was not a value waiting to come back, it was a chip still drawn
+  on the card, still in the filters, and gone from the one screen that claimed
+  to manage it. The weight moves to the confirmation instead: deleting asks you
+  to type the tag's name, having shown you how many items it is on.
+- **Eighty-one migrations became one baseline.** Every install replayed 3,600
+  lines of SQL that was mostly a diary of tables built, rewritten and dropped
+  again. Existing databases are untouched and apply nothing; a database left
+  part-way through the old history is now refused outright, with instructions,
+  rather than silently ending up with a schema nobody asked for.
+- **A failed migration says what went wrong.** The error carried the entire SQL
+  file as its message and the actual reason as a detail nobody printed, and then
+  the process exited before even that finished writing. It now leads with the
+  reason and the Postgres error code, and clips the statement.
+
+### Fixed
+
+- **The repositories panel shows a repo the moment you create one.** Using
+  "Create and connect", the panel directly above the success message still read
+  "No repositories connected" until a reload. Two statements on one screen
+  contradicting each other, one of them wrong, at the exact moment an evaluator
+  is deciding whether the product works.
+- **A background worker on a fresh install can write the tags it creates.**
+  Ingestion canonicalises a spec's tags against the workspace registry and
+  creates any that are new, but the grant that allows it existed only in a
+  migration that skips when the role does not exist yet, which is every fresh
+  install. Provisioning the worker role now grants it.
+- **Forty-six lint warnings, and the React Compiler rules behind them.** Three
+  rules had been turned down to warnings during the Next 16 upgrade rather than
+  rewriting thirty components inside a version bump. The rewrite has now
+  happened on its own terms and the rules are back at `error`. Three of the
+  findings were real: a ref read during render decided whether the spec editor
+  warned that a document had changed underneath you, the command palette stepped
+  its arrow keys from an unclamped index so Enter could open the wrong command
+  after the results shrank, and the spec import panel set state synchronously
+  inside an effect.
+
 ## [1.0.1] - 2026-09-06
 
 The first round of fixes from the 1.0 feedback, and they turned out to share a
