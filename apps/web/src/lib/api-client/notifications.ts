@@ -2,8 +2,11 @@
 
 import { apiFetch } from "@/lib/api-client/request";
 import type {
+  NotificationDefaultsView,
   NotificationList,
+  NotificationPreferenceView,
   NotificationQuery,
+  NotificationSettingChange,
 } from "@/lib/store/types";
 
 /**
@@ -67,4 +70,66 @@ export async function markAllNotificationsRead(): Promise<void> {
     method: "POST",
   });
   if (!res.ok) throw new Error(`Failed to mark all read (${res.status}).`);
+}
+
+/**
+ * Notification settings. Both grids read and write the same shape, and both
+ * write calls answer with the whole grid rather than an acknowledgement, so
+ * the caller re-renders from the server's view of it instead of guessing what
+ * a change did to the rows around it.
+ *
+ * Each call names its path as a literal rather than sharing one helper that
+ * takes a `path` argument. `api-client-routes.test.ts` reads these call sites
+ * to check that every path resolves to a route file exporting that method, and
+ * a path it cannot see is a path it cannot check. The shared part is the
+ * unwrapping below, which takes the response and never the URL.
+ */
+async function unwrap<T>(res: Response, what: string): Promise<T> {
+  const body = (await res.json().catch(() => null)) as
+    | (T & { error?: string })
+    | null;
+  if (!res.ok || !body) {
+    throw new Error(body?.error ?? `Failed to load ${what} (${res.status}).`);
+  }
+  return body;
+}
+
+/** A PATCH body carrying a batch of cell changes. */
+function patchInit(changes: readonly NotificationSettingChange[]): RequestInit {
+  return {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ changes }),
+  };
+}
+
+const SETTINGS = "notification settings";
+const DEFAULTS = "workspace notification defaults";
+
+/* There is no client-side read of either grid. Both pages render their first
+ * state on the server, and every write answers with the whole grid, so a
+ * browser-side GET would have no caller. The routes still serve GET, which is
+ * how anything outside the app reads these settings. */
+
+/** Set or clear the caller's overrides. `enabled: null` returns a row to
+ * inheriting. */
+export async function updateNotificationPreferences(
+  changes: readonly NotificationSettingChange[],
+): Promise<NotificationPreferenceView> {
+  const res = await apiFetch(
+    "/api/v1/notifications/preferences",
+    patchInit(changes),
+  );
+  return unwrap<NotificationPreferenceView>(res, SETTINGS);
+}
+
+/** Set or clear a workspace default. Admins only. */
+export async function updateNotificationDefaults(
+  changes: readonly NotificationSettingChange[],
+): Promise<NotificationDefaultsView> {
+  const res = await apiFetch(
+    "/api/v1/notifications/defaults",
+    patchInit(changes),
+  );
+  return unwrap<NotificationDefaultsView>(res, DEFAULTS);
 }

@@ -20,6 +20,7 @@ import type {
 } from "@specboards/core";
 
 import { DomainError } from "@/lib/errors";
+import type { MatrixRow } from "@/lib/notifications/matrix";
 
 export type {
   CycleScheduleInput,
@@ -1013,6 +1014,45 @@ export interface NotificationList {
   nextCursor: string | null;
 }
 
+/** Raised when notification settings can't be read or written. */
+export class NotificationSettingsError extends DomainError {}
+
+/**
+ * One cell of a settings grid, on its way to being stored.
+ *
+ * `enabled: null` is a reset, and it is the reason this is a tri-state rather
+ * than a boolean: clearing an override has to delete the row, not write the
+ * current inherited value into it. Writing the value back would look identical
+ * on screen and would quietly pin the row, so that the next time the level
+ * above changed, this user or this workspace would be the one it failed to
+ * move.
+ */
+export interface NotificationSettingChange {
+  type: string;
+  channel: string;
+  enabled: boolean | null;
+}
+
+/** The caller's own settings, already resolved through the workspace's. */
+export interface NotificationPreferenceView {
+  rows: MatrixRow[];
+}
+
+/** The workspace defaults grid, as an admin sees it. */
+export interface NotificationDefaultsView {
+  rows: MatrixRow[];
+  /**
+   * How many members hold an override for each cell, keyed by event type and
+   * then channel. Absent entries are zero.
+   *
+   * Here so an admin can see a default nobody accepts. It is computed rather
+   * than queryable by them: RLS keeps one member's preferences private from
+   * every other member, admins included, so this is the aggregate and never
+   * the rows behind it.
+   */
+  overrideCounts: Record<string, Record<string, number>>;
+}
+
 // Cycle helpers live in core (they are pure date logic shared with the CLI);
 // re-exported here so UI code imports its scoping helpers from one place,
 // alongside releasesForProduct / selectableReleases below.
@@ -1889,6 +1929,32 @@ interface CollaborationStore {
   markNotificationUnread(id: string, scope?: WorkspaceScope): Promise<void>;
   /** Mark all of the caller's notifications read. */
   markAllNotificationsRead(scope?: WorkspaceScope): Promise<void>;
+  /**
+   * The caller's notification settings, each cell resolved through the
+   * workspace defaults and tagged with which level decided it.
+   */
+  getNotificationPreferences(
+    scope?: WorkspaceScope,
+  ): Promise<NotificationPreferenceView>;
+  /**
+   * Set or clear the caller's own overrides, returning the settings as they
+   * now resolve. A change carrying `enabled: null` deletes the override.
+   */
+  updateNotificationPreferences(
+    changes: readonly NotificationSettingChange[],
+    scope?: WorkspaceScope,
+  ): Promise<NotificationPreferenceView>;
+  /** The workspace's default settings, plus how many members have departed
+   * from each. Org admins only. */
+  getNotificationDefaults(
+    scope?: WorkspaceScope,
+  ): Promise<NotificationDefaultsView>;
+  /** Set or clear workspace defaults. Org admins only; `enabled: null`
+   * returns a row to the built-in catalog value. */
+  updateNotificationDefaults(
+    changes: readonly NotificationSettingChange[],
+    scope?: WorkspaceScope,
+  ): Promise<NotificationDefaultsView>;
 }
 
 /**

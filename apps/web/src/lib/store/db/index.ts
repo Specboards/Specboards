@@ -12,8 +12,11 @@ import { createDb, outboxEvents, sql, type Database } from "@specboards/db";
 import {
   type CommentInput,
   type CommentRecord,
+  type NotificationDefaultsView,
   type NotificationList,
+  type NotificationPreferenceView,
   type NotificationQuery,
+  type NotificationSettingChange,
   type BoardKey,
   type BoardPreferences,
   type CreateFeatureInput,
@@ -92,6 +95,7 @@ import {
   type Tx,
 } from "./context";
 import * as collabStore from "./collaboration";
+import * as notificationSettingsStore from "./notification-settings";
 import * as configStore from "./workspace-config";
 import * as tagStore from "./tags";
 import * as cycleStore from "./cycles";
@@ -731,6 +735,42 @@ export class DbStore implements FeatureStore, DbStoreContext {
 
   markAllNotificationsRead(scope?: WorkspaceScope): Promise<void> {
     return collabStore.markAllNotificationsRead(this, scope);
+  }
+
+  // Implemented in ./notification-settings.ts.
+
+  getNotificationPreferences(
+    scope?: WorkspaceScope,
+  ): Promise<NotificationPreferenceView> {
+    return notificationSettingsStore.getNotificationPreferences(this, scope);
+  }
+
+  updateNotificationPreferences(
+    changes: readonly NotificationSettingChange[],
+    scope?: WorkspaceScope,
+  ): Promise<NotificationPreferenceView> {
+    return notificationSettingsStore.updateNotificationPreferences(
+      this,
+      changes,
+      scope,
+    );
+  }
+
+  getNotificationDefaults(
+    scope?: WorkspaceScope,
+  ): Promise<NotificationDefaultsView> {
+    return notificationSettingsStore.getNotificationDefaults(this, scope);
+  }
+
+  updateNotificationDefaults(
+    changes: readonly NotificationSettingChange[],
+    scope?: WorkspaceScope,
+  ): Promise<NotificationDefaultsView> {
+    return notificationSettingsStore.updateNotificationDefaults(
+      this,
+      changes,
+      scope,
+    );
   }
 
   // ==========================================================================
