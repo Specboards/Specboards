@@ -1944,12 +1944,17 @@ interface ItemWriteStore {
    * write, and must not fail the write that triggered it.
    */
   pruneAutoGrouping(specId: string, scope?: WorkspaceScope): Promise<boolean>;
-  /** `emit`, when given, records an outbox event in the same transaction. */
+  /**
+   * `emit`, when given, records outbox events in the same transaction. A list
+   * because one patch can be several events: moving an item and reassigning it
+   * in the same write is two things that happened, and collapsing them would
+   * mean whichever consumer cares about the other one never hears.
+   */
   updateFeature(
     specId: string,
     patch: FeaturePatch,
     scope?: WorkspaceScope,
-    emit?: OutboxEmit,
+    emit?: OutboxEmit | readonly OutboxEmit[],
   ): Promise<void>;
   /** Create a typed relation from `specId` to another feature. */
   addRelation(

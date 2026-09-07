@@ -83,6 +83,17 @@ export function snippetFor(
  * Never throws. A failure here must not fail the delivery, because the link
  * state update that came before it is the more important of the two and GitHub
  * would retry the whole thing.
+ *
+ * ── Why this does not go through the notification fan-out ───────────────────
+ * Everything else reaches an inbox by way of an `outbox_events` row written in
+ * the same transaction as the change. There is no such transaction here: the
+ * change happened on GitHub, and this is a webhook delivery reacting to it. So
+ * these two types are in the notification catalog (they are things a user can
+ * tune) but their rows are raised directly.
+ *
+ * The consequence to keep in mind: this path does not yet consult notification
+ * preferences, so a user who mutes a review outcome will still receive it until
+ * the preference layer is wired in here as well.
  */
 export async function notifyReviewOutcome(
   db: Database,

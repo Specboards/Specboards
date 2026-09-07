@@ -56,6 +56,32 @@ describe("notificationHeadline", () => {
     );
   });
 
+  it("reads a legacy 'mention' row the same as the namespaced one", () => {
+    // Rows written before the event catalog carry type "mention"; nothing
+    // rewrites an inbox, so both spellings have to render identically.
+    expect(notificationHeadline(notification({ type: "mention" }))).toEqual(
+      notificationHeadline(notification({ type: "comment.mentioned" })),
+    );
+  });
+
+  it("names the actor on the item events the fan-out raises", () => {
+    expect(notificationHeadline(notification({ type: "item.assigned" }))).toEqual({
+      actor: "Jane",
+      text: "assigned you an item",
+    });
+    expect(
+      notificationHeadline(notification({ type: "item.status_changed" })),
+    ).toEqual({ actor: "Jane", text: "moved an item" });
+  });
+
+  it("gives a shipped release no actor", () => {
+    // A ship is an event, like a review outcome, not something done to the
+    // reader by whoever clicked the button.
+    expect(notificationHeadline(notification({ type: "release.shipped" }))).toEqual(
+      { actor: null, text: "A release shipped" },
+    );
+  });
+
   it("gives an unknown type a heading rather than nothing", () => {
     // This list grows faster than deployments update; a snippet under a blank
     // heading is worse than a generic one.

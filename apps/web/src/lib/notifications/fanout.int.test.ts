@@ -1,0 +1,408 @@
+import { randomUUID } from "node:crypto";
+
+import postgres from "postgres";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+
+import { DbStore } from "@/lib/store/db";
+import { relayOutbox } from "@/lib/webhooks/relay";
+
+/**
+ * Who gets told, against a migrated Postgres.
+ *
+ * The fan-out is the piece that decides whether this feature is useful or
+ * unbearable, and every failure mode is a recipient question rather than a
+ * write question: told twice, told about your own click, told after you left
+ * the workspace, told once per item in a release instead of once. None of that
+ * is visible in a unit test of the resolution functions, because the answers
+ * come out of the database (who is assigned, who is still a member, what is in
+ * the release).
+ *
+ * Driven through the real relay rather than by calling the fan-out directly,
+ * so the claim that matters is actually covered: an event is expanded once,
+ * inside the transaction that stamps it processed.
+ *
+ * Needs a migrated Postgres at DATABASE_URL; skips itself when unset.
+ */
+
+const OWNER_URL = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
+
+const APP_ROLE = "rls_int_app";
+const APP_PASSWORD = "rls-int-only-not-a-real-secret";
+
+function appUrlFrom(ownerUrl: string): string {
+  const url = new URL(ownerUrl);
+  url.username = APP_ROLE;
+  url.password = APP_PASSWORD;
+  return url.toString();
+}
+
+const ws = randomUUID();
+const user = {
+  alice: randomUUID(), // the actor in most of these
+  bob: randomUUID(),
+  carol: randomUUID(),
+  dana: randomUUID(), // deactivated
+};
+const product = randomUUID();
+const suffix = randomUUID().slice(0, 8);
+
+const asAlice = { userId: user.alice, workspaceId: ws };
+
+interface InboxRow {
+  recipient_id: string;
+  type: string;
+  snippet: string;
+  actor_id: string | null;
+  comment_id: string | null;
+}
+
+describe.skipIf(!OWNER_URL)("notification fan-out", () => {
+  let owner: postgres.Sql;
+  let store: DbStore;
+
+  beforeAll(async () => {
+    owner = postgres(OWNER_URL!, { prepare: false, max: 2 });
+    await owner.unsafe(`
+      do $$ begin
+        if not exists (select 1 from pg_roles where rolname = '${APP_ROLE}') then
+          create role ${APP_ROLE} login password '${APP_PASSWORD}';
+        end if;
+      end $$;
+      grant usage on schema public to ${APP_ROLE};
+      grant select, insert, update, delete on all tables in schema public to ${APP_ROLE};
+      grant usage, select on all sequences in schema public to ${APP_ROLE};
+      grant execute on all functions in schema public to ${APP_ROLE};
+    `);
+
+    await owner`insert into workspaces (id, name, slug) values
+      (${ws}, 'Fanout', ${"fanout-int-" + suffix})`;
+    await owner`insert into users (id, name, email) values
+      (${user.alice}, 'Alice', ${`alice-${suffix}@fanout.test`}),
+      (${user.bob}, 'Bob', ${`bob-${suffix}@fanout.test`}),
+      (${user.carol}, 'Carol', ${`carol-${suffix}@fanout.test`}),
+      (${user.dana}, 'Dana', ${`dana-${suffix}@fanout.test`})`;
+    await owner`insert into members (workspace_id, user_id, role) values
+      (${ws}, ${user.alice}, 'owner'),
+      (${ws}, ${user.bob}, 'member'),
+      (${ws}, ${user.carol}, 'member')`;
+    // Dana has left. Still a row, so a stale recipient list would still find
+    // her; the fan-out has to notice the deactivation.
+    await owner`insert into members (workspace_id, user_id, role, deactivated_at)
+      values (${ws}, ${user.dana}, 'member', now())`;
+    await owner`insert into products (id, workspace_id, key, name) values
+      (${product}, ${ws}, 'alpha', 'Alpha')`;
+    await owner`insert into workspace_levels (workspace_id, key, label, position, is_leaf)
+      values (${ws}, 'epic', 'Epics', 0, false),
+             (${ws}, 'story', 'Stories', 1, true)`;
+
+    store = new DbStore(appUrlFrom(OWNER_URL!));
+  });
+
+  afterAll(async () => {
+    await owner`delete from workspaces where id = ${ws}`;
+    await owner`delete from users where id in
+      (${user.alice}, ${user.bob}, ${user.carol}, ${user.dana})`;
+    await owner.end({ timeout: 5 });
+  });
+
+  beforeEach(async () => {
+    await owner`delete from notifications where workspace_id = ${ws}`;
+  });
+
+  /** Run the relay and read back what landed, oldest first. */
+  async function drain(): Promise<InboxRow[]> {
+    await relayOutbox();
+    return owner<InboxRow[]>`
+      select recipient_id, type, snippet, actor_id, comment_id
+      from notifications
+      where workspace_id = ${ws}
+      order by created_at, type`;
+  }
+
+  function newItem(over: Record<string, unknown> = {}) {
+    return store.createFeature(
+      { title: "Checkout flow", level: "story", productId: product, ...over },
+      asAlice,
+      "item.created",
+    );
+  }
+
+  it("tells the person an item was handed to", async () => {
+    const item = await newItem();
+    await store.updateFeature(item.specId, { assigneeId: user.bob }, asAlice, [
+      {
+        type: "item.assigned",
+        productId: product,
+        data: {
+          specId: item.specId,
+          title: item.title,
+          level: item.level,
+          assigneeId: user.bob,
+          previousAssigneeId: null,
+        },
+      },
+    ]);
+
+    const rows = await drain();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      recipient_id: user.bob,
+      type: "item.assigned",
+      actor_id: user.alice,
+    });
+    // The headline says only "assigned you an item"; without the title in the
+    // snippet the row does not say which one.
+    expect(rows[0]!.snippet).toContain("Checkout flow");
+  });
+
+  it("tells nobody when you assign an item to yourself", async () => {
+    const item = await newItem();
+    await store.updateFeature(
+      item.specId,
+      { assigneeId: user.alice },
+      asAlice,
+      [
+        {
+          type: "item.assigned",
+          productId: product,
+          data: {
+            specId: item.specId,
+            title: item.title,
+            level: item.level,
+            assigneeId: user.alice,
+            previousAssigneeId: null,
+          },
+        },
+      ],
+    );
+
+    expect(await drain()).toEqual([]);
+  });
+
+  it("tells nobody about an item handed to somebody who has left", async () => {
+    // The membership row still exists, deactivated. A recipient list built from
+    // the item alone would keep mailing her.
+    const item = await newItem();
+    await store.updateFeature(item.specId, { assigneeId: user.dana }, asAlice, [
+      {
+        type: "item.assigned",
+        productId: product,
+        data: {
+          specId: item.specId,
+          title: item.title,
+          level: item.level,
+          assigneeId: user.dana,
+          previousAssigneeId: null,
+        },
+      },
+    ]);
+
+    expect(await drain()).toEqual([]);
+  });
+
+  it("tells the assignee when their item moves stage", async () => {
+    const item = await newItem({ assigneeId: user.bob });
+    await drain(); // clear the assignment raised by the create
+    await owner`delete from notifications where workspace_id = ${ws}`;
+
+    await store.updateFeature(item.specId, { status: "defining" }, asAlice, [
+      {
+        type: "item.status_changed",
+        productId: product,
+        data: {
+          specId: item.specId,
+          title: item.title,
+          level: item.level,
+          from: item.status,
+          to: "defining",
+        },
+      },
+    ]);
+
+    const rows = await drain();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      recipient_id: user.bob,
+      type: "item.status_changed",
+    });
+    expect(rows[0]!.snippet).toContain("defining");
+  });
+
+  it("tells the person a card is created for, not just the person who made it", async () => {
+    // Creating a card already assigned to somebody is how work is handed over.
+    await newItem({ assigneeId: user.bob });
+
+    const rows = await drain();
+    expect(rows.map((r) => r.type)).toEqual(["item.assigned"]);
+    expect(rows[0]!.recipient_id).toBe(user.bob);
+  });
+
+  it("separates being named in a comment from being kept in the loop", async () => {
+    const item = await newItem({ assigneeId: user.carol });
+    await drain();
+    await owner`delete from notifications where workspace_id = ${ws}`;
+
+    await store.createComment(
+      item.specId,
+      { body: "@Bob can you look at this?", mentionedUserIds: [user.bob] },
+      asAlice,
+    );
+
+    const rows = await drain();
+    // Bob was spoken to; Carol owns the item and is being kept informed. They
+    // are tuned separately in preferences, so they must not arrive as one type.
+    expect(
+      rows
+        .map((r) => ({ who: r.recipient_id, type: r.type }))
+        .sort((a, b) => a.type.localeCompare(b.type)),
+    ).toEqual([
+      { who: user.carol, type: "comment.created" },
+      { who: user.bob, type: "comment.mentioned" },
+    ]);
+    // Both point at the comment, so the inbox can deep-link to it.
+    expect(rows.every((r) => r.comment_id !== null)).toBe(true);
+  });
+
+  it("never sends the quieter comment notice to somebody it already mentioned", async () => {
+    // Bob is both the assignee and the person named. One notice, the louder one.
+    const item = await newItem({ assigneeId: user.bob });
+    await drain();
+    await owner`delete from notifications where workspace_id = ${ws}`;
+
+    await store.createComment(
+      item.specId,
+      { body: "@Bob thoughts?", mentionedUserIds: [user.bob] },
+      asAlice,
+    );
+
+    const rows = await drain();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.type).toBe("comment.mentioned");
+  });
+
+  it("ignores a mention of somebody outside the workspace", async () => {
+    // A user id that is not a member at all, as opposed to one who has left.
+    // Both have to be dropped, and only the membership query can tell either.
+    const stranger = randomUUID();
+    const item = await newItem();
+    await store.createComment(
+      item.specId,
+      { body: "@Nobody hello", mentionedUserIds: [stranger] },
+      asAlice,
+    );
+
+    expect(await drain()).toEqual([]);
+  });
+
+  it("tells nobody about a comment on an item nobody owns", async () => {
+    const item = await newItem();
+    await store.createComment(
+      item.specId,
+      { body: "Thinking out loud." },
+      asAlice,
+    );
+    expect(await drain()).toEqual([]);
+  });
+
+  it("rolls a new child up to whoever owns the parent", async () => {
+    const parent = await store.createFeature(
+      {
+        title: "Checkout",
+        level: "epic",
+        productId: product,
+        assigneeId: user.bob,
+      },
+      asAlice,
+      "item.created",
+    );
+    await drain();
+    await owner`delete from notifications where workspace_id = ${ws}`;
+
+    await newItem({ title: "Card payments", parentSpecId: parent.specId });
+
+    const rows = await drain();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      recipient_id: user.bob,
+      type: "item.created",
+    });
+    expect(rows[0]!.snippet).toContain("Card payments");
+    expect(rows[0]!.snippet).toContain("Checkout");
+  });
+
+  it("says nothing when an item is created with no parent to roll up to", async () => {
+    await newItem();
+    expect(await drain()).toEqual([]);
+  });
+
+  it("tells each person once that a release shipped, however many items they had", async () => {
+    const release = randomUUID();
+    await owner`insert into releases (id, workspace_id, product_id, name, status)
+      values (${release}, ${ws}, ${product}, 'v9.9.9', 'planned')`;
+    const first = await newItem({ title: "One", assigneeId: user.bob });
+    const second = await newItem({ title: "Two", assigneeId: user.bob });
+    await owner`update features set release_id = ${release}
+      where spec_id in (${first.specId}, ${second.specId})`;
+    await drain();
+    await owner`delete from notifications where workspace_id = ${ws}`;
+
+    await store.updateRelease(release, { status: "shipped" }, asAlice, {
+      type: "release.shipped",
+      productId: product,
+      data: { releaseId: release, name: "v9.9.9", itemCount: 2 },
+    });
+
+    const rows = await drain();
+    // Two items, one person, one notice. Per-item rows would make shipping a
+    // release the single noisiest thing the product can do.
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      recipient_id: user.bob,
+      type: "release.shipped",
+    });
+    expect(rows[0]!.snippet).toContain("2 of your items");
+  });
+
+  it("raises nothing for a deleted item, whose inbox row could not survive it", async () => {
+    // `notifications.feature_id` is NOT NULL and cascades, so a notice about a
+    // deleted item cannot exist. The event still has to be processed, not stuck.
+    const item = await newItem({ assigneeId: user.bob });
+    await drain();
+    await owner`delete from notifications where workspace_id = ${ws}`;
+
+    await store.deleteFeature(item.specId, asAlice, {
+      type: "item.deleted",
+      productId: product,
+      data: { specId: item.specId, title: item.title, level: item.level },
+    });
+
+    expect(await drain()).toEqual([]);
+    const [pending] = await owner`
+      select count(*)::int as n from outbox_events
+      where workspace_id = ${ws} and processed_at is null`;
+    expect(pending!.n).toBe(0);
+  });
+
+  it("expands an event once, however often the relay runs", async () => {
+    const item = await newItem();
+    await store.updateFeature(item.specId, { assigneeId: user.bob }, asAlice, [
+      {
+        type: "item.assigned",
+        productId: product,
+        data: {
+          specId: item.specId,
+          title: item.title,
+          level: item.level,
+          assigneeId: user.bob,
+          previousAssigneeId: null,
+        },
+      },
+    ]);
+
+    await drain();
+    const rows = await drain();
+    // The `processedAt` stamp commits with the rows, so a second sweep finds
+    // nothing to expand. A duplicate here would mean every restart re-notified.
+    expect(rows).toHaveLength(1);
+  });
+});

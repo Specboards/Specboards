@@ -109,16 +109,22 @@ else.
 ### What the role can reach (verified surface)
 
 Grants are scoped to exactly these tables (`infra/worker-role.sql`); the role
-has **no** grant on auth, `api_keys`, `members`, `comments`, `activity_log`,
-`releases`, `ideas`, `saved_views`, `feature_links`, `board_preferences`, or any
-other table, so a bug in a worker path cannot reach them.
+has **no** grant on auth, `api_keys`, `comments`, `activity_log`, `releases`,
+`ideas`, `saved_views`, `feature_links`, `board_preferences`, or any other
+table, so a bug in a worker path cannot reach them.
 
 - Outbound delivery: `outbox_events` (S/U/D), `webhook_endpoints` (S/U),
   `webhook_deliveries` (S/I/U).
 - Incoming GitHub sync: `github_app` (S), `github_installations` (S/D),
   `repositories` (S/U), `feature_github_links` (S/I/U/D), `workspace_levels`
   (S), `features` (S/I/U/D), `spec_index` (S/I/U/D), `products` (S/I/U).
+- Notification fan-out: `notifications` (S/I), `members` (S).
 - Read-only context: `workspaces` (S), `users` (S).
+
+`members` is select-only, and is the one place the worker reads the roster: the
+fan-out has to drop a deactivated or departed person from a recipient list, and
+a notification is the one thing that would otherwise keep arriving for someone
+who has left. It can read the roster and cannot change it.
 
 Cross-workspace access on the RLS-enabled tables above comes from role-targeted
 policies (`<table>_worker_all ... FOR ALL TO specboards_worker USING (true)`).

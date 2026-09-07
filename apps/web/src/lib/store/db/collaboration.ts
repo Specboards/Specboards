@@ -1,11 +1,14 @@
 /**
  * Comments and notifications: the two halves of one conversation.
  *
- * They share a module because they share a write. Posting a comment that
- * mentions someone inserts the notification rows in the same transaction as
- * the comment itself, so a mention can never exist without the comment that
- * made it, and a comment can never be posted without notifying the people it
- * names. Splitting them would put that invariant across a seam.
+ * They share a module because they share a reading surface. Posting a comment
+ * no longer inserts the notification rows directly; it records a
+ * `comment.created` outbox event in the same transaction, and the notification
+ * fan-out decides who hears about it. The invariant survives the move (the
+ * event and the comment still commit together, so a comment nobody is told
+ * about is still impossible), and the gain is that one place now answers "who
+ * should be told" for every kind of change rather than each write site
+ * answering it for itself.
  *
  * Reads on both sides are filtered by product visibility rather than refused:
  * a comment on an item the caller cannot see is not an error, it is simply
@@ -24,9 +27,7 @@ import {
   desc,
   eq,
   features,
-  inArray,
   isNull,
-  members,
   notifications,
   products,
   users,
@@ -105,52 +106,32 @@ export async function createComment(
       .returning();
     if (!row) throw new CommentError("Failed to create the comment.");
 
-    // Fan out @mention notifications in the SAME transaction as the comment,
-    // so a crash can't leave a comment without its notices (or vice-versa).
-    // Recipients are the mentioned users that are active workspace members,
-    // minus the author, de-duped. A `comment.mentioned` outbox event lets
-    // future delivery channels (email/Slack) hook in without touching ctx.
-    const mentioned = [...new Set(input.mentionedUserIds ?? [])].filter(
-      (id) => id !== scope!.userId,
-    );
-    if (mentioned.length > 0) {
-      const activeRows = await tx
-        .select({ userId: members.userId })
-        .from(members)
-        .where(
-          and(
-            eq(members.workspaceId, ws),
-            inArray(members.userId, mentioned),
-            isNull(members.deactivatedAt),
-          ),
-        );
-      const recipients = activeRows.map((r) => r.userId);
-      if (recipients.length > 0) {
-        const snippet = commentSnippet(body);
-        await tx.insert(notifications).values(
-          recipients.map((recipientId) => ({
-            workspaceId: ws,
-            recipientId,
-            actorId: scope!.userId,
-            type: "mention",
-            featureId: feat.id,
-            commentId: row.id,
-            snippet,
-          })),
-        );
-        await ctx.writeOutbox(tx, scope!, {
-          type: "comment.mentioned",
-          productId: feat.productId,
-          data: {
-            commentId: row.id,
-            featureId: feat.id,
-            specId,
-            recipientIds: recipients,
-            snippet,
-          },
-        });
-      }
-    }
+    // Record the comment as an outbox event in the SAME transaction as the
+    // comment itself, so a crash cannot leave a comment that nobody is ever
+    // told about. Who hears about it, and whether it reaches them as a mention
+    // or as an update on an item they follow, is resolved by the notification
+    // fan-out off this event (see lib/notifications/fanout.ts).
+    //
+    // This used to insert the mention rows here, inline. Moving them behind the
+    // event is what lets one place decide recipients for every kind of change,
+    // rather than each write site inventing its own answer; the durability
+    // argument for doing it inline is unchanged, because the event and the
+    // comment still commit together.
+    //
+    // The mention list is passed through raw. The fan-out filters it to active
+    // members and drops the author, and doing it twice in two places is how the
+    // two would eventually disagree.
+    await ctx.writeOutbox(tx, scope!, {
+      type: "comment.created",
+      productId: feat.productId,
+      data: {
+        commentId: row.id,
+        featureId: feat.id,
+        specId,
+        mentionedUserIds: [...new Set(input.mentionedUserIds ?? [])],
+        snippet: commentSnippet(body),
+      },
+    });
 
     // The author is the acting user; resolve their display fields so the
     // created row renders without a follow-up fetch.

@@ -8,8 +8,10 @@
 
 export const WEBHOOK_EVENT_TYPES = [
   "item.status_changed",
+  "item.assigned",
   "item.created",
   "item.deleted",
+  "comment.created",
   "release.shipped",
 ] as const;
 
@@ -26,8 +28,10 @@ export const WEBHOOK_FAILURE_DISABLE_THRESHOLD = 5;
 /** Human labels for the settings UI checkboxes. */
 export const WEBHOOK_EVENT_LABELS: Record<WebhookEventType, string> = {
   "item.status_changed": "Item status changed",
+  "item.assigned": "Item assigned",
   "item.created": "Item created",
   "item.deleted": "Item deleted",
+  "comment.created": "Comment posted",
   "release.shipped": "Release shipped",
 };
 

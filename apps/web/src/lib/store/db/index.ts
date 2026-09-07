@@ -427,7 +427,7 @@ export class DbStore implements FeatureStore, DbStoreContext {
     specId: string,
     patch: FeaturePatch,
     scope?: WorkspaceScope,
-    emit?: OutboxEmit,
+    emit?: OutboxEmit | readonly OutboxEmit[],
   ): Promise<void> {
     return itemWriteStore.updateFeature(this, specId, patch, scope, emit);
   }

@@ -345,6 +345,24 @@ export async function createFeature(
           status: row.status,
         },
       });
+      // Creating a card already assigned to somebody is how work is handed
+      // over, so it is an assignment as much as a creation. Without this the
+      // one flow whose whole purpose is to tell a person about an item is the
+      // one flow that tells them nothing. Assigning yourself emits nothing:
+      // the relay would drop it as the actor's own action anyway.
+      if (row.assigneeId && row.assigneeId !== scope!.userId) {
+        await ctx.writeOutbox(tx, scope!, {
+          type: "item.assigned",
+          productId: row.productId,
+          data: {
+            specId: row.specId,
+            title: row.title,
+            level: row.level,
+            assigneeId: row.assigneeId,
+            previousAssigneeId: null,
+          },
+        });
+      }
     }
 
     return {
@@ -525,7 +543,7 @@ export async function updateFeature(
   specId: string,
   patch: FeaturePatch,
   scope?: WorkspaceScope,
-  emit?: OutboxEmit,
+  emit?: OutboxEmit | readonly OutboxEmit[],
 ): Promise<void> {
   // `parentSpecId` isn't a column, so translate it to the parent row's `parentId`.
   const { parentSpecId, ...rest } = patch;
@@ -659,7 +677,9 @@ export async function updateFeature(
       },
       changes,
     );
-    if (emit) await ctx.writeOutbox(tx, scope!, emit);
+    for (const e of emit ? (Array.isArray(emit) ? emit : [emit]) : []) {
+      await ctx.writeOutbox(tx, scope!, e);
+    }
   });
 }
 

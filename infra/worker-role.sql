@@ -4,8 +4,10 @@
 -- entirely. Moving them onto this narrow, non-owner role means a bug in the
 -- worker paths can only reach the handful of tables below, and RLS is a live
 -- backstop on every other table (the role has no grant on auth, api_keys,
--- members, comments, activity_log, releases, ideas, saved_views, feature_links,
--- board_preferences, ... so it cannot read or write them at all).
+-- comments, activity_log, releases, ideas, saved_views, feature_links,
+-- board_preferences, ... so it cannot read or write them at all). `members` is
+-- readable but not writable: the notification fan-out has to know who is still
+-- an active member and nothing more.
 --
 -- Runs ONCE per database (test, then prod) as a superuser / the table owner,
 -- alongside infra/rls-role.sql. Infrastructure, not a schema migration: role
@@ -89,6 +91,12 @@ grant select, insert, update            on products           to specboards_work
 -- Sync resolves each repo's default product from its links (read-only).
 grant select                            on product_repositories to specboards_worker;
 
+-- Notification fan-out (relay). Resolving who to tell about an event needs to
+-- know who is still an active member of the workspace: a departed or
+-- deactivated person must not keep receiving an inbox. Select only, and no
+-- write of any kind: the worker reads the roster and never edits it.
+grant select                            on members            to specboards_worker;
+
 -- Read-only context both paths need to build envelopes / resolve scope.
 grant select                            on workspaces         to specboards_worker;
 grant select                            on users              to specboards_worker; -- no RLS
@@ -106,7 +114,8 @@ declare
     'outbox_events', 'webhook_endpoints', 'webhook_deliveries',
     'github_installations', 'repositories', 'feature_github_links',
     'workspace_levels', 'features', 'spec_index', 'products',
-    'product_repositories', 'workspaces', 'item_events', 'notifications'
+    'product_repositories', 'workspaces', 'item_events', 'notifications',
+    'members'
   ];
 begin
   foreach t in array worker_tables loop
