@@ -206,11 +206,71 @@ async function main(): Promise<void> {
   }
 }
 
+/** Longest slice of a failed statement worth printing. */
+const QUERY_EXCERPT = 400;
+
+/**
+ * A failure report that leads with the reason.
+ *
+ * Two things made the original one useless at the moment it mattered. Drizzle
+ * wraps a failed migration in an error whose *message is the entire SQL file*
+ * and whose `cause` holds the only sentence that says what Postgres objected
+ * to, so printing `err.stack` gave four thousand lines of echoed schema and no
+ * reason. And `process.exit()` does not wait for a pending `stderr` write, so
+ * that flood was then truncated part-way through, taking the cause with it.
+ *
+ * So: the cause first, the Postgres fields next, and the failing statement last
+ * and clipped. The process sets an exit code and ends on its own, which lets
+ * the write drain.
+ */
+function describe(err: unknown): string {
+  const lines: string[] = [];
+  const causes: string[] = [];
+
+  let current: unknown = err;
+  let depth = 0;
+  while (current instanceof Error && depth < 5) {
+    const pg = current as {
+      message: string;
+      code?: string;
+      detail?: string;
+      hint?: string;
+      position?: string;
+      cause?: unknown;
+    };
+    if (depth > 0 || !pg.message.startsWith("Failed query:")) {
+      causes.push(pg.message.split("\n")[0] ?? pg.message);
+    }
+    const fields = [
+      pg.code ? `code ${pg.code}` : null,
+      pg.detail ? `detail: ${pg.detail}` : null,
+      pg.hint ? `hint: ${pg.hint}` : null,
+      pg.position ? `position: ${pg.position}` : null,
+    ].filter(Boolean);
+    if (fields.length > 0) causes.push(`  ${fields.join(", ")}`);
+    current = pg.cause;
+    depth++;
+  }
+
+  lines.push(causes.length > 0 ? causes.join("\n") : String(err));
+
+  if (err instanceof Error && err.message.startsWith("Failed query:")) {
+    const query = err.message.slice("Failed query:".length).trim();
+    const excerpt =
+      query.length > QUERY_EXCERPT
+        ? `${query.slice(0, QUERY_EXCERPT)}\n  … (${query.length} chars total)`
+        : query;
+    lines.push(`while running:\n${excerpt}`);
+  }
+  return lines.join("\n");
+}
+
 main().catch((err: unknown) => {
   // Exit non-zero so Fly aborts the release and the previous version keeps
   // serving, rather than promoting code whose schema never landed.
-  process.stderr.write(
-    `[migrate] failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}\n`,
-  );
-  process.exit(1);
+  //
+  // `exitCode` rather than `process.exit()`: the latter tears the process down
+  // without draining stderr, which silently cut this very message in half.
+  process.stderr.write(`[migrate] failed: ${describe(err)}\n`);
+  process.exitCode = 1;
 });
