@@ -11,6 +11,7 @@ import {
 } from "@/components/board-selection";
 import { CardFieldsMenu } from "@/components/card-fields-menu";
 import { EmptyState } from "@/components/empty-state";
+import { ConnectRepoPrompt } from "@/components/connect-repo-prompt";
 import { NoSpecsEmptyState } from "@/components/no-specs-empty-state";
 import { LevelSwitcher } from "@/components/level-switcher";
 import { WorkItemCreate } from "@/components/work-item-create";
@@ -362,16 +363,23 @@ export async function BoardView({
                 createAction={newItemButton}
               />
             ) : (
-              <EmptyState
-                className="mt-8"
-                title={`No ${activeLevel.label.toLowerCase()} items yet`}
-                description={
-                  canEdit
-                    ? `${activeLevel.label} items collect the work one level down so this board can show progress at a higher altitude. Create the first one and it appears here, ready to move through your workflow.`
-                    : `${activeLevel.label} items collect the work one level down. Once someone with edit access creates one, it appears here.`
-                }
-                action={newItemButton}
-              />
+              // The leaf state above already offers "Connect a repository";
+              // the levels over it did not, and this is the empty board a new
+              // operator actually lands on. Renders nothing once a repository
+              // is connected.
+              <div className="space-y-4">
+                <EmptyState
+                  className="mt-8"
+                  title={`No ${activeLevel.label.toLowerCase()} items yet`}
+                  description={
+                    canEdit
+                      ? `${activeLevel.label} items collect the work one level down so this board can show progress at a higher altitude. Create the first one and it appears here, ready to move through your workflow.`
+                      : `${activeLevel.label} items collect the work one level down. Once someone with edit access creates one, it appears here.`
+                  }
+                  action={newItemButton}
+                />
+                <ConnectRepoPrompt access={access} />
+              </div>
             )
           ) : features.length === 0 ? (
             <EmptyState

@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { descendantGroupIds, resolveProductColor } from "@specboards/core";
 
+import { ConnectRepoPrompt } from "@/components/connect-repo-prompt";
 import { EmptyState } from "@/components/empty-state";
 import { GoalProgressPair } from "@/components/goal-progress";
 import { StatusDot } from "@/components/status-dot";
@@ -207,6 +208,10 @@ export default async function LeadershipDashboardPage() {
           labels={workflow.labels}
         />
       </div>
+
+      {/* The first thing a fresh instance is missing, said where the operator
+          actually lands. Renders nothing once a repository is connected. */}
+      <ConnectRepoPrompt access={access} />
 
       {summary.products.length === 0 ? (
         <EmptyState
