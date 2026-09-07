@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { buildNavGroups, HIDDEN_PREFIXES } from "@/lib/nav-model";
+import { useResetOnChange } from "@/lib/use-reset-on-change";
 import {
   useOrgPath,
   useOrgProductPath,
@@ -42,7 +43,7 @@ export function CommandPalette() {
 
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [highlight, setHighlight] = useState(0);
+  const [rawHighlight, setHighlight] = useState(0);
 
   const hidden = HIDDEN_PREFIXES.some((p) => pathname.startsWith(p)) || !orgSlug;
 
@@ -88,18 +89,21 @@ export function CommandPalette() {
     );
   }, [commands, query]);
 
-  // Keep the highlight in range as the result set shrinks/grows.
-  useEffect(() => {
-    setHighlight((h) => (results.length === 0 ? 0 : Math.min(h, results.length - 1)));
-  }, [results.length]);
+  // Keep the highlight in range as the result set shrinks/grows. Clamped at the
+  // point of use rather than corrected in an effect: typing narrows the results
+  // on the same keystroke that renders them, and the effect version highlighted
+  // a row that was no longer there for a frame -- long enough for Enter to open
+  // the wrong command.
+  const highlight =
+    results.length === 0 ? 0 : Math.min(rawHighlight, results.length - 1);
 
   // Reset transient state each time the palette opens.
-  useEffect(() => {
+  useResetOnChange(open, () => {
     if (open) {
       setQuery("");
       setHighlight(0);
     }
-  }, [open]);
+  });
 
   const go = useCallback(
     (href: string) => {
@@ -110,12 +114,17 @@ export function CommandPalette() {
   );
 
   function onInputKeyDown(e: React.KeyboardEvent) {
+    // Moves from the clamped `highlight`, not the raw state. They differ
+    // whenever the results have shrunk since the last keypress, and stepping
+    // from a row that is no longer on screen lands somewhere arbitrary.
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setHighlight((h) => (results.length ? (h + 1) % results.length : 0));
+      setHighlight(results.length ? (highlight + 1) % results.length : 0);
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      setHighlight((h) => (results.length ? (h - 1 + results.length) % results.length : 0));
+      setHighlight(
+        results.length ? (highlight - 1 + results.length) % results.length : 0,
+      );
     } else if (e.key === "Enter") {
       e.preventDefault();
       const target = results[highlight];

@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useMemo } from "react";
 import Link from "next/link";
 import { ChevronDown, ChevronRight, Target } from "lucide-react";
 
@@ -8,6 +8,8 @@ import { EmptyState } from "@/components/empty-state";
 import { StatusDot } from "@/components/status-dot";
 import { statusDotColor, statusLabel } from "@/lib/feature-helpers";
 import { goalStatusDotColor, goalStatusLabel } from "@/lib/goal-status";
+import { newSet } from "@/lib/new-set";
+import { useStoredIdSet } from "@/lib/use-stored-id-set";
 import { orgProductPath } from "@/lib/org-path";
 import type { GoalTimelineModel } from "@/lib/roadmap-goals";
 import { formatSpan, projectDay } from "@/lib/roadmap-timeline";
@@ -70,28 +72,8 @@ export function RoadmapGoalLanes({
   const todayPct = projectDay(today, axis);
   const storageKey = `specboards.timeline.goals.${stateKey}`;
 
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
-  const [restored, setRestored] = useState(false);
+  const [collapsed, setCollapsed] = useStoredIdSet(storageKey, newSet);
 
-  useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem(storageKey);
-      if (saved) setCollapsed(new Set(JSON.parse(saved) as string[]));
-      else setCollapsed(new Set());
-    } catch {
-      // A quota-blocked or private-mode browser just gets the default shape.
-    }
-    setRestored(true);
-  }, [storageKey]);
-
-  useEffect(() => {
-    if (!restored) return;
-    try {
-      window.localStorage.setItem(storageKey, JSON.stringify([...collapsed]));
-    } catch {
-      // Persistence is a nicety; never let it break the view.
-    }
-  }, [collapsed, restored, storageKey]);
 
   const collapsibleIds = useMemo(
     () => lanes.filter((l) => l.rows.length > 0).map((l) => l.goal.id),
@@ -101,12 +83,10 @@ export function RoadmapGoalLanes({
     collapsibleIds.length > 0 && collapsibleIds.every((id) => collapsed.has(id));
 
   function toggle(goalId: string): void {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(goalId)) next.delete(goalId);
-      else next.add(goalId);
-      return next;
-    });
+    const next = new Set(collapsed);
+    if (next.has(goalId)) next.delete(goalId);
+    else next.add(goalId);
+    setCollapsed(next);
   }
 
   function itemHref(level: string, specId: string): string {

@@ -2,7 +2,7 @@
 
 import { Menu } from "lucide-react";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import {
   BrandMark,

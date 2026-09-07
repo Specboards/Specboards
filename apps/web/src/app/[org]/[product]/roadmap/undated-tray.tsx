@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ChevronDown } from "lucide-react";
 
 import { StatusDot } from "@/components/status-dot";
 import { cn } from "@/lib/utils";
+import { useStoredValue } from "@/lib/use-stored-value";
 
 /** One item that could not be placed on the axis. */
 type UndatedItem = {
@@ -16,24 +16,11 @@ type UndatedItem = {
   href: string;
 };
 
-const STORAGE_PREFIX = "specboards.roadmap.undated.";
+const EXPANDED_PREFIX = "specboards.roadmap.undated.";
 
-function readExpanded(key: string): boolean | undefined {
-  try {
-    const raw = window.localStorage.getItem(STORAGE_PREFIX + key);
-    return raw === null ? undefined : raw === "1";
-  } catch {
-    return undefined;
-  }
-}
-
-function writeExpanded(key: string, expanded: boolean) {
-  try {
-    window.localStorage.setItem(STORAGE_PREFIX + key, expanded ? "1" : "0");
-  } catch {
-    // Persistence is best-effort.
-  }
-}
+/** No stored choice reads as collapsed, which is what the server renders. */
+const parseExpanded = (raw: string | null) => raw === "1";
+const serializeExpanded = (expanded: boolean) => (expanded ? "1" : "0");
 
 /**
  * The tray of items the timeline could not plot.
@@ -60,21 +47,19 @@ export function UndatedTray({
   /** Identifies this scope+view, so one roadmap's choice is not another's. */
   stateKey: string;
 }) {
-  // Server-render collapsed, then reconcile with the stored choice after mount
-  // so there is no SSR mismatch.
-  const [expanded, setExpanded] = useState(false);
-
-  useEffect(() => {
-    setExpanded(readExpanded(stateKey) ?? false);
-  }, [stateKey]);
+  // Server-renders collapsed and hydration agrees, then the stored choice is in
+  // place from the first client render rather than reconciled a render later.
+  const [expanded, setExpanded] = useStoredValue(
+    `${EXPANDED_PREFIX}${stateKey}`,
+    parseExpanded,
+    serializeExpanded,
+    false,
+  );
 
   if (items.length === 0) return null;
 
   function toggle() {
-    setExpanded((prev) => {
-      writeExpanded(stateKey, !prev);
-      return !prev;
-    });
+    setExpanded(!expanded);
   }
 
   const listId = `undated-${stateKey}`;

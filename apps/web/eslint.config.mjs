@@ -76,25 +76,20 @@ export default [
       ],
     },
   },
-  {
-    // eslint-config-next 16 brings eslint-plugin-react-hooks 7 (we were on 5),
-    // which grows the recommended set from 2 rules to 16 by adding the React
-    // Compiler checks. Thirteen of those fourteen new rules already pass and
-    // stay at `error`, so the upgrade buys us that coverage for free.
-    //
-    // These three fire on existing code: 34 set-state-in-effect across 30
-    // files, 6 immutability, 1 refs. They flag compiler-readiness rather than
-    // bugs; the largest group is the standard SSR hydration guard
-    // (`useEffect(() => setMounted(true), [])`) that next-themes documents.
-    // Rewriting the effect and ref plumbing of 30 components inside a version
-    // bump would put real behaviour change in a PR nobody would review as
-    // such, so they are warnings here and tracked as their own work. Nothing
-    // that failed the lint gate before this upgrade passes it now.
-    files: ["**/*.{ts,tsx}"],
-    rules: {
-      "react-hooks/set-state-in-effect": "warn",
-      "react-hooks/immutability": "warn",
-      "react-hooks/refs": "warn",
-    },
-  },
 ];
+
+// The three React Compiler rules that used to be downgraded here are gone from
+// this file, which is the point: they are back at the `error` that
+// eslint-config-next sets, alongside the other thirteen.
+//
+// They were warnings because the upgrade to eslint-plugin-react-hooks 7 found
+// 34 `set-state-in-effect` across 30 files, 6 `immutability` and 1 `refs`, and
+// rewriting the effect plumbing of 30 components inside a version bump would
+// have put real behaviour change in a PR nobody would review as such. That
+// work has now happened on its own: three shared hooks
+// (`useHydrated`, `useStoredValue`, `useResetOnChange`) replaced the patterns,
+// and the two remaining sites carry a targeted disable explaining that the rule
+// cannot see past an `await`.
+//
+// A number that is allowed to grow is not a gate, so there is no warning level
+// left to drift back into.

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { ChevronUp } from "lucide-react";
 import { toast } from "sonner";
 
@@ -25,6 +25,7 @@ import { createIdea, setIdeaVote, updateIdea } from "@/lib/api-client/ideas";
 import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import type { IdeaRecord } from "@/lib/store/types";
 import { cn } from "@/lib/utils";
+import { useResetOnChange } from "@/lib/use-reset-on-change";
 
 /** How the list is ordered. */
 type SortKey = "votes" | "newest" | "oldest";
@@ -336,10 +337,10 @@ function IdeaRow({
   // Reconcile with the server after a refresh (e.g. the same idea was voted on
   // from the detail drawer). Keyed on the primitive fields so it never clobbers
   // an in-flight optimistic toggle.
-  useEffect(() => {
+  useResetOnChange(`${idea.viewerHasVoted}|${idea.voteCount}`, () => {
     setVoted(idea.viewerHasVoted);
     setVotes(idea.voteCount);
-  }, [idea.viewerHasVoted, idea.voteCount]);
+  });
 
   function toggleVote() {
     const next = !voted;

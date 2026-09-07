@@ -23,6 +23,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useOrgProductPath } from "@/lib/use-org";
+import { useResetOnChange } from "@/lib/use-reset-on-change";
 import type { ConnectedRepo } from "@/components/repositories-manager/shared";
 import { CreateSpecRepoNudge } from "@/components/repositories-manager/create-spec-repo";
 
@@ -79,9 +80,14 @@ export function SpecImportPanel({
   const [importing, startImport] = useTransition();
   const [result, setResult] = useState<ImportResult | null>(null);
 
-  const rescan = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  /**
+   * The scan itself. Nothing is set before the first await, which is what lets
+   * the effect below call it: a synchronous `setLoading(true)` inside an effect
+   * is the thing `react-hooks/set-state-in-effect` is pointing at, and moving
+   * it to the two callers that are actually events is the fix rather than the
+   * workaround.
+   */
+  const runScan = useCallback(async () => {
     try {
       setScan(await scanWorkspaceSpecs());
     } catch (err) {
@@ -91,12 +97,35 @@ export function SpecImportPanel({
     }
   }, []);
 
-  // Re-scan on mount and whenever a new repo is connected (scanNonce bump),
-  // clearing any prior import result so the prompt reflects the current repos.
-  useEffect(() => {
+  /** Scan on the reader's say-so: shows the spinner, then scans. */
+  const rescan = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    await runScan();
+  }, [runScan]);
+
+  // Clearing the prior import result belongs to the change of repos, not to the
+  // scan: it must be gone in the render that starts the new scan, not one
+  // render later, or the panel briefly reports the last repo's import as this
+  // repo's.
+  // The spinner and the cleared error belong here with it, for the same reason:
+  // they describe the scan that is about to start, so they belong to the render
+  // that starts it.
+  useResetOnChange(scanNonce, () => {
     setResult(null);
-    void rescan();
-  }, [rescan, scanNonce]);
+    setLoading(true);
+    setError(null);
+  });
+
+  // Re-scan on mount and whenever a new repo is connected (scanNonce bump).
+  useEffect(() => {
+    // `runScan` awaits before it sets anything (that is why the spinner is set
+    // above instead of inside it), so nothing is set during this effect. The
+    // rule cannot see past the call, and fetching on mount is what effects are
+    // for.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void runScan();
+  }, [runScan, scanNonce]);
 
   function runImport() {
     startImport(async () => {

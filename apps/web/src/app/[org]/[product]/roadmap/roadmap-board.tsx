@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -51,6 +51,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
+import { useResetOnChange } from "@/lib/use-reset-on-change";
 import { patchFeature } from "@/lib/api-client/work-items";
 import { statusLabel } from "@/lib/feature-helpers";
 import { productBadge } from "@/lib/product-color";
@@ -157,9 +158,9 @@ export function RoadmapBoard({
   // Re-seed from the server whenever fresh features arrive (after a drop's
   // refresh, or an edit elsewhere). Placement holds only optimistic overrides
   // between a drop and its refresh; clearing it falls back to server truth.
-  useEffect(() => {
-    setPlacement({});
-  }, [features]);
+  // On the transition, so a card is never drawn in its optimistic column for a
+  // frame after the server has already said where it lives.
+  useResetOnChange(features, () => setPlacement({}));
 
   // Below md the roadmap is a swipe-column carousel: drag is off (columns pass
   // allowDrag && !isMobile) and horizontal swipes scroll between releases. On
@@ -196,10 +197,11 @@ export function RoadmapBoard({
   const clearSelection = useCallback(() => setSelected(new Set()), []);
 
   // Leaving multi-select drops whatever was selected, so re-entering never
-  // resurrects a stale selection.
-  useEffect(() => {
+  // resurrects a stale selection. On the transition, so the render that leaves
+  // the mode already has nothing selected.
+  useResetOnChange(selecting, () => {
     if (!selecting) setSelected(new Set());
-  }, [selecting]);
+  });
 
   const releaseOf = (f: FeatureRecord): string | null =>
     f.specId in placement ? placement[f.specId]! : f.releaseId;

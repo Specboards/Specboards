@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { ChevronUp } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";

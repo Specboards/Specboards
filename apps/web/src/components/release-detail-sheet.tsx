@@ -32,6 +32,7 @@ import {
   updateRelease,
 } from "@/lib/api-client/planning";
 import { AuthRequiredError } from "@/lib/api-client/request";
+import { useResetOnChange } from "@/lib/use-reset-on-change";
 import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import { statusLabel } from "@/lib/feature-helpers";
 import type { ReleaseItemGroup } from "@/lib/release-items";
@@ -513,10 +514,15 @@ function ReleaseItems({
   const [count, setCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
+  // Blanking belongs to the change of release, not the fetch: the previous
+  // release's items are never listed under the new release's heading.
+  useResetOnChange(releaseId, () => {
     setGroups(null);
     setError(null);
+  });
+
+  useEffect(() => {
+    let cancelled = false;
     getReleaseItems(releaseId)
       .then((res) => {
         if (cancelled) return;

@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { formatTokenEstimate } from "@/lib/ai/estimate";
+import { useResetOnChange } from "@/lib/use-reset-on-change";
 import { parseAnswer, proposalStarted } from "@/lib/ai/proposals";
 import type { AssistantMessageView } from "@/lib/assistant-service";
 import { useOrgPath } from "@/lib/use-org";
@@ -78,9 +79,9 @@ function ProposalReview({
   // Reset whenever the set of changes could have moved under the selection: a
   // stale index does not error, it applies a different change, which is the
   // one failure mode here that nobody would catch.
-  useEffect(() => {
+  useResetOnChange(`${hunkCount}|${current}|${draft}`, () => {
     setTaken(new Set(Array.from({ length: hunkCount }, (_, i) => i)));
-  }, [hunkCount, current, draft]);
+  });
 
   const toggleHunk = (index: number) =>
     setTaken((prev) => {

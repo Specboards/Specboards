@@ -7,6 +7,8 @@ import { toast } from "sonner";
 import { MarkdownEditor } from "@/components/markdown-editor";
 import { Button } from "@/components/ui/button";
 import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
+import { useHydrated } from "@/lib/use-hydrated";
+import { useResetOnChange } from "@/lib/use-reset-on-change";
 import {
   SpecConflictError,
   type SpecConflict,
@@ -157,13 +159,20 @@ export function SpecBodyEditor({
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
 
-  // Offer back anything left over from a previous visit, once, on mount.
-  useEffect(() => {
+  // Offer back anything left over from a previous visit. Keyed by the spec: a
+  // different item is a different draft.
+  //
+  // The key is null until hydration, so this fires once when it flips to the
+  // spec id and again whenever the spec changes. That gating is load-bearing
+  // twice over: the draft lives in localStorage, which the server cannot read,
+  // and rendering the banner before hydration would be a mismatch on the one
+  // component where a mismatch costs someone their unsaved writing.
+  const hydrated = useHydrated();
+  useResetOnChange(hydrated ? specId : null, () => {
+    if (!hydrated) return;
     const stored = readDraft(specId);
-    if (isDraftWorthOffering(stored, initial)) setDraft(stored);
-    // Keyed by the spec: a different item is a different draft.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [specId]);
+    setDraft(isDraftWorthOffering(stored, initial) ? stored : null);
+  });
 
   function onChange(markdown: string) {
     draftRef.current = markdown;
