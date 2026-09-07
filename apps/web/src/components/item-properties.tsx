@@ -42,6 +42,7 @@ import {
   statusOptions,
 } from "@/lib/feature-helpers";
 import { cn } from "@/lib/utils";
+import { useResetOnChange } from "@/lib/use-reset-on-change";
 import {
   cyclesForProduct,
   releasesForProduct,
@@ -167,20 +168,23 @@ export function ItemProperties({
 
   // Re-sync when the parent hands us a different item, or fresh server truth
   // for the same one (e.g. after a refresh following a save elsewhere).
-  useEffect(() => {
-    setStatusValue(feature.status);
-  }, [feature.status]);
-  useEffect(() => {
-    const next = riceStrings(feature);
-    riceRef.current = next;
-    setRice(next);
-  }, [
-    feature.specId,
-    feature.riceReach,
-    feature.riceImpact,
-    feature.riceConfidence,
-    feature.riceEffort,
-  ]);
+  //
+  // Done on the transition rather than in an effect. The effect version painted
+  // the previous item's status and RICE numbers once before correcting them,
+  // which on the flyout (it keeps the same component mounted across items) was
+  // a visible flash of the wrong item's values.
+  useResetOnChange(feature.status, () => setStatusValue(feature.status));
+  // One key covering every RICE field, because they are edited and saved as a
+  // set. `Object.is` needs a primitive, so the four numbers are joined rather
+  // than passed as a tuple that would be a new array every render.
+  useResetOnChange(
+    `${feature.specId}|${feature.riceReach}|${feature.riceImpact}|${feature.riceConfidence}|${feature.riceEffort}`,
+    () => {
+      const next = riceStrings(feature);
+      riceRef.current = next;
+      setRice(next);
+    },
+  );
 
   useEffect(() => {
     return () => {

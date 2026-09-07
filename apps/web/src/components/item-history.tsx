@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { AuthRequiredError } from "@/lib/api-client/request";
 import { listItemEvents } from "@/lib/api-client/work-items";
+import { useResetOnChange } from "@/lib/use-reset-on-change";
 import { historyEntries, type HistoryContext } from "@/lib/item-history";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -44,10 +45,16 @@ export function ItemHistory({
   > | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let active = true;
+  // Blanking belongs to the change of item, not to the fetch: doing it here
+  // means the previous item's history is never shown under the new item's
+  // heading, which the effect version allowed for one frame.
+  useResetOnChange(specId, () => {
     setEntries(null);
     setError(null);
+  });
+
+  useEffect(() => {
+    let active = true;
     listItemEvents(specId)
       .then((events) => {
         if (active) setEntries(historyEntries(events, context));

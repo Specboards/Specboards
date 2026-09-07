@@ -12,6 +12,7 @@ import { ListChecks } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { useIsMobile } from "@/lib/use-media-query";
+import { useResetOnChange } from "@/lib/use-reset-on-change";
 
 interface BoardSelection {
   /** Whether bulk actions are available at all (drives the toggle's presence). */
@@ -53,13 +54,21 @@ export function BoardSelectionProvider({
 }) {
   const isMobile = useIsMobile();
   const available = canSelect && !(disableOnMobile && isMobile);
-  const [selectMode, setSelectMode] = useState(false);
+  const [wantsSelectMode, setSelectMode] = useState(false);
+  // Gated at the point of use, so the render in which selection stops being
+  // available already reflects that. The effect this replaces turned it off one
+  // render late, which is a frame of a select bar that should not be there.
+  const selectMode = wantsSelectMode && available;
   const enter = useCallback(() => setSelectMode(true), []);
   const exit = useCallback(() => setSelectMode(false), []);
 
-  useEffect(() => {
+  // Gating alone would re-enter selection mode when availability came back
+  // (resizing away from mobile and back), which the effect did not do: it
+  // cleared the flag outright. Clear it here too, on the transition rather than
+  // after the fact, so the behaviour is the same one.
+  useResetOnChange(available, () => {
     if (!available) setSelectMode(false);
-  }, [available]);
+  });
 
   useEffect(() => {
     if (!selectMode) return;
@@ -74,7 +83,7 @@ export function BoardSelectionProvider({
     <BoardSelectionContext.Provider
       value={{
         canSelect: available,
-        selectMode: selectMode && available,
+        selectMode,
         enter,
         exit,
       }}

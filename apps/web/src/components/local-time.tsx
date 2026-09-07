@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useHydrated } from "@/lib/use-hydrated";
 
 /**
  * A timestamp that does not take the rest of the page down with it.
@@ -22,8 +22,16 @@ import { useEffect, useState } from "react";
  * ── How this avoids it ──────────────────────────────────────────────────────
  * The first render is derived from the ISO string itself, so the server and
  * the browser produce the same characters and hydration is clean. The viewer's
- * own timezone and locale are applied in an effect, which runs after React has
+ * own timezone and locale are applied from the next render on, once React has
  * stopped comparing. The cost is one frame of UTC, which beats a dead page.
+ *
+ * `useHydrated` rather than the `useState` + effect this used to be: the
+ * question is only ever "has hydration finished", the answer never changes
+ * again, and the formatted text is a pure function of the props once it has.
+ * Holding it in state meant storing something already derivable, and setting
+ * that state from an effect is what `react-hooks/set-state-in-effect` objects
+ * to. The frame of UTC is unchanged, because it is the hydration boundary that
+ * produces it, not the mechanism.
  */
 export function LocalTime({
   iso,
@@ -37,29 +45,33 @@ export function LocalTime({
   /** Shown when `iso` is null. Cards differ on "Never" versus "never". */
   fallback?: string;
 }) {
-  const [text, setText] = useState(() => beforeHydration(iso, options, fallback));
+  const hydrated = useHydrated();
+  return <>{format(hydrated, iso, options, fallback)}</>;
+}
 
-  useEffect(() => {
-    if (!iso) {
-      setText(fallback);
-      return;
-    }
-    const at = new Date(iso);
-    // A value the browser cannot parse keeps the placeholder rather than
-    // becoming "Invalid Date" in the middle of a settings screen.
-    if (Number.isNaN(at.getTime())) return;
-    setText(
-      at.toLocaleString(
-        undefined,
-        options ?? { dateStyle: "medium", timeStyle: "short" },
-      ),
-    );
-    // `options` is a literal at every call site, so it is compared by identity
-    // on purpose: re-running this effect costs nothing and the alternative is
-    // asking every caller to memoize a constant.
-  }, [iso, options, fallback]);
-
-  return <>{text}</>;
+/**
+ * The text to show, given whether the viewer's own settings may be applied yet.
+ *
+ * Everything here is a pure function of the arguments, which is the point: it
+ * runs during render on both sides of hydration and each side gets the answer
+ * that side must produce.
+ */
+function format(
+  hydrated: boolean,
+  iso: string | null,
+  options: Intl.DateTimeFormatOptions | undefined,
+  fallback: string,
+): string {
+  if (!hydrated) return beforeHydration(iso, options, fallback);
+  if (!iso) return fallback;
+  const at = new Date(iso);
+  // A value the browser cannot parse keeps the placeholder rather than
+  // becoming "Invalid Date" in the middle of a settings screen.
+  if (Number.isNaN(at.getTime())) return beforeHydration(iso, options, fallback);
+  return at.toLocaleString(
+    undefined,
+    options ?? { dateStyle: "medium", timeStyle: "short" },
+  );
 }
 
 /** Whether a format asks for a time at all, or only a date. */

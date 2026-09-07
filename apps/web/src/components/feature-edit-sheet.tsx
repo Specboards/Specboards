@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Maximize2 } from "lucide-react";
 
 import { ItemDetailView } from "@/components/item-detail-view";
@@ -17,6 +17,8 @@ import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import { getItemDetail } from "@/lib/api-client/work-items";
 import type { ItemDetailData } from "@/lib/item-detail";
 import { useIsMobile } from "@/lib/use-media-query";
+import { useResetOnChange } from "@/lib/use-reset-on-change";
+import { useStoredValue } from "@/lib/use-stored-value";
 import { useOrgProductPath } from "@/lib/use-org";
 
 const WIDTH_KEY = "specboard:item-flyout:width";
@@ -38,6 +40,13 @@ function clampWidth(px: number): number {
  * {@link ItemDetailView}. The flyout and the full page are therefore identical
  * in layout; only the chrome (drag-to-resize, "open fullscreen") differs.
  */
+/** Stored width is a plain number of pixels, clamped to what fits. */
+const parseWidth = (raw: string | null) => {
+  const saved = Number(raw);
+  return saved ? clampWidth(saved) : DEFAULT_WIDTH;
+};
+const serializeWidth = (value: number) => String(value);
+
 export function FeatureEditSheet({
   specId,
   onClose,
@@ -49,32 +58,39 @@ export function FeatureEditSheet({
   const router = useRouter();
   const [data, setData] = useState<ItemDetailData | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [width, setWidth] = useState(DEFAULT_WIDTH);
+  // Read as an external store rather than restored by a mount effect: the
+  // server renders the default, hydration agrees, and the stored width is in
+  // place from the first client render instead of one render later.
+  const [storedWidth, setStoredWidth] = useStoredValue(
+    WIDTH_KEY,
+    parseWidth,
+    serializeWidth,
+    DEFAULT_WIDTH,
+  );
+  // While a drag is in flight the width is transient: committing every
+  // pointermove would write to localStorage a hundred times per drag. `null`
+  // means "not dragging", so the stored value shows through.
+  const [dragWidth, setDragWidth] = useState<number | null>(null);
+  const dragWidthRef = useRef<number | null>(null);
+  const width = dragWidth ?? storedWidth;
   // Below sm the drawer is full-screen and the stored width / drag-to-resize
   // handle do not apply. (The drawer only opens on interaction, by which point
   // this has resolved, so there is no first-paint flash.)
   const isMobile = useIsMobile();
   const orgHref = useOrgProductPath();
 
-  // Restore the last-used width once on mount (client-only).
-  useEffect(() => {
-    try {
-      const saved = Number(window.localStorage.getItem(WIDTH_KEY));
-      if (saved) setWidth(clampWidth(saved));
-    } catch {
-      // best-effort
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!specId) {
-      setData(null);
-      setError(null);
-      return;
-    }
-    let cancelled = false;
+  // Blanking the panel belongs to the change of item, not to the effect that
+  // fetches it: doing it here means the previous item's body is never painted
+  // under the new item's heading, which is what the effect version allowed for
+  // one frame.
+  useResetOnChange(specId, () => {
     setData(null);
     setError(null);
+  });
+
+  useEffect(() => {
+    if (!specId) return;
+    let cancelled = false;
     getItemDetail(specId)
       .then((d) => {
         if (!cancelled) setData(d);
@@ -110,25 +126,25 @@ export function FeatureEditSheet({
   const onResizeStart = useCallback((e: React.PointerEvent) => {
     e.preventDefault();
     const onMove = (ev: PointerEvent) => {
-      setWidth(clampWidth(window.innerWidth - ev.clientX));
+      const next = clampWidth(window.innerWidth - ev.clientX);
+      dragWidthRef.current = next;
+      setDragWidth(next);
     };
     const onUp = () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       document.body.style.userSelect = "";
-      setWidth((w) => {
-        try {
-          window.localStorage.setItem(WIDTH_KEY, String(w));
-        } catch {
-          // best-effort
-        }
-        return w;
-      });
+      // Persist once, where the old functional updater did. The ref carries the
+      // final width out of the listener closure, which never saw the state.
+      const final = dragWidthRef.current;
+      if (final !== null) setStoredWidth(final);
+      dragWidthRef.current = null;
+      setDragWidth(null);
     };
     document.body.style.userSelect = "none";
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
-  }, []);
+  }, [setStoredWidth]);
 
   const fullscreenHref =
     data != null

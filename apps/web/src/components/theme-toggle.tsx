@@ -2,9 +2,8 @@
 
 import { Monitor, Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
-import { useEffect, useState } from "react";
-
 import { cn } from "@/lib/utils";
+import { useHydrated } from "@/lib/use-hydrated";
 
 const OPTIONS = [
   { value: "light", label: "Light", icon: Sun },
@@ -18,9 +17,9 @@ const OPTIONS = [
  */
 export function ThemeToggle({ className }: { className?: string }) {
   const { theme, setTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-  const active = mounted ? (theme ?? "system") : undefined;
+  // The theme is only knowable client-side, so the server renders a stable
+  // placeholder and the real choice appears once hydrated.
+  const active = useHydrated() ? (theme ?? "system") : undefined;
 
   return (
     <div
