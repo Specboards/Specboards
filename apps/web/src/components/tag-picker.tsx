@@ -73,7 +73,10 @@ export function TagPicker({
   }
 
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-1.5 px-2 py-1">
+    // No horizontal padding: the chips and the "Add tags" affordance carry
+    // their own, so the row starts on the same left edge as the selects above
+    // it rather than a padding's width to their right.
+    <div className="flex min-w-0 flex-wrap items-center gap-1.5 py-1">
       {/* What the surrounding form serializes. Not `disabled`, or FormData
           would drop it and every save would clear the item's tags. */}
       <input type="hidden" name={name} value={value.join(",")} />
@@ -163,7 +166,9 @@ export function TagPicker({
           type="button"
           size="sm"
           variant="ghost"
-          className="text-muted-foreground"
+          // px-3 rather than the sm size's px-2.5, so the label sits on the
+          // same 0.75rem inset as a select's text.
+          className="px-3 text-muted-foreground"
           onClick={() => setAdding(true)}
         >
           {value.length === 0 ? "Add tags" : "Add"}

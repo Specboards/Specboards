@@ -77,7 +77,12 @@ export function parseSavedViewPatch(body: unknown): SavedViewPatch {
   return patch;
 }
 
-/** Validate the filter bundle: only known keys, scalar string/number values. */
+/**
+ * Validate the filter bundle: only known keys, and either a list of strings
+ * (what a dimension holds now that it accepts several values) or a bare
+ * string/number, which is the shape views saved before that still carry and
+ * which an API client may reasonably still send.
+ */
 function parseFilters(value: unknown): SavedViewFilters {
   if (value === undefined || value === null) return {};
   if (typeof value !== "object" || Array.isArray(value)) {
@@ -90,8 +95,15 @@ function parseFilters(value: unknown): SavedViewFilters {
     }
     if (typeof raw === "string" || typeof raw === "number") {
       out[key] = raw;
+    } else if (Array.isArray(raw)) {
+      if (!raw.every((entry) => typeof entry === "string")) {
+        throw new InvalidViewError(`filters.${key} must be a list of strings.`);
+      }
+      out[key] = raw as string[];
     } else {
-      throw new InvalidViewError(`filters.${key} must be a string or number.`);
+      throw new InvalidViewError(
+        `filters.${key} must be a string, a number, or a list of strings.`,
+      );
     }
   }
   return out;

@@ -12,15 +12,26 @@ import {
   hasActiveFilters,
   type FeatureFilters,
 } from "@/lib/feature-filters";
-import type { SavedView, SavedViewFilters } from "@/lib/store/types";
+import {
+  savedFilterValues,
+  type SavedView,
+  type SavedViewFilters,
+} from "@/lib/store/types";
 import { Button } from "@/components/ui/button";
 
-/** Build a query string from a stored filter bundle (stable key order). */
+/**
+ * Build a query string from a stored filter bundle (stable key order).
+ *
+ * Goes through `savedFilterValues` rather than reading the field directly, so a
+ * view saved before filters became multi-value -- its dimensions are bare
+ * strings in jsonb, never rewritten -- still applies exactly as it did.
+ */
 function viewQuery(filters: SavedViewFilters): string {
   const params = new URLSearchParams();
   for (const key of FILTER_KEYS) {
-    const value = filters[key];
-    if (value !== undefined) params.set(key, String(value));
+    for (const value of savedFilterValues(filters[key])) {
+      params.append(key, value);
+    }
   }
   return params.toString();
 }
@@ -30,7 +41,7 @@ function toSavedFilters(filters: FeatureFilters): SavedViewFilters {
   const out: SavedViewFilters = {};
   for (const key of FILTER_KEYS) {
     const value = filters[key];
-    if (value !== undefined) out[key] = value;
+    if (value && value.length > 0) out[key] = value;
   }
   return out;
 }

@@ -1,27 +1,44 @@
 import type { FeatureRecord } from "@/lib/store/types";
 
 /**
- * Backlog filter state. Each dimension is single-valued and round-trips through
- * the URL query string so a filtered view is shareable/bookmarkable. Special
- * sentinels: `assignee="unassigned"`, `parent="none"` (top-level only),
+ * Backlog filter state.
+ *
+ * Each dimension holds a *list* of accepted values: an item passes a dimension
+ * when it matches any one of them (OR), and passes overall when it clears every
+ * dimension (AND). "Ready or In progress, assigned to me" is one question, and
+ * before this it could not be asked at all -- you got one status, or none.
+ *
+ * The lists round-trip through the URL query string as repeated params
+ * (`?status=ready&status=in_progress`) so a filtered view stays shareable and
+ * bookmarkable. Repeated rather than comma-joined because a value is arbitrary
+ * user data (a tag name), and a separator inside a value is a bug waiting for
+ * the first person who uses one.
+ *
+ * A single-valued URL from before this change still parses: one param, one
+ * entry in the list. Nothing needs rewriting and old links keep working.
+ *
+ * Special sentinels: `assignee="unassigned"`, `parent="none"` (top-level only),
  * `release="none"` (unscheduled only), and `cycle="none"` (in no cycle).
  */
 export interface FeatureFilters {
-  status?: string;
-  assignee?: string;
-  release?: string;
-  /** Owning cycle id, or "none" for items in no cycle. Independent of
+  status?: string[];
+  assignee?: string[];
+  release?: string[];
+  /** Owning cycle ids, or "none" for items in no cycle. Independent of
    * `release`: both can be set, and they narrow on different axes. */
-  cycle?: string;
-  tag?: string;
-  parent?: string;
-  /** Owning product id; only meaningful in the cross-product view. */
-  product?: string;
+  cycle?: string[];
+  tag?: string[];
+  parent?: string[];
+  /** Owning product ids; only meaningful in the cross-product view. */
+  product?: string[];
   /**
    * Inclusive date ranges on `date`-typed custom fields, keyed by property key.
    * An item passes when its value falls within every active range; an empty
    * value is excluded once a range is set. Round-trips as `cf_<key>_from` /
    * `cf_<key>_to` in the query string.
+   *
+   * A range, not a list: "between these two dates" already expresses the set,
+   * and two ranges OR'd together is a question nobody has asked for.
    */
   customDates?: Record<string, { from?: string; to?: string }>;
   /**
@@ -33,7 +50,7 @@ export interface FeatureFilters {
   showShipped?: boolean;
 }
 
-/** The single-value query keys — also the order the filter bar renders them. */
+/** The multi-value query keys — also the order the filter bar renders them. */
 export const FILTER_KEYS = [
   "status",
   "assignee",
@@ -43,6 +60,9 @@ export const FILTER_KEYS = [
   "parent",
   "product",
 ] as const;
+
+/** A dimension that holds a list of accepted values. */
+export type FilterKey = (typeof FILTER_KEYS)[number];
 
 /** Query param for the start of a custom date field's range. */
 function dateFromParam(key: string): string {
@@ -61,25 +81,63 @@ function first(value: string | string[] | undefined): string | undefined {
   return v && v.trim() !== "" ? v : undefined;
 }
 
+/**
+ * Every non-empty value a param carries, de-duplicated and in the order given.
+ * Accepts the scalar shape too, which is what a single-valued (pre-multi-select)
+ * link and Next's own searchParams both hand over.
+ */
+function values(value: string | string[] | undefined): string[] | undefined {
+  const raw = value === undefined ? [] : Array.isArray(value) ? value : [value];
+  const out: string[] = [];
+  for (const v of raw) {
+    const trimmed = v?.trim();
+    if (!trimmed || out.includes(trimmed)) continue;
+    out.push(trimmed);
+  }
+  return out.length > 0 ? out : undefined;
+}
+
 /** Parse untrusted searchParams into a {@link FeatureFilters}. */
 export function parseFeatureFilters(params: RawParams): FeatureFilters {
   const filters: FeatureFilters = {};
-  const status = first(params.status);
-  if (status) filters.status = status;
-  const assignee = first(params.assignee);
-  if (assignee) filters.assignee = assignee;
-  const release = first(params.release);
-  if (release) filters.release = release;
-  const cycle = first(params.cycle);
-  if (cycle) filters.cycle = cycle;
-  const tag = first(params.tag);
-  if (tag) filters.tag = tag;
-  const parent = first(params.parent);
-  if (parent) filters.parent = parent;
-  const product = first(params.product);
-  if (product) filters.product = product;
+  for (const key of FILTER_KEYS) {
+    const list = values(params[key]);
+    if (list) filters[key] = list;
+  }
   if (first(params.showShipped)) filters.showShipped = true;
   return filters;
+}
+
+/**
+ * Add or remove one value in a dimension, returning fresh filters.
+ *
+ * The whole interaction model for a multi-value filter is this one function:
+ * every menu row is a toggle, an unchecked last value drops the dimension (and
+ * so its chip), and there is no separate "clear this one" path to keep in step.
+ */
+export function toggleFilterValue(
+  filters: FeatureFilters,
+  key: FilterKey,
+  value: string,
+): FeatureFilters {
+  const current = filters[key] ?? [];
+  const next = current.includes(value)
+    ? current.filter((v) => v !== value)
+    : [...current, value];
+  const out = { ...filters };
+  if (next.length > 0) out[key] = next;
+  else delete out[key];
+  return out;
+}
+
+/** Drop a whole dimension (the chip's "Remove filter"). */
+export function clearFilterKey(
+  filters: FeatureFilters,
+  key: FilterKey,
+): FeatureFilters {
+  const out = { ...filters };
+  delete out[key];
+  return out;
 }
 
 /**
@@ -133,56 +191,62 @@ function customDateCount(filters: FeatureFilters): number {
 /** True when at least one filter dimension is set. */
 export function hasActiveFilters(filters: FeatureFilters): boolean {
   return (
-    FILTER_KEYS.some((k) => filters[k] !== undefined) ||
+    FILTER_KEYS.some((k) => (filters[k]?.length ?? 0) > 0) ||
     customDateCount(filters) > 0
   );
 }
 
-/** How many filter dimensions are set — drives the mobile "Filters" badge. */
+/**
+ * How many filter dimensions are set -- what the toolbar button's badge shows.
+ *
+ * Dimensions, not values: "Status is Ready or In progress" is one filter the
+ * user set, and counting it as two would make the badge climb every time they
+ * widened a filter rather than added one.
+ */
 export function countActiveFilters(filters: FeatureFilters): number {
   return (
-    FILTER_KEYS.filter((k) => filters[k] !== undefined).length +
+    FILTER_KEYS.filter((k) => (filters[k]?.length ?? 0) > 0).length +
     customDateCount(filters)
   );
 }
 
-/** Apply the filters to a feature list (AND across dimensions). */
+/** Does this item match any of a dimension's accepted values? */
+function matchesAny(
+  accepted: string[] | undefined,
+  /** The item's value for this dimension; null means "not set on the item". */
+  actual: string | null,
+  /** The sentinel that stands for "not set", if this dimension has one. */
+  noneSentinel?: string,
+): boolean {
+  if (!accepted || accepted.length === 0) return true;
+  return accepted.some((want) =>
+    noneSentinel !== undefined && want === noneSentinel
+      ? actual === null
+      : actual === want,
+  );
+}
+
+/** Apply the filters to a feature list (OR within a dimension, AND across). */
 export function applyFeatureFilters(
   features: FeatureRecord[],
   filters: FeatureFilters,
 ): FeatureRecord[] {
   return features.filter((f) => {
-    if (filters.status && f.status !== filters.status) return false;
-    if (filters.assignee) {
-      if (filters.assignee === "unassigned") {
-        if (f.assigneeId !== null) return false;
-      } else if (f.assigneeId !== filters.assignee) {
-        return false;
-      }
+    if (!matchesAny(filters.status, f.status)) return false;
+    if (!matchesAny(filters.assignee, f.assigneeId, "unassigned")) return false;
+    if (!matchesAny(filters.release, f.releaseId, "none")) return false;
+    if (!matchesAny(filters.cycle, f.cycleId, "none")) return false;
+    if (!matchesAny(filters.parent, f.parentSpecId, "none")) return false;
+    if (!matchesAny(filters.product, f.productId)) return false;
+    // Tags are the one many-to-many dimension: the item carries a list too, so
+    // it passes when the two lists intersect at all.
+    if (
+      filters.tag &&
+      filters.tag.length > 0 &&
+      !filters.tag.some((t) => f.tags.includes(t))
+    ) {
+      return false;
     }
-    if (filters.release) {
-      if (filters.release === "none") {
-        if (f.releaseId !== null) return false;
-      } else if (f.releaseId !== filters.release) {
-        return false;
-      }
-    }
-    if (filters.cycle) {
-      if (filters.cycle === "none") {
-        if (f.cycleId !== null) return false;
-      } else if (f.cycleId !== filters.cycle) {
-        return false;
-      }
-    }
-    if (filters.tag && !f.tags.includes(filters.tag)) return false;
-    if (filters.parent) {
-      if (filters.parent === "none") {
-        if (f.parentSpecId !== null) return false;
-      } else if (f.parentSpecId !== filters.parent) {
-        return false;
-      }
-    }
-    if (filters.product && f.productId !== filters.product) return false;
     if (filters.customDates) {
       for (const [key, range] of Object.entries(filters.customDates)) {
         const raw = f.customFields[key];
@@ -201,8 +265,7 @@ export function applyFeatureFilters(
 export function filtersToQuery(filters: FeatureFilters): string {
   const params = new URLSearchParams();
   for (const key of FILTER_KEYS) {
-    const value = filters[key];
-    if (value !== undefined) params.set(key, String(value));
+    for (const value of filters[key] ?? []) params.append(key, value);
   }
   for (const [key, range] of Object.entries(filters.customDates ?? {})) {
     if (range.from) params.set(dateFromParam(key), range.from);

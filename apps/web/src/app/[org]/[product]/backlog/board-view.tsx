@@ -4,7 +4,11 @@ import { parentLevelKey } from "@specboards/core";
 
 import { BoardClient } from "./board-client";
 import { BoardPrefsProvider } from "./board-prefs";
-import { BacklogFilters, type FilterOptions } from "./backlog-filters";
+import {
+  ItemFilterBar,
+  ItemFilterMenu,
+  type FilterOptions,
+} from "@/components/item-filters";
 import {
   BoardSelectToggle,
   BoardSelectionProvider,
@@ -126,10 +130,12 @@ export async function BoardView({
   // it actually moves.
   const workflow = await resolveWorkflowForProducts(access, productIds);
   // Board columns are the workflow statuses. A `status` filter narrows the
-  // board to just that one column rather than emptying every other one.
+  // board to the columns it accepts rather than emptying every other one, in
+  // workflow order (not the order they were ticked): the board's left-to-right
+  // reading is the workflow, and a filter is not a request to reorder it.
   const allColumns = workflow.statuses.filter((s) => s !== "archived");
-  const columns = filters.status
-    ? allColumns.filter((s) => s === filters.status)
+  const columns = filters.status?.length
+    ? allColumns.filter((s) => filters.status!.includes(s))
     : allColumns;
   // Editing is per-product now: the owner can edit anything, others need an
   // admin/contributor grant on the product (any writable product in the "all"
@@ -345,16 +351,21 @@ export async function BoardView({
               {featuresForLevel.length > 0 ? (
                 <SortControl sort={sort} customSorts={customSorts} />
               ) : null}
+              {/* Filters live behind this one button. The set ones render as
+                chips in the bar below; nothing is on screen when nothing is
+                filtered. */}
+              {featuresForLevel.length > 0 ? (
+                <ItemFilterMenu filters={filters} options={filterOptions} />
+              ) : null}
               <BoardSelectToggle />
             </div>
           </div>
-          {/* Filter bar: shown whenever the level has cards, so a filter that
-            empties the board can still be cleared here. Same URL-driven bar as
-            the list view (it preserves the `view=board` param). It gets its own
-            full-width row because the set of filters grows with the workspace's
-            custom properties. */}
+          {/* Active filters only, as chips. Renders nothing when nothing is
+            filtered, so the row costs no height in the common case; a filter
+            that empties the board still shows here and can be cleared. Same
+            URL-driven state as the list view (it preserves `view=board`). */}
           {featuresForLevel.length > 0 ? (
-            <BacklogFilters filters={filters} options={filterOptions} />
+            <ItemFilterBar filters={filters} options={filterOptions} />
           ) : null}
           {featuresForLevel.length === 0 ? (
             activeLevel.isLeaf ? (

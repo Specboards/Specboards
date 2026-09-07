@@ -50,7 +50,11 @@ import {
   canEditProducts,
   requireWorkspaceAccess,
 } from "@/lib/workspace-access";
-import { BacklogFilters, type FilterOptions } from "./backlog-filters";
+import {
+  ItemFilterBar,
+  ItemFilterMenu,
+  type FilterOptions,
+} from "@/components/item-filters";
 import { BacklogTable } from "./backlog-table";
 import { SavedViews } from "./saved-views";
 import { SortControl } from "@/components/sort-control";
@@ -322,6 +326,11 @@ export async function ListView({
               {featuresForLevel.length > 0 ? (
                 <SortControl sort={sort} customSorts={customSorts} />
               ) : null}
+              {/* Filters live behind this one button; the set ones render as
+                chips below. */}
+              {featuresForLevel.length > 0 ? (
+                <ItemFilterMenu filters={filters} options={options} />
+              ) : null}
               <BoardSelectToggle />
             </div>
           </div>
@@ -355,7 +364,7 @@ export async function ListView({
           )
         ) : (
           <>
-            <BacklogFilters filters={filters} options={options} />
+            <ItemFilterBar filters={filters} options={options} />
             <SavedViews
               views={savedViews}
               currentFilters={filters}

@@ -127,11 +127,17 @@ export function compareCycles(
  */
 export function selectableCycles<T extends { id: string; startDate: string; endDate: string }>(
   cycles: T[],
-  keepId: string | null,
+  /**
+   * The id (or ids) to keep regardless. One when a card is showing its own
+   * cycle; several when a filter menu is showing the cycles it is filtering on,
+   * since a filter must never disappear from the very menu that would clear it.
+   */
+  keep: string | readonly string[] | null,
   today: string = todayDateOnly(),
 ): T[] {
+  const kept = keep === null ? [] : typeof keep === "string" ? [keep] : keep;
   return cycles.filter(
-    (c) => cycleState(c, today) !== "complete" || c.id === keepId,
+    (c) => cycleState(c, today) !== "complete" || kept.includes(c.id),
   );
 }
 
