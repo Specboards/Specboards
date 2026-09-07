@@ -352,6 +352,7 @@ export async function getFeature(
           specId: features.specId,
           title: features.title,
           status: features.status,
+          level: features.level,
           productId: features.productId,
         })
         .from(features)

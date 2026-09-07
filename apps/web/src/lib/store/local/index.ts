@@ -361,6 +361,7 @@ export class LocalFileStore implements FeatureStore, LocalStoreContext {
         specId: f.specId,
         title: f.title,
         status: f.status,
+        level: f.level,
       });
       parent.childCount += 1;
       if (isDone(f.status, doneKey)) parent.childDoneCount += 1;
@@ -674,6 +675,15 @@ export class LocalFileStore implements FeatureStore, LocalStoreContext {
     emit?: OutboxEmit | readonly OutboxEmit[], // DB-only; ignored locally
   ): Promise<void> {
     return itemWriteStore.updateFeature(this, specId, patch, scope, emit);
+  }
+
+  convertFeatureLevel(
+    specId: string,
+    input: { level: string; detachParent: boolean },
+    scope?: WorkspaceScope,
+    emit?: OutboxEmit, // DB-only; ignored locally
+  ): Promise<void> {
+    return itemWriteStore.convertFeatureLevel(this, specId, input, scope, emit);
   }
 
   addRelation(

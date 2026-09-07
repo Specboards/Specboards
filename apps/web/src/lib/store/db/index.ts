@@ -432,6 +432,15 @@ export class DbStore implements FeatureStore, DbStoreContext {
     return itemWriteStore.updateFeature(this, specId, patch, scope, emit);
   }
 
+  convertFeatureLevel(
+    specId: string,
+    input: { level: string; detachParent: boolean },
+    scope?: WorkspaceScope,
+    emit?: OutboxEmit,
+  ): Promise<void> {
+    return itemWriteStore.convertFeatureLevel(this, specId, input, scope, emit);
+  }
+
   addRelation(
     specId: string,
     input: RelationInput,

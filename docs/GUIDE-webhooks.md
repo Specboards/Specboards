@@ -147,6 +147,28 @@ name: clearing an assignee produces nothing.
 a handover distinguishable from a first assignment. `assigneeId` and `actor.id`
 are the same person when somebody picks up their own work.
 
+### `item.converted`
+
+An item's hierarchy level changed. The item keeps its `specId`, body, status,
+schedule, comments and history; only its type (and possibly its parent) moved.
+
+```json
+"data": {
+  "specId": "362f82b3-...",
+  "title": "Notification Center",
+  "from": "feature",
+  "to": "epic",
+  "detachedParent": true,
+  "actor": { "id": "...", "name": "..." }
+}
+```
+
+`from` and `to` are level keys, which are configurable per workspace, so do not
+assume a fixed set. `detachedParent` is true when the conversion also cleared
+the item's parent, which happens whenever the old parent is no longer exactly
+one level above it. Worth subscribing to if you mirror items: without it a copy
+of the item silently disagrees about its type, which looks like current data.
+
 ### `comment.created`
 
 Somebody commented on an item.

@@ -5,6 +5,7 @@ import { useCallback, useState } from "react";
 import ReactMarkdown from "react-markdown";
 
 import { AssistantPanel } from "@/components/assistant-panel";
+import { ConvertItemDialog } from "@/components/convert-item-dialog";
 import { CreateSpecButton } from "@/components/create-spec-button";
 import { DescriptionBlock } from "@/components/description-block";
 import {
@@ -72,6 +73,7 @@ export function ItemDetailView({
     currentUserId,
     availableFields,
     levelLabel,
+    levels,
     parentKey,
     parentLevelLabel,
     childKey,
@@ -110,6 +112,8 @@ export function ItemDetailView({
   /** True while either body holds something the author has not committed. */
   const [bodyDirty, setBodyDirty] = useState(false);
   const bodyText = savedBody ?? applied?.body ?? feature.content;
+  /** Whether the type picker is open. Closed unless asked for. */
+  const [converting, setConverting] = useState(false);
 
   // Stable identities: SpecBodyEditor reports its state from an effect that
   // depends on the callback, so a new function every render would re-run it
@@ -118,14 +122,16 @@ export function ItemDetailView({
   const onBodySaved = useCallback((body: string) => setSavedBody(body), []);
 
   // The flyout reuses this component for whatever card you click next rather
-  // than remounting it, so every piece of body state above has to be dropped
-  // when the item changes. Without it the editor seeds the previous item's
-  // text and autosaves it onto this one, which is not a stale render but a
-  // write of the wrong body to the wrong card.
+  // than remounting it, so every piece of state above has to be dropped when
+  // the item changes. Without it the editor seeds the previous item's text and
+  // autosaves it onto this one, which is not a stale render but a write of the
+  // wrong body to the wrong card; and a type picker left open would be aimed at
+  // the item the reader has just navigated away from.
   useResetOnChange(feature.specId, () => {
     setApplied(null);
     setSavedBody(null);
     setBodyDirty(false);
+    setConverting(false);
   });
 
   // Two editable bodies with two different destinations. A DB-native card's
@@ -138,13 +144,38 @@ export function ItemDetailView({
   return (
     <div className="space-y-5">
       <header className="space-y-2">
-        <Badge
-          variant="outline"
-          size="sm"
-          className="uppercase tracking-wide"
-        >
-          {levelLabel}
-        </Badge>
+        <div className="flex items-center gap-2">
+          <Badge
+            variant="outline"
+            size="sm"
+            className="uppercase tracking-wide"
+          >
+            {levelLabel}
+          </Badge>
+          {/* Beside the badge, because the badge is where the type is stated
+              and this is the only thing on the page that changes it. An
+              affordance rather than an open picker: nobody arrives at an item
+              to change its type, and a select sitting in the header would read
+              as a field asking to be set. */}
+          {canEdit && levels.length > 1 ? (
+            <>
+              <button
+                type="button"
+                onClick={() => setConverting(true)}
+                className="rounded-md px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                Change type
+              </button>
+              <ConvertItemDialog
+                specId={feature.specId}
+                currentLevel={feature.level}
+                levels={levels}
+                open={converting}
+                onOpenChange={setConverting}
+              />
+            </>
+          ) : null}
+        </div>
         <ItemTitle
           specId={feature.specId}
           title={feature.title}
@@ -433,6 +464,7 @@ export function ItemDetailView({
             members: members.map((m) => ({ userId: m.userId, name: m.name })),
             releases: releases.map((r) => ({ id: r.id, name: r.name })),
             cycles: cycles.map((c) => ({ id: c.id, name: c.name })),
+            levels,
           }}
         />
       </DetailSection>

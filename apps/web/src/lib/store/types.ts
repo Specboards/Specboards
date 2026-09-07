@@ -105,6 +105,15 @@ export interface ChildRef {
   specId: string;
   title: string;
   status: string;
+  /**
+   * The child's own hierarchy level.
+   *
+   * Derivable from the parent's level while the one-level-apart invariant
+   * holds, and read from the row anyway: a conversion is checked against what
+   * the children actually are, not against what they ought to be. A check that
+   * assumed the invariant could not tell anyone which child was in the way.
+   */
+  level: string;
 }
 
 /**
@@ -1955,6 +1964,26 @@ interface ItemWriteStore {
     patch: FeaturePatch,
     scope?: WorkspaceScope,
     emit?: OutboxEmit | readonly OutboxEmit[],
+  ): Promise<void>;
+  /**
+   * Change an item's hierarchy level in place, keeping its id, body, status,
+   * release, cycle, assignee, tags, comments and history.
+   *
+   * Separate from `updateFeature` on purpose. A level is not one field among
+   * many: it decides which parent is legal, which children are legal, whether a
+   * spec may be attached, and which fields and properties exist on the item. The
+   * checks that make a conversion safe are in the service (see convert-item.ts);
+   * the store writes what has already been planned, and moves the level and the
+   * parent together so a half-applied conversion cannot exist.
+   *
+   * `detachParent` clears the parent as part of the same write, for the common
+   * case where the conversion makes the current parent illegal.
+   */
+  convertFeatureLevel(
+    specId: string,
+    input: { level: string; detachParent: boolean },
+    scope?: WorkspaceScope,
+    emit?: OutboxEmit,
   ): Promise<void>;
   /** Create a typed relation from `specId` to another feature. */
   addRelation(
