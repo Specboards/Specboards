@@ -13,6 +13,7 @@ import {
   type CommentInput,
   type CommentRecord,
   type NotificationList,
+  type NotificationQuery,
   type BoardKey,
   type BoardPreferences,
   type CreateFeatureInput,
@@ -713,8 +714,15 @@ export class DbStore implements FeatureStore, DbStoreContext {
     return collabStore.deleteComment(this, commentId, scope);
   }
 
-  listNotifications(scope?: WorkspaceScope): Promise<NotificationList> {
-    return collabStore.listNotifications(this, scope);
+  listNotifications(
+    scope?: WorkspaceScope,
+    query?: NotificationQuery,
+  ): Promise<NotificationList> {
+    return collabStore.listNotifications(this, scope, query);
+  }
+
+  markNotificationUnread(id: string, scope?: WorkspaceScope): Promise<void> {
+    return collabStore.markNotificationUnread(this, id, scope);
   }
 
   markNotificationRead(id: string, scope?: WorkspaceScope): Promise<void> {

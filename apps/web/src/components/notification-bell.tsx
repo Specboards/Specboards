@@ -1,6 +1,7 @@
 "use client";
 
 import { Bell } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
@@ -11,6 +12,7 @@ import {
 } from "@/lib/api-client/notifications";
 import { AuthRequiredError } from "@/lib/api-client/request";
 import { notificationHeadline as headline } from "@/lib/notification-copy";
+import { orgPath } from "@/lib/org-path";
 import { useOrgSlug } from "@/lib/use-org";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -19,6 +21,15 @@ import type { NotificationRecord } from "@/lib/store/types";
 /** How often to poll the inbox (ms). No realtime transport exists yet, so the
  * bell polls; keep it modest to avoid hammering the API. */
 const POLL_MS = 45_000;
+
+/**
+ * Rows in the panel.
+ *
+ * Small on purpose. This is a glance, and the page behind "See all" is where
+ * a longer list belongs; asking for more here would also mean paying for rows
+ * nobody scrolls to on every poll.
+ */
+const PANEL_ROWS = 6;
 
 function timeAgo(iso: string): string {
   const secs = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
@@ -32,9 +43,18 @@ function timeAgo(iso: string): string {
 }
 
 /**
- * Notification inbox bell for the sidebar footer. Polls the caller's inbox,
- * shows an unread badge, and opens a panel of @mention notifications. Clicking
- * one marks it read and deep-links to the item the source comment lives on.
+ * The notification bell in the sidebar footer: an unread badge and a glance at
+ * what is new, with a way through to the whole thing.
+ *
+ * Deliberately a summary and nothing more. It shows the newest few unread rows
+ * and links to the notification centre for history, filtering and grouping.
+ * When a mention was the only thing that could land here, a short dropdown was
+ * the whole feature; now that every assignment and status change does, a panel
+ * trying to be the inbox would be a worse inbox with less room.
+ *
+ * "Mark all read" stays, because it is the one action somebody wants without
+ * going anywhere. Marking a single row unread does not: that is a
+ * catching-up gesture and it belongs on the surface built for catching up.
  */
 export function NotificationBell({
   collapsed = false,
@@ -49,7 +69,7 @@ export function NotificationBell({
 
   const refresh = useCallback(async () => {
     try {
-      const inbox = await listNotifications();
+      const inbox = await listNotifications({ limit: PANEL_ROWS });
       setItems(inbox.items);
       setUnread(inbox.unreadCount);
     } catch (err) {
@@ -197,6 +217,15 @@ export function NotificationBell({
                 ))}
               </ul>
             )}
+            <div className="border-t px-2 py-1.5">
+              <Link
+                href={orgPath(org, "/notifications")}
+                onClick={() => setOpen(false)}
+                className="block text-center text-xs text-muted-foreground hover:text-foreground hover:underline"
+              >
+                See all notifications
+              </Link>
+            </div>
           </div>
         </>
       ) : null}
