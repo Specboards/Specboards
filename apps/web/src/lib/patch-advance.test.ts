@@ -36,10 +36,16 @@ const store = {
       _specId: string,
       patch: { status?: string; tags?: string[] },
       _scope: unknown,
-      emit?: { data: { from: string; to: string } },
+      // A list since one patch can be several events (a move and a handover
+      // in the same write). The advance walk only ever produces the move.
+      emit?: { type: string; data: { from: string; to: string } }[],
     ) => {
       applied.push({ ...patch });
-      if (emit) emitted.push({ from: emit.data.from, to: emit.data.to });
+      for (const e of emit ?? []) {
+        if (e.type === "item.status_changed") {
+          emitted.push({ from: e.data.from, to: e.data.to });
+        }
+      }
       if (patch.status) current = { ...current, status: patch.status };
       if (patch.tags) current = { ...current, tags: patch.tags };
     },

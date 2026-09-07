@@ -126,6 +126,47 @@ changes; an edit that leaves it alone produces nothing.
 `from` and `to` are stage keys from that product's workflow, which is
 configurable. `archived` is a stage like any other here.
 
+### `item.assigned`
+
+An item was given to somebody. Fires on the change, including on the create
+that hands a new card straight to a person, and only when there is somebody to
+name: clearing an assignee produces nothing.
+
+```json
+"data": {
+  "specId": "362f82b3-...",
+  "title": "Split the store",
+  "level": "feature",
+  "assigneeId": "19a5c490-...",
+  "previousAssigneeId": null,
+  "actor": { "id": "...", "name": "..." }
+}
+```
+
+`previousAssigneeId` is `null` when nobody held it before, which is what makes
+a handover distinguishable from a first assignment. `assigneeId` and `actor.id`
+are the same person when somebody picks up their own work.
+
+### `comment.created`
+
+Somebody commented on an item.
+
+```json
+"data": {
+  "commentId": "0f2ab1c4-...",
+  "featureId": "9c1e4b77-...",
+  "specId": "362f82b3-...",
+  "mentionedUserIds": ["19a5c490-..."],
+  "snippet": "Can we split this before the release?",
+  "actor": { "id": "...", "name": "..." }
+}
+```
+
+`mentionedUserIds` is de-duplicated and may be empty; it is the raw list the
+author named, so it can include somebody who has since left the workspace.
+`snippet` is a single-line preview, truncated, not the full body. Use
+`specId`/`commentId` to fetch the comment if you need all of it.
+
 ### `item.deleted`
 
 An item was removed. The payload describes what was removed, since you cannot

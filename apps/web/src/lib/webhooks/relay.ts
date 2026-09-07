@@ -17,6 +17,7 @@ import {
 } from "@specboards/db";
 
 import { getWorkerDb } from "@/lib/db";
+import { fanOutNotifications } from "@/lib/notifications/fanout";
 import type { WebhookEnvelope, WebhookEventType } from "@/lib/webhooks/types";
 
 /**
@@ -30,6 +31,10 @@ import type { WebhookEnvelope, WebhookEventType } from "@/lib/webhooks/types";
  *
  * The outbox snapshot was written to match the webhook payload fields, so
  * mapping is a pass-through: `envelope.data = { ...event.data, actor }`.
+ *
+ * Webhooks are not the only consumer. In-app notifications are fanned out from
+ * the same claimed event, in the same transaction, so both delivery paths and
+ * the `processedAt` stamp commit together and one event can never notify twice.
  */
 
 const BATCH = 50;
@@ -112,6 +117,11 @@ async function expandOne(tx: Tx, id: string): Promise<void> {
       await tx.insert(webhookDeliveries).values(rows);
     }
   }
+
+  // Second consumer of the same claimed event. Deliberately outside the
+  // endpoint check above: somebody's inbox does not depend on the workspace
+  // having configured a webhook.
+  await fanOutNotifications(tx, ev);
 
   await tx
     .update(outboxEvents)

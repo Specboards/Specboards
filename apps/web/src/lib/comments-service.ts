@@ -46,9 +46,10 @@ export async function createComment(
 ): Promise<CommentRecord> {
   const store = await getStore();
   const comment = await store.createComment(specId, input, scope);
-  // A comment with mentions writes a `comment.mentioned` outbox event; nudge the
-  // relay so any delivery channels fire promptly (no-op when nothing was queued).
-  if (input.mentionedUserIds && input.mentionedUserIds.length > 0) notifyOutbox();
+  // Every comment writes a `comment.created` outbox event; nudge the relay so
+  // the mention lands in the bell while the author is still looking at the
+  // thread (no-op in local file mode, where there is no relay).
+  notifyOutbox();
   return comment;
 }
 

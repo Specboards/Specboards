@@ -335,12 +335,16 @@ async function applyFeaturePatch(
     }
   }
 
-  // Record a status-change event in the SAME transaction as the update (via the
-  // store's outbox), so a crash can't leave the change persisted but the event
-  // lost. The relay fans it out to webhooks afterward.
-  let emit: OutboxEmit | undefined;
+  // Record the events in the SAME transaction as the update (via the store's
+  // outbox), so a crash can't leave the change persisted but the event lost.
+  // The relay fans them out to webhooks and to people's inboxes afterward.
+  //
+  // A patch can be more than one event: a card moved and handed over in one
+  // write is a status change and an assignment, and a consumer subscribed to
+  // only one of them still needs to hear about it.
+  const emit: OutboxEmit[] = [];
   if (patch.status !== undefined && patch.status !== feature.status) {
-    emit = {
+    emit.push({
       type: "item.status_changed",
       productId: feature.productId,
       data: {
@@ -350,7 +354,27 @@ async function applyFeaturePatch(
         from: feature.status,
         to: patch.status,
       },
-    };
+    });
+  }
+  // Only a change *to* somebody counts. Clearing an assignee is a real change
+  // (the ledger records it) but there is nobody it is addressed to, and the
+  // person losing the item is told by the item leaving their board.
+  if (
+    patch.assigneeId !== undefined &&
+    patch.assigneeId !== null &&
+    patch.assigneeId !== feature.assigneeId
+  ) {
+    emit.push({
+      type: "item.assigned",
+      productId: feature.productId,
+      data: {
+        specId: feature.specId,
+        title: patch.title ?? feature.title,
+        level: feature.level,
+        assigneeId: patch.assigneeId,
+        previousAssigneeId: feature.assigneeId,
+      },
+    });
   }
 
   await store.updateFeature(specId, patch, scope, emit);
@@ -382,7 +406,7 @@ async function applyFeaturePatch(
   }
 
   const updated = await store.getFeature(specId, scope);
-  if (emit) notifyOutbox(); // nudge the relay so delivery isn't delayed a tick
+  if (emit.length > 0) notifyOutbox(); // nudge the relay so delivery isn't delayed a tick
 
   return updated ?? feature;
 }

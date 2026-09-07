@@ -194,7 +194,7 @@ export async function updateFeature(
   specId: string,
   patch: FeaturePatch,
   _scope?: WorkspaceScope,
-  _emit?: OutboxEmit, // webhooks are DB-only; ignored in local file mode
+  _emit?: OutboxEmit | readonly OutboxEmit[], // DB-only; ignored in local file mode
 ): Promise<void> {
   // DB-native items live in their own file, not the spec-metadata map.
   const items = await ctx.readItems();

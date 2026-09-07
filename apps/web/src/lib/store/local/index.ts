@@ -671,7 +671,7 @@ export class LocalFileStore implements FeatureStore, LocalStoreContext {
     specId: string,
     patch: FeaturePatch,
     scope?: WorkspaceScope,
-    emit?: OutboxEmit, // webhooks are DB-only; ignored in local file mode
+    emit?: OutboxEmit | readonly OutboxEmit[], // DB-only; ignored locally
   ): Promise<void> {
     return itemWriteStore.updateFeature(this, specId, patch, scope, emit);
   }

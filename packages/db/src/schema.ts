@@ -1492,12 +1492,22 @@ export const comments = pgTable("comments", {
 });
 
 /**
- * A personal, in-app notification for one recipient — currently only
- * "@mention in a comment". Fanned out in the same transaction as the triggering
- * comment: one row per mentioned member. `readAt` null = unread, which drives
- * the inbox unread badge. `actorId` is a historical snapshot (no FK, like
- * `outbox_events`), so deleting the actor never rewrites someone's inbox; the
- * source `comment`/`feature` carry FKs so deleting an item clears its notices.
+ * A personal, in-app notification for one recipient. `type` is a key from the
+ * notification catalog (apps/web/src/lib/notifications/catalog.ts): an item
+ * assigned or moved, a comment or a mention, a spec change resolved, a release
+ * shipped. `readAt` null = unread, which drives the inbox unread badge.
+ *
+ * Rows are written by the notification fan-out as it expands `outbox_events`,
+ * one recipient at a time, rather than by the write that caused the change.
+ * The durability comes from the outbox row, which is written in the same
+ * transaction as the change itself. The exception is a spec-change outcome,
+ * raised by the GitHub webhook sink, which has no domain transaction.
+ *
+ * `actorId` is a historical snapshot (no FK, like `outbox_events`), so deleting
+ * the actor never rewrites someone's inbox; the source `comment`/`feature`
+ * carry FKs so deleting an item clears its notices. That cascade is also why
+ * there is no notification for a deleted item: the row would not outlive the
+ * thing it is about.
  */
 export const notifications = pgTable(
   "notifications",
@@ -1511,8 +1521,9 @@ export const notifications = pgTable(
     /** Who triggered it (comment author); snapshot, no FK. */
     actorId: uuid("actor_id"),
     /**
-     * Kind of notification: "mention", or the outcome of a spec change the
-     * recipient proposed ("spec_change_merged" / "spec_change_closed").
+     * Kind of notification: a key from the notification catalog. Rows written
+     * before that catalog existed carry "mention", which readers still have to
+     * understand as today's "comment.mentioned"; nothing rewrites an inbox.
      */
     type: text("type").notNull().default("mention"),
     /** The item the comment lives on, for deep-linking the inbox row. */

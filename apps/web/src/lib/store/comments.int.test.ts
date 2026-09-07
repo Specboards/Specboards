@@ -15,6 +15,12 @@ import { CommentError } from "./types";
  * the author resolved; another member sees it; only the author or the workspace
  * owner can delete a comment; empty bodies and unknown items are rejected.
  *
+ * Posting a comment no longer writes anybody's notification rows: it records a
+ * `comment.created` outbox event, and the fan-out decides who hears about it.
+ * So what this suite asserts about mentions is that the *event* carries what
+ * the fan-out needs. Who actually receives one, and as which type, belongs to
+ * notifications/fanout.int.test.ts, which drives the relay.
+ *
  * Needs a migrated Postgres at DATABASE_URL; skips itself when unset.
  */
 
@@ -126,35 +132,34 @@ describe.skipIf(!OWNER_URL)("comments (store + RLS)", () => {
     ).rejects.toThrow(CommentError);
   });
 
-  it("fans out one notification per valid mention, skipping self and non-members", async () => {
-    const stranger = randomUUID(); // not a workspace member
-    await store.createComment(
+  it("records the comment as an event carrying everything the fan-out needs", async () => {
+    const created = await store.createComment(
       specId,
       { body: "hey @Bob and @Alice", mentionedUserIds: [user.bob, user.alice] },
-      asAlice, // Alice authors and also mentions herself
+      asAlice,
     );
 
-    // Bob gets one; Alice (the author) does not; the stranger does not.
-    const [bob] = await owner`select count(*)::int as n from notifications
-      where recipient_id = ${user.bob} and actor_id = ${user.alice}`;
-    const [alice] = await owner`select count(*)::int as n from notifications
-      where recipient_id = ${user.alice} and actor_id = ${user.alice}`;
-    const [none] = await owner`select count(*)::int as n from notifications
-      where recipient_id = ${stranger}`;
-    expect(bob!.n).toBe(1);
-    expect(alice!.n).toBe(0);
-    expect(none!.n).toBe(0);
-
-    // The notification carries a snippet and points at the source comment.
-    const [row] = await owner`select snippet, type, feature_id, comment_id
-      from notifications where recipient_id = ${user.bob} and actor_id = ${user.alice} limit 1`;
-    expect(row!.type).toBe("mention");
-    expect(String(row!.snippet)).toContain("hey @Bob");
+    const [event] = await owner`select type, actor_id, data from outbox_events
+      where workspace_id = ${ws} and type = 'comment.created'
+      order by created_at desc limit 1`;
+    const data = event!.data as Record<string, unknown>;
+    // The item and the comment, so the notice can deep-link to the thread;
+    // the snippet, so the inbox row reads without loading the comment; the
+    // mention list, so a mention can be told apart from an update.
+    expect(data).toMatchObject({
+      specId,
+      commentId: created.id,
+      mentionedUserIds: [user.bob, user.alice],
+    });
+    expect(String(data.snippet)).toContain("hey @Bob");
+    // The author is the actor, which is what lets the fan-out drop Alice from
+    // her own mention rather than each write site remembering to.
+    expect(event!.actor_id).toBe(user.alice);
   });
 
-  it("de-dupes a repeated mention into a single notification", async () => {
-    const before = await owner`select count(*)::int as n from notifications
-      where recipient_id = ${user.bob}`;
+  it("de-dupes a repeated mention in the event itself", async () => {
+    // Cheaper here than in the fan-out, and it means the event is a clean
+    // record of who was named rather than of how many times the name appeared.
     await store.createComment(
       specId,
       {
@@ -163,11 +168,28 @@ describe.skipIf(!OWNER_URL)("comments (store + RLS)", () => {
       },
       asAlice,
     );
-    const after = await owner`select count(*)::int as n from notifications
-      where recipient_id = ${user.bob}`;
-    expect((after[0] as { n: number }).n - (before[0] as { n: number }).n).toBe(
-      1,
+
+    const [event] = await owner`select data from outbox_events
+      where workspace_id = ${ws} and type = 'comment.created'
+      order by created_at desc limit 1`;
+    expect((event!.data as { mentionedUserIds: string[] }).mentionedUserIds).toEqual(
+      [user.bob],
     );
+  });
+
+  it("writes no notification rows of its own", async () => {
+    // The whole point of the move: one place decides recipients. A row
+    // appearing here would mean two answers to "who should be told", and the
+    // preference layer only filters one of them.
+    await owner`delete from notifications where workspace_id = ${ws}`;
+    await store.createComment(
+      specId,
+      { body: "@Bob look", mentionedUserIds: [user.bob] },
+      asAlice,
+    );
+    const [n] = await owner`select count(*)::int as n from notifications
+      where workspace_id = ${ws}`;
+    expect(n!.n).toBe(0);
   });
 
   it("lets only the author or the owner delete a comment", async () => {
@@ -189,12 +211,24 @@ describe.skipIf(!OWNER_URL)("comments (store + RLS)", () => {
   });
 
   it("lists a recipient's notifications, resolves the target, and marks read", async () => {
-    // Bob accumulated mention notifications from the fan-out tests above.
+    // Seeded directly rather than through a comment: the reading side is what
+    // is under test, and having it depend on what earlier cases happened to
+    // leave behind made a failure here point at the wrong feature.
+    await owner`delete from notifications where workspace_id = ${ws}`;
+    const [feature] = await owner`select id from features
+      where workspace_id = ${ws} and spec_id = ${specId}`;
+    for (const snippet of ["first mention", "second mention"]) {
+      await owner`insert into notifications
+        (workspace_id, recipient_id, actor_id, type, feature_id, snippet)
+        values (${ws}, ${user.bob}, ${user.alice}, 'comment.mentioned',
+                ${feature!.id as string}, ${snippet})`;
+    }
+
     const before = await store.listNotifications(asBob);
-    expect(before.unreadCount).toBeGreaterThan(0);
+    expect(before.unreadCount).toBe(2);
     expect(before.items.length).toBe(before.unreadCount);
     // Each resolves to the source item + a mention type for deep-linking.
-    expect(before.items.every((n) => n.type === "mention")).toBe(true);
+    expect(before.items.every((n) => n.type === "comment.mentioned")).toBe(true);
     expect(before.items.every((n) => n.specId === specId)).toBe(true);
     expect(before.items.every((n) => n.actorName === "Alice")).toBe(true);
 
