@@ -43,4 +43,25 @@ test.describe("mobile navigation", () => {
     await page.keyboard.press("Escape");
     await expect(page.getByRole("navigation", { name: "Primary" })).toBeHidden();
   });
+
+  test("opening the drawer focuses the panel, not a control inside it", async ({
+    page,
+  }) => {
+    const { slug } = await getWorkspace();
+    await page.goto(`/${slug}/all/backlog`);
+
+    await page.getByRole("button", { name: "Open navigation menu" }).click();
+    await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
+
+    // Radix's focus trap skips links and focuses the first tabbable control,
+    // which in this drawer is the product <select>. iOS Safari opens a select's
+    // picker as soon as it is focused, so the picker covered the navigation
+    // every time the menu was opened. The panel takes focus instead.
+    const focused = await page.evaluate(() => ({
+      role: document.activeElement?.getAttribute("role") ?? null,
+      tag: document.activeElement?.tagName ?? null,
+    }));
+    expect(focused.role).toBe("dialog");
+    expect(focused.tag).not.toBe("SELECT");
+  });
 });
