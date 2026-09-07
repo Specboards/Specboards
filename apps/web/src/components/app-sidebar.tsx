@@ -8,6 +8,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { type ReactNode } from "react";
 
+import { SpecboardsMark } from "@/components/specboards-mark";
 import { OrgSwitcher } from "@/components/org-switcher";
 import { ProductSwitcher } from "@/components/product-switcher";
 import { NotificationBell } from "@/components/notification-bell";
@@ -122,7 +123,7 @@ export function BrandMark({ showWord = true }: { showWord?: boolean }) {
       aria-label="Specboards home"
       className="flex items-center gap-2 text-sm font-semibold tracking-tight"
     >
-      <img src="/brand/specboards-mark.png" alt="" className="h-6 w-6" />
+      <SpecboardsMark />
       {showWord ? (
         <span>
           Spec<span className="text-muted-foreground">boards</span>

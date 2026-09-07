@@ -10,7 +10,7 @@ import nextVitals from "eslint-config-next/core-web-vitals";
 // FlatCompat from @eslint/eslintrc; that shim is what broke on the 16 bump
 // (the config it produced failed validation, and eslintrc's error formatter
 // then died on a circular structure rather than reporting why).
-export default [
+const config = [
   {
     ignores: [
       ".next/**",
@@ -93,3 +93,5 @@ export default [
 //
 // A number that is allowed to grow is not a gate, so there is no warning level
 // left to drift back into.
+
+export default config;

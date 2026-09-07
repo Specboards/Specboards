@@ -144,6 +144,11 @@ export function CommandPalette() {
         >
           <Dialog.Title className="sr-only">Command palette</Dialog.Title>
           <input
+            // The one control where autofocus is right: the palette opens on a
+            // keyboard shortcut, from the keyboard, and exists to be typed
+            // into. Focusing anything else would make the reader press Tab to
+            // reach the only thing on screen.
+            // eslint-disable-next-line jsx-a11y/no-autofocus
             autoFocus
             type="text"
             value={query}

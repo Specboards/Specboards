@@ -103,7 +103,10 @@ export function FeatureEditSheet({
     return () => {
       cancelled = true;
     };
-  }, [specId]);
+    // `router` is only read inside the catch, and `useRouter()` returns a
+    // stable object, so listing it changes nothing at runtime and stops the
+    // dependency list from being a lie.
+  }, [specId, router]);
 
   /**
    * Re-read the item after its body was written to git. `router.refresh()`

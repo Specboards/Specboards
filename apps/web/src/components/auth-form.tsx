@@ -6,6 +6,7 @@ import { useState, useTransition } from "react";
 
 import { sendVerificationEmail, signIn, signUp } from "@/lib/auth-client";
 import { safeRedirectPath } from "@/lib/utils";
+import { SpecboardsMark } from "@/components/specboards-mark";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -185,6 +186,11 @@ export function AuthForm({
         return;
       }
       if (isOAuthAuthorize) {
+        // A real navigation, not a client-side one. This is a route handler
+        // that issues a redirect out to the MCP client's callback, so there is
+        // no Next page for `router.push` to render; pushing it would leave the
+        // app rendering nothing while the browser sat on a URL it does not own.
+        // eslint-disable-next-line @next/next/no-location-assign-relative-destination
         window.location.assign(
           `/api/auth/mcp/authorize?${searchParams.toString()}`,
         );
@@ -211,11 +217,7 @@ export function AuthForm({
   return (
     <Card className="mx-auto mt-16 w-full max-w-sm">
       <CardHeader>
-        <img
-          src="/brand/specboards-mark.png"
-          alt="Specboards"
-          className="mb-2 h-8 w-8"
-        />
+        <SpecboardsMark alt="Specboards" className="mb-2 h-8 w-8" />
         <CardTitle>{t.title}</CardTitle>
         <CardDescription>{t.description}</CardDescription>
       </CardHeader>
