@@ -23,6 +23,8 @@ export function FeatureDetailsEditor({
   initial,
   placeholder = "Add a description…",
   minHeightClass,
+  onDirtyChange,
+  onSaved,
 }: {
   specId: string;
   /** Current Markdown body (seed value; the editor owns state after mount). */
@@ -30,6 +32,19 @@ export function FeatureDetailsEditor({
   placeholder?: string;
   /** Min-height utility for the editor surface (e.g. "min-h-[15rem]"). */
   minHeightClass?: string;
+  /**
+   * Whether there is typing that has not reached the server yet: a debounce
+   * still counting down, or a save in flight or failed. The Description block
+   * refuses to collapse over it, because collapsing unmounts this editor.
+   */
+  onDirtyChange?: (dirty: boolean) => void;
+  /**
+   * The body as it was last persisted. The parent needs it because this editor
+   * never remounts on its own saves, so `initial` goes stale the moment anyone
+   * types; anything that re-renders from the body (a folded preview, a remount
+   * after unfolding) would otherwise show the version the page loaded with.
+   */
+  onSaved?: (body: string) => void;
 }) {
   const router = useRouter();
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -61,6 +76,10 @@ export function FeatureDetailsEditor({
       await patchFeature(specId, { details: value.trim() ? value : null });
       savedRef.current = value;
       setStatus("saved");
+      onSaved?.(value);
+      // Still dirty if more typing arrived while this was in flight; the
+      // follow-up save in `finally` clears it.
+      if (pendingRef.current === null) onDirtyChange?.(false);
       router.refresh();
     } catch (err) {
       if (redirectOnAuthExpiry(err, router)) return;
@@ -77,6 +96,11 @@ export function FeatureDetailsEditor({
   }
 
   function onChange(markdown: string) {
+    // Dirty from the keystroke, not from the save attempt: the window this
+    // guards is exactly the one where the text exists only in the editor.
+    // Reported both ways, because typing back to the saved text produces a
+    // no-op save that would otherwise leave the block permanently unfoldable.
+    onDirtyChange?.(markdown !== savedRef.current);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => void save(markdown), 700);
   }

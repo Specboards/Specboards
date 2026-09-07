@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import ReactMarkdown from "react-markdown";
 
 import { AssistantPanel } from "@/components/assistant-panel";
 import { CreateSpecButton } from "@/components/create-spec-button";
+import { DescriptionBlock } from "@/components/description-block";
 import {
   DetailSection,
   openDetailSection,
@@ -22,13 +23,13 @@ import { ItemProperties } from "@/components/item-properties";
 import { ItemTitle } from "@/components/item-title";
 import { ItemHistory } from "@/components/item-history";
 import { SpecBodyEditor } from "@/components/spec-body-editor";
-import { SpecPendingChange } from "@/components/spec-pending-change";
 import { StatusDot } from "@/components/status-dot";
 import { WorkItemDelete } from "@/components/work-item-controls";
 import { Badge } from "@/components/ui/badge";
 import { pluralLevel, statusLabel } from "@/lib/feature-helpers";
 import type { ItemDetailData } from "@/lib/item-detail";
 import { useOrgProductPath } from "@/lib/use-org";
+import { useResetOnChange } from "@/lib/use-reset-on-change";
 
 /**
  * The single source of truth for how an item's detail is laid out: title,
@@ -96,6 +97,37 @@ export function ItemDetailView({
     null,
   );
 
+  /**
+   * The body as it currently stands, for the folded preview and for reseeding
+   * the editor when the fold opens again.
+   *
+   * `feature.content` is what the page loaded with, and the DB-native editor
+   * deliberately never remounts on its own saves, so after any typing it is the
+   * wrong text. `router.refresh()` catches up eventually; the preview would
+   * show the stale version until it did.
+   */
+  const [savedBody, setSavedBody] = useState<string | null>(null);
+  /** True while either body holds something the author has not committed. */
+  const [bodyDirty, setBodyDirty] = useState(false);
+  const bodyText = savedBody ?? applied?.body ?? feature.content;
+
+  // Stable identities: SpecBodyEditor reports its state from an effect that
+  // depends on the callback, so a new function every render would re-run it
+  // every render.
+  const onBodyDirty = useCallback((dirty: boolean) => setBodyDirty(dirty), []);
+  const onBodySaved = useCallback((body: string) => setSavedBody(body), []);
+
+  // The flyout reuses this component for whatever card you click next rather
+  // than remounting it, so every piece of body state above has to be dropped
+  // when the item changes. Without it the editor seeds the previous item's
+  // text and autosaves it onto this one, which is not a stale render but a
+  // write of the wrong body to the wrong card.
+  useResetOnChange(feature.specId, () => {
+    setApplied(null);
+    setSavedBody(null);
+    setBodyDirty(false);
+  });
+
   // Two editable bodies with two different destinations. A DB-native card's
   // body is a database column, so it autosaves. A spec's body is a file in git,
   // so it commits, and the editor for it says so rather than pretending the two
@@ -153,18 +185,20 @@ export function ItemDetailView({
       <hr className="border-border/60" />
 
       {/* Description / body */}
-      <div className="space-y-2">
-        <h2 className="text-sm font-medium text-muted-foreground">Description</h2>
-        {/* Above the body on purpose: it explains why the text underneath is
-            not the change someone just made, so reading it afterwards is too
-            late to stop them concluding the editor lost their work. */}
-        <SpecPendingChange links={feature.githubLinks} />
+      <DescriptionBlock
+        itemId={feature.specId}
+        body={bodyText}
+        links={feature.githubLinks}
+        dirty={bodyDirty}
+      >
         {editableBody ? (
           <FeatureDetailsEditor
             key={applied ? `applied-${applied.rev}` : "own"}
             specId={feature.specId}
-            initial={applied?.body ?? feature.content}
+            initial={bodyText}
             minHeightClass="min-h-[15rem]"
+            onDirtyChange={onBodyDirty}
+            onSaved={onBodySaved}
           />
         ) : canEditSpec ? (
           <SpecBodyEditor
@@ -175,6 +209,7 @@ export function ItemDetailView({
             writeMode={data.specWriteMode}
             minHeightClass="min-h-[15rem]"
             onSaved={onSpecSaved}
+            onDirtyChange={onBodyDirty}
           />
         ) : feature.content.trim() === "" ? (
           <div className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">
@@ -187,9 +222,15 @@ export function ItemDetailView({
             <ReactMarkdown>{feature.content}</ReactMarkdown>
           </div>
         )}
-        {/* Below the body rather than beside the heading, so the expanded form
-            has the full column to open into. Only a leaf card tracked in the
-            app can take a spec; everywhere else the server would refuse. */}
+      </DescriptionBlock>
+
+      {/* Outside the fold. Below the body rather than beside the heading, so
+          the expanded form has the full column to open into, but folding the
+          description away must not take "Attach a spec" with it: the reason to
+          fold a long body is to reach the controls under it. Only a leaf card
+          tracked in the app can take a spec; everywhere else the server would
+          refuse. */}
+      <div className="space-y-2">
         {canAttachSpec ? (
           <CreateSpecButton
             target={{
@@ -235,6 +276,9 @@ export function ItemDetailView({
           subject={{ kind: "item", specId: feature.specId }}
           onApplied={(body) => {
             setApplied((prev) => ({ body, rev: (prev?.rev ?? 0) + 1 }));
+            // The accepted proposal is now the newest text; anything this
+            // view remembered saving is older than it.
+            setSavedBody(null);
             // The flyout holds its item in local state, so it has to re-read
             // for everything else on the card (history, the board behind it).
             onSpecSaved?.();

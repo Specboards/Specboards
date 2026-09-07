@@ -73,6 +73,7 @@ export function SpecBodyEditor({
   writeMode,
   minHeightClass,
   onSaved,
+  onDirtyChange,
 }: {
   specId: string;
   /** Repo-relative path of the spec file, shown so the target is never a guess. */
@@ -98,6 +99,14 @@ export function SpecBodyEditor({
   /** Called after a successful commit, for views that hold the item in local
    * state and must re-read it (the flyout) rather than relying on a refresh. */
   onSaved?: () => void;
+  /**
+   * Whether there is anything here the author would lose if this editor were
+   * unmounted. Wider than "the text has changed": a recovered draft waiting to
+   * be accepted, and an unresolved conflict, are both decisions only this
+   * person can make, and both disappear with the component. The Description
+   * block refuses to collapse while this is true.
+   */
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const router = useRouter();
   // The editor owns its content; we track the latest Markdown so the Save
@@ -149,6 +158,13 @@ export function SpecBodyEditor({
     saved: commitSha !== null,
     path,
   };
+
+  // Everything the author would lose with this component, reported up so the
+  // Description block can refuse to fold over it.
+  const unresolved = dirty || draft !== null || conflict !== null;
+  useEffect(() => {
+    onDirtyChange?.(unresolved);
+  }, [unresolved, onDirtyChange]);
 
   // The browser's own guard still runs: a draft is recovery, not a reason to
   // let someone close a tab on unsaved work without a word.
