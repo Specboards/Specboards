@@ -15,6 +15,7 @@ import {
   and,
   eq,
   features,
+  inArray,
   isNull,
   itemEvents,
   or,
@@ -307,6 +308,16 @@ interface SpecScanItem {
   title: string;
   /** Whether the spec already carries a stable id (false means import injects one). */
   hasId: boolean;
+  /**
+   * Whether this file's spec already has a work item on the board, so importing
+   * it would update that item rather than create a card.
+   *
+   * The scan has to answer this, because the prompt in front of it offers to
+   * "Create N cards" and N is otherwise the number of files in the repository.
+   * On a workspace that has already imported, those are entirely different
+   * numbers: 200 specs, none of them new.
+   */
+  alreadyImported: boolean;
 }
 
 /** The scan result for one connected repository. */
@@ -342,14 +353,53 @@ async function scanRepositorySpecs(db: Database, repo: RepoRecord): Promise<Spec
   const globs = config?.specGlobs ?? repoGlobs(repo);
 
   const files = await client.listSpecFiles(globs);
-  return files.map((file) => {
-    const preview = previewSpec(file.raw);
-    return {
-      path: file.path,
-      title: preview.title ?? titleFromPath(file.path),
-      hasId: preview.hasId,
-    };
-  });
+  const previews = files.map((file) => ({ file, preview: previewSpec(file.raw) }));
+
+  // Which of these specs the board already holds. Mirrors the lookup
+  // `syncRepository` does per spec, including the repo predicate: a work item
+  // with no repo may still be the one this spec attaches to (it was created in
+  // the app), while one belonging to a *different* connected repo is somebody
+  // else's row and does not count as this file being imported.
+  const ids = previews
+    .map(({ preview }) => preview.id)
+    .filter((id): id is string => id !== null);
+  const imported = await importedSpecIds(db, repo, ids);
+
+  return previews.map(({ file, preview }) => ({
+    path: file.path,
+    title: preview.title ?? titleFromPath(file.path),
+    hasId: preview.hasId,
+    // No id at all means sync will inject one and create a work item, so the
+    // file is new by definition -- there is nothing it could already be.
+    alreadyImported: preview.id !== null && imported.has(preview.id),
+  }));
+}
+
+/**
+ * Of `specIds`, the ones that already name a work item this repo's sync would
+ * attach to rather than create.
+ *
+ * Kept to one query rather than one per spec: a repository with a few hundred
+ * specs is the case this whole fix is about, and the scan runs on every visit
+ * to the settings page.
+ */
+export async function importedSpecIds(
+  db: Database,
+  repo: Pick<RepoRecord, "id" | "workspaceId">,
+  specIds: string[],
+): Promise<Set<string>> {
+  if (specIds.length === 0) return new Set();
+  const rows = await db
+    .select({ specId: features.specId })
+    .from(features)
+    .where(
+      and(
+        eq(features.workspaceId, repo.workspaceId),
+        inArray(features.specId, specIds),
+        or(isNull(features.repoId), eq(features.repoId, repo.id)),
+      ),
+    );
+  return new Set(rows.map((r) => r.specId));
 }
 
 /**

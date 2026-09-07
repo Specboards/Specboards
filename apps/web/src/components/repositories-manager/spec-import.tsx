@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { importCounts } from "@/lib/import-summary";
 import { useOrgProductPath } from "@/lib/use-org";
 import { useResetOnChange } from "@/lib/use-reset-on-change";
 import type { ConnectedRepo } from "@/components/repositories-manager/shared";
@@ -76,6 +77,7 @@ export function SpecImportPanel({
   const [scan, setScan] = useState<{
     repos: RepoScan[];
     totalSpecs: number;
+    newSpecs: number;
   } | null>(null);
   const [importing, startImport] = useTransition();
   const [result, setResult] = useState<ImportResult | null>(null);
@@ -142,6 +144,11 @@ export function SpecImportPanel({
   }
 
   const totalSpecs = scan?.totalSpecs ?? 0;
+  // What the create button would actually do. The panel speaks to this rather
+  // than to `totalSpecs`, which describes the repository: on a workspace that
+  // has already imported, "Create 200 cards" creates none.
+  const newSpecs = scan?.newSpecs ?? 0;
+  const alreadyImported = totalSpecs - newSpecs;
   const scanErrors = (scan?.repos ?? []).filter((r) => r.error);
 
   return (
@@ -191,18 +198,35 @@ export function SpecImportPanel({
             orgInstallationId={orgInstallationId}
             onRepoCreated={onRepoCreated}
           />
+        ) : newSpecs === 0 ? (
+          <AllImportedState
+            total={totalSpecs}
+            boardHref={importedBoardHref}
+            onRescan={() => void rescan()}
+            loading={loading}
+          />
         ) : (
           <div className="space-y-3">
             <p className="text-sm">
-              We found <strong>{totalSpecs}</strong> spec
-              {totalSpecs === 1 ? "" : "s"} across your connected repositories.
+              <strong>{newSpecs}</strong> new spec{newSpecs === 1 ? "" : "s"} to
+              import
+              {alreadyImported > 0 ? (
+                <span className="text-muted-foreground">
+                  {" "}
+                  ({alreadyImported} already on your board)
+                </span>
+              ) : null}
+              .
             </p>
+            {/* Only the new ones: this list is a preview of what the button
+                below will create, so listing specs it will not create would
+                make the two disagree. */}
             <SpecScanList repos={scan!.repos} />
             <div className="flex items-center gap-2">
               <Button size="sm" onClick={runImport} disabled={importing}>
                 {importing
                   ? "Creating…"
-                  : `Create ${totalSpecs} card${totalSpecs === 1 ? "" : "s"}`}
+                  : `Create ${newSpecs} card${newSpecs === 1 ? "" : "s"}`}
               </Button>
               <Button
                 size="sm"
@@ -230,9 +254,17 @@ export function SpecImportPanel({
   );
 }
 
-/** The list of specs found by the scan, grouped by repo and capped for length. */
+/**
+ * The specs the import would create, grouped by repo and capped for length.
+ *
+ * Specs already on the board are left out rather than shown greyed: the list
+ * sits directly above "Create N cards" and reads as that button's contents, so
+ * a row the button will not act on is the same lie the count used to tell.
+ */
 function SpecScanList({ repos }: { repos: RepoScan[] }) {
-  const withSpecs = repos.filter((r) => r.specs.length > 0);
+  const withSpecs = repos
+    .map((r) => ({ ...r, specs: r.specs.filter((s) => !s.alreadyImported) }))
+    .filter((r) => r.specs.length > 0);
   const CAP = 8;
   return (
     <div className="space-y-3">
@@ -267,6 +299,55 @@ function SpecScanList({ repos }: { repos: RepoScan[] }) {
   );
 }
 
+/**
+ * Every spec found is already on the board: the panel's job is done.
+ *
+ * It recedes to a line and two links rather than disappearing, following the
+ * same rule as the other organizing features: hidden until there is something
+ * to organize, but never unreachable once it holds data. The rescan is the
+ * whole reason to keep it -- this is exactly the state an admin lands in after
+ * merging a spec PR, and pressing it is how the new spec arrives.
+ */
+function AllImportedState({
+  total,
+  boardHref,
+  onRescan,
+  loading,
+}: {
+  total: number;
+  boardHref: string;
+  onRescan: () => void;
+  loading: boolean;
+}) {
+  return (
+    <div className="space-y-3">
+      <p className="text-sm">
+        {total === 1 ? (
+          <>The spec in your connected repositories is already on your board.</>
+        ) : (
+          <>
+            All <strong>{total}</strong> specs in your connected repositories
+            are already on your board.
+          </>
+        )}
+      </p>
+      <p className="text-xs text-muted-foreground">
+        Merged a new spec since? Rescan to pick it up.
+      </p>
+      <div className="flex items-center gap-2">
+        <Link href={boardHref}>
+          <Button size="sm" variant="outline">
+            View your board
+          </Button>
+        </Link>
+        <Button size="sm" variant="ghost" onClick={onRescan} disabled={loading}>
+          {loading ? "…" : "Rescan"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 /** Shown after a successful import: the summary plus a link to the board. */
 function ImportResultView({
   result,
@@ -279,11 +360,27 @@ function ImportResultView({
 }) {
   const { summary } = result;
   const unparented = summary.unparented;
-  const imported = summary.upserted;
+  // Not `summary.upserted`: that counts the new specs plus every spec whose
+  // file changed since the last sync, so reporting it is how "Create 1 card"
+  // came back as "Imported 2 specs" and matched nothing the reader was shown.
+  const { created, updated } = importCounts(summary);
   return (
     <div className="space-y-3">
       <p className="text-sm">
-        Imported <strong>{imported}</strong> spec{imported === 1 ? "" : "s"}
+        {created > 0 ? (
+          <>
+            Created <strong>{created}</strong> card{created === 1 ? "" : "s"}
+          </>
+        ) : (
+          <>No new cards to create</>
+        )}
+        {updated > 0 ? (
+          <span className="text-muted-foreground">
+            {created > 0 ? " and updated " : "; updated "}
+            <strong>{updated}</strong> existing {updated === 1 ? "one" : "ones"}{" "}
+            from git
+          </span>
+        ) : null}
         {unparented > 0 ? (
           <>
             {" "}
