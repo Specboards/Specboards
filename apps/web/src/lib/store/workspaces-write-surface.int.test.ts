@@ -98,11 +98,24 @@ describe.skipIf(!OWNER_URL)("workspaces write surface", () => {
     expect(rows[0]!.name).toBe("Write surface");
   });
 
-  it("has no UPDATE policy on workspaces at all", async () => {
+  it("leaves no write-capable policy that a tenant session could satisfy", async () => {
+    // Not simply "no UPDATE policy": `workspaces_worker_all` survives and is
+    // meant to. It is `for all to specboards_worker`, the separate role
+    // webhook ingestion connects as (infra/worker-role.sql), and a tenant
+    // connection is never that role. Filtering on `cmd = 'UPDATE'` alone would
+    // also miss it, since an ALL policy covers UPDATE without saying so.
+    //
+    // What has to be gone is any policy a *tenant* session could satisfy, so
+    // that is what this asks: every remaining write-capable policy must be
+    // scoped to the worker role.
     const rows = await owner`
-      select policyname from pg_policies
-      where schemaname = 'public' and tablename = 'workspaces' and cmd = 'UPDATE'`;
-    expect(rows.map((r) => r.policyname)).toEqual([]);
+      select policyname, roles::text[] as roles from pg_policies
+      where schemaname = 'public' and tablename = 'workspaces'
+        and cmd in ('UPDATE', 'ALL')`;
+    const tenantFacing = rows.filter((r) =>
+      (r.roles as string[]).some((role) => role !== "specboards_worker"),
+    );
+    expect(tenantFacing.map((r) => r.policyname)).toEqual([]);
   });
 
   it("updates zero rows when an org owner tries to rename their workspace", async () => {
