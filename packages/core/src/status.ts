@@ -51,8 +51,9 @@ export const TRANSITION_MODES: readonly TransitionMode[] = ["strict", "flexible"
  * column default because the setting now lives in `product_settings`, where
  * every value is nullable to mean "inherit": the bottom of the inheritance
  * chain has to be a constant the code knows, not one the schema supplies.
- * Matches the `workspaces.transition_mode` default it replaces, so a workspace
- * that never configured this keeps behaving the same.
+ * Carries the value the old `workspaces.transition_mode` column defaulted to
+ * (that column is gone), so a workspace that never configured this keeps
+ * behaving the same.
  */
 export const DEFAULT_TRANSITION_MODE: TransitionMode = "flexible";
 

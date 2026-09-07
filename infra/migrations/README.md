@@ -6,7 +6,16 @@ are in git history before that release.
 ## Adding a migration
 
 Write the SQL by hand, in a new file, and add an entry to `meta/_journal.json`
-with a `when` larger than every entry already there. That is the whole process.
+with a `when` larger than **1787500000000**, the last entry of the old history.
+That is the whole process.
+
+Larger than the newest entry in this file is not enough, and the difference is
+silent. The baseline deliberately carries an *old* `when` so that databases
+which ran the old history skip it (see below), so a new migration numbered just
+above the baseline is below every such database's recorded position and is
+never applied there: it runs on a fresh database, does nothing on production,
+and reports success on both. Keep stepping from 1787500000000 (the old files
+went up in 10000000).
 
 **Do not run `drizzle-kit generate`.** Drizzle's schema
 (`packages/db/src/schema.ts`) describes tables and nothing else, so it cannot
