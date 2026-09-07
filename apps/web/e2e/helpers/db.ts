@@ -10,6 +10,7 @@ import {
   ideaSettings,
   ideaStatuses,
   ideas,
+  itemWatchers,
   notificationDefaults,
   notificationPreferences,
   notifications,
@@ -150,6 +151,52 @@ export async function resetNotifications(workspaceId: string): Promise<void> {
   await db()
     .delete(notifications)
     .where(eq(notifications.workspaceId, workspaceId));
+}
+
+/**
+ * Put an item into the state one assigned before this feature existed would be
+ * in: somebody is the assignee, and nothing has been recorded about who is
+ * watching it.
+ *
+ * Written straight to the database rather than driven through the UI, and it
+ * clears the outbox on the way out. Assigning through the app emits an event
+ * the relay turns into an auto-watch row, which is precisely the row this is
+ * trying to be without, and a test that deleted the row would be racing the
+ * drain that puts it back.
+ */
+export async function assignWithoutWatching(
+  workspaceId: string,
+  specId: string,
+): Promise<void> {
+  const [admin] = await db()
+    .select({ id: schema.users.id })
+    .from(schema.users)
+    .limit(1);
+  if (!admin) throw new Error("No user found; global setup did not run?");
+  await db()
+    .update(features)
+    .set({ assigneeId: admin.id })
+    .where(
+      and(eq(features.workspaceId, workspaceId), eq(features.specId, specId)),
+    );
+  await db()
+    .delete(outboxEvents)
+    .where(eq(outboxEvents.workspaceId, workspaceId));
+  await resetWatchers(workspaceId);
+}
+
+/**
+ * Forget every watch in the workspace.
+ *
+ * Used to reach the state where somebody is the assignee and has said nothing
+ * about it, which is otherwise hard to produce through the UI now that
+ * creating and being assigned both auto-watch. It is what an item assigned
+ * before this feature existed looks like.
+ */
+export async function resetWatchers(workspaceId: string): Promise<void> {
+  await db()
+    .delete(itemWatchers)
+    .where(eq(itemWatchers.workspaceId, workspaceId));
 }
 
 /**

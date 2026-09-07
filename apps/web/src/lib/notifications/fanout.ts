@@ -4,6 +4,7 @@ import {
   features,
   inArray,
   isNull,
+  itemWatchers,
   members,
   notifications,
   type Database,
@@ -81,6 +82,7 @@ export async function fanOutNotifications(
   ev: OutboxEventRow,
 ): Promise<ResolvedNotice[]> {
   try {
+    await recordAutoWatch(tx, ev);
     const targets = await resolveTargets(tx, ev);
     if (targets.length === 0) return [];
 
@@ -174,6 +176,70 @@ async function activeMembers(
       ),
     );
   return new Set(rows.map((r) => r.userId));
+}
+
+// ============================================================================
+// Auto-watch
+// ============================================================================
+
+/**
+ * Put somebody on an item because of what they just did to it.
+ *
+ * Being given an item, commenting on one, and creating one all say the person
+ * expects to hear what happens next, and making them ask for it separately is
+ * a step nobody would take. Recorded as a row rather than inferred at read
+ * time so the watcher list can show them, and so leaving is possible: it
+ * inserts ON CONFLICT DO NOTHING, which means a row saying "no" survives every
+ * later reason the system might have had to add them back. Auto-watch that
+ * could not be left is noise with extra steps.
+ *
+ * Here rather than at the write site because of the assignment case. The
+ * person doing the assigning is not the person who ends up watching, and the
+ * alternative would be an RLS policy letting any member insert a watch row for
+ * anybody, which is a way to subscribe a colleague to something they never
+ * asked about. The relay already runs as the role whose job is deciding who a
+ * change concerns.
+ *
+ * Failures are swallowed separately from the fan-out's own catch. A watch row
+ * is a convenience; the notification for the event that would have created it
+ * is the thing somebody is waiting for, and losing the second to the first
+ * would be the wrong trade.
+ */
+async function recordAutoWatch(tx: Tx, ev: OutboxEventRow): Promise<void> {
+  try {
+    const data = (ev.data ?? {}) as Record<string, unknown>;
+    // Who this event says has just shown interest. The actor for the two they
+    // performed themselves; the new assignee for the one done to them.
+    const userId =
+      ev.type === "item.assigned"
+        ? str(data.assigneeId)
+        : ev.type === "item.created" || ev.type === "comment.created"
+          ? ev.actorId
+          : null;
+    if (!userId) return;
+
+    const item = await itemBySpecId(tx, ev.workspaceId, str(data.specId));
+    if (!item) return;
+
+    await tx
+      .insert(itemWatchers)
+      .values({
+        workspaceId: ev.workspaceId,
+        featureId: item.id,
+        userId,
+        watching: true,
+        source: "auto",
+      })
+      .onConflictDoNothing({
+        target: [
+          itemWatchers.workspaceId,
+          itemWatchers.featureId,
+          itemWatchers.userId,
+        ],
+      });
+  } catch (err) {
+    console.error(`[notifications] auto-watch failed for event ${ev.id}:`, err);
+  }
 }
 
 // ============================================================================
@@ -364,15 +430,24 @@ interface ItemRow {
   parentId: string | null;
 }
 
-/** Everyone who should hear about a change to this item. */
+/**
+ * Everyone who should hear about a change to this item.
+ *
+ * The assignee is a follower by inference rather than by choice, so an
+ * explicit mute has to outrank them. That ordering is the feature: unwatching
+ * an item you are assigned to stops the stream without giving the work away,
+ * and it is the only per-item lever there is, because the preference grid is
+ * deliberately per type and not per item.
+ */
 async function followers(
   tx: Tx,
   workspaceId: string,
   item: ItemRow,
 ): Promise<string[]> {
-  const watchers = await watchersFor(tx, workspaceId, [item.id]);
-  const set = new Set(watchers.get(item.id) ?? []);
+  const audience = (await watchersFor(tx, workspaceId, [item.id])).get(item.id);
+  const set = new Set(audience?.watching ?? []);
   if (item.assigneeId) set.add(item.assigneeId);
+  for (const muted of audience?.muted ?? []) set.delete(muted);
   return [...set];
 }
 

@@ -119,13 +119,23 @@ table, so a bug in a worker path cannot reach them.
   `repositories` (S/U), `feature_github_links` (S/I/U/D), `workspace_levels`
   (S), `features` (S/I/U/D), `spec_index` (S/I/U/D), `products` (S/I/U).
 - Notification fan-out: `notifications` (S/I), `members` (S),
-  `notification_defaults` (S), `notification_preferences` (S).
+  `notification_defaults` (S), `notification_preferences` (S),
+  `item_watchers` (S/I/U).
 - Read-only context: `workspaces` (S), `users` (S).
 
 `members` is select-only, and is the one place the worker reads the roster: the
 fan-out has to drop a deactivated or departed person from a recipient list, and
 a notification is the one thing that would otherwise keep arriving for someone
 who has left. It can read the roster and cannot change it.
+
+`item_watchers` is the one write in the notification path that is not a
+notification, and the reason is the assignment case: being handed an item
+auto-watches you, and the person doing the handing is not the person who ends
+up watching. Doing that at the write site would need an RLS policy letting any
+member insert a watch row for anybody, which is a way to subscribe a colleague
+to an item they never asked about. It has no DELETE, so the worker can add
+somebody to an item they just acted on and can never undo a decision a person
+made about their own attention.
 
 The two settings tables are select-only for the same kind of reason. Resolving
 who to tell means reading what each recipient asked for, and the worker has no

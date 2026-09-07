@@ -1553,6 +1553,62 @@ export const notifications = pgTable(
 );
 
 /**
+ * Who has explicitly asked to hear about an item, and who has explicitly asked
+ * not to.
+ *
+ * One row per (item, person), carrying a boolean rather than existing-or-not,
+ * because "I am not watching this" has to be a thing the table can say. The
+ * item you are assigned to is followed by default, so leaving it needs a
+ * recorded decision; without one, the only way to stop hearing about an item
+ * would be to give it away. It is also what keeps auto-watch leaveable: the
+ * triggers below insert with ON CONFLICT DO NOTHING, so a row saying no
+ * survives every later reason the system might have had to add you.
+ *
+ * `includeDescendants` answers the card's open question about watching an
+ * epic. Cascade is neither always on (watching an initiative would put every
+ * status change under it in your inbox, which is the flood this whole release
+ * exists to prevent) nor unavailable (following everything under an epic is
+ * the main reason to watch a parent at all). It is a choice made per watch,
+ * offered only where there is something underneath.
+ */
+export const itemWatchers = pgTable(
+  "item_watchers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    featureId: uuid("feature_id")
+      .notNull()
+      .references(() => features.id, { onDelete: "cascade" }),
+    /** The watcher. No FK, matching `notifications.recipient_id`. */
+    userId: uuid("user_id").notNull(),
+    /** False is an explicit mute, not an absent row. See above. */
+    watching: boolean("watching").notNull().default(true),
+    /** Also hear about anything below this item. Ignored on a leaf. */
+    includeDescendants: boolean("include_descendants").notNull().default(false),
+    /**
+     * `manual` when a person clicked Watch, `auto` when being assigned,
+     * commenting or creating put them here. Kept so the watcher list can say
+     * why somebody is on it, and so a future change to the auto rules could
+     * find the rows it created without touching anybody's own choice.
+     */
+    source: text("source").notNull().default("manual"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    unique("item_watchers_uq").on(t.workspaceId, t.featureId, t.userId),
+    index("item_watchers_feature_idx").on(t.featureId),
+    index("item_watchers_user_idx").on(t.workspaceId, t.userId),
+  ],
+);
+
+/**
  * Notification settings, stored as OVERRIDES ONLY.
  *
  * Two tables, one idea, and the thing to hold on to is what an absent row

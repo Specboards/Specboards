@@ -1017,6 +1017,40 @@ export interface NotificationList {
 /** Raised when notification settings can't be read or written. */
 export class NotificationSettingsError extends DomainError {}
 
+/** One person on an item's watcher list. */
+export interface WatcherRecord {
+  userId: string;
+  name: string | null;
+  image: string | null;
+  /** `auto` when being assigned, commenting or creating put them here. */
+  source: "auto" | "manual";
+}
+
+/** An item's watchers, and where the caller stands on it. */
+export interface ItemWatchState {
+  watchers: WatcherRecord[];
+  /**
+   * The caller's effective state, not their stored one. Being assigned an item
+   * follows it without a row; a row saying no outranks that.
+   */
+  watching: boolean;
+  /**
+   * Whether the caller has actually decided, as opposed to inheriting the
+   * answer from being the assignee. The control says which, because a state
+   * somebody did not choose and cannot explain reads as a bug.
+   */
+  explicit: boolean;
+  /** Whether their watch also covers everything under the item. */
+  includeDescendants: boolean;
+}
+
+/** A change to the caller's own watch on one item. */
+export interface WatchInput {
+  watching: boolean;
+  /** Only meaningful on an item with children; ignored on a leaf. */
+  includeDescendants?: boolean;
+}
+
 /**
  * One cell of a settings grid, on its way to being stored.
  *
@@ -1955,6 +1989,18 @@ interface CollaborationStore {
     changes: readonly NotificationSettingChange[],
     scope?: WorkspaceScope,
   ): Promise<NotificationDefaultsView>;
+  /** Who is watching an item, and where the caller stands on it. Requires read
+   * access to the item's product. */
+  listWatchers(specId: string, scope?: WorkspaceScope): Promise<ItemWatchState>;
+  /**
+   * Join or leave an item's watcher list. The caller's own state only: there
+   * is no way to express anybody else's, deliberately.
+   */
+  setWatch(
+    specId: string,
+    input: WatchInput,
+    scope?: WorkspaceScope,
+  ): Promise<ItemWatchState>;
 }
 
 /**
