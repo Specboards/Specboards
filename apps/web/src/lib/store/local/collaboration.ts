@@ -16,11 +16,20 @@
 import { randomUUID } from "node:crypto";
 
 import {
+  resolveUserMatrix,
+  resolveWorkspaceMatrix,
+} from "@/lib/notifications/matrix";
+
+import {
   CommentError,
+  NotificationSettingsError,
   type CommentInput,
   type CommentRecord,
+  type NotificationDefaultsView,
   type NotificationList,
+  type NotificationPreferenceView,
   type NotificationQuery,
+  type NotificationSettingChange,
   type WorkspaceScope,
 } from "../types";
 
@@ -115,6 +124,45 @@ export async function markNotificationUnread(
 export async function markAllNotificationsRead(
   _scope?: WorkspaceScope,
 ): Promise<void> {}
+
+/**
+ * Notification settings, in local file mode.
+ *
+ * Nothing here has anybody to notify: the inbox above is always empty for the
+ * same reason. The settings still resolve, to the catalog values with no
+ * override at either level, so the grid renders honestly if it is ever asked
+ * to. Writes refuse rather than quietly succeeding, because a saved preference
+ * that can never change anything is worse than being told so.
+ */
+export async function getNotificationPreferences(
+  _scope?: WorkspaceScope,
+): Promise<NotificationPreferenceView> {
+  return { rows: resolveUserMatrix([], []) };
+}
+
+export async function updateNotificationPreferences(
+  _changes: readonly NotificationSettingChange[],
+  _scope?: WorkspaceScope,
+): Promise<NotificationPreferenceView> {
+  throw new NotificationSettingsError(
+    "Notification settings are unavailable in local file mode.",
+  );
+}
+
+export async function getNotificationDefaults(
+  _scope?: WorkspaceScope,
+): Promise<NotificationDefaultsView> {
+  return { rows: resolveWorkspaceMatrix([]), overrideCounts: {} };
+}
+
+export async function updateNotificationDefaults(
+  _changes: readonly NotificationSettingChange[],
+  _scope?: WorkspaceScope,
+): Promise<NotificationDefaultsView> {
+  throw new NotificationSettingsError(
+    "Notification settings are unavailable in local file mode.",
+  );
+}
 
 async function readComments(ctx: LocalStoreContext): Promise<LocalComment[]> {
   return ctx.readJsonFile<LocalComment>(localPath(ctx.root, "comments"));

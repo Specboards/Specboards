@@ -37,8 +37,11 @@ import {
 import {
   type CommentInput,
   type CommentRecord,
+  type NotificationDefaultsView,
   type NotificationList,
+  type NotificationPreferenceView,
   type NotificationQuery,
+  type NotificationSettingChange,
   type BoardKey,
   type BoardPreferences,
   type CreateFeatureInput,
@@ -976,6 +979,32 @@ export class LocalFileStore implements FeatureStore, LocalStoreContext {
 
   markAllNotificationsRead(scope?: WorkspaceScope): Promise<void> {
     return collabStore.markAllNotificationsRead(scope);
+  }
+
+  getNotificationPreferences(
+    scope?: WorkspaceScope,
+  ): Promise<NotificationPreferenceView> {
+    return collabStore.getNotificationPreferences(scope);
+  }
+
+  updateNotificationPreferences(
+    changes: readonly NotificationSettingChange[],
+    scope?: WorkspaceScope,
+  ): Promise<NotificationPreferenceView> {
+    return collabStore.updateNotificationPreferences(changes, scope);
+  }
+
+  getNotificationDefaults(
+    scope?: WorkspaceScope,
+  ): Promise<NotificationDefaultsView> {
+    return collabStore.getNotificationDefaults(scope);
+  }
+
+  updateNotificationDefaults(
+    changes: readonly NotificationSettingChange[],
+    scope?: WorkspaceScope,
+  ): Promise<NotificationDefaultsView> {
+    return collabStore.updateNotificationDefaults(changes, scope);
   }
 
   // ==========================================================================

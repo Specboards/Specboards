@@ -97,6 +97,16 @@ grant select                            on product_repositories to specboards_wo
 -- write of any kind: the worker reads the roster and never edits it.
 grant select                            on members            to specboards_worker;
 
+-- Notification preferences (relay). Fan-out asks, per recipient and event
+-- type, which channels they want it on: the workspace's defaults, then that
+-- user's own overrides on top. Select only on both, and no write of any kind:
+-- the worker reads somebody's settings to honour them and never records an
+-- answer on their behalf. Also granted in migration 0002, so an existing
+-- database honours preferences the moment that migration lands rather than
+-- when this file is next re-run by hand.
+grant select                            on notification_defaults    to specboards_worker;
+grant select                            on notification_preferences to specboards_worker;
+
 -- Read-only context both paths need to build envelopes / resolve scope.
 grant select                            on workspaces         to specboards_worker;
 grant select                            on users              to specboards_worker; -- no RLS
@@ -115,7 +125,7 @@ declare
     'github_installations', 'repositories', 'feature_github_links',
     'workspace_levels', 'features', 'spec_index', 'products',
     'product_repositories', 'workspaces', 'item_events', 'notifications',
-    'members'
+    'members', 'notification_defaults', 'notification_preferences'
   ];
 begin
   foreach t in array worker_tables loop

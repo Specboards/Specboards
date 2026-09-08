@@ -1,11 +1,11 @@
 "use client";
 
-import { CheckCheck, Inbox } from "lucide-react";
+import { CheckCheck, Inbox, SlidersHorizontal } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useState } from "react";
 
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import {
   listNotifications,
@@ -19,7 +19,7 @@ import {
   NOTIFICATION_EVENT_LABELS,
   NOTIFICATION_EVENT_TYPES,
 } from "@/lib/notifications/catalog";
-import { orgProductPath } from "@/lib/org-path";
+import { orgPath, orgProductPath } from "@/lib/org-path";
 import type { NotificationList, NotificationRecord } from "@/lib/store/types";
 import { useOrgSlug } from "@/lib/use-org";
 import { cn } from "@/lib/utils";
@@ -161,12 +161,25 @@ export function NotificationCenter({
               : "You are up to date."}
           </p>
         </div>
-        {unread > 0 ? (
-          <Button variant="outline" size="sm" onClick={() => void onMarkAll()}>
-            <CheckCheck aria-hidden className="h-4 w-4" />
-            Mark all read
-          </Button>
-        ) : null}
+        <div className="flex items-center gap-2">
+          {unread > 0 ? (
+            <Button variant="outline" size="sm" onClick={() => void onMarkAll()}>
+              <CheckCheck aria-hidden className="h-4 w-4" />
+              Mark all read
+            </Button>
+          ) : null}
+          {/* The moment somebody decides a notification is too noisy is the
+              moment they are looking at it, and that is here rather than in
+              Settings. The grid itself lives there, so this is a link and not
+              a second copy of it. */}
+          <Link
+            href={orgPath(org, "/settings/notifications")}
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+          >
+            <SlidersHorizontal aria-hidden className="h-4 w-4" />
+            Settings
+          </Link>
+        </div>
       </header>
 
       <div className="flex flex-wrap items-center gap-2">

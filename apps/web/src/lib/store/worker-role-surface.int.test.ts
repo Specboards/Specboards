@@ -61,6 +61,17 @@ const WORKER_READS: { table: string; why: string }[] = [
   },
   { table: "item_events", why: "sync appends git-originated history" },
   { table: "notifications", why: "review-outcome notifications" },
+  // The notification fan-out, which runs in the relay's transaction: who is
+  // still an active member, and which channels each of them wants.
+  { table: "members", why: "fanOutNotifications: drop departed recipients" },
+  {
+    table: "notification_defaults",
+    why: "channelsFor: the workspace's default channels",
+  },
+  {
+    table: "notification_preferences",
+    why: "channelsFor: a recipient's own overrides",
+  },
   { table: "outbox_events", why: "webhook drainer" },
   { table: "webhook_endpoints", why: "webhook drainer" },
   { table: "webhook_deliveries", why: "webhook relay" },

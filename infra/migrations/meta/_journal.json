@@ -15,6 +15,13 @@
       "when": 1787510000000,
       "tag": "0001_drop_workspaces_transition_mode",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787520000000,
+      "tag": "0002_notification_preferences",
+      "breakpoints": true
     }
   ]
 }

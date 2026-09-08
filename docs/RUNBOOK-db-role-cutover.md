@@ -118,13 +118,23 @@ table, so a bug in a worker path cannot reach them.
 - Incoming GitHub sync: `github_app` (S), `github_installations` (S/D),
   `repositories` (S/U), `feature_github_links` (S/I/U/D), `workspace_levels`
   (S), `features` (S/I/U/D), `spec_index` (S/I/U/D), `products` (S/I/U).
-- Notification fan-out: `notifications` (S/I), `members` (S).
+- Notification fan-out: `notifications` (S/I), `members` (S),
+  `notification_defaults` (S), `notification_preferences` (S).
 - Read-only context: `workspaces` (S), `users` (S).
 
 `members` is select-only, and is the one place the worker reads the roster: the
 fan-out has to drop a deactivated or departed person from a recipient list, and
 a notification is the one thing that would otherwise keep arriving for someone
 who has left. It can read the roster and cannot change it.
+
+The two settings tables are select-only for the same kind of reason. Resolving
+who to tell means reading what each recipient asked for, and the worker has no
+business writing anybody's settings on their behalf. Note that these two are
+also granted by migration `0002`, so a database that has run migrations already
+honours preferences without this file being re-run; the entry here is what
+keeps a freshly provisioned database (where the migration's grant is skipped
+because the role does not exist yet) from silently ignoring everybody's
+choices.
 
 Cross-workspace access on the RLS-enabled tables above comes from role-targeted
 policies (`<table>_worker_all ... FOR ALL TO specboards_worker USING (true)`).

@@ -10,6 +10,8 @@ import {
   ideaSettings,
   ideaStatuses,
   ideas,
+  notificationDefaults,
+  notificationPreferences,
   notifications,
   isNull,
   ne,
@@ -148,6 +150,21 @@ export async function resetNotifications(workspaceId: string): Promise<void> {
   await db()
     .delete(notifications)
     .where(eq(notifications.workspaceId, workspaceId));
+}
+
+/**
+ * Empty both notification settings tables, so a run starts on the catalog
+ * defaults with nothing overridden at either level.
+ */
+export async function resetNotificationSettings(
+  workspaceId: string,
+): Promise<void> {
+  await db()
+    .delete(notificationPreferences)
+    .where(eq(notificationPreferences.workspaceId, workspaceId));
+  await db()
+    .delete(notificationDefaults)
+    .where(eq(notificationDefaults.workspaceId, workspaceId));
 }
 
 /** Remove every release in the workspace (items are unscheduled by SET NULL). */

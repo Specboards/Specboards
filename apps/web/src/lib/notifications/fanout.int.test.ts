@@ -107,6 +107,8 @@ describe.skipIf(!OWNER_URL)("notification fan-out", () => {
 
   beforeEach(async () => {
     await owner`delete from notifications where workspace_id = ${ws}`;
+    await owner`delete from notification_defaults where workspace_id = ${ws}`;
+    await owner`delete from notification_preferences where workspace_id = ${ws}`;
   });
 
   /** Run the relay and read back what landed, oldest first. */
@@ -404,5 +406,73 @@ describe.skipIf(!OWNER_URL)("notification fan-out", () => {
     // The `processedAt` stamp commits with the rows, so a second sweep finds
     // nothing to expand. A duplicate here would mean every restart re-notified.
     expect(rows).toHaveLength(1);
+  });
+
+  /**
+   * Preferences, seen from the only place they matter.
+   *
+   * The settings suite proves the rows resolve; these prove the relay asks.
+   * They are the same claim the settings screen makes, checked at the far end
+   * of the pipe: what somebody switches off has to actually stop arriving, and
+   * a workspace default has to reach the people who have not overridden it and
+   * nobody else.
+   */
+  async function assign(to: string) {
+    const item = await newItem();
+    await store.updateFeature(item.specId, { assigneeId: to }, asAlice, [
+      {
+        type: "item.assigned",
+        productId: product,
+        data: {
+          specId: item.specId,
+          title: item.title,
+          level: item.level,
+          assigneeId: to,
+          previousAssigneeId: null,
+        },
+      },
+    ]);
+  }
+
+  it("does not raise a notice the recipient has switched off", async () => {
+    await owner`insert into notification_preferences
+      (workspace_id, user_id, event_type, channel, enabled)
+      values (${ws}, ${user.bob}, 'item.assigned', 'in_app', false)`;
+
+    await assign(user.bob);
+    expect(await drain()).toEqual([]);
+  });
+
+  it("silences everyone the workspace default covers, and nobody else", async () => {
+    await owner`insert into notification_defaults
+      (workspace_id, event_type, channel, enabled)
+      values (${ws}, 'item.assigned', 'in_app', false)`;
+    // Carol has been here before and turned it back on. The default must not
+    // reach her: that is the difference between a default and a policy.
+    await owner`insert into notification_preferences
+      (workspace_id, user_id, event_type, channel, enabled)
+      values (${ws}, ${user.carol}, 'item.assigned', 'in_app', true)`;
+
+    await assign(user.bob);
+    expect(await drain()).toEqual([]);
+
+    await owner`delete from notifications where workspace_id = ${ws}`;
+    await assign(user.carol);
+    const rows = await drain();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      recipient_id: user.carol,
+      type: "item.assigned",
+    });
+  });
+
+  it("still raises the in-app notice when only email is switched off", async () => {
+    // Per channel, not per row. Muting mail must not take the inbox with it.
+    await owner`insert into notification_preferences
+      (workspace_id, user_id, event_type, channel, enabled)
+      values (${ws}, ${user.bob}, 'item.assigned', 'email', false)`;
+
+    await assign(user.bob);
+    expect(await drain()).toHaveLength(1);
   });
 });

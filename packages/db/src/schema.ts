@@ -1553,6 +1553,99 @@ export const notifications = pgTable(
 );
 
 /**
+ * Notification settings, stored as OVERRIDES ONLY.
+ *
+ * Two tables, one idea, and the thing to hold on to is what an absent row
+ * means. A resolution walks three levels: the catalog default in
+ * `lib/notifications/catalog.ts`, then the workspace's default if it has one,
+ * then the user's own if they have one. Absence at either level means
+ * "inherit", resolved at read time.
+ *
+ * Nothing is ever seeded. Copying the defaults into per-user rows at signup
+ * would be the obvious implementation and it is exactly wrong: an admin
+ * changing a default would then move nobody, because everybody would already
+ * hold an explicit row saying the old value. That failure is invisible until
+ * the day somebody tries it, so the absence of a seed step is load-bearing and
+ * not an optimisation.
+ *
+ * A row per (scope, event type, channel) rather than a column per channel, so
+ * adding a channel is a catalog change rather than a migration, and so
+ * `frequency` can be per channel. Frequency is written and never read today:
+ * email ships immediate-only, and the column exists so a digest does not need
+ * a migration to arrive.
+ */
+export const notificationDefaults = pgTable(
+  "notification_defaults",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    /** A key from NOTIFICATION_EVENT_TYPES. Text, not an enum: the catalog is
+     * the authority and a new type must not need a migration. */
+    eventType: text("event_type").notNull(),
+    /** A key from NOTIFICATION_CHANNELS. */
+    channel: text("channel").notNull(),
+    enabled: boolean("enabled").notNull(),
+    /** Always "immediate" today. See the note above. */
+    frequency: text("frequency").notNull().default("immediate"),
+    /** Which admin set it; snapshot, no FK, so a departed admin's change
+     * survives them. */
+    updatedBy: uuid("updated_by"),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    unique("notification_defaults_row_uq").on(
+      t.workspaceId,
+      t.eventType,
+      t.channel,
+    ),
+  ],
+);
+
+/**
+ * One user's departures from their workspace's defaults. See
+ * {@link notificationDefaults} for why only overrides are stored.
+ */
+export const notificationPreferences = pgTable(
+  "notification_preferences",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    /** The owning user. No FK: `notifications` treats a recipient the same
+     * way, and membership is what actually gates access here. */
+    userId: uuid("user_id").notNull(),
+    eventType: text("event_type").notNull(),
+    channel: text("channel").notNull(),
+    enabled: boolean("enabled").notNull(),
+    frequency: text("frequency").notNull().default("immediate"),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    unique("notification_preferences_row_uq").on(
+      t.workspaceId,
+      t.userId,
+      t.eventType,
+      t.channel,
+    ),
+    /* The admin grid counts how many people have overridden each row, which
+     * asks by (workspace, type, channel) and cannot use the primary key: the
+     * user id sits in the middle of it. */
+    index("notification_preferences_row_idx").on(
+      t.workspaceId,
+      t.eventType,
+      t.channel,
+    ),
+  ],
+);
+
+/**
  * A user's saved backlog filter ("custom view"): a named bundle of filter
  * params they can re-apply. Personal — scoped to the creating user within their
  * workspace, so each member curates their own list.
