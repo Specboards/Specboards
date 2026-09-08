@@ -45,6 +45,7 @@ import { getStore } from "@/lib/store";
 import { mergeTagOptions } from "@/lib/tags-service";
 import { selectableCycles, selectableReleases } from "@/lib/store/types";
 import { listWorkspaceMembers, type WorkspaceMember } from "@/lib/workspace";
+import { memberLabels } from "@/lib/member-label";
 import {
   canConnectRepos,
   canEditProducts,
@@ -214,6 +215,7 @@ export async function BoardView({
   const db = getDb();
   const members: WorkspaceMember[] =
     access && db ? await listWorkspaceMembers(db, access.workspaceId) : [];
+  const memberName = memberLabels(members);
   const memberNames = Object.fromEntries(
     members.map((m) => [m.userId, m.name]),
   );
@@ -247,7 +249,7 @@ export async function BoardView({
   const filterableFeatures = scoped.filter((f) => f.status !== "archived");
   const filterOptions: FilterOptions = {
     statuses: allColumns,
-    assignees: members.map((m) => ({ userId: m.userId, name: m.name })),
+    assignees: members.map((m) => ({ userId: m.userId, name: memberName(m) })),
     // From the registry, plus any tag still sitting on an item that the
     // registry no longer lists (dropping a tag hides values rather than
     // destroying them, so those exist and must stay filterable). Registry order
@@ -428,7 +430,7 @@ export async function BoardView({
                       statuses: allColumns,
                       assignees: members.map((m) => ({
                         userId: m.userId,
-                        name: m.name,
+                        name: memberName(m),
                       })),
                       releases: selectableReleases(releases).map((r) => ({
                         id: r.id,

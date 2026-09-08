@@ -45,6 +45,7 @@ import { getStore } from "@/lib/store";
 import { mergeTagOptions } from "@/lib/tags-service";
 import { selectableCycles, selectableReleases } from "@/lib/store/types";
 import { listWorkspaceMembers } from "@/lib/workspace";
+import { memberLabels } from "@/lib/member-label";
 import {
   canConnectRepos,
   canEditProducts,
@@ -193,9 +194,10 @@ export async function ListView({
     releases.filter((r) => r.status === "shipped").map((r) => r.id),
   );
 
+  const memberName = memberLabels(members);
   const options: FilterOptions = {
     statuses: workflow.statuses.filter((s) => s !== "archived"),
-    assignees: members.map((m) => ({ userId: m.userId, name: m.name })),
+    assignees: members.map((m) => ({ userId: m.userId, name: memberName(m) })),
     // From the registry, plus any tag still sitting on an item that the
     // registry no longer lists (dropping a tag hides values rather than
     // destroying them, so those exist and must stay filterable). Registry order

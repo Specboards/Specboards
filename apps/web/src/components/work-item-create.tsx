@@ -23,6 +23,7 @@ import {
 import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import { createWorkItem } from "@/lib/api-client/work-items";
 import { statusLabel } from "@/lib/feature-helpers";
+import { memberLabels } from "@/lib/member-label";
 import type { WorkspaceMember } from "@/lib/workspace";
 
 /**
@@ -85,6 +86,7 @@ export function WorkItemCreate({
 
   const statuses = workflow.statuses;
   const defaultStatus = statuses[0] ?? "backlog";
+  const memberName = memberLabels(members);
 
   // Offer a product picker only when no product is in context (all-products
   // view) and there's more than one to choose between.
@@ -210,7 +212,7 @@ export function WorkItemCreate({
                   <option value="">Unassigned</option>
                   {members.map((m) => (
                     <option key={m.userId} value={m.userId}>
-                      {m.name}
+                      {memberName(m)}
                     </option>
                   ))}
                 </Select>

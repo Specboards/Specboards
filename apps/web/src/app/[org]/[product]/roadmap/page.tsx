@@ -70,6 +70,7 @@ import {
 } from "@/lib/roadmap-timeline";
 import { buildLadder } from "@/lib/roadmap-ladder";
 import { buildGoalTimeline } from "@/lib/roadmap-goals";
+import { memberLabels } from "@/lib/member-label";
 import { DateSourcePicker } from "./date-source-picker";
 import { GoalTimelineEmptyState, RoadmapGoalLanes } from "./roadmap-goal-lanes";
 import { RoadmapLadder } from "./roadmap-ladder";
@@ -170,6 +171,7 @@ export default async function RoadmapPage({
   const customFieldTypes = Object.fromEntries(
     properties.map((p) => [p.key, p.type]),
   );
+  const memberName = memberLabels(members);
   const memberNames = Object.fromEntries(
     members.map((m) => [m.userId, m.name]),
   );
@@ -300,7 +302,7 @@ export default async function RoadmapPage({
   // (?view=shipped) rather than rows hidden inside this one.
   const filterOptions: FilterOptions = {
     statuses: workflow.statuses.filter((st) => st !== "archived"),
-    assignees: members.map((m) => ({ userId: m.userId, name: m.name })),
+    assignees: members.map((m) => ({ userId: m.userId, name: memberName(m) })),
     // Registry order first, then any tag still sitting on a card that the
     // registry no longer lists, so the menu reads as the workspace's
     // vocabulary rather than a sample of what happens to be on screen.
@@ -454,7 +456,7 @@ export default async function RoadmapPage({
     canEdit && !showShipped
       ? {
           statuses: workflow.statuses.filter((s) => s !== "archived"),
-          assignees: members.map((m) => ({ userId: m.userId, name: m.name })),
+          assignees: members.map((m) => ({ userId: m.userId, name: memberName(m) })),
           releases: activeReleases.map((r) => ({ id: r.id, name: r.name })),
         }
       : undefined;
