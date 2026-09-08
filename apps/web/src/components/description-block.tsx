@@ -39,6 +39,17 @@ import { cn } from "@/lib/utils";
  * The pending-change banner sits above the fold and stays visible either way.
  * It explains why the text underneath may not be somebody's latest change, and
  * collapsing the explanation while leaving the confusion is the wrong half.
+ *
+ * ── Why it wears the DetailSection chrome without being one ─────────────────
+ * The bordered card with a titled header is the shape every other block on
+ * this item uses (Assistant, Relationships, Comments), and Description sitting
+ * outside it read as page furniture rather than as the first of the sections.
+ * It is not a `DetailSection`, though, because the two fold differently on
+ * purpose: a section collapses to nothing, and this collapses to a clamped
+ * preview with the text still legible behind a fade, which is the difference
+ * between "put this away" and "make this shorter". The header also has to
+ * disappear as a control on a short body and refuse to fold a dirty editor,
+ * neither of which a plain section does.
  */
 
 const STORAGE_KEY = "specboard:item-detail:description";
@@ -86,70 +97,87 @@ export function DescriptionBlock({
   // mechanism; it is here so that no future path can fold over an edit.
   const folded = foldable && collapsed && !dirty;
 
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="text-sm font-medium text-muted-foreground">
-          Description
-        </h2>
-        {foldable ? (
-          <button
-            type="button"
-            onClick={() => setCollapsed(!collapsed)}
-            disabled={dirty}
-            aria-expanded={!folded}
-            title={
-              dirty
-                ? "Finish or save your changes before collapsing the description."
-                : undefined
-            }
+  /** The header row, matching DetailSection: title left, control right. */
+  const heading = (
+    <>
+      <span className="text-sm font-medium">Description</span>
+      {foldable ? (
+        <span className="flex items-center gap-1 text-xs text-muted-foreground">
+          {/* The words stay next to the chevron, unlike the other sections.
+              Theirs opens and shuts a whole block, and a chevron says that on
+              its own; this one turns a long document into a short preview, and
+              "Show more" is the only part of the header that says so. */}
+          {folded ? "Show more" : "Show less"}
+          <ChevronDown
+            aria-hidden
             className={cn(
-              "flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-muted-foreground",
-              "hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50",
+              "h-4 w-4 transition-transform",
+              folded ? "-rotate-90" : "",
             )}
-          >
-            {folded ? "Show more" : "Show less"}
-            <ChevronDown
-              aria-hidden
-              className={cn(
-                "h-3.5 w-3.5 transition-transform",
-                folded ? "-rotate-90" : "",
-              )}
-            />
-          </button>
-        ) : null}
-      </div>
-      {/* Above the body on purpose: it explains why the text underneath is not
+          />
+        </span>
+      ) : null}
+    </>
+  );
+
+  return (
+    <section className="overflow-hidden rounded-md border">
+      {foldable ? (
+        <button
+          type="button"
+          onClick={() => setCollapsed(!collapsed)}
+          disabled={dirty}
+          aria-expanded={!folded}
+          title={
+            dirty
+              ? "Finish or save your changes before collapsing the description."
+              : undefined
+          }
+          className="flex w-full items-center justify-between gap-2 border-b bg-muted px-4 py-2.5 text-left disabled:pointer-events-none disabled:opacity-50"
+        >
+          {heading}
+        </button>
+      ) : (
+        // Nothing to toggle on a short body, so the header is not a control.
+        // A chevron that collapses two lines into two lines is noise on every
+        // card that has a sentence in it.
+        <div className="flex w-full items-center justify-between gap-2 border-b bg-muted px-4 py-2.5">
+          {heading}
+        </div>
+      )}
+      <div className="space-y-2 px-4 py-4">
+        {/* Above the body on purpose: it explains why the text underneath is not
           the change someone just made, so reading it afterwards is too late to
           stop them concluding the editor lost their work. Which is also why it
           is outside the fold. */}
-      <SpecPendingChange links={links} />
-      {folded ? (
-        <button
-          type="button"
-          onClick={() => setCollapsed(false)}
-          className="relative block max-h-32 w-full cursor-pointer overflow-hidden text-left"
-        >
-          {/* Headings flattened to body size for the preview only. A spec
+        <SpecPendingChange links={links} />
+        {folded ? (
+          <button
+            type="button"
+            onClick={() => setCollapsed(false)}
+            className="relative block max-h-32 w-full cursor-pointer overflow-hidden text-left"
+          >
+            {/* Headings flattened to body size for the preview only. A spec
               usually opens with an H1 repeating the item's own title, and at
               full scale that heading plus one sentence is the entire preview:
               two lines, one of which the reader has already read on the line
               above. Flattened, the same space shows what the document is
               actually about. */}
-          <div
-            className={cn(
-              "prose prose-sm prose-neutral max-w-none dark:prose-invert",
-              "[&_h1]:text-sm [&_h2]:text-sm [&_h3]:text-sm",
-              "[&_h1]:mt-0 [&_h2]:mt-0 [&_h3]:mt-0 [&_h1]:mb-1 [&_h2]:mb-1 [&_h3]:mb-1",
-            )}
-          >
-            <ReactMarkdown>{body}</ReactMarkdown>
-          </div>
-          <span className="pointer-events-none absolute inset-x-0 bottom-0 block h-16 bg-gradient-to-b from-transparent to-background" />
-        </button>
-      ) : (
-        children
-      )}
-    </div>
+            <div
+              className={cn(
+                "prose prose-sm prose-neutral max-w-none dark:prose-invert",
+                "[&_h1]:text-sm [&_h2]:text-sm [&_h3]:text-sm",
+                "[&_h1]:mt-0 [&_h2]:mt-0 [&_h3]:mt-0 [&_h1]:mb-1 [&_h2]:mb-1 [&_h3]:mb-1",
+              )}
+            >
+              <ReactMarkdown>{body}</ReactMarkdown>
+            </div>
+            <span className="pointer-events-none absolute inset-x-0 bottom-0 block h-16 bg-gradient-to-b from-transparent to-background" />
+          </button>
+        ) : (
+          children
+        )}
+      </div>
+    </section>
   );
 }

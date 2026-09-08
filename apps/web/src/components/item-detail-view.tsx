@@ -216,6 +216,25 @@ export function ItemDetailView({
 
       <hr className="border-border/60" />
 
+      {/* Top of the stack, above the body and every section under it.
+          "Am I hearing about this?" is a question people answer on arriving at
+          an item, not after scrolling past its description, its relationships
+          and its integrations, which is where this used to sit. Still below
+          the page header rather than in it: a control about your own
+          notifications does not belong among the controls that change the item
+          for everybody.
+
+          Absent in local file mode, where `watch` is null: there is no account
+          and nothing that could notify anybody, so the control would be a
+          button that does nothing. */}
+      {data.watch ? (
+        <ItemWatchers
+          specId={feature.specId}
+          initial={data.watch}
+          hasChildren={feature.children.length > 0}
+        />
+      ) : null}
+
       {/* Description / body */}
       <DescriptionBlock
         itemId={feature.specId}
@@ -437,23 +456,6 @@ export function ItemDetailView({
           repos={data.repos}
         />
       </DetailSection>
-
-      {/* Above Comments, because the two are the same question asked twice:
-          who is paying attention to this item. Not in a section of its own,
-          which would put a collapsed header in front of a single button, and
-          not in the page header, where a control about your own notifications
-          would sit among controls that change the item for everybody.
-
-          Absent in local file mode, where `watch` is null: there is no account
-          and nothing that could notify anybody, so the control would be a
-          button that does nothing. */}
-      {data.watch ? (
-        <ItemWatchers
-          specId={feature.specId}
-          initial={data.watch}
-          hasChildren={feature.children.length > 0}
-        />
-      ) : null}
 
       {/* The only section on the card that opens by default, because a comment
           is usually addressed to someone and waiting to be read. That is also
