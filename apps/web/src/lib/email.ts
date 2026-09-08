@@ -1,22 +1,20 @@
 /**
- * Outbound email via Postmark (https://postmarkapp.com).
+ * Outbound email: the renderers, and the public send surface.
  *
- * Configured entirely by env so self-host works without it:
- * - `POSTMARK_SERVER_TOKEN` — server API token; unset = email disabled,
- *   sends become logged no-ops (sign-up still works, verification links
- *   are just never delivered).
- * - `EMAIL_FROM` — verified sender signature / domain address,
- *   e.g. `Specboards <no-reply@specboards.ai>`.
+ * The transports live in `lib/mail/` and Postmark is now one of them rather
+ * than the only one, so a self-hosted instance can send through its own SMTP
+ * relay. This module keeps the surface every caller already imports
+ * (`sendEmail`, `isEmailConfigured`, and the two renderers), which is why
+ * `auth.ts`, `invitations-service.ts` and the access-request route did not
+ * move.
  *
- * Uses Postmark's HTTP API directly — no SDK dependency.
+ * Configuration comes from `lib/mail/config.ts`: stored settings on a
+ * single-tenant deployment, env otherwise. See there for the precedence and
+ * why a hosted deployment never reads the stored row.
  */
 
-interface OutboundEmail {
-  to: string;
-  subject: string;
-  textBody: string;
-  htmlBody?: string;
-}
+import { dispatchEmail } from "@/lib/mail/send";
+import type { OutboundEmail } from "@/lib/mail/types";
 
 /** Escape a string for safe interpolation into HTML. */
 function escapeHtml(value: string): string {
@@ -170,67 +168,40 @@ export function renderInfoEmail(opts: {
 }
 
 /**
- * Whether outbound email can actually be delivered.
+ * Whether outbound email can actually be delivered, judged from env alone.
  *
- * Both halves are needed: a token with no verified sender, or a sender with no
- * token, sends nothing. Callers use this to decide whether a flow may *depend*
- * on an email arriving. Email verification does, which is why a self-host with
- * no transport cannot require it (see `requireEmailVerification` in auth.ts) —
- * the link is dropped by {@link sendEmail} and the token is not recoverable
- * from anywhere, so the first admin would be locked out of their own instance.
+ * Both halves of a transport are needed: a Postmark token with no verified
+ * sender, or a sender with no token, sends nothing. `SPECBOARDS_SMTP_HOST`
+ * counts too, so a self-host configured entirely from its compose file reads
+ * as configured.
+ *
+ * ── Why this does not consult the stored settings ───────────────────────────
+ * It is synchronous, and it has one caller that needs it to be: Better Auth's
+ * `requireEmailVerification` is fixed when the auth instance is built, and the
+ * instance is memoized for the life of the process. Reading a table here would
+ * mean making this async and the auth construction with it.
+ *
+ * The consequence, and it is worth knowing: a self-hosted operator who
+ * configures SMTP through Settings does not have verification start being
+ * required until the app restarts. The settings screen says so. The coupling
+ * itself is what `121e301f` removes, by gating the first-run admin claim on a
+ * bootstrap secret rather than on whether mail happens to work, at which point
+ * this stops being a security-relevant answer at all.
  */
 export function isEmailConfigured(): boolean {
-  return Boolean(process.env.POSTMARK_SERVER_TOKEN && process.env.EMAIL_FROM);
+  if (!process.env.EMAIL_FROM) return false;
+  return Boolean(
+    process.env.POSTMARK_SERVER_TOKEN || process.env.SPECBOARDS_SMTP_HOST,
+  );
 }
 
+/**
+ * Send one message through whichever transport this deployment has.
+ *
+ * Unchanged as a signature and nearly unchanged in behaviour: a configured
+ * transport that fails still throws, and no transport at all still logs and
+ * returns. See `lib/mail/send.ts` for why that second case is not an error.
+ */
 export async function sendEmail(message: OutboundEmail): Promise<void> {
-  const token = process.env.POSTMARK_SERVER_TOKEN;
-  const from = process.env.EMAIL_FROM;
-  if (!token || !from) {
-    console.warn(
-      `[email] POSTMARK_SERVER_TOKEN/EMAIL_FROM not set; dropping "${message.subject}" to ${message.to}`,
-    );
-    return;
-  }
-
-  const res = await fetch("https://api.postmarkapp.com/email", {
-    method: "POST",
-    headers: {
-      accept: "application/json",
-      "content-type": "application/json",
-      "x-postmark-server-token": token,
-    },
-    body: JSON.stringify({
-      From: from,
-      To: message.to,
-      Subject: message.subject,
-      TextBody: message.textBody,
-      HtmlBody: message.htmlBody,
-      MessageStream: "outbound",
-    }),
-  });
-
-  // Postmark returns HTTP 200 with `ErrorCode: 0` on success, but some failures
-  // (e.g. an inactive/suppressed recipient) also come back 200 with a non-zero
-  // ErrorCode, which an `res.ok` check alone would read as success. Read the
-  // body once and treat any non-zero ErrorCode as a failure too.
-  const raw = await res.text().catch(() => "");
-  let parsed: { ErrorCode?: number; Message?: string } | null = null;
-  try {
-    parsed = raw
-      ? (JSON.parse(raw) as { ErrorCode?: number; Message?: string })
-      : null;
-  } catch {
-    parsed = null;
-  }
-  const postmarkError =
-    parsed != null &&
-    typeof parsed.ErrorCode === "number" &&
-    parsed.ErrorCode !== 0;
-  if (!res.ok || postmarkError) {
-    const code = parsed?.ErrorCode != null ? `, code ${parsed.ErrorCode}` : "";
-    throw new Error(
-      `Postmark send failed (${res.status}${code}): ${parsed?.Message ?? raw}`,
-    );
-  }
+  await dispatchEmail(message);
 }

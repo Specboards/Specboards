@@ -192,6 +192,12 @@ describe("the resource vocabulary", () => {
       // inventing, since the picture is what everyone else uses to recognize a
       // person's comments and reviews.
       "profile",
+      // Where every verification link, invitation and notification leaves
+      // through. Same reasoning as model-provider: a key able to change it
+      // could re-point the instance's mail at a relay it controls and read
+      // every token the app sends anybody, which is account takeover for the
+      // whole workspace. Never delegable.
+      "mail-settings",
     ]);
 
     const missing = entries

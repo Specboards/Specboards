@@ -458,6 +458,49 @@ export const githubApp = pgTable("github_app", {
 });
 
 /**
+ * How this deployment sends mail.
+ *
+ * A deployment singleton, like {@link githubApp}: no `workspaceId`, no RLS,
+ * owner connection only. That is a security property rather than a shortcut.
+ * Mail transport is the credential every transactional message leaves through,
+ * so on a multi-tenant deployment a per-workspace version of this would let any
+ * workspace owner re-point every other tenant's verification and invitation
+ * mail at a relay they control. There is one mail transport per deployment
+ * because there is one operator per deployment.
+ *
+ * Enforced as one row by a unique constant column rather than by convention. A
+ * second row that the reader silently ignored would present as "I saved the
+ * settings and nothing changed", which is the worst kind of support call.
+ *
+ * The env vars remain the other way to configure this, and win on a hosted
+ * deployment; see `lib/mail/config.ts` for the precedence and why.
+ */
+export const mailSettings = pgTable("mail_settings", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  /** Pinned true, unique: at most one row can exist. */
+  singleton: boolean("singleton").notNull().default(true).unique(),
+  /** A key from MAIL_TRANSPORTS: "postmark" or "smtp". */
+  transport: text("transport").notNull(),
+  /** Envelope sender, e.g. `Specboards <no-reply@specboards.ai>`. */
+  fromAddress: text("from_address").notNull(),
+  /** Postmark server API token, encrypted at rest. Null unless transport is
+   * postmark. */
+  postmarkToken: text("postmark_token"),
+  smtpHost: text("smtp_host"),
+  smtpPort: integer("smtp_port"),
+  /** "tls" (implicit, usually 465), "starttls" (usually 587), or "none". */
+  smtpSecurity: text("smtp_security"),
+  smtpUsername: text("smtp_username"),
+  /** Encrypted at rest, same treatment as a model provider's API key. */
+  smtpPassword: text("smtp_password"),
+  /** Which admin last saved it; snapshot, no FK. */
+  updatedBy: uuid("updated_by"),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+/**
  * Better Auth's rate-limit counters (its `rateLimit` model). Backing the
  * limiter with the database instead of process memory makes the auth / DCR
  * limits hold across instances (the hosted app can scale past one machine).

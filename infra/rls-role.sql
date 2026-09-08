@@ -40,6 +40,27 @@ grant usage, select on all sequences in schema public to specboards_app;
 -- only needs EXECUTE, not direct read access to members/products.
 grant execute on all functions in schema public to specboards_app;
 
+-- 2b. Tables the tenant role must NOT reach, revoked after the blanket grant
+--     above rather than by omitting them from it.
+--
+--     `mail_settings` holds the transport and credentials every transactional
+--     message leaves through. A tenant connection able to read it learns the
+--     relay and the sender; able to write it, one workspace owner could
+--     re-point every other tenant's verification links and invitations at a
+--     relay they control. It carries no workspace_id and no RLS because it is
+--     deployment configuration, so there is nothing for a policy to key on and
+--     the grant is the whole of the access control. It is reached on the owner
+--     connection only (see `lib/mail/config.ts`).
+--
+--     This has to live here, not only in migration 0004. That migration
+--     revokes it too, for a database that has already been provisioned, but
+--     this script re-grants "all tables in schema public" every time it runs
+--     and the runbook says re-running it is safe. Without this line the revoke
+--     would silently come undone the next time somebody followed that advice.
+--     Caught by `apps/web/src/lib/mail/settings.int.test.ts`, which applies
+--     this file and then checks the privilege.
+revoke all on mail_settings from specboards_app;
+
 -- 3. Future objects created by the migration owner inherit the same grants, so
 --    a new table added in a later migration is reachable without editing this
 --    script. Applies to objects created by the role running this statement, so
