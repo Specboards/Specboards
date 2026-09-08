@@ -22,6 +22,7 @@ function row(over: Partial<NotificationRecord> = {}): NotificationRecord {
     specId: "spec-1",
     featureLevel: "work",
     productSlug: "default",
+    productName: "Default",
     featureTitle: "Checkout flow",
     commentId: null,
     snippet: "moved",

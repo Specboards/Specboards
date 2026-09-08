@@ -152,6 +152,28 @@ describe.skipIf(!OWNER_URL)("notification inbox", () => {
     expect(betaOnly.items.map((n) => n.featureTitle)).toEqual(["Beta item"]);
   });
 
+  /**
+   * The inbox is the reader's, not the product they happen to be standing in.
+   * Asked without a product filter it spans the workspace, and every row names
+   * the product it came from so the reader can tell one from another. Without
+   * that name the surfaces read as product-scoped, which is how a notification
+   * about another product comes to look like no notification at all.
+   */
+  it("spans every product, and says which one each row came from", async () => {
+    await notify({ specId: alphaItem });
+    await notify({ specId: betaItem });
+
+    const inbox = await store.listNotifications(scope);
+    expect(
+      inbox.items
+        .map((n) => [n.featureTitle, n.productName] as const)
+        .sort((a, b) => a[0].localeCompare(b[0])),
+    ).toEqual([
+      ["Alpha item", "Alpha"],
+      ["Beta item", "Beta"],
+    ]);
+  });
+
   it("pages with a cursor, oldest last, without repeating a row", async () => {
     for (let i = 0; i < 5; i += 1) {
       await notify({ at: `2026-09-0${i + 1}T12:00:00.000Z` });

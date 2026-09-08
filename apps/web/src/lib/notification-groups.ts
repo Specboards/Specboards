@@ -24,6 +24,8 @@ interface NotificationGroup {
   featureTitle: string;
   featureLevel: string;
   productSlug: string;
+  /** Which product the item lives in, for surfaces that say so. */
+  productName: string | null;
   /** Newest first, matching the order they arrived in. */
   items: NotificationRecord[];
   /** How many in this group the reader has not read. */
@@ -52,6 +54,7 @@ export function groupNotifications(
       featureTitle: item.featureTitle,
       featureLevel: item.featureLevel,
       productSlug: item.productSlug,
+      productName: item.productName,
       items: [item],
       unreadCount: item.read ? 0 : 1,
       newestAt: item.createdAt,

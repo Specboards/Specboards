@@ -194,7 +194,10 @@ export function SidebarBody({
         ))}
       </nav>
       <div className="space-y-1 border-t p-2">
-        <NotificationBell collapsed={collapsed} />
+        <NotificationBell
+          collapsed={collapsed}
+          showProduct={products.length > 1}
+        />
         <SidebarProfile collapsed={collapsed} />
         {/* AGPL source-availability: a persistent link to the source + license
             notice (see /legal), present in hosted and self-host builds. */}
