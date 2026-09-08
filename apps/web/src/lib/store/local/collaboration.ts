@@ -25,11 +25,13 @@ import {
   NotificationSettingsError,
   type CommentInput,
   type CommentRecord,
+  type ItemWatchState,
   type NotificationDefaultsView,
   type NotificationList,
   type NotificationPreferenceView,
   type NotificationQuery,
   type NotificationSettingChange,
+  type WatchInput,
   type WorkspaceScope,
 } from "../types";
 
@@ -187,4 +189,26 @@ interface LocalComment {
   authorId: string;
   body: string;
   createdAt: string;
+}
+
+/**
+ * Watching, in local file mode. Nothing here can notify anybody, so an item
+ * has no watchers and joining one refuses rather than recording a decision
+ * that could never have an effect. The item detail page does not offer the
+ * control at all when there is no account behind it; these exist because the
+ * interface is one interface.
+ */
+export async function listWatchers(
+  _specId: string,
+  _scope?: WorkspaceScope,
+): Promise<ItemWatchState> {
+  return { watchers: [], watching: false, explicit: false, includeDescendants: false };
+}
+
+export async function setWatch(
+  _specId: string,
+  _input: WatchInput,
+  _scope?: WorkspaceScope,
+): Promise<ItemWatchState> {
+  throw new CommentError("Watching an item is unavailable in local file mode.");
 }

@@ -37,11 +37,13 @@ import {
 import {
   type CommentInput,
   type CommentRecord,
+  type ItemWatchState,
   type NotificationDefaultsView,
   type NotificationList,
   type NotificationPreferenceView,
   type NotificationQuery,
   type NotificationSettingChange,
+  type WatchInput,
   type BoardKey,
   type BoardPreferences,
   type CreateFeatureInput,
@@ -1005,6 +1007,18 @@ export class LocalFileStore implements FeatureStore, LocalStoreContext {
     scope?: WorkspaceScope,
   ): Promise<NotificationDefaultsView> {
     return collabStore.updateNotificationDefaults(changes, scope);
+  }
+
+  listWatchers(specId: string, scope?: WorkspaceScope): Promise<ItemWatchState> {
+    return collabStore.listWatchers(specId, scope);
+  }
+
+  setWatch(
+    specId: string,
+    input: WatchInput,
+    scope?: WorkspaceScope,
+  ): Promise<ItemWatchState> {
+    return collabStore.setWatch(specId, input, scope);
   }
 
   // ==========================================================================

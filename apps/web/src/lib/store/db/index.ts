@@ -12,11 +12,13 @@ import { createDb, outboxEvents, sql, type Database } from "@specboards/db";
 import {
   type CommentInput,
   type CommentRecord,
+  type ItemWatchState,
   type NotificationDefaultsView,
   type NotificationList,
   type NotificationPreferenceView,
   type NotificationQuery,
   type NotificationSettingChange,
+  type WatchInput,
   type BoardKey,
   type BoardPreferences,
   type CreateFeatureInput,
@@ -96,6 +98,7 @@ import {
 } from "./context";
 import * as collabStore from "./collaboration";
 import * as notificationSettingsStore from "./notification-settings";
+import * as watcherStore from "./watchers";
 import * as configStore from "./workspace-config";
 import * as tagStore from "./tags";
 import * as cycleStore from "./cycles";
@@ -771,6 +774,20 @@ export class DbStore implements FeatureStore, DbStoreContext {
       changes,
       scope,
     );
+  }
+
+  // Implemented in ./watchers.ts.
+
+  listWatchers(specId: string, scope?: WorkspaceScope): Promise<ItemWatchState> {
+    return watcherStore.listWatchers(this, specId, scope);
+  }
+
+  setWatch(
+    specId: string,
+    input: WatchInput,
+    scope?: WorkspaceScope,
+  ): Promise<ItemWatchState> {
+    return watcherStore.setWatch(this, specId, input, scope);
   }
 
   // ==========================================================================

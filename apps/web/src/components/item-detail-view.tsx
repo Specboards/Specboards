@@ -21,6 +21,7 @@ import { GateChecklist } from "@/components/gate-checklist";
 import { GenerateChildButton } from "@/components/generate-child-button";
 import { ItemGoals } from "@/components/item-goals";
 import { ItemProperties } from "@/components/item-properties";
+import { ItemWatchers } from "@/components/item-watchers";
 import { ItemTitle } from "@/components/item-title";
 import { ItemHistory } from "@/components/item-history";
 import { SpecBodyEditor } from "@/components/spec-body-editor";
@@ -436,6 +437,23 @@ export function ItemDetailView({
           repos={data.repos}
         />
       </DetailSection>
+
+      {/* Above Comments, because the two are the same question asked twice:
+          who is paying attention to this item. Not in a section of its own,
+          which would put a collapsed header in front of a single button, and
+          not in the page header, where a control about your own notifications
+          would sit among controls that change the item for everybody.
+
+          Absent in local file mode, where `watch` is null: there is no account
+          and nothing that could notify anybody, so the control would be a
+          button that does nothing. */}
+      {data.watch ? (
+        <ItemWatchers
+          specId={feature.specId}
+          initial={data.watch}
+          hasChildren={feature.children.length > 0}
+        />
+      ) : null}
 
       {/* The only section on the card that opens by default, because a comment
           is usually addressed to someone and waiting to be read. That is also

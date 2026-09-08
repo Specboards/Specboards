@@ -72,6 +72,10 @@ const WORKER_READS: { table: string; why: string }[] = [
     table: "notification_preferences",
     why: "channelsFor: a recipient's own overrides",
   },
+  {
+    table: "item_watchers",
+    why: "watchersFor + auto-watch on assign, comment and create",
+  },
   { table: "outbox_events", why: "webhook drainer" },
   { table: "webhook_endpoints", why: "webhook drainer" },
   { table: "webhook_deliveries", why: "webhook relay" },

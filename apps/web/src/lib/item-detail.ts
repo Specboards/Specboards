@@ -24,6 +24,7 @@ import type {
   CycleRecord,
   FeatureDetail,
   ItemGoalRef,
+  ItemWatchState,
   ReleaseRecord,
   StageGateKind,
   WorkspaceScope,
@@ -128,6 +129,12 @@ export interface ItemDetailData {
   /** The acting user's id (for author-only affordances like deleting a
    * comment); null in local file mode where there is no authenticated user. */
   currentUserId: string | null;
+  /**
+   * Who is watching this item, and where the reader stands. Null in local file
+   * mode, where there is no account and nothing that could notify anybody, so
+   * the control is not offered rather than being offered and inert.
+   */
+  watch: ItemWatchState | null;
   /** Built-in field keys available at this level; null = all. */
   availableFields: string[] | null;
   /** The workspace's tag registry, offered by the item's tag picker. */
@@ -295,6 +302,11 @@ export async function getItemDetailData(
   // parallel set: "the team's sections" is one idea, wherever the Markdown ends
   // up. Skipped entirely when no create affordance shows, so an ordinary item
   // read does not pay for a query nothing renders.
+  // Loaded here rather than by the control so the watcher count is present on
+  // arrival: it is part of reading the item ("is anybody else following this"),
+  // not something the reader asks for.
+  const watch = access ? await store.listWatchers(feature.specId, access) : null;
+
   const specTemplates = canCreateChildSpec
     ? await store.listDetailTemplates(access ?? undefined, feature.productId)
     : [];
@@ -319,6 +331,7 @@ export async function getItemDetailData(
     canAttachSpec,
     canCreateChildSpec,
     currentUserId: access?.userId ?? null,
+    watch,
     availableFields,
     tags: tags.map((t) => t.name),
     levelLabel,

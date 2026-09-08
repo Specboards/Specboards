@@ -14,6 +14,7 @@ import type {
   GithubLink,
   GithubLinkInput,
   ItemEvent,
+  ItemWatchState,
 } from "@/lib/store/types";
 
 /**
@@ -374,4 +375,32 @@ export async function removeGithubLink(
     );
   }
   return body?.githubLinks ?? [];
+}
+
+/**
+ * Join or leave an item's watcher list.
+ *
+ * States the desired state rather than toggling, so two clicks racing settle
+ * on the same answer, and answers with the whole list so the count beside the
+ * control stays honest without a second request.
+ */
+export async function setWatch(
+  specId: string,
+  input: { watching: boolean; includeDescendants?: boolean },
+): Promise<ItemWatchState> {
+  const res = await apiFetch(
+    `/api/v1/features/${encodeURIComponent(specId)}/watch`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  );
+  const body = (await res.json().catch(() => null)) as
+    | (ItemWatchState & { error?: string })
+    | null;
+  if (!res.ok || !body?.watchers) {
+    throw new Error(body?.error ?? `Could not update watching (${res.status}).`);
+  }
+  return body;
 }

@@ -107,6 +107,16 @@ grant select                            on members            to specboards_work
 grant select                            on notification_defaults    to specboards_worker;
 grant select                            on notification_preferences to specboards_worker;
 
+-- Watchers (relay). Read to resolve who a change concerns, and written to
+-- record an auto-watch when somebody is assigned an item, comments on one, or
+-- creates one. The one write in the notification path, and deliberately no
+-- DELETE: the worker can add somebody to an item they just acted on, and can
+-- never undo a decision a person made about their own attention. The
+-- assignment case is why this lives here at all rather than at the write site,
+-- where the acting user is not the user being subscribed. Also granted in
+-- migration 0003.
+grant select, insert, update             on item_watchers to specboards_worker;
+
 -- Read-only context both paths need to build envelopes / resolve scope.
 grant select                            on workspaces         to specboards_worker;
 grant select                            on users              to specboards_worker; -- no RLS
@@ -125,7 +135,8 @@ declare
     'github_installations', 'repositories', 'feature_github_links',
     'workspace_levels', 'features', 'spec_index', 'products',
     'product_repositories', 'workspaces', 'item_events', 'notifications',
-    'members', 'notification_defaults', 'notification_preferences'
+    'members', 'notification_defaults', 'notification_preferences',
+    'item_watchers'
   ];
 begin
   foreach t in array worker_tables loop
