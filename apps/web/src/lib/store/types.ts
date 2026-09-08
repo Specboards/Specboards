@@ -957,6 +957,17 @@ export interface NotificationRecord {
   /** The item's level key and product slug, to build its permalink. */
   featureLevel: string;
   productSlug: string;
+  /**
+   * The product's display name, for surfaces that say where a notification
+   * came from. Null when the item belongs to no product, which is also when
+   * `productSlug` falls back to the all-products view.
+   *
+   * Carried on the row rather than resolved by each reader from a product
+   * list. The bell has no product list to resolve against, and giving it one
+   * would mean loading every product on every poll to render a word the query
+   * already had in hand.
+   */
+  productName: string | null;
   featureTitle: string;
   /** The source comment, or null for a notification with no comment behind it. */
   commentId: string | null;

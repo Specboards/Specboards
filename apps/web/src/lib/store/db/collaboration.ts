@@ -237,6 +237,7 @@ export async function listNotifications(
           specId: features.specId,
           featureLevel: features.level,
           productKey: products.key,
+          productName: products.name,
           featureTitle: features.title,
           commentId: notifications.commentId,
           snippet: notifications.snippet,
@@ -271,6 +272,7 @@ export async function listNotifications(
       featureLevel: r.featureLevel,
       // Fall back to the all-products view when the item has no product.
       productSlug: r.productKey ?? "all",
+      productName: r.productName,
       featureTitle: r.featureTitle,
       commentId: r.commentId,
       snippet: r.snippet,

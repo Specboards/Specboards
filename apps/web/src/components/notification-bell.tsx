@@ -58,8 +58,18 @@ function timeAgo(iso: string): string {
  */
 export function NotificationBell({
   collapsed = false,
+  showProduct = false,
 }: {
   collapsed?: boolean;
+  /**
+   * Whether to name the product each row belongs to. The inbox spans the whole
+   * workspace, so a reader standing in one product is shown rows about items in
+   * every other one, and without this nothing says so: the panel reads as
+   * product-scoped and its contents read as missing. Resolved by the sidebar,
+   * which already holds the product list; the bell has none of its own and
+   * loading one on every poll to render a word would be a poor trade.
+   */
+  showProduct?: boolean;
 }) {
   const router = useRouter();
   const org = useOrgSlug();
@@ -206,7 +216,17 @@ export function NotificationBell({
                           {timeAgo(n.createdAt)}
                         </span>
                       </div>
-                      <span className="truncate text-xs text-muted-foreground">
+                      {/* The product prefixes the item rather than sitting on
+                          its own line: the panel is 20rem wide and a row that
+                          spends a line saying where something is has less room
+                          left to say what happened. */}
+                      <span className="w-full truncate text-xs text-muted-foreground">
+                        {showProduct && n.productName ? (
+                          <span className="font-medium">
+                            {n.productName}
+                            {" · "}
+                          </span>
+                        ) : null}
                         {n.featureTitle}
                       </span>
                       <span className="line-clamp-2 text-xs text-muted-foreground">

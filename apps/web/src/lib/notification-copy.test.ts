@@ -22,6 +22,7 @@ function notification(over: Partial<NotificationRecord> = {}): NotificationRecor
     specId: "s1",
     featureLevel: "work",
     productSlug: "default",
+    productName: "Default",
     featureTitle: "Checkout flow",
     commentId: "c1",
     snippet: "…",

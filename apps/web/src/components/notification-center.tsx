@@ -61,6 +61,10 @@ export function NotificationCenter({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Same test the product filter uses: on a single-product workspace, naming
+  // the product on every row says the same thing every time.
+  const showProduct = products.length > 1;
+
   const query = useCallback(
     (before?: string) => ({
       unreadOnly,
@@ -221,7 +225,7 @@ export function NotificationCenter({
         </Select>
         {/* Only worth showing once there is more than one product to tell
             apart; on a single-product workspace it filters nothing. */}
-        {products.length > 1 ? (
+        {showProduct ? (
           <Select
             aria-label="Filter by product"
             value={product}
@@ -260,16 +264,28 @@ export function NotificationCenter({
               className="overflow-hidden rounded-md border"
             >
               <div className="flex items-center justify-between gap-2 border-b bg-muted/40 px-3 py-2">
-                <Link
-                  href={orgProductPath(
-                    org,
-                    group.productSlug,
-                    `/backlog/${group.featureLevel}/${group.specId}`,
-                  )}
-                  className="truncate text-sm font-medium hover:underline"
-                >
-                  {group.featureTitle}
-                </Link>
+                <div className="flex min-w-0 items-center gap-2">
+                  <Link
+                    href={orgProductPath(
+                      org,
+                      group.productSlug,
+                      `/backlog/${group.featureLevel}/${group.specId}`,
+                    )}
+                    className="truncate text-sm font-medium hover:underline"
+                  >
+                    {group.featureTitle}
+                  </Link>
+                  {/* Which product this item lives in. The inbox spans the
+                      whole workspace, and without this a reader standing in
+                      one product cannot tell that a row belongs to another,
+                      which reads as the inbox being product-scoped. Only worth
+                      saying when there is more than one product to be in. */}
+                  {showProduct && group.productName ? (
+                    <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-2xs text-muted-foreground">
+                      {group.productName}
+                    </span>
+                  ) : null}
+                </div>
                 {group.unreadCount > 0 ? (
                   <span className="shrink-0 rounded-full bg-primary px-1.5 text-2xs font-medium text-primary-foreground">
                     {group.unreadCount}
