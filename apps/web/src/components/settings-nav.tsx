@@ -3,44 +3,24 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+import type { SettingsSection } from "@/lib/settings-sections";
 import { useOrgPath } from "@/lib/use-org";
 import { cn } from "@/lib/utils";
-
-const ITEMS = [
-  { href: "/settings/profile", label: "Profile" },
-  { href: "/settings/notifications", label: "Notifications" },
-  // Deployment configuration, not workspace configuration: how this instance
-  // talks to a relay. On a hosted deployment that belongs to whoever runs it,
-  // the screen is read-only, and there is nothing a workspace owner can do
-  // there, so the entry is not offered. See `showEmail`.
-  { href: "/settings/email", label: "Email" },
-  { href: "/settings/company", label: "Company & Team" },
-  { href: "/settings/products", label: "Products" },
-  { href: "/settings/work-cards", label: "Cards" },
-  { href: "/settings/tags", label: "Tags" },
-  { href: "/settings/ideas", label: "Ideas" },
-  { href: "/settings/hierarchy", label: "Hierarchy" },
-  { href: "/settings/assistant", label: "Assistant" },
-  { href: "/settings/branding", label: "Branding" },
-  { href: "/settings/integrations", label: "Integrations" },
-];
 
 /**
  * Left sub-navigation for the Settings section.
  *
- * `showEmail` is resolved on the server by the layout, because tenancy is an
- * environment fact and this is a client component. A hosted tenant is not
- * shown a screen whose only content is somebody else's mail transport.
+ * Which sections these are is resolved on the server by the layout and handed
+ * down, because the answer depends on the viewer's role and their product
+ * grants and this is a client component. See `lib/settings-sections.ts` for
+ * the rule, and for why hiding a section is not the same as blocking it.
  */
-export function SettingsNav({ showEmail }: { showEmail: boolean }) {
+export function SettingsNav({ sections }: { sections: SettingsSection[] }) {
   const pathname = usePathname();
   const orgHref = useOrgPath();
-  const items = showEmail
-    ? ITEMS
-    : ITEMS.filter((i) => i.href !== "/settings/email");
   return (
     <nav aria-label="Settings" className="flex gap-1 overflow-x-auto border-b pb-px sm:w-48 sm:flex-col sm:border-b-0 sm:border-r sm:pb-0 sm:pr-4">
-      {items.map((item) => {
+      {sections.map((item) => {
         const href = orgHref(item.href);
         const active = pathname === href || pathname.startsWith(href + "/");
         return (
