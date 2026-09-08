@@ -115,4 +115,9 @@ export const HIDDEN_PREFIXES = [
   "/setup",
   "/forgot-password",
   "/reset-password",
+  // Reached from a link in an email by somebody who may not be signed in, and
+  // possibly on a device that never has been. A rail of workspace links that
+  // all bounce to a sign-in form is worse than no rail: the page has one job
+  // and none of those links is it.
+  "/unsubscribe",
 ];

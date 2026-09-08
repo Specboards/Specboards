@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import {
   and,
   eq,
@@ -55,6 +57,17 @@ interface OutboxEventRow {
 
 /** One resolved notice: a person, and what they are being told. */
 interface ResolvedNotice {
+  /**
+   * The in-app row this produced, or null when the recipient wants email but
+   * not the bell.
+   *
+   * Minted here rather than read back from the insert. The email channel needs
+   * to name the row it mirrors, so that a notification already read in the app
+   * does not also arrive by mail, and matching a `returning()` back onto the
+   * notices it came from would rely on the database handing rows back in the
+   * order they were given.
+   */
+  notificationId: string | null;
   recipientId: string;
   type: NotificationEventType;
   /** Internal `features.id` the notice deep-links to. */
@@ -72,6 +85,8 @@ interface ResolvedNotice {
  * Returns every notice that survived resolution, including the ones whose
  * in-app channel is off, because the email channel consumes the same list and
  * a recipient who wants email but not the bell is a legitimate combination.
+ * The relay turns the email half into messages and sends them once this
+ * transaction has committed; see `notifications/email.ts` for why not here.
  *
  * Never throws. A notification is a courtesy on top of a change that has
  * already committed; failing the relay transaction over one would strand the
@@ -105,6 +120,7 @@ export async function fanOutNotifications(
     if (inApp.length > 0) {
       await tx.insert(notifications).values(
         inApp.map((n) => ({
+          id: n.notificationId!,
           workspaceId: ev.workspaceId,
           recipientId: n.recipientId,
           actorId: ev.actorId,
@@ -123,7 +139,7 @@ export async function fanOutNotifications(
 }
 
 /** A target before preferences have had a say. */
-type Target = Omit<ResolvedNotice, "channels">;
+type Target = Omit<ResolvedNotice, "channels" | "notificationId">;
 
 async function applyPreferences(
   tx: Tx,
@@ -151,7 +167,11 @@ async function applyPreferences(
       const channels = decisions.get(t.recipientId);
       if (!channels) continue;
       if (!channels.in_app && !channels.email) continue;
-      out.push({ ...t, channels });
+      out.push({
+        ...t,
+        channels,
+        notificationId: channels.in_app ? randomUUID() : null,
+      });
     }
   }
   return out;

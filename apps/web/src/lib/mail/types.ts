@@ -17,6 +17,22 @@ export interface OutboundEmail {
   subject: string;
   textBody: string;
   htmlBody?: string;
+  /**
+   * Extra message headers, for the handful of things that have to be a header
+   * rather than a line of copy.
+   *
+   * Today that is one-click unsubscribe: `List-Unsubscribe` and
+   * `List-Unsubscribe-Post` (RFC 8058) are what put the unsubscribe control in
+   * the mail client's own chrome, and the large mailbox providers now expect
+   * bulk senders to honour them. A link in the body alone is not the same
+   * thing, because the button people actually reach for is the one their
+   * client draws.
+   *
+   * Every transport has to carry these or the guarantee is only true on some
+   * deployments, which is why this is on the shared shape rather than a
+   * Postmark argument.
+   */
+  headers?: Record<string, string>;
 }
 
 export interface PostmarkConfig {

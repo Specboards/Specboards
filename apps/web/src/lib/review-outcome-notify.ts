@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import {
   and,
   eq,
@@ -10,6 +12,12 @@ import {
 import { createGitHubRepoClient, type GithubEntityEvent } from "@specboards/git";
 
 import { getGithubApp } from "@/lib/github-app";
+import {
+  buildNotificationEmails,
+  sendNotificationEmails,
+  type NoticeForEmail,
+} from "@/lib/notifications/email";
+import { channelsFor } from "@/lib/notifications/preferences";
 
 /**
  * Telling an author what became of the change they proposed.
@@ -91,9 +99,12 @@ export function snippetFor(
  * these two types are in the notification catalog (they are things a user can
  * tune) but their rows are raised directly.
  *
- * The consequence to keep in mind: this path does not yet consult notification
- * preferences, so a user who mutes a review outcome will still receive it until
- * the preference layer is wired in here as well.
+ * What that used to cost, and no longer does: this path did not consult
+ * notification preferences at all, so a person who had muted a review outcome
+ * received it anyway. It asks now, using the same resolution the relay uses,
+ * which is also what lets these two types reach the email channel like every
+ * other one. Only the recipient resolution is different here, because it is
+ * the pull request's author rather than an event's audience.
  */
 export async function notifyReviewOutcome(
   db: Database,
@@ -147,23 +158,64 @@ export async function notifyReviewOutcome(
       return reasonByWorkspace.get(workspaceId) ?? null;
     };
 
+    const type = evt.state === "merged" ? MERGED : CLOSED;
+    // Grouped per workspace, because that is the unit both preferences and the
+    // emailed links are scoped to: the same pull request can be linked from
+    // several tenants, and each author's settings are their own.
+    const emailsByWorkspace = new Map<string, NoticeForEmail[]>();
+
     let raised = 0;
     for (const link of targets) {
       const reason = await reasonFor(link.workspaceId);
-      await db.insert(notifications).values({
-        workspaceId: link.workspaceId,
-        recipientId: link.authorId!,
-        // No actor: a merge is an outcome rather than something a particular
-        // person did to the author, and naming the person who clicked the
-        // button would read as blame on a close.
-        actorId: null,
-        type: evt.state === "merged" ? MERGED : CLOSED,
-        featureId: link.featureId,
-        commentId: null,
-        snippet: snippetFor(evt.state, evt.title, reason),
-      });
-      raised += 1;
+      const recipientId = link.authorId!;
+      const snippet = snippetFor(evt.state, evt.title, reason);
+      const channels = (
+        await channelsFor(db, link.workspaceId, [recipientId], type)
+      ).get(recipientId);
+      if (!channels?.in_app && !channels?.email) continue;
+
+      // Minted here so the email can name the row it mirrors, and skip itself
+      // if the author has already read the thing in the app.
+      const notificationId = channels.in_app ? randomUUID() : null;
+      if (notificationId) {
+        await db.insert(notifications).values({
+          id: notificationId,
+          workspaceId: link.workspaceId,
+          recipientId,
+          // No actor: a merge is an outcome rather than something a particular
+          // person did to the author, and naming the person who clicked the
+          // button would read as blame on a close.
+          actorId: null,
+          type,
+          featureId: link.featureId,
+          commentId: null,
+          snippet,
+        });
+        raised += 1;
+      }
+      if (channels.email) {
+        const list = emailsByWorkspace.get(link.workspaceId) ?? [];
+        list.push({
+          notificationId,
+          recipientId,
+          type,
+          featureId: link.featureId,
+          snippet,
+        });
+        emailsByWorkspace.set(link.workspaceId, list);
+      }
     }
+
+    for (const [workspaceId, notices] of emailsByWorkspace) {
+      await sendNotificationEmails(
+        db,
+        await buildNotificationEmails(db, workspaceId, null, notices),
+      );
+    }
+
+    // Still the count of inbox rows raised, which is what the webhook
+    // responder reports. An email is not an inbox row, and counting it here
+    // would make the number mean two things at once.
     return raised;
   } catch (err) {
     console.error("[review-outcome-notify] failed:", err);

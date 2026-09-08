@@ -13,7 +13,16 @@ import type {
 } from "@/lib/notifications/catalog";
 import { resolveChannelsPerUser } from "@/lib/notifications/matrix";
 
-type Tx = Parameters<Parameters<Database["transaction"]>[0]>[0];
+/**
+ * Anything that can run a read.
+ *
+ * Structural rather than `Database`, because the callers hold different
+ * things: the relay asks inside its claimed transaction, and the GitHub review
+ * sink asks on a plain connection, having no domain transaction to be inside.
+ * A `PgTransaction` is not assignable to `Database`, and both run this query
+ * identically.
+ */
+type Reader = Pick<Database, "select">;
 
 /** What a single recipient should receive for one event type. */
 type ChannelDecision = Record<NotificationChannel, boolean>;
@@ -49,7 +58,7 @@ type ChannelDecision = Record<NotificationChannel, boolean>;
  * covers precisely so that this stays unreachable.
  */
 export async function channelsFor(
-  tx: Tx,
+  tx: Reader,
   workspaceId: string,
   userIds: readonly string[],
   type: NotificationEventType,

@@ -1,3 +1,6 @@
+import { mailStatus } from "@/lib/mail/send";
+import { isMultiTenant } from "@/lib/tenancy";
+import { isNotificationEmailOff } from "@/lib/notification-email";
 import {
   getNotificationDefaults,
   getNotificationPreferences,
@@ -6,6 +9,7 @@ import { requireWorkspaceAccess } from "@/lib/workspace-access";
 import {
   NotificationDefaultsCard,
   NotificationPreferencesCard,
+  type EmailBlock,
 } from "@/components/notification-settings";
 
 export const dynamic = "force-dynamic";
@@ -38,10 +42,38 @@ export default async function NotificationSettingsPage() {
   }
 
   const isAdmin = access.role === "owner";
-  const [preferences, defaults] = await Promise.all([
+  const [preferences, defaults, mail, unsubscribed] = await Promise.all([
     getNotificationPreferences(access),
     isAdmin ? getNotificationDefaults(access) : null,
+    mailStatus(),
+    isNotificationEmailOff(access.userId),
   ]);
+
+  /**
+   * Two different reasons the Email column might be dead, and they do not mean
+   * the same thing.
+   *
+   * No transport is a property of the deployment: these rows still say what
+   * they will do, they just cannot act yet, so the column keeps showing its
+   * resolved value. An unsubscribe is a property of the reader and outranks
+   * every row underneath it, so the column has to read as off or the grid is
+   * telling them something untrue. The deployment answer comes first because
+   * re-subscribing on an install that cannot send would change nothing.
+   */
+  const own: EmailBlock | null = !mail.configured
+    ? { note: "Not configured" }
+    : unsubscribed
+      ? { note: "You unsubscribed", forcedOff: true }
+      : null;
+  // The admin grid is workspace policy rather than one person's mail, so an
+  // admin who has unsubscribed still sets the defaults everybody else gets.
+  const workspace: EmailBlock | null = !mail.configured
+    ? { note: "Not configured" }
+    : null;
+  // On a hosted deployment the transport belongs to whoever runs it, and the
+  // mail settings screen is read-only, so there is nowhere here to send an
+  // admin who wants one.
+  const canConfigureMail = !isMultiTenant();
 
   return (
     <div className="space-y-4">
@@ -51,11 +83,20 @@ export default async function NotificationSettingsPage() {
           Choose what you hear about and where it reaches you.
         </p>
       </div>
-      <NotificationPreferencesCard rows={preferences.rows} />
+      <NotificationPreferencesCard
+        rows={preferences.rows}
+        emailBlocked={own}
+        unsubscribed={unsubscribed}
+        mailConfigured={mail.configured}
+        canConfigureMail={canConfigureMail}
+      />
       {defaults ? (
         <NotificationDefaultsCard
           rows={defaults.rows}
           overrideCounts={defaults.overrideCounts}
+          emailBlocked={workspace}
+          mailConfigured={mail.configured}
+          canConfigureMail={canConfigureMail}
         />
       ) : null}
     </div>

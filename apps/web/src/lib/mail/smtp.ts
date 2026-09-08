@@ -63,6 +63,7 @@ export async function sendViaSmtp(
       subject: message.subject,
       text: message.textBody,
       html: message.htmlBody,
+      headers: message.headers,
     });
   } catch (err) {
     throw asMailError(err);

@@ -6,11 +6,7 @@ import {
   NOTIFICATION_CHANNELS,
   type NotificationChannel,
 } from "@/lib/notifications/catalog";
-import {
-  EMAIL_CHANNEL_LIVE,
-  type MatrixRow,
-  type MatrixSource,
-} from "@/lib/notifications/matrix";
+import type { MatrixRow, MatrixSource } from "@/lib/notifications/matrix";
 import type { NotificationSettingChange } from "@/lib/store/types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -74,6 +70,22 @@ interface NotificationMatrixProps {
   resetTargetLabel: string;
   /** How many people have overridden each cell. Admin grid only. */
   overrideCounts?: Record<string, Record<string, number>>;
+  /**
+   * Why the email column cannot be used right now, if it cannot.
+   *
+   * `note` sits under the column header, once, rather than beside every cell
+   * in the column: repeating it per row put the same words next to eight
+   * checkboxes and still left the column looking armed.
+   *
+   * `forcedOff` distinguishes the two blocks, which are not the same thing.
+   * A deployment with no mail transport cannot act on these rows yet, but the
+   * rows still mean what they say, so the column keeps showing its resolved
+   * value. A reader who has unsubscribed will receive nothing whatever the
+   * rows say, so the column has to show off: leaving ticks on it would be the
+   * setting lying to them, which is the exact failure the master switch was
+   * supposed to prevent.
+   */
+  emailBlocked?: { note: string; forcedOff?: boolean } | null;
   /** Persist a batch of cells and hand back the grid as it now resolves. */
   onSave(changes: NotificationSettingChange[]): Promise<MatrixRow[]>;
 }
@@ -90,6 +102,7 @@ export function NotificationMatrix({
   inheritedLabel,
   resetTargetLabel,
   overrideCounts,
+  emailBlocked,
   onSave,
 }: NotificationMatrixProps) {
   const [rows, setRows] = useState(initialRows);
@@ -148,9 +161,9 @@ export function NotificationMatrix({
                     than under every cell in its column. Repeating it per row
                     put the same words beside eight checkboxes and still left
                     the column looking armed. */}
-                {channel === "email" && !EMAIL_CHANNEL_LIVE ? (
+                {channel === "email" && emailBlocked ? (
                   <span className="block text-[10px] font-normal leading-tight text-muted-foreground">
-                    Not sending yet
+                    {emailBlocked.note}
                   </span>
                 ) : null}
               </TableHead>
@@ -180,6 +193,7 @@ export function NotificationMatrix({
                       ownLabel={ownLabel}
                       inheritedLabel={inheritedLabel}
                       count={overrideCounts?.[row.type]?.[channel]}
+                      emailBlocked={emailBlocked}
                       disabled={pending}
                       onToggle={(enabled) =>
                         apply([{ type: row.type, channel, enabled }])
@@ -251,6 +265,7 @@ function MatrixCellControl({
   ownLabel,
   inheritedLabel,
   count,
+  emailBlocked,
   disabled,
   onToggle,
 }: {
@@ -260,24 +275,26 @@ function MatrixCellControl({
   ownLabel: string;
   inheritedLabel: string;
   count: number | undefined;
+  emailBlocked: { note: string; forcedOff?: boolean } | null | undefined;
   disabled: boolean;
   onToggle(enabled: boolean): void;
 }) {
   const cell = row.channels[channel];
   const isMine = cell.source === owns;
-  // The email column renders its resolved value and refuses the click until
-  // email can actually deliver. See EMAIL_CHANNEL_LIVE: a live checkbox that
-  // produces no mail is the failure the unsubscribe switch exists to prevent,
-  // reached from the other side.
-  const unavailable = channel === "email" && !EMAIL_CHANNEL_LIVE;
+  // A blocked email column refuses the click: a live checkbox that produces no
+  // mail is the failure the unsubscribe switch exists to prevent, reached from
+  // the other side.
+  const unavailable = channel === "email" && !!emailBlocked;
   const locked = disabled || unavailable;
+  const checked =
+    unavailable && emailBlocked?.forcedOff ? false : cell.enabled;
 
   return (
     <div className="flex flex-col items-center gap-1">
       <button
         type="button"
         role="switch"
-        aria-checked={cell.enabled}
+        aria-checked={checked}
         aria-label={`${row.label}, ${CHANNEL_LABELS[channel]}`}
         aria-describedby={
           unavailable ? undefined : `${row.type}-${channel}-source`
@@ -287,13 +304,13 @@ function MatrixCellControl({
         className="rounded focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
       >
         <Checkbox
-          checked={cell.enabled}
+          checked={checked}
           // A filled green check on a column that cannot deliver reads as
           // armed however the cell is labelled, so an unavailable one is drawn
           // in the muted palette: still showing its resolved value, visibly
           // not doing anything yet.
           className={
-            unavailable && cell.enabled
+            unavailable && checked
               ? "border-muted-foreground/40 bg-muted text-muted-foreground"
               : undefined
           }

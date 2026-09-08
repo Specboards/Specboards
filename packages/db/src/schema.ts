@@ -2068,6 +2068,17 @@ export const users = pgTable("users", {
   image: text("image"),
   /** IANA time zone (e.g. "America/Los_Angeles"); set on Settings → Profile. */
   timezone: text("timezone"),
+  /**
+   * When this person turned off every notification email, or null if they have
+   * not. The master switch behind the unsubscribe link, deliberately on the
+   * person rather than on any one workspace's settings: somebody unsubscribing
+   * from a mail client has no workspace in context and is saying "no more of
+   * this from Specboards". Outranks every workspace default and every per-type
+   * preference; see migration 0006 for why it is not a sweep over those rows.
+   */
+  notificationEmailOptedOutAt: timestamp("notification_email_opted_out_at", {
+    withTimezone: true,
+  }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

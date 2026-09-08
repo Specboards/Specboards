@@ -1,0 +1,33 @@
+-- The one switch that turns off every notification email.
+--
+-- A person who unsubscribes from a link in an email is, by definition, not in
+-- the app: no session, no workspace in context, and no interest in being
+-- taught the difference between an event type and a channel. One link, one
+-- effect, and it has to work from a mail client.
+--
+-- ── Why a column on users and not a sweep over notification_preferences ─────
+-- Unsubscribing by writing `email = false` into every preference row would be
+-- slow, would destroy the per-type choices the person had made, and would
+-- leave them nothing to come back to if they re-subscribed. It also could not
+-- express what the link actually promises, which is "no notification email
+-- from Specboards", not "no notification email from this workspace": the
+-- reader has no idea which workspace an event came from and should not have to
+-- unsubscribe once per one.
+--
+-- So it lives on the person rather than on any workspace's settings, it is
+-- deliberately not per workspace, and it outranks everything underneath it. No
+-- workspace default and no admin setting can put mail back into the inbox of
+-- somebody who has said no. The preference grid renders that state rather than
+-- pretending the email column still means something.
+--
+-- A timestamp rather than a boolean: null is subscribed, and a value both says
+-- "unsubscribed" and records when, which is the first thing anybody asks when
+-- somebody reports mail they did not expect to stop.
+--
+-- No grants and no policy. `users` carries no RLS (see infra/rls-role.sql) and
+-- both the tenant and worker roles already hold table-level SELECT, so the
+-- relay can honour this the moment the migration lands. The writes go through
+-- the owner connection, because the unsubscribe link has no session to
+-- authorize and the token in it is the authorization.
+
+ALTER TABLE users ADD COLUMN notification_email_opted_out_at timestamptz;
