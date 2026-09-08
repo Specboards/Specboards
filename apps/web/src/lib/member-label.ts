@@ -25,8 +25,10 @@
  * and a fuzzy match would start disambiguating people who are not ambiguous.
  */
 
-/** The least a person has to carry to be named in a list. */
-export interface LabelledMember {
+/** The least a person has to carry to be named in a list. Not exported: every
+ * caller passes a `WorkspaceMember` (or the roster shape a page already holds)
+ * and lets it structurally match, so naming the type buys nothing. */
+interface LabelledMember {
   name?: string | null;
   email?: string | null;
 }
