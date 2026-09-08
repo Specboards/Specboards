@@ -501,6 +501,33 @@ export const mailSettings = pgTable("mail_settings", {
 });
 
 /**
+ * The secret that lets somebody claim a fresh instance.
+ *
+ * A deployment singleton with no `workspaceId` and no RLS, like
+ * {@link githubApp}: there is no workspace yet when this matters, which is the
+ * entire point of it.
+ *
+ * Only a hash is stored. The token is shown once, in the server log at the
+ * boot that generated it, and is not recoverable afterwards. That is the same
+ * bargain a password reset link makes, and it means a database dump does not
+ * hand somebody the keys to an instance that has not been claimed.
+ *
+ * The row is written once and never cleared. It does not need to be: the gate
+ * it guards is scoped to "no account exists yet", so it stops being consulted
+ * the moment the first person signs up and cannot be replayed afterwards.
+ */
+export const bootstrapSecret = pgTable("bootstrap_secret", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  /** Pinned true, unique: at most one row can exist. */
+  singleton: boolean("singleton").notNull().default(true).unique(),
+  /** SHA-256 of the token, hex. Never the token. */
+  tokenHash: text("token_hash").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+/**
  * Better Auth's rate-limit counters (its `rateLimit` model). Backing the
  * limiter with the database instead of process memory makes the auth / DCR
  * limits hold across instances (the hosted app can scale past one machine).

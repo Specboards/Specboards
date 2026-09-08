@@ -61,6 +61,18 @@ grant execute on all functions in schema public to specboards_app;
 --     this file and then checks the privilege.
 revoke all on mail_settings from specboards_app;
 
+--     `bootstrap_secret` holds the hash of the token that lets somebody claim
+--     an unclaimed instance. It is deployment configuration reached on the
+--     owner connection, and it carries no workspace_id for a policy to key on,
+--     so the grant is the whole of the access control.
+--
+--     This has to live here, not only in the migration that creates the table.
+--     This script re-grants "all tables in schema public" every time it runs,
+--     and the runbook says re-running it is safe, so a revoke that lived only
+--     in a migration would come undone the next time somebody followed that
+--     advice.
+revoke all on bootstrap_secret from specboards_app;
+
 -- 3. Future objects created by the migration owner inherit the same grants, so
 --    a new table added in a later migration is reachable without editing this
 --    script. Applies to objects created by the role running this statement, so

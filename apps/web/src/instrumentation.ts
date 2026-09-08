@@ -22,7 +22,11 @@
  * 6. Sign-up gate: refuse to start when the sign-up-code gate is on but no code
  *    is configured, which would gate sign-up in name only (see
  *    lib/access-gate.ts).
- * 7. Start the in-process webhook outbox drainer. No-op in local file mode,
+ * 7. First-run token: on a deployment with no accounts yet, make sure a
+ *    first-run secret exists and print it, so the instance can be claimed by
+ *    its operator rather than by whoever reaches the URL first (see
+ *    lib/bootstrap.ts). Inert once anybody has signed up.
+ * 8. Start the in-process webhook outbox drainer. No-op in local file mode,
  *    where `startDrainer` finds no database.
  */
 export async function register(): Promise<void> {
@@ -48,6 +52,13 @@ export async function register(): Promise<void> {
 
     const { assertSignUpCodeConfigured } = await import("@/lib/access-gate");
     assertSignUpCodeConfigured();
+
+    const { getDb } = await import("@/lib/db");
+    const bootDb = getDb();
+    if (bootDb) {
+      const { announceBootstrapSecret } = await import("@/lib/bootstrap");
+      await announceBootstrapSecret(bootDb);
+    }
 
     const { startDrainer } = await import("@/lib/webhooks/drainer");
     startDrainer();

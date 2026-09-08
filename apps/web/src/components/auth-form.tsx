@@ -223,17 +223,30 @@ export function AuthForm({
       </CardHeader>
       <CardContent>
         <form onSubmit={onSubmit} className="space-y-4">
+          {/* One field, two things asked of it, and the words have to match
+              which. On a first run this is the token the server printed to its
+              log, and somebody reading "New teams need a sign-up code" would
+              go looking for a code nobody can issue them rather than at the
+              terminal it is already on their screen. */}
           {mode === "sign-up" && showSignUpCode ? (
             <FormField
-              label="Sign-up code"
-              hint="New teams need a sign-up code to get started. If a teammate is already on Specboards, you can leave this blank."
+              label={firstRun ? "First-run token" : "Sign-up code"}
+              hint={
+                firstRun
+                  ? "Specboards printed this to the server log when it started. It is what proves you are the person who deployed this instance."
+                  : "New teams need a sign-up code to get started. If a teammate is already on Specboards, you can leave this blank."
+              }
             >
               <Input
                 name="signUpCode"
                 autoComplete="off"
                 autoCapitalize="off"
                 spellCheck={false}
-                placeholder="Required to start a new team"
+                placeholder={
+                  firstRun
+                    ? "From the server log"
+                    : "Required to start a new team"
+                }
               />
             </FormField>
           ) : null}
