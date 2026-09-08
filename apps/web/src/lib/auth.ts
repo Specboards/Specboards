@@ -141,6 +141,37 @@ async function allowLoopbackRedirectPort(ctx: {
   });
 }
 
+/**
+ * Whether a verification token was minted for the second step of an email
+ * change rather than for a new account.
+ *
+ * `sendVerificationEmail` is one callback serving two flows, and the only
+ * thing that distinguishes them is the `requestType` Better Auth puts in the
+ * token payload when the first confirmation link is opened.
+ *
+ * Read, not verified. Better Auth checks the signature when the link is
+ * actually opened; the single thing decided here is which sentence the email
+ * says, so a token this cannot parse falls back to the sign-up wording rather
+ * than failing the send.
+ */
+function isEmailChangeToken(token: string): boolean {
+  try {
+    const payload = token.split(".")[1];
+    if (!payload) return false;
+    const claims: unknown = JSON.parse(
+      Buffer.from(payload, "base64url").toString("utf8"),
+    );
+    return (
+      typeof claims === "object" &&
+      claims !== null &&
+      (claims as { requestType?: unknown }).requestType ===
+        "change-email-verification"
+    );
+  } catch {
+    return false;
+  }
+}
+
 function createAuth(url: string) {
   // The MCP OAuth provider needs an explicit issuer for its discovery
   // metadata; everywhere else Better Auth can infer the URL per request.
@@ -237,12 +268,32 @@ function createAuth(url: string) {
       additionalFields: {
         timezone: { type: "string", required: false, input: true },
       },
-      // Let users change their email from the account page. Because their
-      // current address is verified, Better Auth sends a confirmation link to
-      // the *existing* inbox; the change only takes effect once that's clicked.
+      // Let users change their email from the account page, as a double
+      // opt-in: authorize from the address on the account, then prove control
+      // of the new one.
+      //
+      //   1. This callback mails a confirmation link to the *current*,
+      //      verified address. Asking the old inbox first is what stops a
+      //      hijacked session from silently swapping the address and locking
+      //      the owner out.
+      //   2. Opening that link does not change anything. Better Auth mints a
+      //      second token and calls `sendVerificationEmail` below with the new
+      //      address, which is where the account actually moves.
+      //
+      // ── Why the callback is named what it is ────────────────────────────
+      // This was `sendChangeEmailVerification`, which Better Auth stopped
+      // reading at 1.6 without the compiler noticing. With no callback under
+      // the name it looks for, `/change-email` skipped step 1 entirely and
+      // fell through to its single-step path: a verification link to the new
+      // address, and nothing at all to the old one. That is the failure the
+      // step exists to prevent, so the name is load-bearing.
+      //
+      // The fall-through still happens for a user whose current address is
+      // unverified, and correctly: there is no trusted inbox to ask, so
+      // proving control of the new address is the whole of the check.
       changeEmail: {
         enabled: true,
-        sendChangeEmailVerification: async ({
+        sendChangeEmailConfirmation: async ({
           user,
           newEmail,
           url,
@@ -253,11 +304,11 @@ function createAuth(url: string) {
         }) => {
           const { textBody, htmlBody } = renderActionEmail({
             name: user.name,
-            intro: `Confirm that you want to change your Specboards email address to ${newEmail}. The change takes effect once you click the button below.`,
+            intro: `Confirm that you want to change your Specboards sign-in address to ${newEmail}. Nothing changes yet: once you confirm here, we send a second link to ${newEmail} that has to be opened as well.`,
             action: "Confirm email change",
             url,
             footer:
-              "If you didn't request this, you can safely ignore this email and your address stays the same.",
+              "If you didn't request this, you can safely ignore this email and your address stays the same. It cannot be changed without this link.",
           });
           await sendEmail({
             to: user.email,
@@ -278,17 +329,35 @@ function createAuth(url: string) {
       sendOnSignUp: !isE2E() && canRequireEmailVerification(),
       // Land verified users back in the app rather than on a bare API 200.
       autoSignInAfterVerification: true,
-      sendVerificationEmail: async ({ user, url }) => {
+      // Called for two different things (see isEmailChangeToken): confirming a
+      // new account's address, and step 2 of an email change. Sending the
+      // sign-up wording to somebody moving an existing account would tell them
+      // to "finish setting up your account", which reads like a duplicate
+      // signup and is exactly the sort of thing people report as phishing.
+      sendVerificationEmail: async ({ user, url, token }) => {
+        const changing = isEmailChangeToken(token);
         const { textBody, htmlBody } = renderActionEmail({
           name: user.name,
-          intro:
-            "Confirm your email address to finish setting up your Specboards account.",
-          action: "Verify email",
+          intro: changing
+            ? "Confirm this address to finish moving your Specboards account to it. Your account keeps its current address until you do."
+            : "Confirm your email address to finish setting up your Specboards account.",
+          action: changing ? "Confirm new address" : "Verify email",
           url,
+          // Deliberately does not name the address being moved away from: if
+          // the new address was mistyped, this lands in a stranger's inbox,
+          // and it should tell them nothing about whose account it is.
+          ...(changing
+            ? {
+                footer:
+                  "If you weren't expecting this, you can safely ignore this email. Nothing changes unless this link is opened.",
+              }
+            : {}),
         });
         await sendEmail({
           to: user.email,
-          subject: "Verify your Specboards email",
+          subject: changing
+            ? "Confirm your new Specboards email address"
+            : "Verify your Specboards email",
           textBody,
           htmlBody,
         });

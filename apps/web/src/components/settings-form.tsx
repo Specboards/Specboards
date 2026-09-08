@@ -120,14 +120,18 @@ export function ProfileCard({
             // Better Auth reports success even when the new address already
             // belongs to another account (it sends nothing, so as not to leak
             // that the address exists). Worded so somebody who never receives
-            // the email understands why, without us confirming either way. The
-            // link always goes to the current, verified address.
-            return `We've sent a confirmation link to ${email}. Open it to finish the change. If it doesn't arrive, the new address may already be in use by another account.`;
+            // the email understands why, without us confirming either way.
+            //
+            // Both steps are described up front. Somebody who confirms from
+            // their old inbox and then sees no change has not hit a bug, they
+            // are halfway through, and finding that out from the first email
+            // is worse than reading it here.
+            return `We've sent a confirmation link to ${email}. Open it and we'll send a second link to ${newEmail}; the change takes effect once you open that one too. If neither arrives, the new address may already be in use by another account.`;
           }}
         >
           <FormField
             label="New email"
-            hint={`Changing this sends a confirmation link to ${email}. The change takes effect when you open it.`}
+            hint={`Changing this sends a confirmation link to ${email}, then a second one to the new address. The change takes effect once you have opened both.`}
           >
             <Input name="email" type="email" autoComplete="email" required />
           </FormField>
