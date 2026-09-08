@@ -25,6 +25,88 @@ for how and when the version is bumped.
 > `pnpm deploy:prod` and the dispatched workflow. See
 > [VERSIONING.md](./VERSIONING.md).
 
+## [1.1.0] - 2026-09-07
+
+Specboards could not tell you anything. Being handed an item, having your
+proposed change merged, being mentioned in a comment: all of it happened
+silently, and the only way to find out was to go and look. This release is the
+notification centre end to end, from the event that starts it to the email that
+reaches somebody who is not in the app.
+
+The other half of it is the mail transport underneath, which is what makes an
+on-prem install able to send at all, and which turned up two things that needed
+fixing on the way through.
+
+### Added
+
+- **Notifications.** Assignment, status changes, comments, mentions, review
+  outcomes and shipped releases now reach the people they concern. Events are
+  read from the transactional outbox, so the change and the intent to tell
+  somebody about it commit together: a notification cannot exist for a change
+  that was rolled back, and a change cannot quietly fail to notify.
+- **An inbox, with a bell.** Unread count in the navigation, a panel for a quick
+  look, and a full notification centre with filters by type and product,
+  grouping by item, and paging. Reading one marks it read; you can put one back
+  to unread, or clear the lot.
+- **Per-person notification settings.** A grid of event type by channel, in
+  Settings. Only the rows you change are stored, so anything you have not
+  touched follows the workspace default and moves when an admin changes it,
+  which is the whole point of having defaults at all.
+- **Workspace notification defaults.** An admin sets where everybody starts, and
+  sees how many people have already departed from each default. Changing one
+  moves every member who has not overridden that row, so a notification that
+  turns out to be noisy can be quietened for the whole workspace without asking
+  anybody to go and change a setting.
+- **Watching an item you are not assigned.** Follow anything, optionally
+  including everything underneath it, and leave an item that is yours without
+  giving the work away. Being assigned an item, commenting on one, or creating
+  one starts a watch for you, and leaving is a decision the system remembers
+  rather than one it undoes on your behalf. The watcher list is visible on the
+  item rather than hidden behind a hover.
+- **Notification email.** The same recipients, delivered a second way, for the
+  people most likely to miss a change: the ones not currently in the app. One
+  message per event you opted into, sent as it happens. Every message carries a
+  link to the item, a link to your settings, and one-click unsubscribe (RFC 8058)
+  that mutes all notification email without touching the per-type choices
+  underneath it, so re-subscribing puts you back where you were.
+- **A configurable mail transport.** Postmark or any SMTP relay, set up in
+  Settings rather than in environment variables, with a test send that says
+  which field is wrong instead of "it did not work". An air-gapped install can
+  now send its own mail; a hosted one is unchanged.
+- **A first-run token for a fresh self-host.** A newly installed instance with
+  no mail configured used to hand workspace-owner rights to whoever loaded the
+  sign-up page first. It now prints a token to the server log at startup, which
+  the first account has to present. Inert the moment any account exists, so
+  nobody has to remember to turn it off.
+- **Changing an item's type in place.** A card that should have been an epic can
+  become one without being recreated, and the consequences (what happens to its
+  children, its spec, its release) are stated before the change rather than
+  discovered after it.
+
+### Changed
+
+- **A long description folds away.** A well-written spec pushed everything below
+  it off the screen, so reaching an item's children meant scrolling past a
+  document you had already read. It collapses to a preview you can still read,
+  remembers the choice per item, and refuses to fold over an unsaved edit.
+- **The item panel leads with Watch**, and the description now matches the
+  sections under it rather than sitting outside them.
+- **Mail settings are hidden on the hosted service.** The transport belongs to
+  whoever runs the deployment, so the screen exists where it can be used, which
+  is a self-host.
+
+### Fixed
+
+- **Changing your email address asks both inboxes.** It confirmed from your
+  current address and never verified the new one, so a typo could become the
+  address you sign in with. Worse, a rename in an auth dependency had silently
+  disabled even that first step: the only message went to the new address, and
+  the address being moved away from was never told. Both halves are in place
+  now, and the account moves only after both have been confirmed.
+- **Review outcomes honour your notification settings.** Being told that a spec
+  change you proposed was merged or closed bypassed the settings entirely, so
+  somebody who had muted it received it anyway.
+
 ## [1.0.4] - 2026-09-07
 
 Opening an item on a phone killed the tab. The cause was not mobile at all: a
