@@ -1,5 +1,8 @@
+import { notFound } from "next/navigation";
+
 import { getDb } from "@/lib/db";
 import { getMailSettings } from "@/lib/mail-settings-service";
+import { isMultiTenant } from "@/lib/tenancy";
 import { requireWorkspaceAccess } from "@/lib/workspace-access";
 import { MailSettingsCard } from "@/components/mail-settings";
 
@@ -16,8 +19,15 @@ export const dynamic = "force-dynamic";
  *
  * Owner-gated, and the page says why rather than 404ing: a member who lands
  * here should learn that mail is an admin concern, not that the URL is wrong.
+ *
+ * A hosted deployment is the exception, and 404s. There the transport belongs
+ * to whoever runs the instance: the screen was read-only anyway, the nav does
+ * not offer it, and the one thing it would still do is show every workspace
+ * owner the deployment's sender address. Not a secret, and not theirs either.
  */
 export default async function EmailSettingsPage() {
+  if (isMultiTenant()) notFound();
+
   const access = await requireWorkspaceAccess();
   const db = getDb();
 
