@@ -117,6 +117,16 @@ grant select                            on notification_preferences to specboard
 -- migration 0003.
 grant select, insert, update             on item_watchers to specboards_worker;
 
+-- Product access (relay). Resolving who to tell about a change to an item in a
+-- private product needs to know who may read that product: a workspace member
+-- who is not a member of the product cannot see the item, so telling them is
+-- an in-app row they can never open and an email whose body leaks the title of
+-- work they were deliberately not given access to. Select only, and no write:
+-- the worker reads the roster to honour it and can no more edit who may see a
+-- product than it can edit who belongs to a workspace. Also granted in
+-- migration 0007.
+grant select                            on product_members    to specboards_worker;
+
 -- Read-only context both paths need to build envelopes / resolve scope.
 grant select                            on workspaces         to specboards_worker;
 grant select                            on users              to specboards_worker; -- no RLS
@@ -136,7 +146,7 @@ declare
     'workspace_levels', 'features', 'spec_index', 'products',
     'product_repositories', 'workspaces', 'item_events', 'notifications',
     'members', 'notification_defaults', 'notification_preferences',
-    'item_watchers'
+    'item_watchers', 'product_members'
   ];
 begin
   foreach t in array worker_tables loop

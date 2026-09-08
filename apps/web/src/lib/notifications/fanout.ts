@@ -14,6 +14,7 @@ import {
 
 import type { NotificationEventType } from "@/lib/notifications/catalog";
 import { channelsFor } from "@/lib/notifications/preferences";
+import { productReaders } from "@/lib/notifications/product-access";
 import { watchersFor } from "@/lib/notifications/watchers";
 
 /**
@@ -38,8 +39,9 @@ import { watchersFor } from "@/lib/notifications/watchers";
  *    two people and lands on an item three others are watching).
  * 2. Subtract the actor. Nobody is told about their own action.
  * 3. Keep only active workspace members.
- * 4. Ask preferences which channels each recipient wants.
- * 5. Write the in-app rows, and hand the rest back for the email channel.
+ * 4. Keep only those who may read the item's product.
+ * 5. Ask preferences which channels each recipient wants.
+ * 6. Write the in-app rows, and hand the rest back for the email channel.
  */
 
 type Tx = Parameters<Parameters<Database["transaction"]>[0]>[0];
@@ -111,7 +113,25 @@ export async function fanOutNotifications(
       ev.workspaceId,
       others.map((t) => t.recipientId),
     );
-    const eligible = others.filter((t) => active.has(t.recipientId));
+    const inWorkspace = others.filter((t) => active.has(t.recipientId));
+    if (inWorkspace.length === 0) return [];
+
+    // Being in the workspace is not the same as being able to see the item. A
+    // private product is readable only by its own members and the workspace
+    // owner, so telling anybody else is an in-app row the inbox query hides
+    // behind its join to `features` and, worse, an email whose subject and body
+    // carry the title of work they were deliberately not given access to.
+    //
+    // Asked per item rather than per event. `ev.productId` is the product the
+    // change happened in, which is not always the product of the item a notice
+    // points at: a shipped release is one event whose items can span several
+    // products, and each of those items decides its own audience.
+    const canRead = await productReaders(
+      tx,
+      ev.workspaceId,
+      inWorkspace,
+    );
+    const eligible = inWorkspace.filter((t) => canRead(t));
     if (eligible.length === 0) return [];
 
     const notices = await applyPreferences(tx, ev.workspaceId, eligible);

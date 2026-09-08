@@ -50,6 +50,13 @@
       "when": 1787560000000,
       "tag": "0006_notification_email_opt_out",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1787570000000,
+      "tag": "0007_worker_reads_product_members",
+      "breakpoints": true
     }
   ]
 }

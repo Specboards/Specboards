@@ -44,6 +44,9 @@ const user = {
   dana: randomUUID(), // deactivated
 };
 const product = randomUUID();
+/** A private product Bob is not a member of, to prove he is never told about
+ * work he cannot open. */
+const closedProduct = randomUUID();
 const suffix = randomUUID().slice(0, 8);
 
 const asAlice = { userId: user.alice, workspaceId: ws };
@@ -91,6 +94,12 @@ describe.skipIf(!OWNER_URL)("notification fan-out", () => {
       values (${ws}, ${user.dana}, 'member', now())`;
     await owner`insert into products (id, workspace_id, key, name) values
       (${product}, ${ws}, 'alpha', 'Alpha')`;
+    // Private, and Carol is its only member. Alice reaches it as the workspace
+    // owner; Bob cannot reach it at all.
+    await owner`insert into products (id, workspace_id, key, name, visibility) values
+      (${closedProduct}, ${ws}, 'closed', 'Closed', 'private')`;
+    await owner`insert into product_members (workspace_id, product_id, user_id, role)
+      values (${ws}, ${closedProduct}, ${user.carol}, 'contributor')`;
     await owner`insert into workspace_levels (workspace_id, key, label, position, is_leaf)
       values (${ws}, 'epic', 'Epics', 0, false),
              (${ws}, 'story', 'Stories', 1, true)`;
@@ -383,6 +392,67 @@ describe.skipIf(!OWNER_URL)("notification fan-out", () => {
       select count(*)::int as n from outbox_events
       where workspace_id = ${ws} and processed_at is null`;
     expect(pending!.n).toBe(0);
+  });
+
+  /**
+   * Being in the workspace is not being able to see the item.
+   *
+   * The in-app half of this failed silently: the row was written and then
+   * hidden, because the inbox inner-joins `features` and that carries
+   * `specboards_can_read_product`. The email half did not fail at all, which is
+   * worse: a real message, a deep link the reader 404s on, and a subject line
+   * carrying the title of work in a product they were deliberately not given
+   * access to.
+   */
+  it("tells nobody about an item in a product they cannot read", async () => {
+    const item = await store.createFeature(
+      { title: "Secret roadmap", level: "story", productId: closedProduct },
+      asAlice,
+      "item.created",
+    );
+    await store.updateFeature(item.specId, { assigneeId: user.bob }, asAlice, [
+      {
+        type: "item.assigned",
+        productId: closedProduct,
+        data: {
+          specId: item.specId,
+          title: item.title,
+          level: item.level,
+          assigneeId: user.bob,
+          previousAssigneeId: null,
+        },
+      },
+    ]);
+
+    expect(await drain()).toEqual([]);
+  });
+
+  it("still tells a member of that product", async () => {
+    const item = await store.createFeature(
+      { title: "Secret roadmap", level: "story", productId: closedProduct },
+      asAlice,
+      "item.created",
+    );
+    await store.updateFeature(item.specId, { assigneeId: user.carol }, asAlice, [
+      {
+        type: "item.assigned",
+        productId: closedProduct,
+        data: {
+          specId: item.specId,
+          title: item.title,
+          level: item.level,
+          assigneeId: user.carol,
+          previousAssigneeId: null,
+        },
+      },
+    ]);
+
+    const rows = await drain();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      recipient_id: user.carol,
+      type: "item.assigned",
+    });
   });
 
   it("expands an event once, however often the relay runs", async () => {

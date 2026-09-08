@@ -18,6 +18,10 @@ import {
   type NoticeForEmail,
 } from "@/lib/notifications/email";
 import { channelsFor } from "@/lib/notifications/preferences";
+import {
+  productReaders,
+  type Addressee,
+} from "@/lib/notifications/product-access";
 
 /**
  * Telling an author what became of the change they proposed.
@@ -158,6 +162,31 @@ export async function notifyReviewOutcome(
       return reasonByWorkspace.get(workspaceId) ?? null;
     };
 
+    // The author proposed the change, so they could read the item when they
+    // opened it. Product access can be taken away afterwards, and an outcome
+    // notice is the one notification that arrives long after the thing it is
+    // about, so it is the likeliest of all of them to land on somebody who has
+    // since lost sight of the item. Same rule as the relay's fan-out, from the
+    // same helper.
+    //
+    // Resolved per workspace for the same reason the review reason is: one
+    // pull request can be linked from several tenants, and whether somebody may
+    // read a product is a fact about one of them. Asking once with whichever
+    // workspace came back first would answer for the wrong tenant.
+    const readersByWorkspace = new Map<string, (a: Addressee) => boolean>();
+    for (const workspaceId of new Set(targets.map((l) => l.workspaceId))) {
+      readersByWorkspace.set(
+        workspaceId,
+        await productReaders(
+          db,
+          workspaceId,
+          targets
+            .filter((l) => l.workspaceId === workspaceId)
+            .map((l) => ({ recipientId: l.authorId!, featureId: l.featureId })),
+        ),
+      );
+    }
+
     const type = evt.state === "merged" ? MERGED : CLOSED;
     // Grouped per workspace, because that is the unit both preferences and the
     // emailed links are scoped to: the same pull request can be linked from
@@ -166,8 +195,10 @@ export async function notifyReviewOutcome(
 
     let raised = 0;
     for (const link of targets) {
-      const reason = await reasonFor(link.workspaceId);
       const recipientId = link.authorId!;
+      const canRead = readersByWorkspace.get(link.workspaceId);
+      if (!canRead?.({ recipientId, featureId: link.featureId })) continue;
+      const reason = await reasonFor(link.workspaceId);
       const snippet = snippetFor(evt.state, evt.title, reason);
       const channels = (
         await channelsFor(db, link.workspaceId, [recipientId], type)
