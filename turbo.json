@@ -8,7 +8,19 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
+      // `tsconfig.tsbuildinfo` is an output, not a stray file. `tsc -b` is
+      // incremental and decides whether to emit by reading it, so caching
+      // `dist/**` without it lets the two disagree: restoring a cached `dist`
+      // next to a newer tsbuildinfo leaves `tsc -b` believing there is nothing
+      // to do, and every consumer then typechecks against stale declarations.
+      // That happened on the 1.1.0 release branch, where `pnpm -w typecheck`
+      // reported four errors for a column that was in the source all along.
+      "outputs": [
+        "dist/**",
+        "*.tsbuildinfo",
+        ".next/**",
+        "!.next/cache/**"
+      ]
     },
     "dev": {
       "cache": false,
