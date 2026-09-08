@@ -30,6 +30,7 @@ export default defineConfig({
     timeout: 120_000,
     env: {
       SPECBOARDS_E2E: "1",
+      SPECBOARDS_BOOTSTRAP_TOKEN: process.env.SPECBOARDS_BOOTSTRAP_TOKEN!,
       DATABASE_URL: process.env.DATABASE_URL!,
       BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET!,
       BETTER_AUTH_URL: BASE_URL,

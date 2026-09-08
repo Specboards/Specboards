@@ -24,6 +24,12 @@ export default async function globalSetup() {
   // and showed the wall unconditionally, which is the same bug that locked the
   // first admin out of a self-host with no mail transport.
   await page.goto("/sign-up");
+  // The instance is unclaimed, so the first account has to present the
+  // first-run token. The field only renders while that is true.
+  const tokenField = page.locator('input[name="signUpCode"]');
+  if (await tokenField.count()) {
+    await tokenField.fill(process.env.SPECBOARDS_BOOTSTRAP_TOKEN!);
+  }
   await page.fill('input[name="name"]', ADMIN.name);
   await page.fill('input[name="email"]', ADMIN.email);
   await page.fill('input[name="password"]', ADMIN.password);

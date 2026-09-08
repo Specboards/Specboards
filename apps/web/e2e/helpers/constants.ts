@@ -10,6 +10,10 @@ process.env.DATABASE_URL ??= "postgres://postgres:postgres@localhost:5432/specbo
 process.env.BETTER_AUTH_SECRET ??= "e2e-only-better-auth-secret-0123456789abcdef";
 process.env.SPECBOARDS_E2E_GITHUB_FIXTURE ??= resolve(process.cwd(), "e2e/.tmp/github.json");
 process.env.SPECBOARDS_E2E ??= "1";
+// The E2E database starts empty, so global setup's first sign-up meets the
+// first-run gate. Configuring a token rather than exempting the suite means
+// the gate is exercised on every run instead of only in unit tests.
+process.env.SPECBOARDS_BOOTSTRAP_TOKEN ??= "e2e-first-run-token";
 
 /** Where the app server listens during E2E (distinct from `next dev` on 3000). */
 export const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:3100";

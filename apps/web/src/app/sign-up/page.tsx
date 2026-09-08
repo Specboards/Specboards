@@ -18,9 +18,18 @@ export default async function SignUpPage() {
   // told me to do", and it is the only moment the fact is actionable.
   const firstRun = db ? !(await hasAnyUser(db)) : false;
 
+  // The field is offered whenever something will be checked against it: the
+  // pre-v1 code gate, or the first-run token that claims an unclaimed
+  // instance. Both arrive in the same header, and both are asked with the same
+  // `hasAnyUser` the server uses, so the form cannot come to hide a field the
+  // server insists on.
   return (
     <Suspense>
-      <AuthForm mode="sign-up" showSignUpCode={signUpCodeRequired()} firstRun={firstRun} />
+      <AuthForm
+        mode="sign-up"
+        showSignUpCode={signUpCodeRequired() || firstRun}
+        firstRun={firstRun}
+      />
     </Suspense>
   );
 }

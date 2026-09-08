@@ -15,6 +15,10 @@ import {
 import { onFly, trustsForwardedFor } from "@/lib/client-ip";
 import { getDb } from "@/lib/db";
 import { isE2E } from "@/lib/e2e";
+import {
+  bootstrapRequired,
+  bootstrapSecretMatches,
+} from "@/lib/bootstrap";
 import { isEmailConfigured, renderActionEmail, sendEmail } from "@/lib/email";
 import { isSelfHost, isSingleTenant } from "@/lib/tenancy";
 
@@ -310,6 +314,28 @@ function createAuth(url: string) {
             message:
               "Please sign up with your work email address. Personal email providers are not supported on the hosted service.",
           });
+        }
+        // First-run gate: nobody claims an unclaimed instance without a
+        // secret only its operator could have. Checked before the sign-up-code
+        // gate because it applies to a different question (is this deployment
+        // spoken for at all) and on deployments where that gate is off, which
+        // is every self-host by default.
+        //
+        // Inert the moment any account exists, so the hosted deployments never
+        // reach it and nobody has to remember a flag to keep it that way.
+        {
+          const db = getDb();
+          if (db && (await bootstrapRequired(db))) {
+            const token = ctx.headers?.get("x-specboards-signup-code") ?? "";
+            if (!(await bootstrapSecretMatches(db, token))) {
+              throw new APIError("FORBIDDEN", {
+                message:
+                  "This Specboards instance has not been claimed yet. The first " +
+                  "account needs the first-run token printed in the server log at " +
+                  "startup, or the value of SPECBOARDS_BOOTSTRAP_TOKEN if you set one.",
+              });
+            }
+          }
         }
         // Pre-v1 sign-up-code gate: the first person from a company must present
         // a valid sign-up code to start their team. Teammates who follow them on
