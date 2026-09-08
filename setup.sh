@@ -156,6 +156,17 @@ APP_URL=http://localhost:3000
 # else already owns 5432; only the host side changes.
 POSTGRES_PORT=${db_port}
 
+# Claims this instance. An unclaimed Specboards refuses the first account
+# unless it is given this token, which is what stops whoever reaches the URL
+# first from becoming the admin of your deployment.
+#
+# Generated here rather than left to the app. The app generates one at first
+# boot and prints it to the log, which works only if you are watching the log
+# at that moment: it is stored hashed and cannot be shown again, so an operator
+# who missed it had to set this variable and restart. Writing it down first
+# means it is always recoverable, from this file.
+SPECBOARDS_BOOTSTRAP_TOKEN=$(random_hex 24)
+
 # Outbound email (verification, password reset, invites). Unset means email is
 # skipped; sign-up then does not require verification, because the link could
 # never arrive. Set both to turn real verification on.
@@ -186,6 +197,18 @@ APP_URL=http://localhost:3000"
   add_key POSTGRES_PORT "# Host port the database is published on, loopback only. Move it if something
 # else already owns 5432; only the host side changes.
 POSTGRES_PORT=${db_port}"
+  # The one secret this may add, which is why the rule above says "never a
+  # secret" and this is the exception rather than a change of mind. Adding a
+  # second BETTER_AUTH_SECRET would lock people out of their own data; adding
+  # this cannot, because it is inert the moment any account exists. The
+  # operator it rescues is the one who installed, never got as far as creating
+  # an account, and came back after the first-run token had scrolled out of a
+  # log they were not reading.
+  add_key SPECBOARDS_BOOTSTRAP_TOKEN "# Claims this instance. An unclaimed Specboards refuses the first account
+# unless it is given this token, which is what stops whoever reaches the URL
+# first from becoming the admin of your deployment. Ignored once an account
+# exists.
+SPECBOARDS_BOOTSTRAP_TOKEN=$(random_hex 24)"
   add_key POSTMARK_SERVER_TOKEN "# Outbound email (verification, password reset, invites). Unset means email is
 # skipped; sign-up then does not require verification, because the link could
 # never arrive. Set both to turn real verification on.
@@ -370,7 +393,38 @@ for _ in $(seq 1 60); do
     echo
     echo
     echo "Specboards is running at $url"
-    echo "Open it and create your account; the first account becomes the admin."
+
+    # The first-run token, but only while it is still the answer to something.
+    #
+    # An unclaimed instance refuses the first sign-up without it, and this line
+    # is the only place the operator is told it exists: the install ended by
+    # saying "create your account", the form then asked for a token, and
+    # nothing in this script, the README or the docs had mentioned one. They
+    # were left to guess it was somewhere in `docker compose logs`.
+    #
+    # Asked of the database rather than inferred from the page, because what
+    # `/` serves is application code that has changed before and will again
+    # (see the note on this job's path filter in the smoke workflow). "Are
+    # there any accounts" is the same question the gate itself asks.
+    claimed=""
+    if claimed="$("${compose[@]}" exec -T db \
+      psql -U postgres -d specboard -tAc 'select count(*) from users' 2>/dev/null)"; then
+      claimed="$(printf '%s' "$claimed" | tr -d '[:space:]')"
+    fi
+    token="$(sed -n 's/^SPECBOARDS_BOOTSTRAP_TOKEN=//p' "$env_file" | tr -d '"' | head -1)"
+    if [ "$claimed" = "0" ] && [ -n "$token" ]; then
+      echo
+      echo "Nobody has claimed this instance yet, so the first account needs the"
+      echo "first-run token below. Whoever holds it becomes the admin."
+      echo
+      echo "    $token"
+      echo
+      echo "It is also in $env_file, so you can come back for it."
+      echo "Open $url and create your account."
+    else
+      echo "Open it and create your account; the first account becomes the admin."
+    fi
+
     echo
     echo "  ./setup.sh --stop      stop, keep data"
     echo "  ./setup.sh --destroy   stop and delete the database"
