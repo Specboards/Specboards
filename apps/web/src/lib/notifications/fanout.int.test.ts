@@ -111,14 +111,77 @@ describe.skipIf(!OWNER_URL)("notification fan-out", () => {
     await owner`delete from notification_preferences where workspace_id = ${ws}`;
   });
 
-  /** Run the relay and read back what landed, oldest first. */
+  /**
+   * Run the relay, then answer both halves of "who was told": what the fan-out
+   * WROTE, and what each recipient can actually READ.
+   *
+   * Returns the written rows, so every assertion below is unchanged. The read
+   * is checked here rather than asserted per test, because it is the same claim
+   * every time and it was the half this suite could not see: seventeen tests
+   * proved the fan-out wrote the right rows for the right people, and not one
+   * of them proved those people could read them.
+   *
+   * That is the more likely half to break. Rows are written by
+   * `specboards_worker` under a permissive `notifications_worker_all`, and read
+   * by `specboards_app` under `notifications_read`, which wants
+   * `specboards_is_member` and a matching `app.user_id`, and then inner-joins
+   * `features`, which carries its own `specboards_can_read_product`. A
+   * recipient who cannot see the item's product loses the notification with no
+   * error anywhere, because `fanOutNotifications` swallows its own.
+   *
+   * ── Why the write is still read on the owner connection ────────────────────
+   * The "tells nobody" assertions need to tell "the fan-out wrote no row" from
+   * "a row exists and the policy hides it", and only a reader that bypasses RLS
+   * can. The deactivated-member case is the sharpest: `specboards_is_member`
+   * requires `deactivated_at is null`, so Dana can never read anything whatever
+   * the fan-out did, and a test asserting she hears nothing would pass on a
+   * fan-out that wrongly told her. Comparing the two is what makes both
+   * questions answerable at once: a row written and not readable fails here,
+   * and so does a row readable that should never have been written.
+   */
   async function drain(): Promise<InboxRow[]> {
     await relayOutbox();
-    return owner<InboxRow[]>`
+    const written = await owner<InboxRow[]>`
       select recipient_id, type, snippet, actor_id, comment_id
       from notifications
       where workspace_id = ${ws}
       order by created_at, type`;
+
+    // Asked once per person, because the inbox is per recipient by
+    // construction: there is no query that returns everybody's, which is the
+    // point of the policy.
+    const readable: InboxRow[] = [];
+    for (const recipientId of Object.values(user)) {
+      const inbox = await store.listNotifications({
+        userId: recipientId,
+        workspaceId: ws,
+      });
+      for (const n of inbox.items) {
+        readable.push({
+          recipient_id: recipientId,
+          type: n.type,
+          snippet: n.snippet,
+          actor_id: n.actorId,
+          comment_id: n.commentId,
+        });
+      }
+    }
+
+    expect(canonical(readable), "the recipients cannot read what the fan-out wrote").toEqual(
+      canonical(written),
+    );
+    return written;
+  }
+
+  /** Order-free comparable form: the two readers sort differently on purpose
+   * (oldest-first for the ledger, newest-first for an inbox), and the claim is
+   * about which rows exist for whom, not their order. */
+  function canonical(rows: readonly InboxRow[]): string[] {
+    return rows
+      .map((r) =>
+        [r.recipient_id, r.type, r.snippet, r.actor_id, r.comment_id].join("\u0000"),
+      )
+      .sort();
   }
 
   function newItem(over: Record<string, unknown> = {}) {
