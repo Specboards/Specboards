@@ -26,6 +26,7 @@ import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import { createWorkItem } from "@/lib/api-client/work-items";
 import { formatTokenEstimate } from "@/lib/ai/estimate";
 import { pluralLevel, statusLabel } from "@/lib/feature-helpers";
+import { memberLabels } from "@/lib/member-label";
 import type { WorkspaceMember } from "@/lib/workspace";
 
 /**
@@ -102,6 +103,7 @@ export function GenerateChildButton({
    * works without it and the sentence simply gains a clause.
    */
   const [estimate, setEstimate] = useState<number | null>(null);
+  const memberName = memberLabels(members);
 
   useEffect(() => {
     if (!open) return;
@@ -434,7 +436,7 @@ export function GenerateChildButton({
                   <option value="">Unassigned</option>
                   {members.map((m) => (
                     <option key={m.userId} value={m.userId}>
-                      {m.name}
+                      {memberName(m)}
                     </option>
                   ))}
                 </Select>

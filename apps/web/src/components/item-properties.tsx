@@ -35,6 +35,7 @@ import { TagPicker } from "@/components/tag-picker";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { isFieldAvailable } from "@/lib/card-fields";
+import { memberLabels } from "@/lib/member-label";
 import { shipDateLabel } from "@/lib/release-dates";
 import {
   formatRiceScore,
@@ -101,6 +102,7 @@ export function ItemProperties({
   tags?: string[];
 }) {
   const router = useRouter();
+  const memberName = memberLabels(members);
   // An item can only be scheduled into a release from its own product, or a
   // workspace-wide portfolio release. Scope the picker to those, and drop
   // shipped releases (keeping the item's current one so its value never
@@ -347,7 +349,7 @@ export function ItemProperties({
             <option value="">Unassigned</option>
             {members.map((m) => (
               <option key={m.userId} value={m.userId}>
-                {m.name}
+                {memberName(m)}
               </option>
             ))}
           </Select>
@@ -498,11 +500,12 @@ export function CustomFieldInput({
   members: WorkspaceMember[];
 }) {
   const name = `cf:${property.key}`;
+  const memberName = memberLabels(members);
 
   if (property.type === "select" || property.type === "user") {
     const options =
       property.type === "user"
-        ? members.map((m) => ({ value: m.userId, label: m.name }))
+        ? members.map((m) => ({ value: m.userId, label: memberName(m) }))
         : property.options.map((o) => ({ value: o, label: o }));
     return (
       <Select
@@ -607,7 +610,9 @@ function ReadOnlyProperties({
   workflow?: StatusWorkflow;
   show: (key: string) => boolean;
 }) {
-  const assignee = members.find((m) => m.userId === feature.assigneeId)?.name;
+  const memberName = memberLabels(members);
+  const assigned = members.find((m) => m.userId === feature.assigneeId);
+  const assignee = assigned ? memberName(assigned) : null;
   const releaseRecord = releases.find((r) => r.id === feature.releaseId);
   const release = releaseRecord?.name;
   const shipDate = releaseRecord ? shipDateLabel(releaseRecord) : null;
