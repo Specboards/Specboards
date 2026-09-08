@@ -87,4 +87,17 @@ CREATE TABLE mail_settings (
 -- Both are needed: this one for a database already migrated, that one for every
 -- future run. `apps/web/src/lib/mail/settings.int.test.ts` applies that script
 -- and then checks the privilege, which is how the gap was found.
-REVOKE ALL ON mail_settings FROM specboards_app;
+--
+-- Guarded on the role existing. Migrations run against a bare Postgres in CI
+-- and on a fresh install, where `infra/rls-role.sql` has not created
+-- specboards_app yet, and REVOKE on a role that does not exist is an error
+-- rather than a no-op. That is not a hypothetical: the unguarded version
+-- passed locally, where an integration test had already created the role, and
+-- failed the first CI run on a clean database. Same shape as the worker grants
+-- in migrations 0002 and 0003.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'specboards_app') THEN
+        REVOKE ALL ON mail_settings FROM specboards_app;
+    END IF;
+END $$;
