@@ -102,14 +102,36 @@ jobs:
       # verification gate is wrongly on and the operator would be locked out.
       - name: A first account can be created and is signed in
         run: |
+          # The first-run token, read the way the README tells a person to read
+          # it: out of infra/.env, which setup.sh wrote. Taking it from the
+          # container log instead would keep this job green while the
+          # documented path stayed broken, which is exactly what happened when
+          # the gate shipped: sign-up started answering 403 here and the only
+          # thing at fault was that nothing told the operator a token existed.
+          token="$(sed -n 's/^SPECBOARDS_BOOTSTRAP_TOKEN=//p' infra/.env | tr -d '"' | head -1)"
+          [ -n "$token" ] || { echo "setup.sh left no SPECBOARDS_BOOTSTRAP_TOKEN in infra/.env."; exit 1; }
           body="$(curl -fsS -X POST http://localhost:3000/api/auth/sign-up/email \
             -H 'Content-Type: application/json' \
+            -H "x-specboards-signup-code: $token" \
             -d '{"name":"Smoke Test","email":"smoke@onprem.test","password":"SmokeTest!2026x"}')"
           echo "$body" | grep -q '"token"' \
             || { echo "Sign-up returned no session token: $body"; exit 1; }
           users="$(docker exec specboards-db-1 psql -U postgres -d specboard -tAc \
             "select count(*) from users where email='smoke@onprem.test';")"
           [ "$users" = "1" ] || { echo "Expected 1 user row, found $users."; exit 1; }
+
+      # The gate is the reason the token above exists, so prove it is on. A
+      # change that removed it would otherwise leave every assertion here green
+      # while handing the instance to whoever reached it first.
+      - name: An unclaimed instance refuses a first account with no token
+        run: |
+          docker compose -f infra/docker-compose.yml down -v >/dev/null 2>&1
+          ./setup.sh --start >/dev/null
+          code="$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+            http://localhost:3000/api/auth/sign-up/email \
+            -H 'Content-Type: application/json' \
+            -d '{"name":"Squatter","email":"squatter@onprem.test","password":"SmokeTest!2026x"}')"
+          [ "$code" = "403" ] || { echo "Sign-up with no first-run token returned $code, expected 403."; exit 1; }
 
       # Whatever failed above, the logs are the first thing anyone will want,
       # and a dead container's logs are gone once the runner is recycled.

@@ -143,11 +143,25 @@ One command, on any machine with Docker running:
 ./setup.sh          # http://localhost:3000
 ```
 
-That generates `infra/.env` with a strong `BETTER_AUTH_SECRET` and
-`POSTGRES_PASSWORD`, pulls the published image, applies the migrations, starts
-the stack, and waits until it answers. Open the URL and create your account:
-**the first account becomes the admin**. Nothing else to configure, and no
-email needed to get in (see below).
+That generates `infra/.env` with a strong `BETTER_AUTH_SECRET`,
+`POSTGRES_PASSWORD` and `SPECBOARDS_BOOTSTRAP_TOKEN`, pulls the published
+image, applies the migrations, starts the stack, and waits until it answers.
+
+Open the URL and create your account: **the first account becomes the admin**.
+An instance nobody has claimed asks for the **first-run token** when you do,
+and `setup.sh` prints it once the stack is up. It lives in `infra/.env`, so you
+can go back for it. Nothing else to configure, and no email needed to get in
+(see below).
+
+The token exists because a self-host has no other way to know that the person
+creating the first account is the person who installed it. Without one, an
+instance reachable on a network hands workspace-owner rights to whoever finds
+the URL first. It is ignored the moment any account exists, so it never gets
+in the way again. Set your own beforehand if you would rather:
+
+```bash
+SPECBOARDS_BOOTSTRAP_TOKEN=... ./setup.sh   # or put it in infra/.env
+```
 
 ```bash
 ./setup.sh --build     # compile your working tree instead of pulling

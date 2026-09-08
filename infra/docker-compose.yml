@@ -119,6 +119,25 @@ services:
       # origin. Without it the app falls back to request headers, which a
       # misconfigured proxy can spoof.
       APP_URL: ${APP_URL:-http://localhost:3000}
+      # The first-run token. An unclaimed instance refuses the first account
+      # unless it is presented with this, which is what stops whoever finds the
+      # URL first from becoming the admin of somebody else's deployment.
+      #
+      # It has to be declared here to exist at all. compose reads infra/.env
+      # for variable substitution, not as a container environment file, so a
+      # value set there and never referenced in this file goes nowhere: the
+      # variable was absent from the container, the app generated its own and
+      # printed it to the log, and the operator's chosen token was refused with
+      # a message telling them to set the variable they had just set.
+      #
+      # Empty means "not configured", which is what `configuredBootstrapToken`
+      # already tests for, so the app falls back to generating one and saying
+      # so. setup.sh writes a value into infra/.env on a fresh install.
+      SPECBOARDS_BOOTSTRAP_TOKEN: ${SPECBOARDS_BOOTSTRAP_TOKEN:-}
+      # A deployment that has already chosen a sign-up code does not need a
+      # second secret for the first-run gate; the app accepts this one too.
+      # Passed through for the same reason as above.
+      SPECBOARDS_SIGNUP_CODE: ${SPECBOARDS_SIGNUP_CODE:-}
       # Single-workspace self-host: auth/SSO are commercial add-ons.
       SPECBOARDS_SELF_HOST: "true"
       # Set to "true" to reject sign-ups from consumer email providers
