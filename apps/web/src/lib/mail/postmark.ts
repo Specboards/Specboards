@@ -43,6 +43,17 @@ export async function sendViaPostmark(
       TextBody: message.textBody,
       HtmlBody: message.htmlBody,
       MessageStream: "outbound",
+      // Postmark takes headers as a list of name/value pairs rather than an
+      // object, and rejects an empty array on some accounts, so it is omitted
+      // entirely when there are none.
+      ...(message.headers && Object.keys(message.headers).length > 0
+        ? {
+            Headers: Object.entries(message.headers).map(([Name, Value]) => ({
+              Name,
+              Value,
+            })),
+          }
+        : {}),
     }),
   });
 

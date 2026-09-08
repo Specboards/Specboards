@@ -159,19 +159,3 @@ export function resolveChannelsPerUser(
     }),
   );
 }
-
-/**
- * Whether the email channel can actually deliver.
- *
- * The preference grids show the email column either way. Hiding it would make
- * the grid change shape on the day email ships and leave today's reader with
- * no idea the channel is coming; showing it live would let somebody tick a box
- * that produces nothing, which is the failure the global unsubscribe exists to
- * prevent, reached from the other side. So the column renders, reads as its
- * resolved value, and does not accept a click until this is true.
- *
- * Annotated `boolean` rather than left as the literal `false`, so the branches
- * on it stay real code that the compiler checks instead of dead ends it prunes.
- * The email notification channel feature flips it.
- */
-export const EMAIL_CHANNEL_LIVE: boolean = false;

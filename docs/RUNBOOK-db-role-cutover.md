@@ -123,6 +123,13 @@ table, so a bug in a worker path cannot reach them.
   `item_watchers` (S/I/U).
 - Read-only context: `workspaces` (S), `users` (S).
 
+`users` is read for two things now. The relay builds an emailed notification
+from it (name, address) and honours
+`users.notification_email_opted_out_at`, the master unsubscribe switch. Still
+select-only: the worker reads somebody's decision and never records one. The
+unsubscribe link itself writes that column on the owner connection, because it
+carries no session and the signed token in the URL is the authorization.
+
 `members` is select-only, and is the one place the worker reads the roster: the
 fan-out has to drop a deactivated or departed person from a recipient list, and
 a notification is the one thing that would otherwise keep arriving for someone

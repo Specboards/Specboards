@@ -117,20 +117,37 @@ test.describe("notification settings", () => {
     await expect(workspace.getByText("1 override")).toBeVisible();
   });
 
-  test("shows the email column without letting anyone arm it yet", async ({
+  test("refuses the email column on a deployment that cannot send", async ({
     page,
   }) => {
-    // Visible so the grid does not change shape the day email ships, and
-    // refused so nobody ticks a box that produces nothing.
+    // The e2e server runs with no mail transport, which is also how a fresh
+    // self-host starts. The column stays visible so the grid does not change
+    // shape when one is configured, reads as its resolved value because these
+    // rows still say what they will do, and refuses the click so nobody ticks
+    // a box that produces nothing.
     const ws = await getWorkspace();
     await resetNotificationSettings(ws.id);
     await page.goto(`/${ws.slug}/settings/notifications`);
 
     const { mine } = grids(page);
     await expect(cell(mine, ROW, "email").toggle).toBeDisabled();
-    // The warning is on the column header, once, rather than under every cell.
+    // The reason is on the column header, once, rather than under every cell.
     await expect(
       mine.getByRole("columnheader", { name: /Email/ }),
-    ).toContainText("Not sending yet");
+    ).toContainText("Not configured");
+    await expect(
+      mine.getByText(/no mail transport configured/),
+    ).toBeVisible();
+  });
+
+  test("turns an unreadable unsubscribe link into an answer, not an error", async ({
+    page,
+  }) => {
+    // The public half of the email channel. It is reached with no session, by
+    // somebody in a mail client, and the one thing it must never do is show
+    // them a stack trace or a sign-in form. A token that does not verify is a
+    // sentence, and the page is reachable while signed in or not.
+    await page.goto("/unsubscribe?t=not-a-real-token");
+    await expect(page.getByText("That link is not valid")).toBeVisible();
   });
 });

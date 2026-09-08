@@ -17,6 +17,11 @@ import {
 } from "@specboards/db";
 
 import { getWorkerDb } from "@/lib/db";
+import {
+  buildNotificationEmails,
+  sendNotificationEmails,
+  type PendingNotificationEmail,
+} from "@/lib/notifications/email";
 import { fanOutNotifications } from "@/lib/notifications/fanout";
 import type { WebhookEnvelope, WebhookEventType } from "@/lib/webhooks/types";
 
@@ -54,11 +59,20 @@ export async function relayOutbox(): Promise<void> {
     .limit(BATCH);
 
   for (const { id } of candidates) {
-    await db.transaction((tx) => expandOne(tx, id));
+    // The messages are built inside the transaction, where the worker role's
+    // grants are, and sent outside it. A relay that hung on an SMTP connection
+    // would otherwise hold the outbox row locked for the whole timeout, and a
+    // send that failed would roll back the in-app notification, which is the
+    // delivery somebody is actually waiting on. See notifications/email.ts.
+    const pending = await db.transaction((tx) => expandOne(tx, id));
+    await sendNotificationEmails(db, pending);
   }
 }
 
-async function expandOne(tx: Tx, id: string): Promise<void> {
+async function expandOne(
+  tx: Tx,
+  id: string,
+): Promise<PendingNotificationEmail[]> {
   // Re-claim under a row lock; skip if another relay took it or it's already done.
   const [ev] = await tx
     .select()
@@ -66,7 +80,7 @@ async function expandOne(tx: Tx, id: string): Promise<void> {
     .where(and(eq(outboxEvents.id, id), isNull(outboxEvents.processedAt)))
     .for("update", { skipLocked: true })
     .limit(1);
-  if (!ev) return;
+  if (!ev) return [];
 
   const productMatch =
     ev.productId === null
@@ -121,12 +135,20 @@ async function expandOne(tx: Tx, id: string): Promise<void> {
   // Second consumer of the same claimed event. Deliberately outside the
   // endpoint check above: somebody's inbox does not depend on the workspace
   // having configured a webhook.
-  await fanOutNotifications(tx, ev);
+  const notices = await fanOutNotifications(tx, ev);
+  const pending = await buildNotificationEmails(
+    tx,
+    ev.workspaceId,
+    ev.actorId,
+    notices.filter((n) => n.channels.email),
+  );
 
   await tx
     .update(outboxEvents)
     .set({ processedAt: new Date() })
     .where(eq(outboxEvents.id, ev.id));
+
+  return pending;
 }
 
 async function loadWorkspace(

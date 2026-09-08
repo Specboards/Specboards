@@ -43,8 +43,18 @@ export function renderActionEmail(opts: {
   url: string;
   /** Optional reassurance line shown in muted text below the button. */
   footer?: string;
+  /**
+   * Secondary links rendered small, below everything else.
+   *
+   * Separate from `footer` because these have to be clickable. The footer is
+   * escaped prose; a URL pasted into it arrives as text. Notification mail
+   * needs a way to reach settings and to unsubscribe, and both of those are
+   * the sort of thing somebody looks for at the bottom of a message rather
+   * than in the middle of a sentence.
+   */
+  links?: { label: string; url: string }[];
 }): { textBody: string; htmlBody: string } {
-  const { name, intro, action, url, footer } = opts;
+  const { name, intro, action, url, footer, links } = opts;
 
   const textBody = [
     `Hi ${name},`,
@@ -53,6 +63,7 @@ export function renderActionEmail(opts: {
     "",
     url,
     ...(footer ? ["", footer] : []),
+    ...(links?.length ? ["", ...links.map((l) => `${l.label}: ${l.url}`)] : []),
   ].join("\n");
 
   const safeUrl = escapeHtml(url);
@@ -77,6 +88,18 @@ export function renderActionEmail(opts: {
                 </table>
                 <p style="margin:24px 0 0;font-size:13px;line-height:1.5;color:#888;">Or paste this link into your browser:<br /><a href="${safeUrl}" style="color:#2563eb;word-break:break-all;">${safeUrl}</a></p>
                 ${footer ? `<p style="margin:24px 0 0;font-size:13px;line-height:1.5;color:#888;">${escapeHtml(footer)}</p>` : ""}
+                ${
+                  links?.length
+                    ? `<p style="margin:24px 0 0;padding-top:16px;border-top:1px solid #eee;font-size:12px;line-height:1.6;color:#888;">${links
+                        .map(
+                          (l) =>
+                            `<a href="${escapeHtml(l.url)}" style="color:#888;">${escapeHtml(
+                              l.label,
+                            )}</a>`,
+                        )
+                        .join(' <span style="color:#ccc;">|</span> ')}</p>`
+                    : ""
+                }
               </td>
             </tr>
           </table>

@@ -23,6 +23,10 @@ export const RESERVED_ORG_SLUGS: ReadonlySet<string> = new Set([
   "sign-up",
   "forgot-password",
   "reset-password",
+  // Reached from a link in an email, by somebody who may never have signed in.
+  // A workspace on this slug would shadow it and leave that person with no way
+  // to stop the mail.
+  "unsubscribe",
   "_next",
   "favicon.ico",
   "local",

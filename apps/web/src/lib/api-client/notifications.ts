@@ -123,6 +123,24 @@ export async function updateNotificationPreferences(
   return unwrap<NotificationPreferenceView>(res, SETTINGS);
 }
 
+/**
+ * Turn the caller's notification email on or off wholesale.
+ *
+ * The same switch the unsubscribe link flips, reached from the settings page
+ * instead. Answers with the state as stored, so the grid re-renders from the
+ * server's view of it rather than from what was clicked.
+ */
+export async function setNotificationEmailSubscription(
+  subscribed: boolean,
+): Promise<{ subscribed: boolean }> {
+  const res = await apiFetch("/api/v1/notifications/email-subscription", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ subscribed }),
+  });
+  return unwrap<{ subscribed: boolean }>(res, "your email subscription");
+}
+
 /** Set or clear a workspace default. Admins only. */
 export async function updateNotificationDefaults(
   changes: readonly NotificationSettingChange[],
