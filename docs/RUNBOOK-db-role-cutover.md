@@ -120,7 +120,7 @@ table, so a bug in a worker path cannot reach them.
   (S), `features` (S/I/U/D), `spec_index` (S/I/U/D), `products` (S/I/U).
 - Notification fan-out: `notifications` (S/I), `members` (S),
   `notification_defaults` (S), `notification_preferences` (S),
-  `item_watchers` (S/I/U).
+  `item_watchers` (S/I/U), `product_members` (S).
 - Read-only context: `workspaces` (S), `users` (S).
 
 `users` is read for two things now. The relay builds an emailed notification
@@ -129,6 +129,16 @@ from it (name, address) and honours
 select-only: the worker reads somebody's decision and never records one. The
 unsubscribe link itself writes that column on the owner connection, because it
 carries no session and the signed token in the URL is the authorization.
+
+`product_members` is select-only, added in migration 0007. Being in the
+workspace is not the same as being able to see an item: a private product is
+readable only by its own members and the workspace owner, and the fan-out had
+no way to tell, because this is the roster that says so. Telling somebody
+anyway wrote them an in-app row the inbox then hid behind its join to
+`features`, and sent them an email whose subject carried the title of work they
+had deliberately not been given access to. The worker reads who may see a
+product and can no more change it than it can change who belongs to a
+workspace.
 
 `members` is select-only, and is the one place the worker reads the roster: the
 fan-out has to drop a deactivated or departed person from a recipient list, and
