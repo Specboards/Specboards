@@ -25,6 +25,50 @@ for how and when the version is bumped.
 > `pnpm deploy:prod` and the dispatched workflow. See
 > [VERSIONING.md](./VERSIONING.md).
 
+## [1.1.2] - 2026-09-08
+
+A follow-up to 1.1.0, from what using it turned up. Notifications reached the
+inbox but did not say enough to be read; a self-hosted install of 1.1.0 could
+not be completed at all; and the notification fan-out was telling people about
+work they had deliberately not been given access to.
+
+### Added
+
+- Notification rows say which product they are about, in the bell and in the
+  notification centre, on any workspace with more than one product. The inbox
+  always spanned the whole workspace and never said so, which read as it being
+  limited to whichever product you were standing in.
+- Two people with the same display name are told apart by their email address
+  wherever a person is chosen: the assignee picker, custom `user` properties,
+  work item create, generate child, the board, list and roadmap filters, and
+  the bulk action bar. Only where a name is actually shared, so the common case
+  stays as short as it was.
+- The self-host install generates and prints a first-run token, and records it
+  in `infra/.env` so it can be found again.
+
+### Changed
+
+- Settings shows a member only the sections they can act on. The pages keep
+  their own gates, so a hidden URL still opens read-only rather than 404ing.
+  Products and Cards remain visible to the admin of any product, since that
+  grant exists to manage exactly those screens.
+
+### Fixed
+
+- A self-hosted 1.1.0 could not be installed. `setup.sh` ended by telling the
+  operator to create an account, the form then demanded a first-run token that
+  was documented nowhere, and setting `SPECBOARDS_BOOTSTRAP_TOKEN` did not help
+  because the compose stack never passed it to the container.
+- The notification fan-out no longer tells people about items in products they
+  cannot read. In the app that row was written and then silently hidden; by
+  email it was delivered, with a link the reader could not open and a subject
+  line carrying the title of work they had no access to. The same rule now
+  covers GitHub review outcomes, which resolved recipients separately and had
+  the same gap.
+- The fan-out test suite can see a broken read. It verified what was written
+  and never what a recipient could retrieve, so an RLS or product-visibility
+  regression would have passed it. 
+
 ## [1.1.0] - 2026-09-07
 
 Specboards could not tell you anything. Being handed an item, having your
