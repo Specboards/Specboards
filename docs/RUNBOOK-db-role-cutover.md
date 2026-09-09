@@ -1,4 +1,4 @@
-# RUNBOOK: database role cutover (app + worker)
+# RUNBOOK: database role cutover (app + worker + portal)
 
 The app connects to Postgres as the **table owner**, which bypasses RLS. Every
 tenant-isolation guarantee then rests solely on hand-written `workspaceId`
@@ -11,6 +11,10 @@ the database is a live backstop:
   the outbox delivery drainer + relay and the incoming GitHub webhook sink
   (`DATABASE_URL_WORKER`). Covers backlog card "Dedicated DB roles for
   outbox/webhook workers".
+- **`specboards_portal`** - a read-only connection for the public Ideas portal
+  and public roadmap (`DATABASE_URL_PORTAL`), the only surface served to
+  somebody with no account. Covers backlog card "Portal database role and RLS
+  policies for the anonymous reader".
 
 Both are **provision-and-set-one-env-var** changes. The application code already
 prefers the scoped connections when the env vars are set and falls back to the
@@ -212,6 +216,97 @@ role, not removing the variable.
 
 ---
 
+## Part 3 - `specboards_portal` (public portal reader)
+
+The portal serves people with no account and no membership. It therefore cannot
+use `specboards_app`, whose policies key on `app.user_id` and correctly match
+nothing for a stranger, and must not use the owner connection, which bypasses
+RLS entirely: on a page rendered for the public that would make one forgotten
+predicate the difference between a portal and an unannounced product's backlog
+on a public URL.
+
+### What the role can reach (verified surface)
+
+`SELECT` only, on exactly eight tables: `workspaces`, `idea_settings`,
+`idea_portal_products`, `products`, `ideas`, `idea_votes`, `releases`,
+`features`. No `INSERT`, `UPDATE` or `DELETE` anywhere, on any table. Public
+submissions and votes are writes and go through their own intake path on a
+different connection.
+
+Unlike `specboards_app`, new tables are **not** auto-granted: `infra/portal-role.sql`
+issues no blanket grant and sets no `ALTER DEFAULT PRIVILEGES`, so a table added
+by a later migration is unreachable until somebody grants it on purpose. That is
+deliberate. Silence should mean "no" for the public reader even where it means
+"yes" for the tenant role.
+
+Within those tables, row visibility is decided by role-targeted policies that
+encode publication itself (migration `0009_idea_portal_reader.sql`), plus
+`RESTRICTIVE` clamps so the reach cannot be widened by any other policy. An
+unpublished product, an unpublished review stage, a roadmap that is switched off
+and a portal that is switched off are each refused by the database regardless of
+what the application asks for.
+
+### Preconditions
+
+Migration `0009_idea_portal_reader.sql` must already be applied to the database,
+because `infra/portal-role.sql` calls the function that migration creates. That
+happens automatically on deploy (`release_command = "node migrate.mjs"`), so in
+practice: **deploy first, then run this**. If the script errors with `function
+specboards_portal_apply_grants() does not exist`, that is the migration not
+being there yet.
+
+Deploying ahead of provisioning is safe and expected. The migration's grants are
+guarded on the role existing, so until this runbook is followed the portal simply
+has no reader.
+
+### Cutover
+
+1. **Provision the role** as a superuser / the table owner:
+   ```sh
+   psql "$SUPERUSER_URL" -f infra/portal-role.sql
+   ```
+2. **Set a login + password** (kept out of git):
+   ```sql
+   alter role specboards_portal with login password '<generated-strong-password>';
+   ```
+3. **Point the portal at it**, then redeploy. Leave the other three connection
+   strings as they are:
+   ```sh
+   fly secrets set DATABASE_URL_PORTAL='postgres://specboards_portal:<pw>@<host>:5432/<db>' -a specboard-test
+   ```
+4. **Smoke-test on test** (checklist below) before prod.
+5. **Repeat for prod** (`app specboard`) once test is green.
+
+### If a portal page is empty when it should not be
+
+Check in this order, because the first is by far the most likely:
+
+1. **Is anything actually published?** Everything defaults to publishing
+   nothing: empty status list, empty product set, roadmap off. A portal with
+   `portal_enabled = true` and nothing else chosen is *correctly* empty.
+2. **Was `infra/portal-role.sql` run after the migration?** If the role was
+   created but the script was run before migration 0009, it will have errored on
+   the missing function and granted nothing. Re-run it; it is idempotent.
+3. **`permission denied for table X`** means a portal query reached a table
+   outside the eight above. Decide whether a stranger on the internet should
+   read that table before adding the grant to `infra/portal-role.sql`; if yes,
+   add a role-targeted policy and a `RESTRICTIVE` clamp with it, then re-run the
+   script on both databases.
+
+### Rollback
+
+Single-tenant: unset `DATABASE_URL_PORTAL` and redeploy; `getPortalDb()` falls
+back to the owner connection. No data or schema change is involved.
+
+Multi-tenant (hosted): the owner fallback is refused by design, both at boot
+(`assertPortalIsolation`) and in `getPortalDb()`, because falling back here
+means serving unpublished rows to anonymous visitors. Rolling back means fixing
+the role, not removing the variable. To take a portal down instead, switch off
+`portal_enabled` in Settings -> Ideas: that is a single setting and the clamp
+policies make it total.
+
+---
+
 ## Smoke-test checklists
 
 ### After the `specboards_app` cutover (test, then prod)
@@ -224,6 +319,29 @@ role, not removing the variable.
 
 If any read returns empty or a write 500s with a permission error, unset
 `DATABASE_URL_APP` to fall back instantly, and investigate before retrying.
+
+### After the `specboards_portal` cutover (test, then prod)
+
+Every check here is about something that must **not** appear. A portal that
+renders is not evidence of anything; a portal that renders exactly what was
+published is.
+
+- [ ] Boot log says `portal connection verified RLS-safe and publication-scoped.`
+      Its absence means `DATABASE_URL_PORTAL` is unset; a refusal to boot means
+      the connection can read an unpublished row, which is the misconfiguration
+      this guard exists for (pointing it at the owner connection does exactly
+      that).
+- [ ] With a workspace's portal enabled and one product and one stage published:
+      the portal shows ideas from that product at that stage, and nothing else.
+- [ ] A second, unpublished product in the same workspace: its **name** does not
+      appear anywhere on the portal.
+- [ ] An idea at an unpublished stage (e.g. `declined`) does not appear.
+- [ ] A different workspace with its portal off: its slug does not resolve, and
+      nothing of its content is reachable.
+- [ ] Roadmap off: no roadmap. Roadmap on with one item status published: only
+      items at that status.
+- [ ] Switch `portal_enabled` off: the whole portal goes away, not just the
+      ideas list.
 
 ### After the `specboards_worker` cutover (test, then prod)
 
