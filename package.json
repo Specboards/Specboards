@@ -23,6 +23,7 @@
     "release:check": "scripts/release-guard.sh",
     "format": "prettier --write \"**/*.{ts,tsx,md,json,yml,yaml}\"",
     "audit": "scripts/audit.sh",
+    "audit:keys": "pnpm --filter @specboards/db audit:keys",
     "knip": "knip"
   },
   "devDependencies": {
