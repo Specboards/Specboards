@@ -32,6 +32,25 @@ export default defineConfig({
       SPECBOARDS_E2E: "1",
       SPECBOARDS_BOOTSTRAP_TOKEN: process.env.SPECBOARDS_BOOTSTRAP_TOKEN!,
       DATABASE_URL: process.env.DATABASE_URL!,
+      // The public portal reads through `getPortalDb()`, which returns null
+      // when this is unset, so without it every portal URL 404s and the portal
+      // specs cannot run at all. It points at the same database as everything
+      // else here, which means the portal role's RLS policies are NOT what
+      // gates these tests: this suite runs single-tenant on the owner
+      // connection throughout (there is no DATABASE_URL_APP either), and the
+      // portal is no exception.
+      //
+      // That is a real gap and it is covered elsewhere on purpose.
+      // `portal-role-rls.int.test.ts` connects as the actual `specboards_portal`
+      // role and asserts what it can and cannot see, which needs a provisioned
+      // role and is integration work rather than end-to-end.
+      //
+      // What these specs cover instead is the half that lives in the
+      // application: routing, the 404 for an unpublished portal, the absence of
+      // the app's chrome, and session parity. Those hold on this connection
+      // precisely because `resolvePortal` checks `portal_enabled` itself rather
+      // than relying only on the policy, which is the reason that check exists.
+      DATABASE_URL_PORTAL: process.env.DATABASE_URL!,
       BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET!,
       BETTER_AUTH_URL: BASE_URL,
       APP_URL: BASE_URL,
