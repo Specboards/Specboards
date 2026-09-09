@@ -25,6 +25,79 @@ for how and when the version is bumped.
 > `pnpm deploy:prod` and the dispatched workflow. See
 > [VERSIONING.md](./VERSIONING.md).
 
+## [1.2.0] - 2026-09-08
+
+Two critical security patches, a closed sign-up funnel reopened, and the
+foundations of the public Ideas portal.
+
+**The portal is not finished in this release**, and the version number says
+"minor feature" rather than "Public Ideas Portal" for that reason. What ships is
+everything underneath it: the model that decides what a portal may show, the
+database role that lets an anonymous visitor read only that, and a portal page
+that renders. Browsing ideas, voting and submitting are still to come, so a
+published portal currently says it has nothing to show. Enabling one is
+deliberately not enough to publish anything.
+
+### Added
+
+- **Portal visibility model** (Settings -> Ideas -> "What the portal shows";
+  migration 0008 adds four columns to `idea_settings` plus an
+  `idea_portal_products` table). An admin chooses which products appear, which
+  idea review stages are fit for outsiders to read, whether the read-only
+  roadmap is included and at which item statuses, and whether public submissions
+  wait for review. **Everything defaults to publishing nothing**, so a portal
+  switched on before those choices are made is empty rather than
+  over-exposed, and the screen says so.
+- **A database role for the anonymous reader** (`specboards_portal`,
+  `infra/portal-role.sql` + migration 0009). The portal reads on a SELECT-only
+  connection whose row-level security policies carry the publication rule
+  itself, so an unpublished product, an unpublished stage, a roadmap that is off
+  and a portal that is off are each refused by the database and not only by the
+  application. Optional: a deployment that has not provisioned the role serves
+  no portal and is otherwise unaffected. See
+  [RUNBOOK-db-role-cutover.md](./docs/RUNBOOK-db-role-cutover.md), Part 3.
+- **The public portal page** at `/{org}/ideas`, served with no account and no
+  session. A path under the origin the deployment already has, rather than a
+  subdomain, so it works on a self-host with no wildcard DNS or certificate.
+  Renders without the application's sidebar, nav or command palette, and
+  identically whether or not the viewer happens to be signed in.
+- **A `robots.txt`.** There was none: defensible while every page worth crawling
+  sat behind a sign-in, and not once a page is meant to be found. Published
+  portals are crawlable; the authenticated app, the API and the account flows
+  are not.
+
+### Changed
+
+- **Product keys can no longer collide with a route.** A product is addressed at
+  `/{org}/{key}`, and a static route wins, so a product called "Settings" took
+  the key `settings` and became unreachable with no error at creation and
+  nothing to see afterwards. `dashboard`, `notifications` and `repositories`
+  were the same. Such a name now yields `settings-2`: less tidy, and reachable.
+  `pnpm audit:keys` reports products already holding one (none did).
+
+### Fixed
+
+- **Two critical unauthenticated remote-code-execution advisories in Next.js**
+  (GHSA-p293-qw3h-jr36, GHSA-2xp9-vwfh-vxw4), by moving to 16.3.4. Also a high
+  in `sharp` and three moderates in `hono`. Both criticals were disclosed after
+  1.1.2 shipped, so production was running the affected version until this
+  release.
+- **The "Request access" form on the marketing site.** It had been answering
+  every prospect with "This request came from another site", because the
+  cross-site origin check refused the cross-origin POST before the endpoint's
+  own CORS allowlist was consulted. The preflight passed, which is why it looked
+  reachable. With sign-up gated behind that queue, the funnel was closed.
+- **One-click unsubscribe was one header away from breaking.** The route's own
+  comment claimed it was exempt from the origin check; it was not, and passed
+  only because mail providers send no `Origin`. A provider adding one would have
+  taken unsubscribe with it, and a refused unsubscribe is what turns
+  "unsubscribe me" into "mark as spam" for the whole deployment.
+- **The dependency-audit gate could not accept an exception.** Its own failure
+  message told you to add the advisory to `pnpm.auditConfig.ignoreGhsas`, which
+  filters the advisory list while leaving the counts the gate actually read
+  untouched. A documented, accepted exception still failed the build. It now
+  reads what the report asserts after suppressions, and names the ids.
+
 ## [1.1.2] - 2026-09-08
 
 A follow-up to 1.1.0, from what using it turned up. Notifications reached the
