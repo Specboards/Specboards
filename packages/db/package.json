@@ -22,7 +22,8 @@
     "migrate": "tsx src/migrate.ts",
     "seed": "tsx src/seed.ts",
     "lint": "eslint src",
-    "build:migrate": "esbuild src/migrate.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/migrate.mjs --banner:js=\"import{createRequire}from'node:module';const require=createRequire(import.meta.url);\""
+    "build:migrate": "esbuild src/migrate.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/migrate.mjs --banner:js=\"import{createRequire}from'node:module';const require=createRequire(import.meta.url);\"",
+    "audit:slugs": "node scripts/audit-reserved-slugs.mjs"
   },
   "dependencies": {
     "@specboards/core": "workspace:*",
