@@ -153,18 +153,32 @@ let portalDb: Database | null | undefined;
  */
 export function getPortalDb(): Database | null {
   if (portalDb === undefined) {
-    let url = process.env.DATABASE_URL_PORTAL;
+    const url = process.env.DATABASE_URL_PORTAL;
     if (!url) {
-      if (isMultiTenant() && process.env.DATABASE_URL) {
-        throw new Error(
-          "[security] getPortalDb: DATABASE_URL_PORTAL is required in multi-tenant mode; " +
-            "refusing the owner-connection fallback, which would serve unpublished " +
-            "rows to anonymous visitors (see infra/portal-role.sql).",
-        );
-      }
-      url = process.env.DATABASE_URL;
+      // No portal role: the portal is off, not broken.
+      //
+      // This threw in multi-tenant mode, which was the wrong shape twice over.
+      // A throw here turns every request to a portal URL into a 500 on a
+      // deployment that has simply not enabled the feature, and paired with the
+      // boot guard it took the test deployment down entirely.
+      //
+      // Returning null gets the protection the throw was for without the
+      // outage. `resolvePortal` treats null as "no portal", so every portal URL
+      // 404s, and the owner connection is never reached: the fallback that
+      // would have bypassed row-level security is gone in BOTH modes rather
+      // than refused in one.
+      //
+      // Single-tenant self-host loses its owner-connection fallback with it,
+      // which is deliberate and is the one behaviour change here. `getAppDb()`
+      // and `getWorkerDb()` keep theirs because the app and the workers must
+      // function on a self-host with one connection string. A portal need not:
+      // it is opt-in, nobody is broken by not having one, and running a PUBLIC
+      // surface on the connection that bypasses every publication policy is not
+      // a bargain worth making to save a self-hoster one setup step.
+      portalDb = null;
+      return portalDb;
     }
-    portalDb = url ? createDb(url) : null;
+    portalDb = createDb(url);
   }
   return portalDb;
 }
