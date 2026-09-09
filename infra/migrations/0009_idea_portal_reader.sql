@@ -40,12 +40,12 @@
 -- reads nothing because a wrapper was missed.
 --
 -- It follows that this role can read the published rows of EVERY workspace, not
--- just the one whose subdomain was requested. That is deliberate. RLS's job
--- here is publication; deciding which portal a request is for is the
--- application's job, and the two failure modes are not comparable. A bug in the
--- host-to-workspace resolution shows one public portal's content under another
--- public portal's URL: wrong, visible, and reportable by anyone. A bug on the
--- owner connection publishes an unpublished internal backlog.
+-- just the one being served. That is deliberate. RLS's job here is publication;
+-- deciding which portal a request is for is the application's job, and the two
+-- failure modes are not comparable. A bug in resolving the org from the URL
+-- shows one public portal's content under another public portal's URL: wrong,
+-- visible, and reportable by anyone. A bug on the owner connection publishes an
+-- unpublished internal backlog.
 --
 -- ── This migration is inert until the role exists ──────────────────────────
 -- The grants and policies are guarded on the role being present, the same way
@@ -181,7 +181,7 @@ BEGIN
                     products, ideas, idea_votes, releases, features
         TO specboards_portal;
 
-    -- The workspace behind the subdomain, and the fallback portal heading.
+    -- The workspace named in the portal URL, and the fallback portal heading.
     -- Readable only while its portal is published, so an unpublished slug
     -- is not even confirmable as a workspace through this connection.
     DROP POLICY IF EXISTS workspaces_portal_select ON workspaces;

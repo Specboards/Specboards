@@ -1,10 +1,37 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isReservedProductKey,
   PRODUCT_COLORS,
   productKeyFromName,
   resolveProductColor,
 } from "./products.js";
+
+describe("reserved product keys", () => {
+  it("never mints a key a route would shadow", () => {
+    // The bug this exists for, and it predates the portal: a product is
+    // addressed at /{org}/{key}, Next resolves a static segment before the
+    // [product] one, so a product called "Settings" got key `settings` and was
+    // simply unreachable. No error at creation, nothing to see afterwards
+    // except a board that never opens.
+    expect(productKeyFromName("Settings", new Set())).toBe("settings-2");
+    expect(productKeyFromName("Dashboard", new Set())).toBe("dashboard-2");
+    expect(productKeyFromName("Ideas", new Set())).toBe("ideas-2");
+    // Ugly, and reachable. That is the trade.
+  });
+
+  it("still disambiguates past a reserved key that is also taken", () => {
+    expect(productKeyFromName("Ideas", new Set(["ideas-2"]))).toBe("ideas-3");
+  });
+
+  it("does not reserve a key merely for containing a reserved one", () => {
+    // Equality, not prefix: every reservation costs a customer a name, and
+    // `settings-hub` collides with nothing.
+    for (const ok of ["settings-hub", "ideas-portal", "dashboards"]) {
+      expect(isReservedProductKey(ok), ok).toBe(false);
+    }
+  });
+});
 
 describe("productKeyFromName", () => {
   it("slugifies a name", () => {
