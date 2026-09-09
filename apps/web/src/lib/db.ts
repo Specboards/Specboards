@@ -119,3 +119,52 @@ export function getWorkerDb(): Database | null {
   }
   return workerDb;
 }
+
+let portalDb: Database | null | undefined;
+
+/**
+ * Drizzle client for the public Ideas portal and public roadmap: the only
+ * surface served to somebody with no account.
+ *
+ * Neither of the other two connections can do this job. `getAppDb()` policies
+ * key on `app.user_id`, and a portal visitor has no user, so it correctly
+ * returns nothing. `getDb()` is the owner connection, which bypasses RLS
+ * entirely; on a page rendered for a stranger that would make one forgotten
+ * predicate the difference between a public portal and an unannounced
+ * product's backlog on a public URL.
+ *
+ * So this connects as `specboards_portal` (`infra/portal-role.sql`), a
+ * read-only role granted eight tables and carrying role-targeted policies that
+ * encode publication itself: an unpublished product, an unpublished stage and a
+ * switched-off portal are refused by the database even when the query is wrong.
+ *
+ * Unlike `getAppDb()` there is no `asUser()` to remember. The policies are
+ * data-driven rather than keyed on a session variable, so a query made through
+ * this handle is already scoped to what is published. What it is NOT scoped to
+ * is a single workspace: it can read the published rows of every workspace, and
+ * deciding which portal a request is for stays the caller's job. That is a
+ * deliberate split, and the failure modes are not comparable (see the migration
+ * `0009_idea_portal_reader.sql`).
+ *
+ * Falls back the way `getWorkerDb()` does, and refuses for the same reason:
+ * multi-tenant without the dedicated role would silently reinstate the owner
+ * connection and the bypass with it. Single-tenant self-host keeps the
+ * fallback, where there is no co-tenant to leak into. `null` in local file mode.
+ */
+export function getPortalDb(): Database | null {
+  if (portalDb === undefined) {
+    let url = process.env.DATABASE_URL_PORTAL;
+    if (!url) {
+      if (isMultiTenant() && process.env.DATABASE_URL) {
+        throw new Error(
+          "[security] getPortalDb: DATABASE_URL_PORTAL is required in multi-tenant mode; " +
+            "refusing the owner-connection fallback, which would serve unpublished " +
+            "rows to anonymous visitors (see infra/portal-role.sql).",
+        );
+      }
+      url = process.env.DATABASE_URL;
+    }
+    portalDb = url ? createDb(url) : null;
+  }
+  return portalDb;
+}

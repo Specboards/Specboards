@@ -64,6 +64,13 @@
       "when": 1787580000000,
       "tag": "0008_idea_portal_visibility",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1787590000000,
+      "tag": "0009_idea_portal_reader",
+      "breakpoints": true
     }
   ]
 }
