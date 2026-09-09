@@ -34,9 +34,11 @@ export async function register(): Promise<void> {
     const { assertLocalMode } = await import("@/lib/local-mode");
     assertLocalMode();
 
-    const { assertTenantIsolation, assertWorkerIsolation } = await import("@/lib/rls-guard");
+    const { assertTenantIsolation, assertWorkerIsolation, assertPortalIsolation } =
+      await import("@/lib/rls-guard");
     await assertTenantIsolation();
     await assertWorkerIsolation();
+    await assertPortalIsolation();
 
     const { assertCanonicalOrigin } = await import("@/lib/origin-guard");
     assertCanonicalOrigin();

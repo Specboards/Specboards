@@ -1,4 +1,8 @@
-import { probeTenantConnection, tenantIsolationViolations } from "@specboards/db";
+import {
+  probePortalCannotReadUnpublished,
+  probeTenantConnection,
+  tenantIsolationViolations,
+} from "@specboards/db";
 
 import { isMultiTenant } from "@/lib/tenancy";
 
@@ -123,4 +127,107 @@ export async function assertWorkerIsolation(): Promise<void> {
   }
 
   console.log("[security] worker connection verified RLS-safe.");
+}
+
+/**
+ * Same fail-closed contract for the public portal connection, plus one check
+ * the generic probe cannot make.
+ *
+ * The portal is the only surface served to somebody with no account, so it runs
+ * as the read-only `specboards_portal` role whose policies encode publication
+ * itself (see infra/portal-role.sql and migration 0009). Without this guard a
+ * multi-tenant deployment that forgot to provision DATABASE_URL_PORTAL would
+ * fall back to the owner connection and serve unpublished rows to anonymous
+ * visitors, which is the single worst failure this codebase can have.
+ *
+ * ── Why the shared probe is not enough here ────────────────────────────────
+ * `tenantIsolationViolations` answers "could RLS apply to this connection":
+ * not a superuser, no BYPASSRLS, does not own the tables, RLS enabled,
+ * policies present. All five can be true of a connection whose policies say
+ * `USING (true)`. For the app role that gap is tolerable, because a policy
+ * that matches everything still only matches what `app.user_id` scopes it to.
+ * For this role there is no session scope at all: a permissive policy IS the
+ * leak, and it would satisfy every check above.
+ *
+ * So we ask the database the actual question instead of inferring it, and the
+ * question is asked in the direction that fails safe. A row that exists and
+ * must not be visible is the whole risk; a row that is visible and should be is
+ * merely a bug. `probePortalCannotReadUnpublished` reads an unpublished
+ * `idea_settings` row through the portal role and expects nothing back.
+ */
+export async function assertPortalIsolation(): Promise<void> {
+  // Local file mode: no Postgres at all.
+  if (!process.env.DATABASE_URL) return;
+
+  const portalUrl = process.env.DATABASE_URL_PORTAL;
+  if (!portalUrl) {
+    if (isMultiTenant()) {
+      throw new Error(
+        "[security] Refusing to start: SPECBOARDS_MULTI_TENANT is set but DATABASE_URL_PORTAL " +
+          "is not. The public portal would fall back to the owner connection, which bypasses " +
+          "row-level security and would serve unpublished ideas, unannounced product names " +
+          "and other tenants' rows to anonymous visitors. Provision the portal role " +
+          "(infra/portal-role.sql) and set DATABASE_URL_PORTAL.",
+      );
+    }
+    // Not a warning on single-tenant: unlike the worker, the portal is simply
+    // off until configured, and a self-host that never enables one should not
+    // be nagged at every boot about a role it does not need.
+    return;
+  }
+
+  let violations: string[];
+  try {
+    violations = tenantIsolationViolations(await probeTenantConnection(portalUrl));
+  } catch (err) {
+    if (isMultiTenant()) {
+      throw new Error(
+        `[security] Refusing to start: could not verify the portal connection is RLS-safe: ${String(err)}`,
+      );
+    }
+    console.warn("[security] portal RLS probe failed (continuing, single-tenant):", err);
+    return;
+  }
+
+  if (violations.length > 0) {
+    const detail = violations.join("; ");
+    if (isMultiTenant()) {
+      throw new Error(
+        `[security] Refusing to start: the DATABASE_URL_PORTAL connection bypasses row-level security: ${detail}.`,
+      );
+    }
+    console.warn(`[security] DATABASE_URL_PORTAL connection is not RLS-safe: ${detail}.`);
+    return;
+  }
+
+  // The check the generic probe cannot make. Asked in the direction that fails
+  // safe: a row that exists and must not be readable is the entire risk.
+  try {
+    const leaked = await probePortalCannotReadUnpublished(portalUrl);
+    if (leaked > 0) {
+      const detail =
+        `the portal connection can read ${leaked} idea_settings row(s) whose portal is ` +
+        "switched off, so its policies are not enforcing publication";
+      if (isMultiTenant()) {
+        throw new Error(`[security] Refusing to start: ${detail}.`);
+      }
+      console.warn(`[security] ${detail}.`);
+      return;
+    }
+  } catch (err) {
+    // A thrown refusal above must not be swallowed by this catch.
+    if (err instanceof Error && err.message.startsWith("[security] Refusing")) {
+      throw err;
+    }
+    if (isMultiTenant()) {
+      throw new Error(
+        `[security] Refusing to start: could not verify the portal connection refuses ` +
+          `unpublished rows: ${String(err)}`,
+      );
+    }
+    console.warn("[security] portal publication probe failed (continuing, single-tenant):", err);
+    return;
+  }
+
+  console.log("[security] portal connection verified RLS-safe and publication-scoped.");
 }

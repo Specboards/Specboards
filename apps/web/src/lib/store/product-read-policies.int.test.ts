@@ -162,6 +162,24 @@ describe.skipIf(!DB_URL)("reading across a product boundary", () => {
     // Role-targeted policies are excluded on purpose: the worker's `USING
     // (true)` policies are `TO specboards_worker`, which the app role is not,
     // so they never widen anything it can see.
+    //
+    // The same exclusion is needed on the OTHER side of the join, for the
+    // narrower SELECT policy. The portal role's policies (migration 0009) are
+    // `FOR SELECT TO specboards_portal` on tables that already carry a
+    // `FOR ALL ... is_member` policy, which matched this query and is a false
+    // positive: `specboards_is_member` is false with no `app.user_id`, and the
+    // portal connection never sets one, so the portal policy is not defeated by
+    // the member policy, it is the only thing granting that role any row at all.
+    //
+    // What the pairing DID reveal, when this fired, is that the arrangement
+    // fails open rather than closed: the member policy is `TO public`, so a
+    // session user reaching the portal connection would have ORed the whole
+    // workspace back in. That is now clamped by RESTRICTIVE policies rather
+    // than argued about, and pinned by "stays bounded even if a session user is
+    // set on the connection" in `portal-role-rls.int.test.ts`, which fails
+    // without them. Excluding role-targeted SELECT policies here is therefore
+    // narrowing this heuristic to what it can actually judge, not waiving the
+    // concern it raised.
     const defeated = await sql<{ table: string; policy: string }[]>`
       select a.tablename as table, a.policyname as policy
       from pg_policies a
@@ -169,6 +187,7 @@ describe.skipIf(!DB_URL)("reading across a product boundary", () => {
         on s.tablename = a.tablename
        and s.schemaname = a.schemaname
        and s.cmd = 'SELECT'
+       and s.roles::text = '{public}'
       where a.schemaname = 'public'
         and a.cmd = 'ALL'
         and a.permissive = 'PERMISSIVE'

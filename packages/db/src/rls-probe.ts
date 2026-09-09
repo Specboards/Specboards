@@ -100,3 +100,43 @@ export function tenantIsolationViolations(probe: TenantConnectionProbe): string[
   }
   return violations;
 }
+
+/**
+ * Does the public portal connection actually refuse an unpublished row?
+ *
+ * {@link tenantIsolationViolations} answers a weaker question: could RLS apply
+ * to this connection at all (not a superuser, no BYPASSRLS, not the owner, RLS
+ * on, policies present). Every one of those can be true of a role whose policy
+ * reads `USING (true)`.
+ *
+ * For the tenant role that gap is survivable, because a permissive policy is
+ * still bounded by the `app.user_id` the connection sets. The portal role has
+ * no session scope by design, so a permissive policy is not a weakened boundary
+ * but the absence of one, and it would pass every existing check.
+ *
+ * So ask directly, in the direction that fails safe: a row that exists and must
+ * not be readable is the entire risk. `idea_settings` is the right probe
+ * because it is the predicate's own source, it always has a row per configured
+ * workspace, and a portal that is switched off is the least ambiguous "must not
+ * be visible" the schema has.
+ *
+ * Returns the number of unpublished rows this connection could read. Zero is
+ * the only acceptable answer. A workspace whose portal is genuinely published
+ * is not counted, so an empty database and a correctly-configured one both
+ * return zero.
+ */
+export async function probePortalCannotReadUnpublished(
+  connectionString: string,
+): Promise<number> {
+  const sql = postgres(connectionString, { prepare: false, max: 1 });
+  try {
+    const [row] = await sql<{ leaked: string }[]>`
+      select count(*)::text as leaked
+      from idea_settings
+      where portal_enabled = false
+    `;
+    return Number(row?.leaked ?? 0);
+  } finally {
+    await sql.end({ timeout: 5 });
+  }
+}
