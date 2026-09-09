@@ -57,16 +57,19 @@ describe("reserved product keys match the route tree", () => {
   });
 
   it("does not reserve names no route needs", () => {
-    // The list costs customers names, so it should not outgrow its reason.
-    // Every reserved key must correspond to a real route, with one exception:
-    // `ideas` is reserved ahead of the public portal's routes existing, which
-    // is deliberate. Reserving it after somebody had taken it would be too
-    // late, and the alternative is shipping the portal and discovering the
-    // clash then.
+    // The list costs customers names, so it should not outgrow its reason:
+    // every reserved key must correspond to a real route.
+    //
+    // `ideas` used to be the one permitted exception, reserved ahead of the
+    // public portal's routes existing because reserving it after somebody had
+    // taken it would have been too late. `app/[org]/ideas` now exists, so the
+    // exception is spent and the rule is exact again. This test failing on that
+    // change is the guard working in the other direction: it noticed the
+    // temporary allowance had stopped being temporary.
     const routes = new Set(staticOrgSegments());
     const withoutRoute = [...RESERVED_PRODUCT_KEYS].filter(
       (key) => !routes.has(key),
     );
-    expect(withoutRoute.sort()).toEqual(["ideas"]);
+    expect(withoutRoute.sort()).toEqual([]);
   });
 });
