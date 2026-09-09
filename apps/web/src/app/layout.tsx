@@ -42,11 +42,41 @@ export const viewport: Viewport = {
 };
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
-  const [orgs, products, groups, nonce] = await Promise.all([
+  const h = await headers();
+  const nonce = h.get("x-nonce") ?? undefined;
+  // Set by middleware for `/{org}/ideas` and below. See `isPortalPath` there.
+  const isPortal = h.get("x-portal-route") === "1";
+
+  // The public portal renders bare: no sidebar, no mobile nav, no command
+  // palette, and none of the three sidebar queries above.
+  //
+  // Skipping the queries is the half that matters. They resolve the signed-in
+  // user's orgs and products, so leaving them in would have every anonymous
+  // request to a customer's portal doing session work on our side, and would
+  // put the app's furniture around somebody else's branded page for any visitor
+  // who happens to be signed in. `e2e/portal-shell.spec.ts` asserts the portal
+  // renders byte-identically with and without a session, which is the property
+  // this branch exists to make true.
+  //
+  // Theme and announcer stay: they are page-level infrastructure with no
+  // knowledge of who is asking, and a portal still has to respect dark mode.
+  if (isPortal) {
+    return (
+      <html lang="en" suppressHydrationWarning>
+        <body className="min-h-screen antialiased">
+          <WebpackNonce nonce={nonce} />
+          <ThemeProvider nonce={nonce}>
+            <AnnouncerProvider>{children}</AnnouncerProvider>
+          </ThemeProvider>
+        </body>
+      </html>
+    );
+  }
+
+  const [orgs, products, groups] = await Promise.all([
     listSidebarOrgs(),
     listSidebarProducts(),
     listSidebarGroups(),
-    headers().then((h) => h.get("x-nonce") ?? undefined),
   ]);
   return (
     <html lang="en" suppressHydrationWarning>

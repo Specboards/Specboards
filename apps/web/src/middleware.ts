@@ -77,6 +77,18 @@ function contentSecurityPolicy(nonce: string, pathname: string): string {
   ].join("; ");
 }
 
+/**
+ * The public Ideas portal: `/{org}/ideas` and anything under it.
+ *
+ * Exactly two segments before `ideas`, so the authenticated board at
+ * `/{org}/{product}/ideas` is deliberately NOT matched. The two routes differ by
+ * one path segment and mistaking them would either strip the chrome from the
+ * internal board or wrap the public one in it.
+ */
+function isPortalPath(pathname: string): boolean {
+  return /^\/[^/]+\/ideas(\/|$)/.test(pathname);
+}
+
 /** A fresh base64 nonce for the CSP (edge-runtime safe: Web Crypto + btoa). */
 function newNonce(): string {
   const bytes = new Uint8Array(16);
@@ -174,6 +186,21 @@ export function middleware(req: NextRequest) {
   if (!pathname.startsWith("/api/")) {
     headers.set("x-org-slug", pathname.split("/")[1] ?? "");
   }
+
+  // Mark the public portal, so the root layout can render it without the
+  // application's chrome.
+  //
+  // A layout cannot read the pathname, and Next gives a nested layout no way to
+  // opt out of its parent, so without this the portal renders inside the app's
+  // sidebar, mobile nav and command palette: a customer's public page wearing
+  // our internal furniture. The alternative is moving all ~30 authenticated
+  // routes into a `(app)` group so the portal can have a sibling root layout,
+  // which is a large diff to express one bit.
+  //
+  // A header rather than a pathname check duplicated in the layout, because
+  // middleware already owns "what kind of request is this" (see the org-slug
+  // hint above) and two places deciding it is how they come to disagree.
+  if (isPortalPath(pathname)) headers.set("x-portal-route", "1");
 
   const res = NextResponse.next({ request: { headers } });
   res.headers.set("content-security-policy", csp);
