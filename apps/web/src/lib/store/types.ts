@@ -1271,16 +1271,60 @@ export interface CardsOverrides {
   levelTemplates: boolean;
 }
 
-/** Per-workspace Ideas configuration (public portal settings). */
+/** How a public submission reaches the portal. */
+export const PORTAL_MODERATION = ["review_first", "immediate"] as const;
+export type PortalModeration = (typeof PORTAL_MODERATION)[number];
+
+export function isPortalModeration(v: unknown): v is PortalModeration {
+  return (
+    typeof v === "string" && (PORTAL_MODERATION as readonly string[]).includes(v)
+  );
+}
+
+/**
+ * Per-workspace Ideas configuration: the public portal's settings, and the
+ * visibility model that decides what it may show.
+ *
+ * `portalEnabled` is the outer switch, and every other field narrows from
+ * there. All of them default to publishing NOTHING (no products, no statuses,
+ * roadmap off), which is why a portal switched on with nothing chosen is
+ * correctly empty rather than broken. See migration 0008.
+ */
 export interface IdeaSettings {
   portalEnabled: boolean;
   /** Portal heading, or null to fall back to the workspace name. */
   portalTitle: string | null;
+  /** Products the portal exposes. Empty publishes no ideas at all. */
+  portalProductIds: string[];
+  /**
+   * Idea review stages fit to appear publicly, by key. Empty publishes none.
+   * Keys rather than references, because a workspace on the built-in workflow
+   * has no `idea_statuses` rows (see `resolveIdeaStages`); a key matching no
+   * stage publishes nothing, so a renamed-away stage fails safe.
+   */
+  portalIdeaStatuses: string[];
+  /** Whether the portal includes the read-only roadmap. */
+  portalRoadmapEnabled: boolean;
+  /** Item statuses the public roadmap shows, by key. Empty shows none. */
+  portalRoadmapItemStatuses: string[];
+  /** Whether a public submission appears at once or waits for an admin. */
+  portalModeration: PortalModeration;
 }
 
+/**
+ * A patch to the Ideas configuration. Every list field REPLACES the stored set
+ * rather than merging into it, because the UI is a set of checkboxes: a
+ * merge-only patch could never unpublish a product, and "send what is ticked"
+ * is the only shape that can express the empty set.
+ */
 export type IdeaSettingsPatch = Partial<{
   portalEnabled: boolean;
   portalTitle: string | null;
+  portalProductIds: string[];
+  portalIdeaStatuses: string[];
+  portalRoadmapEnabled: boolean;
+  portalRoadmapItemStatuses: string[];
+  portalModeration: PortalModeration;
 }>;
 
 /** Raised when an idea can't be created/updated/deleted/promoted. */

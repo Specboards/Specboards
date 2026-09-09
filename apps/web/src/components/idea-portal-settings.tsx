@@ -12,9 +12,16 @@ import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import type { IdeaSettings } from "@/lib/store/types";
 
 /**
- * Admin form for the public Ideas portal. The portal itself (a public,
- * unauthenticated voting page built on this data) is a later phase; this
- * captures its config now so it can ship as a flip of `portalEnabled`.
+ * The publish switch and heading for the public Ideas portal.
+ *
+ * What the portal may SHOW lives in `IdeaPortalVisibility`, deliberately
+ * separate: this is the one control an admin flips in a hurry (to take a portal
+ * down, say), and burying it among five multi-select fields would make the
+ * urgent case the fiddly one.
+ *
+ * `portalEnabled` is the outer gate for everything, in the database as well as
+ * here: the portal role's policies are all predicated on it, so switching it
+ * off is total rather than cosmetic.
  */
 export function IdeaPortalSettings({
   initial,
@@ -67,9 +74,9 @@ export function IdeaPortalSettings({
             Publish the public portal
           </span>
           <span className="block text-xs text-muted-foreground">
-            When published, customers can browse open ideas, vote, and submit
-            requests without an account. (Public site coming in a later
-            release.)
+            When published, customers can browse ideas, vote, and submit
+            requests without an account. Only the products and stages selected
+            below are shown.
           </span>
         </span>
       </label>

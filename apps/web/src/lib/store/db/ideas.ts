@@ -35,11 +35,13 @@ import {
   count,
   eq,
   features,
+  ideaPortalProducts,
   ideaSettings,
   ideaStatuses,
   ideaVotes,
   ideas,
   inArray,
+  products,
   users,
 } from "@specboards/db";
 
@@ -52,6 +54,7 @@ import {
   type IdeaSettings,
   type IdeaSettingsPatch,
   type IdeaStage,
+  isPortalModeration,
   type StatusStageInput,
   type WorkspaceScope,
 } from "../types";
@@ -475,14 +478,56 @@ export async function getIdeaSettings(
   scope?: WorkspaceScope,
 ): Promise<IdeaSettings> {
   return ctx.scoped(scope, async (tx) => {
-    const row = await tx.query.ideaSettings.findFirst({
-      where: eq(ideaSettings.workspaceId, scope!.workspaceId),
-    });
-    return {
-      portalEnabled: row?.portalEnabled ?? false,
-      portalTitle: row?.portalTitle ?? null,
-    };
+    const ws = scope!.workspaceId;
+    const [row, products] = await Promise.all([
+      tx.query.ideaSettings.findFirst({
+        where: eq(ideaSettings.workspaceId, ws),
+      }),
+      tx
+        .select({ productId: ideaPortalProducts.productId })
+        .from(ideaPortalProducts)
+        .where(eq(ideaPortalProducts.workspaceId, ws)),
+    ]);
+    return settingsFrom(row, products.map((p) => p.productId));
   });
+}
+
+/**
+ * One shape for a settings row, so an absent row and a present one cannot
+ * disagree about what the defaults are.
+ *
+ * Absent means the workspace has never opened Settings -> Ideas, and it must
+ * read as "publishing nothing" rather than as anything else: this is the value
+ * the portal's own reads are compared against, and the migration's column
+ * defaults say the same thing. Two places stating it is already one too many.
+ */
+function settingsFrom(
+  row:
+    | {
+        portalEnabled: boolean;
+        portalTitle: string | null;
+        portalIdeaStatuses: string[];
+        portalRoadmapEnabled: boolean;
+        portalRoadmapItemStatuses: string[];
+        portalModeration: string;
+      }
+    | undefined,
+  productIds: string[],
+): IdeaSettings {
+  return {
+    portalEnabled: row?.portalEnabled ?? false,
+    portalTitle: row?.portalTitle ?? null,
+    portalProductIds: productIds,
+    portalIdeaStatuses: row?.portalIdeaStatuses ?? [],
+    portalRoadmapEnabled: row?.portalRoadmapEnabled ?? false,
+    portalRoadmapItemStatuses: row?.portalRoadmapItemStatuses ?? [],
+    // Not `as PortalModeration`: the column is text with a CHECK, and a value
+    // that somehow evaded it should fall back to the safe branch rather than be
+    // asserted into the type.
+    portalModeration: isPortalModeration(row?.portalModeration)
+      ? row.portalModeration
+      : "review_first",
+  };
 }
 
 export async function updateIdeaSettings(
@@ -503,6 +548,19 @@ export async function updateIdeaSettings(
             ? patch.portalTitle.trim()
             : null
           : (current?.portalTitle ?? null),
+      portalIdeaStatuses:
+        patch.portalIdeaStatuses ?? current?.portalIdeaStatuses ?? [],
+      portalRoadmapEnabled:
+        patch.portalRoadmapEnabled ?? current?.portalRoadmapEnabled ?? false,
+      portalRoadmapItemStatuses:
+        patch.portalRoadmapItemStatuses ??
+        current?.portalRoadmapItemStatuses ??
+        [],
+      portalModeration:
+        patch.portalModeration ??
+        (isPortalModeration(current?.portalModeration)
+          ? current.portalModeration
+          : "review_first"),
     };
     await tx
       .insert(ideaSettings)
@@ -511,7 +569,56 @@ export async function updateIdeaSettings(
         target: ideaSettings.workspaceId,
         set: { ...next, updatedAt: new Date() },
       });
-    return next;
+
+    // The published product set. Replaced wholesale rather than merged, because
+    // the caller sends what is ticked and a merge could never unpublish one.
+    //
+    // Ids are filtered against products in THIS workspace before insert. The
+    // composite `(product_id, workspace_id)` foreign key would refuse a foreign
+    // id anyway, so this is not the only guard; it is here so a stale id in a
+    // form submission is dropped quietly instead of failing the whole save,
+    // which is what a 500 on "untick a deleted product" would be.
+    // Deduplicated here as well as in `parseIdeaSettingsPatch`, so the store's
+    // contract does not depend on its caller having done it. The set is uniquely
+    // constrained, so a repeated id aborts the whole transaction: a caller that
+    // is not the settings form (the MCP surface, a script) would get a
+    // constraint error about a table it never named.
+    let productIds = patch.portalProductIds
+      ? [...new Set(patch.portalProductIds)]
+      : patch.portalProductIds;
+    if (productIds !== undefined) {
+      const owned =
+        productIds.length === 0
+          ? []
+          : await tx
+              .select({ id: products.id })
+              .from(products)
+              .where(
+                and(
+                  eq(products.workspaceId, ws),
+                  inArray(products.id, productIds),
+                ),
+              );
+      const ownedIds = new Set(owned.map((p) => p.id));
+      productIds = productIds.filter((id) => ownedIds.has(id));
+
+      await tx
+        .delete(ideaPortalProducts)
+        .where(eq(ideaPortalProducts.workspaceId, ws));
+      if (productIds.length > 0) {
+        await tx.insert(ideaPortalProducts).values(
+          productIds.map((productId) => ({ workspaceId: ws, productId })),
+        );
+      }
+    } else {
+      const rows = await tx
+        .select({ productId: ideaPortalProducts.productId })
+        .from(ideaPortalProducts)
+        .where(eq(ideaPortalProducts.workspaceId, ws));
+      productIds = rows.map((r) => r.productId);
+    }
+
+    return { ...next, portalProductIds: productIds };
   });
 }
 
