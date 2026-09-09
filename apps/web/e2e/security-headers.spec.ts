@@ -227,6 +227,24 @@ test.describe("security headers", () => {
   }) => {
     const MARKETING = "https://www.specboards.ai";
 
+    // One-click unsubscribe, with an Origin a mail provider does not send
+    // today. The exemption exists precisely so that staying true is not a
+    // requirement: a refused unsubscribe costs the deployment its sending
+    // reputation, and would surface as a deliverability decline rather than as
+    // an error. A bad token is a deliberate 200 (see the route).
+    const unsubscribe = await page.request.post(
+      "/api/unsubscribe?t=not-a-real-token",
+      {
+        headers: { origin: "https://mail.example.com" },
+        form: { "List-Unsubscribe": "One-Click" },
+        failOnStatusCode: false,
+      },
+    );
+    expect(
+      unsubscribe.status(),
+      "one-click unsubscribe survives a provider that sends an Origin",
+    ).toBe(200);
+
     const intake = await page.request.post("/api/access-request", {
       headers: { "content-type": "application/json", origin: MARKETING },
       data: {},
