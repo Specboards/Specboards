@@ -25,6 +25,26 @@
 # `pnpm audit --json` emits a `metadata.vulnerabilities` object on any real
 # answer, clean or not. No parseable report means we did not get one, whatever
 # the exit code claims.
+#
+# ── Why the verdict does not come from those counts ─────────────────────────
+# It used to, and that made the exception process this script advertises
+# unusable. `pnpm.auditConfig.ignoreGhsas` filters the `advisories` map and
+# leaves `metadata.vulnerabilities` untouched, so an accepted, documented
+# exception still failed the gate, and the failure message helpfully suggested
+# adding it to `ignoreGhsas` (where it already was). Verified against a real
+# advisory: with the id ignored, `advisories` is `{}` while
+# `metadata.vulnerabilities.moderate` still reads 2.
+#
+# A gate whose own documented escape hatch does nothing is not a strict gate,
+# it is one somebody eventually reaches past: `--audit-level high`, or deleting
+# the step. So the verdict is now the `advisories` entries at or above the
+# level, which is what the report actually claims after suppressions.
+#
+# `metadata.vulnerabilities` keeps its original job, which is a different
+# question: it is the probe for "did a real answer come back at all". An empty
+# `advisories` map is a legitimate clean result, so it cannot distinguish a
+# clean tree from a failed request, and the presence of the counts object still
+# can.
 set -uo pipefail
 
 ATTEMPTS=3
@@ -43,21 +63,44 @@ for attempt in $(seq 1 "$ATTEMPTS"); do
         } catch {
           process.exit(1);
         }
+        // Only ever the "did we get an answer" probe. See the header: these
+        // counts ignore `ignoreGhsas`, so they cannot be the verdict.
         const counts = parsed?.metadata?.vulnerabilities;
         if (!counts || typeof counts !== "object") process.exit(1);
-        // At or above the gate level. `info` and `low` are reported by the
-        // scheduled full audit (security-audit.yml) and do not fail a PR.
-        const blocking = ["moderate", "high", "critical"]
-          .map((k) => [k, Number(counts[k] ?? 0)])
-          .filter(([, n]) => n > 0);
-        if (blocking.length === 0) {
-          console.log("[audit] clean: no production advisories at moderate or above.");
+
+        // The verdict. `advisories` is what the report still asserts after
+        // suppressions. `info` and `low` are reported by the scheduled full
+        // audit (security-audit.yml) and do not fail a PR.
+        const GATED = ["moderate", "high", "critical"];
+        const reported = Object.values(parsed?.advisories ?? {}).filter((a) =>
+          GATED.includes(String(a?.severity)),
+        );
+        if (reported.length === 0) {
+          const muted = GATED.reduce((n, k) => n + Number(counts[k] ?? 0), 0);
+          console.log(
+            "[audit] clean: no production advisories at moderate or above." +
+              // Say so when the tree is clean only because something is muted:
+              // a green tick that depends on an exception should not read the
+              // same as one that does not.
+              (muted > 0
+                ? ` (${muted} suppressed via pnpm.auditConfig.ignoreGhsas; see docs/security-audit-exceptions.md)`
+                : ""),
+          );
           process.exit(0);
         }
+        const bySeverity = GATED.map((k) => [
+          k,
+          reported.filter((a) => a.severity === k).length,
+        ]).filter(([, n]) => n > 0);
         console.error(
           "[audit] production advisories found: " +
-            blocking.map(([k, n]) => `${n} ${k}`).join(", "),
+            bySeverity.map(([k, n]) => `${n} ${k}`).join(", "),
         );
+        for (const a of reported) {
+          console.error(
+            `[audit]   ${a.github_advisory_id ?? a.id} (${a.severity}) ${a.module_name ?? ""}: ${a.title ?? ""}`,
+          );
+        }
         // 2, not 1, so the caller can tell "found something" from "could not
         // ask". Both fail the build; only one of them is worth retrying.
         process.exit(2);
