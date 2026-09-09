@@ -1,6 +1,10 @@
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
-import { assertTenantIsolation, assertWorkerIsolation } from "./rls-guard";
+import {
+  assertPortalIsolation,
+  assertTenantIsolation,
+  assertWorkerIsolation,
+} from "./rls-guard";
 
 /**
  * Boot-guard behavior against a real database: a hosted (multi-tenant)
@@ -27,6 +31,7 @@ const ENV_KEYS = [
   "DATABASE_URL",
   "DATABASE_URL_APP",
   "DATABASE_URL_WORKER",
+  "DATABASE_URL_PORTAL",
   "SPECBOARDS_MULTI_TENANT",
 ] as const;
 const saved: Record<string, string | undefined> = {};
@@ -110,6 +115,46 @@ describe.skipIf(!OWNER_URL)("assertTenantIsolation boot guard", () => {
     process.env.DATABASE_URL_WORKER = appUrl();
     process.env.SPECBOARDS_MULTI_TENANT = "true";
     await expect(assertWorkerIsolation()).resolves.toBeUndefined();
+  });
+
+  // Portal guard. The contract is deliberately NOT the worker's, and the
+  // difference is what this group exists to pin.
+  //
+  // An earlier version threw when DATABASE_URL_PORTAL was unset in multi-tenant
+  // mode, by analogy with the worker. That took the test deployment down: the
+  // guard shipped in the same change as the feature it guards, so the app
+  // refused to boot before the role it demanded could be provisioned, and the
+  // runbook it pointed at said deploying first was safe.
+  //
+  // Workers are mandatory, so failing closed is right for them. A portal is
+  // optional: without one, `getPortalDb()` is null and every portal URL 404s,
+  // so there is nothing being served and nothing to protect.
+  it("boots a multi-tenant deployment that has no portal role at all", async () => {
+    process.env.DATABASE_URL = OWNER_URL;
+    delete process.env.DATABASE_URL_PORTAL;
+    process.env.SPECBOARDS_MULTI_TENANT = "true";
+    // The regression, asserted in the direction that broke: not "throws the
+    // right message" but "does not throw".
+    await expect(assertPortalIsolation()).resolves.toBeUndefined();
+  });
+
+  it("still refuses a portal connection pointed at the owner", async () => {
+    // The protection that must survive the fix. A configured portal connection
+    // that bypasses RLS is a real misconfiguration, and it is the one that
+    // would publish unpublished ideas, so it still fails closed.
+    process.env.DATABASE_URL = OWNER_URL;
+    process.env.DATABASE_URL_PORTAL = OWNER_URL;
+    process.env.SPECBOARDS_MULTI_TENANT = "true";
+    await expect(assertPortalIsolation()).rejects.toThrow(
+      /bypasses row-level security/,
+    );
+  });
+
+  it("accepts a non-owner portal role", async () => {
+    process.env.DATABASE_URL = OWNER_URL;
+    process.env.DATABASE_URL_PORTAL = appUrl();
+    process.env.SPECBOARDS_MULTI_TENANT = "true";
+    await expect(assertPortalIsolation()).resolves.toBeUndefined();
   });
 
   it("only warns for single-tenant self-host workers on the owner connection", async () => {

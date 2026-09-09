@@ -255,9 +255,18 @@ practice: **deploy first, then run this**. If the script errors with `function
 specboards_portal_apply_grants() does not exist`, that is the migration not
 being there yet.
 
-Deploying ahead of provisioning is safe and expected. The migration's grants are
-guarded on the role existing, so until this runbook is followed the portal simply
-has no reader.
+Deploying ahead of provisioning is safe: the migration's grants are guarded on
+the role existing, so until this runbook is followed the portal simply has no
+reader and every portal URL 404s.
+
+**This was not always true, and the correction is worth knowing.** The first
+version of the boot guard refused to start a multi-tenant deployment with no
+`DATABASE_URL_PORTAL`, copying `assertWorkerIsolation`. Because the guard shipped
+in the same change as the feature, it took the test deployment down for hours:
+the app would not boot to be provisioned, and this page said the deploy was safe
+while the code disagreed. Workers are mandatory, so failing closed is right for
+them; a portal is optional, and a deployment without one is not degraded. The
+guard now returns quietly and `getPortalDb()` returns null.
 
 ### Cutover
 
@@ -298,12 +307,14 @@ Check in this order, because the first is by far the most likely:
 Single-tenant: unset `DATABASE_URL_PORTAL` and redeploy; `getPortalDb()` falls
 back to the owner connection. No data or schema change is involved.
 
-Multi-tenant (hosted): the owner fallback is refused by design, both at boot
-(`assertPortalIsolation`) and in `getPortalDb()`, because falling back here
-means serving unpublished rows to anonymous visitors. Rolling back means fixing
-the role, not removing the variable. To take a portal down instead, switch off
-`portal_enabled` in Settings -> Ideas: that is a single setting and the clamp
-policies make it total.
+Multi-tenant (hosted): the same. Unsetting `DATABASE_URL_PORTAL` turns the
+portal off everywhere rather than falling back to the owner connection, in
+either tenancy mode, because a public surface reading on the connection that
+bypasses every publication policy is not a fallback worth having.
+
+To take one workspace's portal down without touching infrastructure, switch off
+`portal_enabled` in Settings -> Ideas. That is a single setting and the
+RESTRICTIVE clamp policies make it total.
 
 ---
 
@@ -327,10 +338,11 @@ renders is not evidence of anything; a portal that renders exactly what was
 published is.
 
 - [ ] Boot log says `portal connection verified RLS-safe and publication-scoped.`
-      Its absence means `DATABASE_URL_PORTAL` is unset; a refusal to boot means
-      the connection can read an unpublished row, which is the misconfiguration
-      this guard exists for (pointing it at the owner connection does exactly
-      that).
+      Its absence means `DATABASE_URL_PORTAL` is unset, and the app boots
+      normally with every portal URL 404ing. A refusal to BOOT means the
+      connection is set but can read an unpublished row, which is the
+      misconfiguration this guard exists for (pointing it at the owner
+      connection does exactly that).
 - [ ] With a workspace's portal enabled and one product and one stage published:
       the portal shows ideas from that product at that stage, and nothing else.
 - [ ] A second, unpublished product in the same workspace: its **name** does not

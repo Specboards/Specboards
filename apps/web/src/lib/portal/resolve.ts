@@ -121,6 +121,13 @@ export async function resolvePortal(
   // a missing one would mean the two policies disagree. Refuse rather than
   // invent defaults, which would publish a portal nobody configured.
   if (!row) return null;
+  // And check the flag in app code as well as relying on the policy that got us
+  // here. Two independent statements of "is this published", which is the same
+  // reason the RESTRICTIVE clamps exist in 0009: the expensive failure on this
+  // surface is serving something unpublished, and the cheap insurance against it
+  // is one comparison. It also means this function is still correct if it is
+  // ever called on a connection whose policies do not apply.
+  if (!row.portalEnabled) return null;
 
   const publishedProducts = await db
     .select({ productId: ideaPortalProducts.productId })

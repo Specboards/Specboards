@@ -161,18 +161,25 @@ export async function assertPortalIsolation(): Promise<void> {
 
   const portalUrl = process.env.DATABASE_URL_PORTAL;
   if (!portalUrl) {
-    if (isMultiTenant()) {
-      throw new Error(
-        "[security] Refusing to start: SPECBOARDS_MULTI_TENANT is set but DATABASE_URL_PORTAL " +
-          "is not. The public portal would fall back to the owner connection, which bypasses " +
-          "row-level security and would serve unpublished ideas, unannounced product names " +
-          "and other tenants' rows to anonymous visitors. Provision the portal role " +
-          "(infra/portal-role.sql) and set DATABASE_URL_PORTAL.",
-      );
-    }
-    // Not a warning on single-tenant: unlike the worker, the portal is simply
-    // off until configured, and a self-host that never enables one should not
-    // be nagged at every boot about a role it does not need.
+    // An unconfigured portal is a feature that is off, not a misconfiguration.
+    //
+    // This used to throw in multi-tenant mode, copying `assertWorkerIsolation`
+    // above, and that was wrong in a way that took the test deployment down for
+    // hours: the guard shipped in the same change as the code it guards, so the
+    // moment it deployed the app refused to boot, before anybody could
+    // provision the role it was asking for. The runbook it points at even says
+    // deploying ahead of provisioning is safe. It was not.
+    //
+    // The difference from the worker is the whole point and it is not subtle.
+    // Background workers are mandatory: a deployment without them silently
+    // stops delivering webhooks and notifications, so failing to start is
+    // better than running half-dead. A portal is optional, and a deployment
+    // without one is not degraded, it simply has no portal. `getPortalDb()`
+    // returns null, `resolvePortal` returns null, every portal URL 404s. There
+    // is nothing to protect against because there is nothing being served.
+    //
+    // Silent, deliberately. A self-host that will never publish a portal should
+    // not be told at every boot about a role it does not need.
     return;
   }
 

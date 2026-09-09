@@ -1,18 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * `getPortalDb()`'s refusal, which is the only part of it worth testing and the
- * part that matters most.
+ * `getPortalDb()` returns a client only when a portal connection is configured,
+ * and never falls back to the owner connection.
  *
- * The portal is the one surface served to somebody with no account. If it ever
- * falls back to `DATABASE_URL` it is reading on the owner connection, which
- * bypasses row-level security, and it will serve unpublished ideas,
- * unannounced product names and other tenants' rows to anonymous visitors. So
- * on a hosted deployment the fallback has to be a refusal, not a warning.
+ * The portal is the one surface served to somebody with no account. Reading it
+ * on `DATABASE_URL` means reading on the owner connection, which bypasses row
+ * level security and every publication policy, so it would serve unpublished
+ * ideas and unannounced product names to anonymous visitors.
  *
- * `assertPortalIsolation()` covers the same ground at boot, and this is the
- * per-call backstop for a portal path that outlives the guard. `getWorkerDb()`
- * carries the identical pair, and its own comment explains why both exist.
+ * ── This used to throw, and that was worse than the problem ────────────────
+ * The first version threw in multi-tenant mode rather than returning null,
+ * copying `getWorkerDb()`. Paired with a boot guard that threw for the same
+ * reason, it took the test deployment down: the guard shipped in the same change
+ * as the feature, so the app refused to start before anybody could provision the
+ * role it was demanding.
+ *
+ * Null gets the same protection with no outage. The portal is optional; a
+ * deployment without one is not degraded, and `resolvePortal` turns null into a
+ * 404 on every portal URL. Nothing is served, so there is nothing to protect.
  *
  * Each case re-imports the module. `getPortalDb()` memoises its client in a
  * module-level variable, so a second call in the same module instance returns
@@ -55,39 +61,37 @@ describe("getPortalDb", () => {
     expect(getPortalDb()).toBeNull();
   });
 
-  it("refuses the owner-connection fallback on a hosted deployment", async () => {
-    // The case this function exists for. A multi-tenant deployment that has not
-    // provisioned the portal role must fail loudly rather than quietly serve
-    // every tenant's unpublished rows to the internet.
+  it("is null on a hosted deployment with no portal role, rather than throwing", async () => {
+    // The regression. Throwing here, with a boot guard throwing for the same
+    // reason, is what took test down: the guard demanded a role that could not
+    // exist yet, so the app would not start to be provisioned.
     process.env.DATABASE_URL = "postgres://owner@localhost:5432/db";
     process.env.SPECBOARDS_MULTI_TENANT = "true";
 
     const getPortalDb = await freshGetPortalDb();
-    expect(() => getPortalDb()).toThrow(/DATABASE_URL_PORTAL is required/);
-    // The message has to name the consequence, not just the variable: whoever
-    // hits this is mid-deploy and needs to know it is not a formality.
-    expect(() => getPortalDb()).toThrow(/anonymous visitors/);
+    expect(() => getPortalDb()).not.toThrow();
+    expect(getPortalDb()).toBeNull();
   });
 
-  it("does not cache the refusal, so fixing the env fixes the process", async () => {
-    // Same reasoning as `getAppDb()`: caching a throw would mean one unlucky
-    // boot poisons the process until it is restarted, and the operator who has
-    // just set the secret would still see failures.
+  it("never falls back to the owner connection, in either mode", async () => {
+    // The protection the throw was for, kept. A single-tenant self-host loses
+    // the fallback that `getAppDb()` and `getWorkerDb()` keep, deliberately:
+    // the app and the workers must function on one connection string, and a
+    // portal need not, because it is opt-in and nobody is broken without one.
+    for (const multiTenant of ["true", undefined]) {
+      process.env.DATABASE_URL = "postgres://owner@localhost:5432/db";
+      if (multiTenant) process.env.SPECBOARDS_MULTI_TENANT = multiTenant;
+      else delete process.env.SPECBOARDS_MULTI_TENANT;
+
+      const getPortalDb = await freshGetPortalDb();
+      expect(getPortalDb(), `multiTenant=${multiTenant}`).toBeNull();
+    }
+  });
+
+  it("returns a client once the portal connection is configured", async () => {
     process.env.DATABASE_URL = "postgres://owner@localhost:5432/db";
-    process.env.SPECBOARDS_MULTI_TENANT = "true";
-
-    const getPortalDb = await freshGetPortalDb();
-    expect(() => getPortalDb()).toThrow();
-
     process.env.DATABASE_URL_PORTAL = "postgres://portal@localhost:5432/db";
-    expect(getPortalDb()).not.toBeNull();
-  });
-
-  it("keeps the fallback for single-tenant self-host", async () => {
-    // No co-tenant to leak into, and demanding a second connection string
-    // would be setup friction for somebody who may never enable a portal. The
-    // same bargain `getWorkerDb()` and `getAppDb()` already make.
-    process.env.DATABASE_URL = "postgres://owner@localhost:5432/db";
+    process.env.SPECBOARDS_MULTI_TENANT = "true";
 
     const getPortalDb = await freshGetPortalDb();
     expect(getPortalDb()).not.toBeNull();
