@@ -31,6 +31,7 @@ import {
   type IdeaRecord,
   type IdeaSettings,
   type IdeaSettingsPatch,
+  isPortalModeration,
   type StatusStageInput,
   type WorkspaceScope,
 } from "../types";
@@ -252,11 +253,31 @@ export async function getIdeaSettings(
     return {
       portalEnabled: row.portalEnabled ?? false,
       portalTitle: row.portalTitle ?? null,
+      portalProductIds: row.portalProductIds ?? [],
+      portalIdeaStatuses: row.portalIdeaStatuses ?? [],
+      portalRoadmapEnabled: row.portalRoadmapEnabled ?? false,
+      portalRoadmapItemStatuses: row.portalRoadmapItemStatuses ?? [],
+      portalModeration: isPortalModeration(row.portalModeration)
+        ? row.portalModeration
+        : "review_first",
     };
   } catch {
-    return { portalEnabled: false, portalTitle: null };
+    // No file yet, or an unreadable one. Either way the answer is the same as a
+    // workspace that has never configured a portal.
+    return PORTAL_SETTINGS_DEFAULTS;
   }
 }
+
+/** Publishing nothing: what an absent or unreadable settings file means. */
+const PORTAL_SETTINGS_DEFAULTS: IdeaSettings = {
+  portalEnabled: false,
+  portalTitle: null,
+  portalProductIds: [],
+  portalIdeaStatuses: [],
+  portalRoadmapEnabled: false,
+  portalRoadmapItemStatuses: [],
+  portalModeration: "review_first",
+};
 
 export async function updateIdeaSettings(
   ctx: LocalStoreContext,
@@ -272,6 +293,15 @@ export async function updateIdeaSettings(
           ? patch.portalTitle.trim()
           : null
         : current.portalTitle,
+    // Lists replace rather than merge, matching the DB store: the caller sends
+    // what is ticked, and a merge could never unpublish anything.
+    portalProductIds: patch.portalProductIds ?? current.portalProductIds,
+    portalIdeaStatuses: patch.portalIdeaStatuses ?? current.portalIdeaStatuses,
+    portalRoadmapEnabled:
+      patch.portalRoadmapEnabled ?? current.portalRoadmapEnabled,
+    portalRoadmapItemStatuses:
+      patch.portalRoadmapItemStatuses ?? current.portalRoadmapItemStatuses,
+    portalModeration: patch.portalModeration ?? current.portalModeration,
   };
   await fs.mkdir(path.dirname(localPath(ctx.root, "ideaSettings")), {
     recursive: true,
@@ -358,8 +388,21 @@ interface LocalIdea {
   createdAt: string;
 }
 
-/** Ideas configuration persisted in local file mode. */
+/**
+ * Ideas configuration persisted in local file mode.
+ *
+ * Every field optional, because the file on disk was written by whatever
+ * version the user last ran. A settings file from before the visibility model
+ * has none of these keys, and reading it must produce the same
+ * publishing-nothing defaults a fresh workspace gets rather than `undefined`
+ * leaking into the portal's own checks.
+ */
 interface LocalIdeaSettings {
-  portalEnabled: boolean;
-  portalTitle: string | null;
+  portalEnabled?: boolean;
+  portalTitle?: string | null;
+  portalProductIds?: string[];
+  portalIdeaStatuses?: string[];
+  portalRoadmapEnabled?: boolean;
+  portalRoadmapItemStatuses?: string[];
+  portalModeration?: string;
 }

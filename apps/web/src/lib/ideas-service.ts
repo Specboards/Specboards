@@ -8,6 +8,7 @@ import type {
   IdeaSettingsPatch,
   StatusStageInput,
 } from "@/lib/store/types";
+import { isPortalModeration, PORTAL_MODERATION } from "@/lib/store/types";
 import { InvalidPatchError } from "@/lib/service-errors";
 
 /** Ideas, their votes, their statuses, and the portal settings that govern them. */
@@ -177,12 +178,71 @@ export function parseIdeaSettingsPatch(body: unknown): IdeaSettingsPatch {
   if ("portalTitle" in raw) {
     patch.portalTitle = parseNullableText(raw.portalTitle, "portalTitle");
   }
+  if ("portalProductIds" in raw) {
+    patch.portalProductIds = parseKeySet(raw.portalProductIds, "portalProductIds");
+  }
+  if ("portalIdeaStatuses" in raw) {
+    patch.portalIdeaStatuses = parseKeySet(
+      raw.portalIdeaStatuses,
+      "portalIdeaStatuses",
+    );
+  }
+  if ("portalRoadmapEnabled" in raw) {
+    if (typeof raw.portalRoadmapEnabled !== "boolean") {
+      throw new InvalidPatchError("portalRoadmapEnabled must be a boolean.");
+    }
+    patch.portalRoadmapEnabled = raw.portalRoadmapEnabled;
+  }
+  if ("portalRoadmapItemStatuses" in raw) {
+    patch.portalRoadmapItemStatuses = parseKeySet(
+      raw.portalRoadmapItemStatuses,
+      "portalRoadmapItemStatuses",
+    );
+  }
+  if ("portalModeration" in raw) {
+    if (!isPortalModeration(raw.portalModeration)) {
+      throw new InvalidPatchError(
+        `portalModeration must be one of: ${PORTAL_MODERATION.join(", ")}.`,
+      );
+    }
+    patch.portalModeration = raw.portalModeration;
+  }
   if (Object.keys(patch).length === 0) {
     throw new InvalidPatchError(
-      "Patch must set at least one of: portalEnabled, portalTitle.",
+      "Patch must set at least one of: portalEnabled, portalTitle, " +
+        "portalProductIds, portalIdeaStatuses, portalRoadmapEnabled, " +
+        "portalRoadmapItemStatuses, portalModeration.",
     );
   }
   return patch;
+}
+
+/**
+ * A set of ids or status keys, from an untrusted body.
+ *
+ * An empty array is valid and meaningful: it is how the portal is told to
+ * publish nothing, so it must not be conflated with the field being absent.
+ * `undefined` (the field not sent) leaves the stored set alone; `[]` clears it.
+ *
+ * Deduplicated, because the stored product set is uniquely constrained and a
+ * repeated tick would otherwise turn a save into a constraint violation the
+ * admin cannot act on.
+ */
+function parseKeySet(value: unknown, field: string): string[] {
+  if (!Array.isArray(value)) {
+    throw new InvalidPatchError(`${field} must be an array of strings.`);
+  }
+  const out: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "string" || entry.trim() === "") {
+      throw new InvalidPatchError(
+        `${field} must contain only non-empty strings.`,
+      );
+    }
+    const trimmed = entry.trim();
+    if (!out.includes(trimmed)) out.push(trimmed);
+  }
+  return out;
 }
 
 function parseNullableText(value: unknown, field: string): string | null {

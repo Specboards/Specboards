@@ -3,7 +3,9 @@ import type { ReactNode } from "react";
 import { resolveIdeaStages } from "@specboards/core";
 
 import { IdeaPortalSettings } from "@/components/idea-portal-settings";
+import { IdeaPortalVisibility } from "@/components/idea-portal-visibility";
 import { IdeaStagesEditor } from "@/components/idea-stages-editor";
+import { resolveWorkflowForProducts } from "@/lib/repo-config";
 import { getStore } from "@/lib/store";
 import { requireWorkspaceAccess } from "@/lib/workspace-access";
 
@@ -17,12 +19,20 @@ export const dynamic = "force-dynamic";
 export default async function IdeasSettingsPage() {
   const access = await requireWorkspaceAccess();
   const store = await getStore();
-  const [stageRows, settings] = await Promise.all([
+  const [stageRows, settings, products, workflow] = await Promise.all([
     store.listIdeaStatuses(access ?? undefined),
     store.getIdeaSettings(access ?? undefined),
+    store.listProducts(access ?? undefined),
+    // The union across every product, not one product's workflow: this setting
+    // is workspace-wide, so a stage only some products use still has to be
+    // offerable. `listStatusesUnion` never hides a stage for exactly this
+    // reason.
+    resolveWorkflowForProducts(access ?? null, null),
   ]);
   const canEdit = !access || access.role === "owner";
   const stages = resolveIdeaStages(stageRows);
+  const titleCase = (key: string) =>
+    key.replace(/[_-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
   return (
     <div className="space-y-8">
@@ -38,6 +48,22 @@ export default async function IdeasSettingsPage() {
         description="Configure the public voting portal where customers can browse ideas, vote, and submit requests."
       >
         <IdeaPortalSettings initial={settings} canEdit={canEdit} />
+      </SettingsGroup>
+
+      <SettingsGroup
+        title="What the portal shows"
+        description="Nothing is published until you choose it here. A portal switched on with nothing selected is empty, not broken."
+      >
+        <IdeaPortalVisibility
+          initial={settings}
+          products={products.map((p) => ({ id: p.id, name: p.name }))}
+          ideaStages={stages.map((s) => ({ key: s.key, label: s.label }))}
+          itemStatuses={workflow.statuses.map((key) => ({
+            key,
+            label: workflow.labels?.[key] ?? titleCase(key),
+          }))}
+          canEdit={canEdit}
+        />
       </SettingsGroup>
     </div>
   );
