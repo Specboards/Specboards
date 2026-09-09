@@ -21,10 +21,17 @@ import { userIdFromUnsubscribeToken } from "@/lib/notifications/unsubscribe";
  * No auth-session import, deliberately: there is no session to read here. That
  * is why this route does not appear in `route-auth.test.ts`'s cookie-only list.
  *
- * Not origin-checked either, and it must not be. `needsOriginCheck` allows a
- * mutating request that carries no `Origin`, which is what a mail provider's
- * server-to-server POST looks like; see `lib/csrf-origin.ts` for why an absent
- * `Origin` is not a browser and cannot be ridden cross-site.
+ * Not origin-checked either, and it must not be: this path is listed in
+ * `EXEMPT_PREFIXES` in `lib/csrf-origin.ts`.
+ *
+ * It is listed there because for a long time this comment claimed the exemption
+ * and the code did not provide it. The route was origin-checked like any other,
+ * and passed only because a mail provider's server-to-server POST carries no
+ * `Origin` and an absent `Origin` is allowed. That is true of every provider we
+ * know of and it is not a property we control: one of them attaching an
+ * `Origin` would have taken one-click unsubscribe with it, and the symptom
+ * would have been a slow deliverability decline rather than an error anybody
+ * could see. Hence the explicit entry.
  */
 
 /** GET is a person clicking the header link by hand: send them to the page. */
