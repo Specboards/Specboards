@@ -57,6 +57,13 @@
       "when": 1787570000000,
       "tag": "0007_worker_reads_product_members",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1787580000000,
+      "tag": "0008_idea_portal_visibility",
+      "breakpoints": true
     }
   ]
 }

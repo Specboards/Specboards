@@ -1526,10 +1526,79 @@ export const ideaSettings = pgTable("idea_settings", {
   portalEnabled: boolean("portal_enabled").notNull().default(false),
   /** Heading shown on the public portal, or null to use the workspace name. */
   portalTitle: text("portal_title"),
+  /**
+   * Idea review stages fit to appear publicly, by key. Empty publishes no
+   * ideas at all, which is the default: a portal switched on without a choice
+   * shows nothing rather than everything.
+   *
+   * Keys rather than a reference to `idea_statuses`, because a workspace on the
+   * built-in workflow has no rows there (see `resolveIdeaStages`). A key that
+   * matches no stage publishes nothing, so a renamed-away stage fails safe.
+   */
+  portalIdeaStatuses: text("portal_idea_statuses")
+    .array()
+    .notNull()
+    .default([]),
+  /**
+   * Whether the portal includes the read-only roadmap. Separate from
+   * `portalEnabled`: wanting feedback in the open is not the same decision as
+   * publishing what you plan to build and when.
+   */
+  portalRoadmapEnabled: boolean("portal_roadmap_enabled")
+    .notNull()
+    .default(false),
+  /** Item statuses the public roadmap shows, by key. Empty shows none. */
+  portalRoadmapItemStatuses: text("portal_roadmap_item_statuses")
+    .array()
+    .notNull()
+    .default([]),
+  /**
+   * Whether a public submission appears at once (`immediate`) or waits for an
+   * admin to publish it (`review_first`, the default for new and existing
+   * rows). Constrained by `idea_settings_portal_moderation_chk`.
+   */
+  portalModeration: text("portal_moderation").notNull().default("review_first"),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
 });
+
+/**
+ * Products a workspace publishes on its public Ideas portal. No row for a
+ * product means it is not published, so an empty table publishes nothing.
+ *
+ * A table rather than an array of ids on `ideaSettings` because of the
+ * composite `(productId, workspaceId)` foreign key: it makes a row naming
+ * another workspace's product unrepresentable, and this is the one place where
+ * that mistake would be published to the internet rather than shown to a member
+ * who would report it. Same shape, and the same reason, as
+ * `product_repositories_product_ws_fk`.
+ */
+export const ideaPortalProducts = pgTable(
+  "idea_portal_products",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    unique("idea_portal_products_ws_product_uq").on(t.workspaceId, t.productId),
+    index("idea_portal_products_ws_idx").on(t.workspaceId),
+    index("idea_portal_products_product_idx").on(t.productId),
+    foreignKey({
+      columns: [t.productId, t.workspaceId],
+      foreignColumns: [products.id, products.workspaceId],
+      name: "idea_portal_products_product_ws_fk",
+    }),
+  ],
+);
 
 /** Cached spec content + git pointers, kept in sync by the git service. */
 export const specIndex = pgTable("spec_index", {
