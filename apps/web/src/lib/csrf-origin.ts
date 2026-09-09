@@ -48,8 +48,31 @@ const MUTATING = new Set(["POST", "PUT", "PATCH", "DELETE"]);
  * - `/api/mcp` authenticates with a bearer token or API key, never a cookie, so
  *   there is no ambient authority to ride. A browser-hosted MCP client would
  *   send its own `Origin` and be refused for no benefit.
+ * - `/api/access-request` is the public "Request access" intake, posted to by a
+ *   browser on the marketing site (`www.specboards.ai`) cross-origin to this
+ *   app. It reads no session, so a cross-site POST rides nothing: it can
+ *   achieve exactly what the public form achieves, and its per-IP and per-email
+ *   quotas are what bound abuse. Who may post is decided by the route's own
+ *   CORS allowlist, not here.
+ *
+ *   This was not a judgement call originally, it was a live outage. The check
+ *   refused the form's POST (403, "This request came from another site") while
+ *   the preflight `OPTIONS` passed, because `OPTIONS` is not a mutating method.
+ *   So the endpoint looked reachable, the route's CORS allowlist looked
+ *   authoritative, and the pre-release sign-up funnel was closed: every
+ *   prospect who filled the form in was shown a CSRF error.
+ *
+ *   Exempting the path is deliberate, in preference to widening `originAllowed`
+ *   to accept the marketing origin. The host comparison guards ~70 mutating
+ *   `/api/v1` routes that DO carry cookie authority; relaxing it for all of
+ *   them to admit one public endpoint trades a real defence for a convenience.
  */
-const EXEMPT_PREFIXES = ["/api/auth/", "/api/webhooks/", "/api/mcp"];
+const EXEMPT_PREFIXES = [
+  "/api/auth/",
+  "/api/webhooks/",
+  "/api/mcp",
+  "/api/access-request",
+];
 
 /** Whether this request should be origin-checked at all. */
 export function needsOriginCheck(method: string, pathname: string): boolean {

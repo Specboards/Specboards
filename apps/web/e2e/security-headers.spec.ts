@@ -205,4 +205,55 @@ test.describe("security headers", () => {
       [],
     );
   });
+
+  /**
+   * The cross-site origin check, exercised where it actually runs.
+   *
+   * `lib/csrf-origin.test.ts` pins the rule as a function, and it passed
+   * throughout the outage it should have caught: the marketing site's "Request
+   * access" form was refused with 403 for months because the composition of
+   * middleware and route was never tested, only the predicate. The endpoint was
+   * built with a CORS allowlist that read as authoritative, and its preflight
+   * succeeded (OPTIONS is not a mutating method), so nothing looked wrong until
+   * a real POST was tried.
+   *
+   * So these two assertions belong at this level and belong together: the
+   * public intake admits the marketing origin, and the authenticated write
+   * surface still refuses it. One without the other is how the bug happened and
+   * how a careless fix for it would go unnoticed.
+   */
+  test("the origin check admits the public intake and still refuses the authenticated surface", async ({
+    page,
+  }) => {
+    const MARKETING = "https://www.specboards.ai";
+
+    const intake = await page.request.post("/api/access-request", {
+      headers: { "content-type": "application/json", origin: MARKETING },
+      data: {},
+      failOnStatusCode: false,
+    });
+    // Not 403 is the assertion. 400 is the route itself answering, which is the
+    // proof that middleware let the request reach it; the body is validated by
+    // the route's own tests, not here.
+    expect(
+      intake.status(),
+      "the marketing origin reaches the access-request route",
+    ).not.toBe(403);
+    expect(intake.status()).toBe(400);
+
+    const authenticated = await page.request.post("/api/v1/ideas", {
+      headers: { "content-type": "application/json", origin: MARKETING },
+      data: { title: "cross-site" },
+      failOnStatusCode: false,
+    });
+    expect(
+      authenticated.status(),
+      "the marketing origin is refused by the mutating /api/v1 surface",
+    ).toBe(403);
+    // Assert which 403. The request context here carries a session, so a
+    // regression that let it through would create an idea rather than fail an
+    // authorization check, and a 403 from somewhere else would pass this test
+    // while the guard was gone.
+    expect(await authenticated.text()).toContain("came from another site");
+  });
 });

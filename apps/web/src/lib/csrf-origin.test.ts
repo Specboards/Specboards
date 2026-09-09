@@ -50,6 +50,26 @@ describe("which requests are checked", () => {
     // But not something that merely starts similarly.
     expect(needsOriginCheck("POST", "/api/v1/webhooks/abc")).toBe(true);
   });
+
+  it("exempts the public access-request intake", () => {
+    // Regression. This endpoint is posted to by a browser on the marketing
+    // site, cross-origin, so the host comparison below refused it: the form
+    // showed prospects a CSRF error and the pre-release sign-up funnel was
+    // closed. It reads no session, so there is no ambient authority for a
+    // cross-site POST to ride; the route's own CORS allowlist and its per-IP
+    // and per-email quotas are what decide who may post.
+    expect(needsOriginCheck("POST", "/api/access-request")).toBe(false);
+    // The preflight was never the problem, which is why this stayed hidden:
+    // OPTIONS is not a mutating method, so it passed while the POST did not.
+    expect(needsOriginCheck("OPTIONS", "/api/access-request")).toBe(false);
+  });
+
+  it("still checks the authenticated write surface the marketing origin must not reach", () => {
+    // The fix exempts one public path; it must not have relaxed the rule for
+    // the ~70 mutating routes that do carry cookie authority.
+    expect(needsOriginCheck("POST", "/api/v1/ideas")).toBe(true);
+    expect(originAllowed("https://www.specboards.ai", APP, HOST)).toBe(false);
+  });
 });
 
 describe("which origins are allowed", () => {
