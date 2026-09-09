@@ -64,6 +64,19 @@ describe("which requests are checked", () => {
     expect(needsOriginCheck("OPTIONS", "/api/access-request")).toBe(false);
   });
 
+  it("exempts one-click unsubscribe", () => {
+    // RFC 8058: a mail provider POSTs this, authorized by the signed token in
+    // the URL rather than a cookie. It used to pass only because those callers
+    // send no Origin, which is a property of their infrastructure and not one
+    // we control. A provider that started sending one would have taken
+    // one-click unsubscribe with it, and a refused unsubscribe is what turns
+    // "unsubscribe me" into "mark as spam" for the whole deployment.
+    expect(needsOriginCheck("POST", "/api/unsubscribe")).toBe(false);
+    // The property the old behaviour leaned on, pinned so the exemption is
+    // demonstrably doing work rather than restating it.
+    expect(originAllowed("https://mail.example.com", APP, HOST)).toBe(false);
+  });
+
   it("still checks the authenticated write surface the marketing origin must not reach", () => {
     // The fix exempts one public path; it must not have relaxed the rule for
     // the ~70 mutating routes that do carry cookie authority.

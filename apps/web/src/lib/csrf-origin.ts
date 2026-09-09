@@ -66,12 +66,30 @@ const MUTATING = new Set(["POST", "PUT", "PATCH", "DELETE"]);
  *   to accept the marketing origin. The host comparison guards ~70 mutating
  *   `/api/v1` routes that DO carry cookie authority; relaxing it for all of
  *   them to admit one public endpoint trades a real defence for a convenience.
+ * - `/api/unsubscribe` is RFC 8058 one-click unsubscribe, POSTed by a mail
+ *   provider's infrastructure. Its authorization is the signed token in the
+ *   URL, never a cookie, so there is nothing here to ride either.
+ *
+ *   It was already listed as exempt in its own route file's comment ("Not
+ *   origin-checked either, and it must not be"), and that was not true: it was
+ *   checked, and passed only because those callers send no `Origin`. So the
+ *   route worked by relying on the one property nobody controls, and any
+ *   provider that started attaching an `Origin` would silently take one-click
+ *   unsubscribe with it.
+ *
+ *   That failure would be expensive and quiet. A refused unsubscribe is what
+ *   turns "unsubscribe me" into "mark as spam", which costs the whole
+ *   deployment its sending reputation rather than costing us one recipient,
+ *   and it would show up as a deliverability decline rather than as an error
+ *   anybody could see. Listing the path makes the route's stated contract the
+ *   actual one.
  */
 const EXEMPT_PREFIXES = [
   "/api/auth/",
   "/api/webhooks/",
   "/api/mcp",
   "/api/access-request",
+  "/api/unsubscribe",
 ];
 
 /** Whether this request should be origin-checked at all. */
