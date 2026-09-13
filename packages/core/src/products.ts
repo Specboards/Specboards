@@ -52,8 +52,12 @@ export const RESERVED_PRODUCT_KEYS: ReadonlySet<string> = new Set([
   "notifications",
   "repositories",
   "settings",
-  // The public Ideas portal: /{org}/ideas and /{org}/ideas/{product}.
+  // The public Ideas portal: /{org}/ideas and /{org}/ideas/{ideaId}.
   "ideas",
+  // The public roadmap: /{org}/roadmap. Its own top-level route rather than a
+  // child of /ideas, because the two surfaces answer different questions and a
+  // workspace can publish either without the other.
+  "roadmap",
 ]);
 
 /** Whether `key` collides with a route that would shadow the product. */

@@ -86,7 +86,15 @@ function contentSecurityPolicy(nonce: string, pathname: string): string {
  * internal board or wrap the public one in it.
  */
 function isPortalPath(pathname: string): boolean {
-  return /^\/[^/]+\/ideas(\/|$)/.test(pathname);
+  // Both public surfaces. `/roadmap` is gated separately from `/ideas` (a
+  // workspace can publish either alone), so it is a second alternative here
+  // rather than a child of the first.
+  //
+  // Getting this wrong fails quietly rather than loudly: the page still
+  // renders, but inside the app's sidebar chrome, running the three session
+  // queries the portal branch of `app/layout.tsx` exists to skip. That is the
+  // exact thing `e2e/portal-shell.spec.ts` asserts against for `/ideas`.
+  return /^\/[^/]+\/(ideas|roadmap)(\/|$)/.test(pathname);
 }
 
 /** A fresh base64 nonce for the CSP (edge-runtime safe: Web Crypto + btoa). */

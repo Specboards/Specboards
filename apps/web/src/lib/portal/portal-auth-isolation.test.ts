@@ -55,6 +55,7 @@ import { describe, expect, it } from "vitest";
 /** Portal source: the public route tree and the modules written for it. */
 const PORTAL_PATHS = [
   join(process.cwd(), "src", "app", "[org]", "ideas"),
+  join(process.cwd(), "src", "app", "[org]", "roadmap"),
   join(process.cwd(), "src", "lib", "portal"),
   join(process.cwd(), "src", "components", "portal"),
 ];
