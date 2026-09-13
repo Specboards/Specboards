@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
+import { IdeaList } from "@/components/portal/idea-list";
 import { PortalShell } from "@/components/portal/portal-shell";
+import { listPortalIdeas } from "@/lib/portal/ideas";
 import { portalShowsIdeas, resolvePortal } from "@/lib/portal/resolve";
 
 /**
@@ -20,15 +22,39 @@ import { portalShowsIdeas, resolvePortal } from "@/lib/portal/resolve";
  * subdomain design enforced it structurally and a path-based portal has to
  * assert what the origin boundary used to give for free.
  *
- * Everything published flows from `resolvePortal`, which reads on the portal
- * connection where RLS already limits rows to what the workspace publishes.
+ * Everything published flows from `resolvePortal` and the read model in
+ * `lib/portal/ideas.ts`, both of which read on the portal connection where RLS
+ * already limits rows to what the workspace publishes.
  */
 
+/**
+ * Dynamic, for two independent reasons, either of which would be enough.
+ *
+ * This page reads `?status=`, and a page that reads `searchParams` cannot hold
+ * a full route cache entry. Separately, and more decisively, NO page in this
+ * app can: the root layout awaits `headers()` for the per-request CSP nonce,
+ * which opts the whole route tree out. See the note on `[ideaId]/page.tsx`,
+ * which is where the card's "server-render and cache" instruction runs out.
+ *
+ * The filter could have been kept out of the URL to remove the first reason,
+ * and that trade is the wrong way round anyway: a filtered view is something a
+ * visitor links to, a crawler follows, and the back button should return to,
+ * and none of that survives moving the filter into React state.
+ *
+ * What is left uncached is two indexed queries on the portal pool.
+ */
 export const dynamic = "force-dynamic";
 
-type Params = { params: Promise<{ org: string }> };
+type Params = {
+  params: Promise<{ org: string }>;
+  searchParams: Promise<{ status?: string }>;
+};
 
-export async function generateMetadata({ params }: Params): Promise<Metadata> {
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ org: string }>;
+}): Promise<Metadata> {
   const { org } = await params;
   const portal = await resolvePortal(org);
   // No title for a portal that does not exist, and deliberately nothing that
@@ -45,7 +71,10 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   };
 }
 
-export default async function PortalIdeasPage({ params }: Params) {
+export default async function PortalIdeasPage({
+  params,
+  searchParams,
+}: Params) {
   const { org } = await params;
   const portal = await resolvePortal(org);
   // One 404 for every reason. See `resolvePortal`: the cases are not
@@ -53,23 +82,43 @@ export default async function PortalIdeasPage({ params }: Params) {
   // not a row the portal connection can see.
   if (!portal) notFound();
 
-  return (
-    <PortalShell title={portal.title}>
-      {portalShowsIdeas(portal.settings) ? (
-        // The ideas list itself is the next card. Until it lands the shell is
-        // deliberately honest about being empty rather than pretending.
-        <p className="text-sm text-muted-foreground">
-          Ideas are coming to this portal shortly.
-        </p>
-      ) : (
-        // Not an error. Everything defaults to publishing nothing, so a portal
-        // switched on before its products and stages are chosen is unfinished
-        // rather than broken, and a visitor should not be shown a failure for
-        // somebody else's half-done configuration.
+  if (!portalShowsIdeas(portal.settings)) {
+    // Not an error. Everything defaults to publishing nothing, so a portal
+    // switched on before its products and stages are chosen is unfinished
+    // rather than broken, and a visitor should not be shown a failure for
+    // somebody else's half-done configuration.
+    return (
+      <PortalShell title={portal.title}>
         <p className="text-sm text-muted-foreground">
           There is nothing published here yet. Please check back soon.
         </p>
-      )}
+      </PortalShell>
+    );
+  }
+
+  const { ideas, stages } = await listPortalIdeas(portal);
+
+  // A `?status=` naming a stage this portal does not publish is treated as no
+  // filter at all, rather than as an empty result. The query string is
+  // attacker-controlled and the alternative answers a question: "no ideas at
+  // this status" for an unpublished stage confirms the stage exists, where
+  // falling back to the full list says nothing either way.
+  const requested = (await searchParams).status ?? null;
+  const activeStatus =
+    requested && stages.some((s) => s.key === requested) ? requested : null;
+
+  return (
+    <PortalShell title={portal.title}>
+      <IdeaList
+        orgSlug={portal.orgSlug}
+        ideas={
+          activeStatus
+            ? ideas.filter((i) => i.status === activeStatus)
+            : ideas
+        }
+        stages={stages}
+        activeStatus={activeStatus}
+      />
     </PortalShell>
   );
 }

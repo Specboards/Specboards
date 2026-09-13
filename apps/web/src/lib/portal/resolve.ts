@@ -37,7 +37,7 @@ import { isPortalModeration, type IdeaSettings } from "@/lib/store/types";
  */
 
 /** A published portal: the workspace it belongs to, and what it may show. */
-interface PortalContext {
+export interface PortalContext {
   workspaceId: string;
   orgSlug: string;
   /** Heading for the portal, falling back to the workspace name. */
