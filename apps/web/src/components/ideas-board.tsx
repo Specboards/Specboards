@@ -9,6 +9,12 @@ import { type IdeaStage } from "@specboards/core";
 
 import { EmptyState } from "@/components/empty-state";
 import { IdeaDetailSheet } from "@/components/idea-detail-sheet";
+import {
+  hasNotablePortalState,
+  PortalStateBadge,
+  ProvenanceBadge,
+  provenanceLine,
+} from "@/components/idea-portal-state";
 import { IdeaStatusSelect } from "@/components/idea-status-select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -29,6 +35,16 @@ import { useResetOnChange } from "@/lib/use-reset-on-change";
 
 /** How the list is ordered. */
 type SortKey = "votes" | "newest" | "oldest";
+
+/**
+ * The portal filter's options: the three states, plus provenance.
+ *
+ * `external` is not a state, it is a different question ("who sent this"), and
+ * it shares the control because a moderator asks the two together: everything
+ * from outside, whatever has been decided about it. Keeping it here rather than
+ * in a fourth dropdown keeps one row of filters.
+ */
+type PortalFilter = "all" | "pending" | "hidden" | "published" | "external";
 
 /**
  * The internal Ideas view: capture, vote, triage, and promote. Interactive
@@ -58,14 +74,41 @@ export function IdeasBoard({
   productsById?: Record<string, string>;
 }) {
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [portalFilter, setPortalFilter] = useState<PortalFilter>("all");
   const [sort, setSort] = useState<SortKey>("votes");
   const [detailId, setDetailId] = useState<string | null>(null);
 
+  const pendingCount = useMemo(
+    () => ideas.filter((i) => i.portalVisibility === "pending").length,
+    [ideas],
+  );
+
+  /**
+   * Whether the portal controls appear at all.
+   *
+   * Follows the house rule that an organizing feature stays hidden until there
+   * is something to organize: on a workspace with no portal, every idea is
+   * `published` by default and none is external, so a "Portal" filter would be
+   * a control that can only ever say "all of them". It appears the moment a
+   * submission arrives or somebody hides something, and stays while that is
+   * true, so no configuration becomes unreachable.
+   */
+  const showsPortalState = useMemo(
+    () => ideas.some(hasNotablePortalState),
+    [ideas],
+  );
+
   const visible = useMemo(() => {
-    const filtered =
+    const byStatus =
       statusFilter === "all"
         ? ideas
         : ideas.filter((i) => i.status === statusFilter);
+    const filtered =
+      portalFilter === "all"
+        ? byStatus
+        : portalFilter === "external"
+          ? byStatus.filter((i) => i.isExternalSubmission)
+          : byStatus.filter((i) => i.portalVisibility === portalFilter);
     return [...filtered].sort((a, b) => {
       if (sort === "votes") {
         return (
@@ -75,7 +118,7 @@ export function IdeasBoard({
       if (sort === "newest") return cmpDateDesc(a.createdAt, b.createdAt);
       return -cmpDateDesc(a.createdAt, b.createdAt); // oldest first
     });
-  }, [ideas, statusFilter, sort]);
+  }, [ideas, statusFilter, portalFilter, sort]);
 
   // The drawer reads from the live list so it reflects edits after a refresh.
   const detailIdea = detailId
@@ -102,6 +145,41 @@ export function IdeasBoard({
           />
         ) : null}
       </div>
+
+      {/* The moderation queue.
+          A pending submission is the only thing on this board that somebody
+          outside the company is waiting on, and a filter option nobody thinks
+          to open is not a queue. This is the prompt; the filter below is where
+          the work happens. It disappears when the queue empties rather than
+          sitting there saying zero. */}
+      {canEdit && pendingCount > 0 ? (
+        <div className="flex flex-wrap items-center gap-3 rounded-md border border-link/30 bg-link/5 px-4 py-3">
+          <p className="text-sm">
+            <span className="font-medium">
+              {pendingCount === 1
+                ? "1 submission is awaiting review"
+                : `${pendingCount} submissions are awaiting review`}
+            </span>
+            <span className="text-muted-foreground">
+              {" "}
+              and will not appear on the portal until published.
+            </span>
+          </p>
+          <Button
+            size="sm"
+            className="ml-auto"
+            onClick={() => {
+              // Clear the status filter too. The queue is defined by the portal
+              // state, and leaving a stage filter on would show "3 awaiting
+              // review" and then a list of one, which reads as a bug.
+              setStatusFilter("all");
+              setPortalFilter("pending");
+            }}
+          >
+            Review them
+          </Button>
+        </div>
+      ) : null}
 
       {ideas.length === 0 ? (
         <EmptyState
@@ -136,6 +214,25 @@ export function IdeasBoard({
                 ))}
               </Select>
             </label>
+            {showsPortalState ? (
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground max-sm:w-full">
+                Portal
+                <Select
+                  value={portalFilter}
+                  onChange={(e) =>
+                    setPortalFilter(e.target.value as PortalFilter)
+                  }
+                  className="h-8 w-full sm:w-44"
+                  aria-label="Filter by portal state"
+                >
+                  <option value="all">Any portal state</option>
+                  <option value="pending">Awaiting review</option>
+                  <option value="hidden">Hidden from portal</option>
+                  <option value="published">Public if published</option>
+                  <option value="external">From the portal</option>
+                </Select>
+              </label>
+            ) : null}
             <label className="flex items-center gap-1.5 text-xs text-muted-foreground max-sm:w-full">
               Sort
               <Select
@@ -162,9 +259,12 @@ export function IdeasBoard({
               <Button
                 size="sm"
                 variant="ghost"
-                onClick={() => setStatusFilter("all")}
+                onClick={() => {
+                  setStatusFilter("all");
+                  setPortalFilter("all");
+                }}
               >
-                Clear filter
+                Clear filters
               </Button>
             </div>
           ) : (
@@ -372,10 +472,18 @@ function IdeaRow({
     });
   }
 
-  const by = idea.submitterName ?? idea.authorName ?? null;
+  const by = provenanceLine(idea);
 
   return (
-    <li className="flex items-start gap-3 rounded-md border bg-card p-3 transition-colors hover:border-foreground/20">
+    <li
+      className={cn(
+        "flex items-start gap-3 rounded-md border bg-card p-3 transition-colors hover:border-foreground/20",
+        // A pending submission is the one row on this board with somebody
+        // waiting on it, so it is findable while scrolling rather than only
+        // when the filter is set to it.
+        idea.portalVisibility === "pending" && "border-link/40 bg-link/5",
+      )}
+    >
       <button
         type="button"
         onClick={toggleVote}
@@ -412,13 +520,18 @@ function IdeaRow({
               Promoted
             </Badge>
           ) : null}
+          <ProvenanceBadge idea={idea} />
+          <PortalStateBadge visibility={idea.portalVisibility} />
         </div>
         {idea.description ? (
           <p className="line-clamp-2 text-xs text-muted-foreground">
             {idea.description}
           </p>
         ) : null}
-        {by ? <p className="text-xs text-muted-foreground">by {by}</p> : null}
+        {/* `provenanceLine` returns a whole sentence ("Captured by Bob",
+            "Submitted via the portal by Ada"), so no prefix here. It used to be
+            a bare name with a literal "by " in front of it. */}
+        {by ? <p className="text-xs text-muted-foreground">{by}</p> : null}
       </button>
 
       <IdeaStatusSelect

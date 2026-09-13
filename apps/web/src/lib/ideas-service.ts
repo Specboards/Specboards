@@ -8,7 +8,12 @@ import type {
   IdeaSettingsPatch,
   StatusStageInput,
 } from "@/lib/store/types";
-import { isPortalModeration, PORTAL_MODERATION } from "@/lib/store/types";
+import {
+  isPortalModeration,
+  isPortalVisibility,
+  PORTAL_MODERATION,
+  PORTAL_VISIBILITY,
+} from "@/lib/store/types";
 import { InvalidPatchError } from "@/lib/service-errors";
 
 /** Ideas, their votes, their statuses, and the portal settings that govern them. */
@@ -142,9 +147,21 @@ export function parseIdeaPatch(body: unknown): IdeaPatch {
   if ("productId" in raw) {
     patch.productId = parseNullableId(raw.productId, "productId");
   }
+  if ("portalVisibility" in raw) {
+    // Validated against the union rather than passed through, because the
+    // alternative is a CHECK violation surfacing as a 500. The three values are
+    // also the whole moderation vocabulary, so naming them in the error is more
+    // useful than "invalid value".
+    if (!isPortalVisibility(raw.portalVisibility)) {
+      throw new InvalidPatchError(
+        `portalVisibility must be one of: ${PORTAL_VISIBILITY.join(", ")}.`,
+      );
+    }
+    patch.portalVisibility = raw.portalVisibility;
+  }
   if (Object.keys(patch).length === 0) {
     throw new InvalidPatchError(
-      "Patch must set at least one of: title, description, status, productId.",
+      "Patch must set at least one of: title, description, status, productId, portalVisibility.",
     );
   }
   return patch;

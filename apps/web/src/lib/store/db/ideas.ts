@@ -56,6 +56,8 @@ import {
   type IdeaSettingsPatch,
   type IdeaStage,
   isPortalModeration,
+  isPortalVisibility,
+  type PortalVisibility,
   type StatusStageInput,
   type WorkspaceScope,
 } from "../types";
@@ -68,6 +70,23 @@ import {
   type DbStoreContext,
   type Tx,
 } from "./context";
+/**
+ * Narrow the `portal_visibility` text column to the union.
+ *
+ * The column is `text` with a CHECK rather than an enum type (0008's reasoning,
+ * followed by 0012), so Drizzle types it as `string` and something has to make
+ * the assertion. Falling back to `published` rather than throwing is the right
+ * failure here and is the opposite of the usual instinct on this surface: an
+ * unreadable value means the CHECK was changed without this code, and the
+ * choice is between an idea the team can no longer see on their own board and
+ * one that keeps behaving as it did yesterday. Nothing is exposed either way,
+ * because the DATABASE decides what the portal shows and it is reading the same
+ * column; this only governs what the internal board renders.
+ */
+function asPortalVisibility(value: string): PortalVisibility {
+  return isPortalVisibility(value) ? value : "published";
+}
+
 export async function listIdeas(
   ctx: DbStoreContext,
   scope?: WorkspaceScope,
@@ -142,6 +161,10 @@ export async function listIdeas(
         title: r.title,
         description: r.description,
         status: r.status,
+        portalVisibility: asPortalVisibility(r.portalVisibility),
+        // Derived from the submitter columns, never stored, so it cannot
+        // disagree with them. A blank name is still an external submission.
+        isExternalSubmission: r.submitterEmail !== null,
         productId: r.productId,
         authorName: r.authorId ? (authorById.get(r.authorId) ?? null) : null,
         submitterName: r.submitterName,
@@ -246,6 +269,14 @@ export async function updateIdea(
         throw new IdeaError("Your role does not permit that product.");
       }
       set.productId = productId;
+    }
+    if (patch.portalVisibility !== undefined) {
+      // Authorised by the same `canWriteProductId` check above as every other
+      // field. Publishing is a write on the idea's product, which is the right
+      // bar: somebody who can retitle an idea and move it between stages can
+      // already change what the portal shows, because the stage IS a
+      // publication rule. A separate permission here would be theatre.
+      set.portalVisibility = patch.portalVisibility;
     }
     await tx
       .update(ideas)
@@ -689,6 +720,8 @@ async function hydrateIdea(
     title: row.title,
     description: row.description,
     status: row.status,
+    portalVisibility: asPortalVisibility(row.portalVisibility),
+    isExternalSubmission: row.submitterEmail !== null,
     productId: row.productId,
     authorName: author?.name ?? null,
     submitterName: row.submitterName,

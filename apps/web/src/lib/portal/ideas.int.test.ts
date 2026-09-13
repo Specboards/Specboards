@@ -52,6 +52,8 @@ const unannouncedProduct = randomUUID();
 const publishedIdea = randomUUID();
 const internalIdea = randomUUID();
 const unannouncedIdea = randomUUID();
+const pendingIdea = randomUUID();
+const hiddenIdea = randomUUID();
 const promotedFeature = randomUUID();
 const author = randomUUID();
 const suffix = randomUUID().slice(0, 8);
@@ -127,6 +129,18 @@ describe.skipIf(!DB_URL || !PORTAL_URL)("the public ideas read model", () => {
          'Idea about the unannounced thing', null, 'planned', ${author},
          null, null, null)`;
 
+    // Two more in the PUBLISHED product at a PUBLISHED stage, so the moderation
+    // state is the only thing keeping them off the portal. Anything else in the
+    // fixture would let these pass for the wrong reason.
+    await sql`insert into ideas
+        (id, workspace_id, product_id, title, status, submitter_name,
+         submitter_email, portal_visibility)
+      values
+        (${pendingIdea}, ${ws}, ${shownProduct}, 'Unreviewed submission',
+         'planned', 'Spammer', ${`spam-${suffix}@example.com`}, 'pending'),
+        (${hiddenIdea}, ${ws}, ${shownProduct}, 'Rejected submission',
+         'planned', 'Rejected Person', ${`rej-${suffix}@example.com`}, 'hidden')`;
+
     await sql`insert into idea_votes (workspace_id, idea_id, voter_email) values
       (${ws}, ${publishedIdea}, ${`v1-${suffix}@example.com`}),
       (${ws}, ${publishedIdea}, ${`v2-${suffix}@example.com`})`;
@@ -176,6 +190,36 @@ describe.skipIf(!DB_URL || !PORTAL_URL)("the public ideas read model", () => {
     // product nobody published, and each is excluded for its own reason.
     const { ideas } = await listPortalIdeas(portal);
     expect(ideas.map((i) => i.title)).toEqual(["Published idea"]);
+  });
+
+  it("excludes an unreviewed submission and a rejected one", async () => {
+    // Both sit in a published product at a published stage, so the visibility
+    // model would show them and the moderation state is the only thing that
+    // does not. That is the point: this is the one rule that is about a single
+    // row rather than a category, and it is the one an admin reaches for when
+    // a stranger writes something they do not want on their own branded page.
+    const { ideas } = await listPortalIdeas(portal);
+    const titles = ideas.map((i) => i.title);
+    expect(titles).not.toContain("Unreviewed submission");
+    expect(titles).not.toContain("Rejected submission");
+    expect(titles).toEqual(["Published idea"]);
+
+    // And by id, so a direct link to a rejected submission is as dead as the
+    // list implies. A moderator who rejects spam has to be able to rely on the
+    // URL the spammer already has going nowhere.
+    expect(await readPortalIdea(portal, pendingIdea)).toBeNull();
+    expect(await readPortalIdea(portal, hiddenIdea)).toBeNull();
+  });
+
+  it("leaks nothing from a submission it refused to publish", async () => {
+    // The rejected rows carry a name and an address like any other submission.
+    // Excluding a row from the list is not the same as its contents being
+    // unreachable, and this is the assertion that says so.
+    const serialised = JSON.stringify(await listPortalIdeas(portal));
+    expect(serialised).not.toContain("Spammer");
+    expect(serialised).not.toContain(`spam-${suffix}@example.com`);
+    expect(serialised).not.toContain("Rejected Person");
+    expect(serialised).not.toContain(`rej-${suffix}@example.com`);
   });
 
   it("projects exactly the public fields and no others", async () => {
