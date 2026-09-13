@@ -21,9 +21,16 @@ import type { ReactNode } from "react";
  */
 export function PortalShell({
   title,
+  subtitle = "Ideas and feedback",
   children,
 }: {
   title: string;
+  /**
+   * What this surface is. Defaults to the ideas wording because that is where
+   * the shell started; the roadmap passes its own, since a page headed
+   * "Ideas and feedback" that lists releases is simply mislabelled.
+   */
+  subtitle?: string;
   children: ReactNode;
 }) {
   return (
@@ -31,9 +38,7 @@ export function PortalShell({
       <header className="border-b">
         <div className="mx-auto max-w-3xl px-6 py-8">
           <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Ideas and feedback
-          </p>
+          <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
         </div>
       </header>
 
