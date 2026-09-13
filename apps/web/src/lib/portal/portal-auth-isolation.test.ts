@@ -27,6 +27,29 @@ import { describe, expect, it } from "vitest";
  * Static rather than behavioural on purpose. A runtime test can only prove the
  * pages that exist today behave; this fails the moment somebody *writes* the
  * import, in the diff that introduces it, naming the file and the symbol.
+ *
+ * ── What this rule does NOT cover, and why that is deliberate ──────────────
+ * It is a check on the READ side. Everything in the paths below runs on
+ * `getPortalDb()`, where row-level security decides what a stranger may see,
+ * and `getDb` is forbidden there because the owner connection bypasses exactly
+ * that.
+ *
+ * The portal's WRITE paths (a public submission, a public vote) cannot obey
+ * that rule: the portal role holds no INSERT at all, deliberately, so they run
+ * on the owner connection. They live outside these directories on purpose,
+ * in `app/api/portal/` and `lib/portal-intake/`, which is a boundary rather
+ * than an exemption. Two things hold it up:
+ *
+ *   - Every write is bounded by a read that RLS did police. The workspace comes
+ *     from `resolvePortal` and the publication check from `readPortalIdea`,
+ *     both on the portal connection; the owner connection inserts a row and
+ *     decides nothing.
+ *   - The list of such modules is short and named here, so a third one appearing
+ *     is a thing to notice rather than a pattern to copy.
+ *
+ * The check is also not transitive: it reads file contents, so a page importing
+ * a module that uses a forbidden name passes. That is a known limit, stated so
+ * it is not mistaken for a guarantee.
  */
 
 /** Portal source: the public route tree and the modules written for it. */

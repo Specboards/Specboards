@@ -48,7 +48,7 @@ export const dynamic = "force-dynamic";
 
 type Params = {
   params: Promise<{ org: string }>;
-  searchParams: Promise<{ status?: string }>;
+  searchParams: Promise<{ status?: string; voted?: string }>;
 };
 
 export async function generateMetadata({
@@ -107,13 +107,25 @@ export default async function PortalIdeasPage({
   // attacker-controlled and the alternative answers a question: "no ideas at
   // this status" for an unpublished stage confirms the stage exists, where
   // falling back to the full list says nothing either way.
-  const requested = (await searchParams).status ?? null;
+  const search = await searchParams;
+  const requested = search.status ?? null;
   const activeStatus =
     requested && stages.some((s) => s.key === requested) ? requested : null;
 
   return (
     <PortalShell title={portal.title}>
       <div className="space-y-6">
+        {/* The two vote outcomes that have no idea page to land on: a token
+            that did not verify, and an idea that stopped being public between
+            the mail going out and the link being opened. */}
+        {search.voted === "invalid" || search.voted === "gone" ? (
+          <p className="rounded-md border border-dashed px-4 py-3 text-sm text-muted-foreground">
+            {search.voted === "invalid"
+              ? "That confirmation link is not valid. It may have expired, or been copied incompletely. Vote again below to get a new one."
+              : "That idea is no longer public, so nothing was recorded."}
+          </p>
+        ) : null}
+
         {/* Above the list, because suggesting is the action a visitor arrives
             wanting to take, and below nothing, because reading what is already
             there should come first and often replaces the suggestion. */}

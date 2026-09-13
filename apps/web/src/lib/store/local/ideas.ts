@@ -175,6 +175,36 @@ export async function unvoteIdea(
   return toIdeaRecord(idea, null);
 }
 
+/**
+ * Record an anonymous portal vote, keyed by the confirmed email address.
+ *
+ * Exported for the portal's vote path rather than added to the `Store`
+ * interface, because every method there takes a `WorkspaceScope` naming a user
+ * and a portal voter has none. The DB side does its own insert for the same
+ * reason (see `lib/portal/vote.ts`).
+ *
+ * `voters` is a list of opaque strings, so an address sits in it as happily as
+ * a user id; `LOCAL_USER` cannot collide with one because it is not an address.
+ * Returns whether this address had already voted, so the caller can tell a
+ * fresh vote from a replayed confirmation link.
+ */
+export async function addAnonymousVote(
+  ctx: LocalStoreContext,
+  id: string,
+  email: string,
+): Promise<{ found: boolean; alreadyVoted: boolean }> {
+  const rows = await readIdeas(ctx);
+  const idea = rows.find((r) => r.id === id);
+  if (!idea) return { found: false, alreadyVoted: false };
+  const address = email.trim().toLowerCase();
+  if (idea.voters.includes(address)) {
+    return { found: true, alreadyVoted: true };
+  }
+  idea.voters.push(address);
+  await writeIdeas(ctx, rows);
+  return { found: true, alreadyVoted: false };
+}
+
 export async function promoteIdea(
   ctx: LocalStoreContext,
   id: string,
