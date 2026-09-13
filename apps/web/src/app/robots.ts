@@ -48,14 +48,25 @@ export default function robots(): MetadataRoute.Robots {
           "/invite/",
           "/oauth/",
           "/unsubscribe",
-          // The authenticated app, by area. `/{org}/ideas` stays crawlable
-          // because it is not listed.
+          // The authenticated app, by area. `/{org}/ideas` and `/{org}/roadmap`
+          // stay crawlable because neither is listed.
           "/*/settings",
           "/*/dashboard",
           "/*/notifications",
           "/*/repositories",
           "/*/backlog",
-          "/*/roadmap",
+          // TWO wildcards, and the difference matters.
+          //
+          // The internal roadmap is `/{org}/{product}/roadmap`, and the PUBLIC
+          // one is `/{org}/roadmap`. A rule of `/*/roadmap` matches both,
+          // because `*` in robots.txt spans any characters including slashes,
+          // so it silently blocked the public roadmap from the moment that page
+          // shipped, while the page's own metadata said `index: true`. Two
+          // contradictory signals, and the crawler obeys this one.
+          //
+          // `/*/*/roadmap` needs two path segments ahead of it, which the
+          // internal route has and the public one does not.
+          "/*/*/roadmap",
           "/*/cycles",
           "/*/goals",
           "/*/strategy",
