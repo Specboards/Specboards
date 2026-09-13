@@ -112,6 +112,37 @@ interface PortalIdeaList {
 }
 
 /**
+ * The predicates every public idea read must carry.
+ *
+ * These duplicate what `specboards_portal_shows_idea` already enforces in the
+ * database, and that duplication is the point rather than an oversight.
+ *
+ * Found by `e2e/portal-public.spec.ts`, which runs the portal on the OWNER
+ * connection (see `playwright.config.ts`). Without these lines the read model
+ * filtered on workspace and stage ONLY, and delegated product publication and
+ * the moderation state entirely to row-level security. On production that is
+ * invisible, because the real portal role's policies refuse those rows. It is
+ * still the wrong shape: every other rule on this surface is stated twice, once
+ * in the projection and once in RLS, precisely so that a failure of either is
+ * caught by the other. This one was stated once.
+ *
+ * Four e2e cases failed on it at once: an unannounced product's idea appeared
+ * in the list, a hidden idea and a pending submission served a 200 on their own
+ * pages, and a vote on a hidden idea was counted.
+ */
+function publishedIdeaWhere(portal: PortalContext) {
+  return and(
+    eq(ideas.workspaceId, portal.workspaceId),
+    inArray(ideas.status, portal.settings.portalIdeaStatuses),
+    // An idea whose product was deleted has a null product id (ON DELETE SET
+    // NULL, to preserve captured demand). `inArray` never matches null, which
+    // is the correct answer: a null product is in no published set.
+    inArray(ideas.productId, portal.settings.portalProductIds),
+    eq(ideas.portalVisibility, "published"),
+  );
+}
+
+/**
  * The published ideas for a portal, with their vote counts and stage labels.
  *
  * Runs on `getPortalDb()`, where RLS has already limited every table to what
@@ -132,7 +163,10 @@ export async function listPortalIdeas(
   const { workspaceId, settings } = portal;
   // An empty published set means an unfinished portal, not an error, and
   // `inArray(..., [])` is a query worth not issuing.
-  if (settings.portalIdeaStatuses.length === 0) {
+  if (
+    settings.portalIdeaStatuses.length === 0 ||
+    settings.portalProductIds.length === 0
+  ) {
     return { ideas: [], stages: [] };
   }
 
@@ -147,12 +181,7 @@ export async function listPortalIdeas(
         createdAt: ideas.createdAt,
       })
       .from(ideas)
-      .where(
-        and(
-          eq(ideas.workspaceId, workspaceId),
-          inArray(ideas.status, settings.portalIdeaStatuses),
-        ),
-      ),
+      .where(publishedIdeaWhere(portal)),
     db
       .select({
         key: ideaStatuses.key,
@@ -208,8 +237,13 @@ export async function readPortalIdea(
   const db = getPortalDb();
   if (!db) return null;
 
-  const { workspaceId, settings } = portal;
-  if (settings.portalIdeaStatuses.length === 0) return null;
+  const { settings } = portal;
+  if (
+    settings.portalIdeaStatuses.length === 0 ||
+    settings.portalProductIds.length === 0
+  ) {
+    return null;
+  }
 
   const [row] = await db
     .select({
@@ -221,13 +255,7 @@ export async function readPortalIdea(
       createdAt: ideas.createdAt,
     })
     .from(ideas)
-    .where(
-      and(
-        eq(ideas.id, ideaId),
-        eq(ideas.workspaceId, workspaceId),
-        inArray(ideas.status, settings.portalIdeaStatuses),
-      ),
-    )
+    .where(and(eq(ideas.id, ideaId), publishedIdeaWhere(portal)))
     .limit(1);
   if (!row) return null;
 
@@ -239,7 +267,7 @@ export async function readPortalIdea(
         position: ideaStatuses.position,
       })
       .from(ideaStatuses)
-      .where(eq(ideaStatuses.workspaceId, workspaceId))
+      .where(eq(ideaStatuses.workspaceId, portal.workspaceId))
       .orderBy(asc(ideaStatuses.position)),
     voteCounts(db, [row.id]),
   ]);

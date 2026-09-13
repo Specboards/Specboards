@@ -25,6 +25,86 @@ for how and when the version is bumped.
 > `pnpm deploy:prod` and the dispatched workflow. See
 > [VERSIONING.md](./VERSIONING.md).
 
+## [1.2.1] - 2026-09-13
+
+The public Ideas portal, finished. v1.2.0 shipped the foundations and a page
+that admitted it had nothing to show; this is the part customers use.
+
+A visitor with no account can browse published ideas, open one, vote on it
+through an emailed link, suggest a new one, and read a roadmap. An admin decides
+what any of that means: which products and stages are public, whether
+submissions wait for review, and whether the roadmap is included at all.
+
+### Added
+
+- **Browse and read published ideas** at `/{org}/ideas` and
+  `/{org}/ideas/{id}`, with vote counts and a status filter that lives in the
+  URL so a filtered view can be linked to and crawled. The read model is a
+  separate projection rather than the internal record with fields dropped, so a
+  column added to `ideas` later is private until somebody publishes it on
+  purpose.
+- **Suggest an idea from the portal**, with no account. Starts as a
+  "Suggest an idea" affordance rather than an open form. Quota'd per client and
+  per email address, honeypotted, and confirmed by email. Writes
+  `ideas.submitter_name` / `submitter_email`, which have existed unused since
+  v0.8.0.
+- **Moderation** (migration 0012 adds `ideas.portal_visibility`). A submission
+  either waits in a queue and appears on publish, or appears at once and can be
+  hidden afterwards, per the workspace's choice. `pending` and `hidden` are
+  distinct states, so a rejected submission does not come back to the queue.
+  Publication is deliberately independent of the review stage: an idea can be
+  under review internally and public, or planned and withheld.
+- **A moderation queue on the Ideas board**: a banner with the count, a portal
+  filter, and Publish / Reject in the idea's drawer. External submissions are
+  tagged **From the portal** and show who sent them.
+- **Voting by emailed magic link.** A visitor enters an address and opens the
+  link to count their vote; a signed 30-day cookie makes later votes one click.
+  The link expires in 30 minutes and is idempotent, so a replay, a second click
+  or a mail gateway prefetch all count once. Migration 0010 makes anonymous
+  votes representable (`user_id` nullable, `voter_email` added, two partial
+  unique indexes so a member and an outsider can each vote once).
+- **A public roadmap** at `/{org}/roadmap`, gated by its own switch. Releases in
+  two sections, shipped and upcoming, with the work scheduled into them. Items
+  show a coarse phase (Planned / In progress / Shipped) mapped from your
+  workflow by position, never your own stage names.
+- **[A guide to running one](./docs/GUIDE-public-portal.md)**, including what is
+  never published and why, and the one gotcha in combining "publish immediately"
+  with an unpublished first stage.
+
+### Security
+
+- **The portal's role cannot read what it does not need, by grant rather than by
+  convention.** `idea_votes.voter_email` (0010) and `workspace_statuses.label`
+  (0013) are excluded from column-level SELECT grants, so a verified customer
+  address and an internal stage name are not columns the public connection can
+  name at all. Row-level security bounds which *rows* it sees and says nothing
+  about columns, so this is the layer that had to be the grant.
+- **The public read models now state the publication rules themselves**, rather
+  than delegating product publication and the moderation state entirely to
+  row-level security. Found by the new end-to-end suite, which runs the portal
+  on the owner connection: with RLS out of the picture an unannounced product's
+  idea appeared in the list, a hidden idea served its own page, and a vote on a
+  hidden idea was counted. Not reachable in production, where the real portal
+  role's policies refuse those rows, and the wrong shape regardless: every other
+  rule on this surface is stated twice so that a failure of either layer is
+  caught by the other.
+- **The portal's public intake is not exempt from the CSRF origin check**, and
+  there is now a test saying so. It does not need an exemption (same origin as
+  the app, so the check passes on its own), and adding one "for safety" would be
+  pure added surface on endpoints that read no session. Asserted in both
+  directions against the running app, because #460 was an outage that happened
+  while the predicate's own unit tests passed.
+
+### Fixed
+
+- **`ON CONFLICT` on the member vote path.** Making `idea_votes_idea_user_uq`
+  partial changed its contract: Postgres matches a statement to a partial index
+  only when it restates the predicate, and raises otherwise. Caught before it
+  shipped, and asserted on the rendered SQL.
+- **A portal page that renders inside the app's chrome.** Adding `/{org}/roadmap`
+  needed `isPortalPath` in middleware to learn about it; without that the page
+  works but runs the session queries the portal branch exists to skip.
+
 ## [1.2.0] - 2026-09-08
 
 Two critical security patches, a closed sign-up funnel reopened, and the
