@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import {
   and,
   createDb,
@@ -7,8 +9,10 @@ import {
   eq,
   features,
   githubInstallations,
+  ideaPortalProducts,
   ideaSettings,
   ideaStatuses,
+  ideaVotes,
   ideas,
   itemWatchers,
   notificationDefaults,
@@ -249,7 +253,275 @@ export async function resetIdeas(workspaceId: string): Promise<void> {
   // Deleting ideas cascades their votes; then drop stages + settings.
   await db().delete(ideas).where(eq(ideas.workspaceId, workspaceId));
   await db().delete(ideaStatuses).where(eq(ideaStatuses.workspaceId, workspaceId));
+  await db()
+    .delete(ideaPortalProducts)
+    .where(eq(ideaPortalProducts.workspaceId, workspaceId));
   await db().delete(ideaSettings).where(eq(ideaSettings.workspaceId, workspaceId));
+}
+
+/**
+ * A published portal with something to hide.
+ *
+ * Every fixture here exists so that a leak has something to leak. There is a
+ * published product and an unannounced one, a published stage and an
+ * unpublished one, a visible idea and three that must not appear, and the
+ * visible idea carries an author, a submitter email and a promoted-feature link
+ * so the read model has fields to fail to omit.
+ *
+ * Seeded through the database rather than the UI because most of it has no UI:
+ * a workspace cannot create a hidden idea from the board without going through
+ * the moderation flow this is meant to test independently.
+ */
+export async function seedPortalFixture(input: {
+  workspaceId: string;
+  authorId: string;
+}): Promise<{
+  shownProductId: string;
+  secretProductId: string;
+  visibleIdeaId: string;
+  hiddenIdeaId: string;
+  pendingIdeaId: string;
+  unpublishedStageIdeaId: string;
+  secretProductIdeaId: string;
+  promotedFeatureId: string;
+  roadmapItemTitle: string;
+  /** The visible idea's submitter address, which must never be published. */
+  submitterEmail: string;
+  releaseId: string;
+  publishedStage: string;
+  unpublishedStage: string;
+}> {
+  const { workspaceId, authorId } = input;
+  const suffix = Math.random().toString(36).slice(2, 8);
+
+  const [shown] = await db()
+    .insert(products)
+    .values({
+      workspaceId,
+      key: `portal-shown-${suffix}`,
+      name: `Shown Product ${suffix}`,
+    })
+    .returning({ id: products.id });
+  const [secret] = await db()
+    .insert(products)
+    .values({
+      workspaceId,
+      key: `portal-secret-${suffix}`,
+      name: `UNANNOUNCED-PRODUCT-${suffix}`,
+    })
+    .returning({ id: products.id });
+  if (!shown || !secret) throw new Error("failed to seed portal products");
+
+  await db()
+    .insert(ideaStatuses)
+    .values([
+      { workspaceId, key: "planned", label: "On the roadmap", position: 0 },
+      {
+        workspaceId,
+        key: "awaiting_legal",
+        label: `UNPUBLISHED-STAGE-LABEL-${suffix}`,
+        position: 1,
+      },
+    ]);
+
+  await db()
+    .insert(ideaSettings)
+    .values({
+      workspaceId,
+      portalEnabled: true,
+      portalTitle: "E2E Portal",
+      portalIdeaStatuses: ["planned"],
+      portalRoadmapEnabled: false,
+      portalRoadmapItemStatuses: [],
+      portalModeration: "review_first",
+    })
+    .onConflictDoUpdate({
+      target: ideaSettings.workspaceId,
+      set: {
+        portalEnabled: true,
+        portalTitle: "E2E Portal",
+        portalIdeaStatuses: ["planned"],
+        portalModeration: "review_first",
+      },
+    });
+  await db()
+    .insert(ideaPortalProducts)
+    .values({ workspaceId, productId: shown.id })
+    .onConflictDoNothing();
+
+  // A release for the roadmap to group under. Items with no release are not on
+  // a roadmap (that is backlog), so without this the roadmap has nothing to
+  // render and its cases pass vacuously.
+  const [release] = await db()
+    .insert(releases)
+    .values({
+      workspaceId,
+      productId: shown.id,
+      name: `Portal Release ${suffix}`,
+      status: "planned",
+      targetDate: "2027-01-31",
+    })
+    .returning({ id: releases.id });
+  if (!release) throw new Error("failed to seed portal release");
+
+  const level = `portal-level-${suffix}`;
+  await db()
+    .insert(schema.workspaceLevels)
+    .values({ workspaceId, key: level, label: "Feature", position: 0 })
+    .onConflictDoNothing();
+
+  // Three features, in three roles. Keeping them separate matters: the same row
+  // cannot be both "the promotion target that must never appear" and "the
+  // roadmap item that must".
+  //
+  // 1. The promotion target. At an unpublished stage and in no release, so it
+  //    is public NOWHERE, and its title is what the ideas read model must omit
+  //    when it declines to publish the promoted-feature link.
+  const featureId = randomUUID();
+  // 2. A genuine roadmap item: published stage, published product, scheduled.
+  const roadmapItemId = randomUUID();
+  // 3. The same, but in the unannounced product. Published stage and scheduled
+  //    into the same release, so the ONLY thing keeping it off the roadmap is
+  //    the product filter.
+  const secretRoadmapItemId = randomUUID();
+
+  await db()
+    .insert(features)
+    .values([
+      {
+        id: featureId,
+        workspaceId,
+        productId: shown.id,
+        specId: featureId,
+        level,
+        title: `UNANNOUNCED-FEATURE-${suffix}`,
+        status: "backlog",
+      },
+      {
+        id: roadmapItemId,
+        workspaceId,
+        productId: shown.id,
+        specId: roadmapItemId,
+        level,
+        title: `ROADMAP-ITEM-${suffix}`,
+        status: "in_progress",
+        releaseId: release.id,
+      },
+      {
+        id: secretRoadmapItemId,
+        workspaceId,
+        productId: secret.id,
+        specId: secretRoadmapItemId,
+        level,
+        title: `SECRET-ROADMAP-ITEM-${suffix}`,
+        status: "in_progress",
+        releaseId: release.id,
+      },
+    ]);
+
+  const rows = await db()
+    .insert(ideas)
+    .values([
+      {
+        workspaceId,
+        productId: shown.id,
+        title: `VISIBLE-IDEA-${suffix}`,
+        description: "A published idea.",
+        status: "planned",
+        portalVisibility: "published",
+        authorId,
+        submitterName: "Ada Outside",
+        submitterEmail: `ada-${suffix}@example.com`,
+        promotedFeatureId: featureId,
+      },
+      {
+        workspaceId,
+        productId: shown.id,
+        title: `HIDDEN-IDEA-${suffix}`,
+        status: "planned",
+        portalVisibility: "hidden",
+        authorId,
+      },
+      {
+        workspaceId,
+        productId: shown.id,
+        title: `PENDING-IDEA-${suffix}`,
+        status: "planned",
+        portalVisibility: "pending",
+        submitterEmail: `pending-${suffix}@example.com`,
+      },
+      {
+        workspaceId,
+        productId: shown.id,
+        title: `UNPUBLISHED-STAGE-IDEA-${suffix}`,
+        status: "awaiting_legal",
+        portalVisibility: "published",
+        authorId,
+      },
+      {
+        workspaceId,
+        productId: secret.id,
+        title: `SECRET-PRODUCT-IDEA-${suffix}`,
+        status: "planned",
+        portalVisibility: "published",
+        authorId,
+      },
+    ])
+    .returning({ id: ideas.id, title: ideas.title });
+
+  const byPrefix = (prefix: string) => {
+    const row = rows.find((r) => r.title.startsWith(prefix));
+    if (!row) throw new Error(`seed missing ${prefix}`);
+    return row.id;
+  };
+
+  return {
+    shownProductId: shown.id,
+    secretProductId: secret.id,
+    visibleIdeaId: byPrefix("VISIBLE-IDEA"),
+    hiddenIdeaId: byPrefix("HIDDEN-IDEA"),
+    pendingIdeaId: byPrefix("PENDING-IDEA"),
+    unpublishedStageIdeaId: byPrefix("UNPUBLISHED-STAGE-IDEA"),
+    secretProductIdeaId: byPrefix("SECRET-PRODUCT-IDEA"),
+    promotedFeatureId: featureId,
+    roadmapItemTitle: `ROADMAP-ITEM-${suffix}`,
+    submitterEmail: `ada-${suffix}@example.com`,
+    releaseId: release.id,
+    publishedStage: `VISIBLE-IDEA-${suffix}`,
+    unpublishedStage: `UNPUBLISHED-STAGE-LABEL-${suffix}`,
+  };
+}
+
+/**
+ * Remove the products `seedPortalFixture` created, leaving `default` alone.
+ *
+ * Mirrors `resetProductGroups`, which every other spec relies on to find only
+ * the default product. Call it AFTER the features that reference them.
+ */
+export async function resetPortalProducts(workspaceId: string): Promise<void> {
+  await db()
+    .delete(products)
+    .where(and(eq(products.workspaceId, workspaceId), ne(products.key, "default")));
+}
+
+/** Votes on one idea, by confirmed address. */
+export async function voteCountFor(ideaId: string): Promise<number> {
+  const rows = await db()
+    .select({ id: ideaVotes.id })
+    .from(ideaVotes)
+    .where(eq(ideaVotes.ideaId, ideaId));
+  return rows.length;
+}
+
+/** The admin user id, for seeding an idea with a real internal author. */
+export async function getAdminUserId(): Promise<string> {
+  const rows = await db()
+    .select({ id: schema.users.id })
+    .from(schema.users)
+    .limit(1);
+  const row = rows[0];
+  if (!row) throw new Error("No user found; global setup did not run?");
+  return row.id;
 }
 
 /** Remove every doc space and doc page (Plan-section areas). */

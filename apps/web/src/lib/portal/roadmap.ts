@@ -179,6 +179,13 @@ export async function readPortalRoadmap(
         and(
           eq(features.workspaceId, workspaceId),
           inArray(features.status, settings.portalRoadmapItemStatuses),
+          // The published products, stated here as well as in RLS. Same
+          // reasoning as `publishedIdeaWhere`: every rule on this surface is
+          // stated twice so a failure of either layer is caught by the other,
+          // and this one was relying on the policy alone. `inArray` never
+          // matches null, which correctly excludes an item whose product was
+          // deleted.
+          inArray(features.productId, settings.portalProductIds),
         ),
       ),
     db
