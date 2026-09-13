@@ -192,6 +192,21 @@ export const QUOTAS = {
   portalIdea: { op: "portal-idea", limit: 10, windowSec: 3600 },
   portalIdeaEmail: { op: "portal-idea-email", limit: 5, windowSec: 86_400 },
   /**
+   * Asking for a vote confirmation link. Each accepted request sends one email
+   * to an address nobody has verified yet, which makes this the most
+   * mailbomb-shaped endpoint in the product: the attacker picks the recipient.
+   *
+   * So the per-email limit is the tight one and the per-client limit is the
+   * loose one, which is the opposite balance to the submission form above. A
+   * real person voting through a portal sends a handful of these in a session
+   * (one per idea they care about) and never twenty to the same address.
+   *
+   * Confirming a link costs nothing here: it spends no quota, because by then
+   * the mail has already been sent and the expensive thing has happened.
+   */
+  portalVote: { op: "portal-vote", limit: 20, windowSec: 3600 },
+  portalVoteEmail: { op: "portal-vote-email", limit: 6, windowSec: 3600 },
+  /**
    * `/api/mcp`, counted per JSON-RPC call and keyed per credential (see
    * `lib/mcp/rpc.ts` `credentialKeyFor`), not per user: one runaway agent must
    * not be able to exhaust its owner's other connections.

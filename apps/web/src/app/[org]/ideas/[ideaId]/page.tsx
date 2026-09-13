@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { VoteCount } from "@/components/portal/idea-list";
+import { VoteButton } from "@/components/portal/vote-button";
 import { PortalShell } from "@/components/portal/portal-shell";
 import { readPortalIdea } from "@/lib/portal/ideas";
 import { portalShowsIdeas, resolvePortal } from "@/lib/portal/resolve";
@@ -62,9 +62,16 @@ import { portalShowsIdeas, resolvePortal } from "@/lib/portal/resolve";
  */
 export const dynamic = "force-dynamic";
 
-type Params = { params: Promise<{ org: string; ideaId: string }> };
+type Params = {
+  params: Promise<{ org: string; ideaId: string }>;
+  searchParams: Promise<{ voted?: string }>;
+};
 
-export async function generateMetadata({ params }: Params): Promise<Metadata> {
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ org: string; ideaId: string }>;
+}): Promise<Metadata> {
   const { org, ideaId } = await params;
   const portal = await resolvePortal(org);
   if (!portal || !portalShowsIdeas(portal.settings)) {
@@ -85,7 +92,10 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   };
 }
 
-export default async function PortalIdeaDetailPage({ params }: Params) {
+export default async function PortalIdeaDetailPage({
+  params,
+  searchParams,
+}: Params) {
   const { org, ideaId } = await params;
   const portal = await resolvePortal(org);
   if (!portal) notFound();
@@ -101,9 +111,21 @@ export default async function PortalIdeaDetailPage({ params }: Params) {
   // name real internal ideas.
   if (!idea) notFound();
 
+  // Set by the confirmation link's redirect. Only the two outcomes that land
+  // HERE are handled; "invalid" and "gone" redirect to the list instead,
+  // because in both of those cases there is no idea page to land on.
+  const voted = (await searchParams).voted;
+
   return (
     <PortalShell title={portal.title}>
       <div className="space-y-6">
+        {voted === "counted" || voted === "already" ? (
+          <p className="rounded-md border border-link/40 bg-link/5 px-4 py-3 text-sm">
+            {voted === "counted"
+              ? "Your vote is counted. You will not need to confirm again on this device for a while."
+              : "You had already voted for this. Votes are one per person, so nothing changed."}
+          </p>
+        ) : null}
         <Link
           href={`/${portal.orgSlug}/ideas`}
           className="inline-block text-sm text-muted-foreground hover:underline"
@@ -112,7 +134,11 @@ export default async function PortalIdeaDetailPage({ params }: Params) {
         </Link>
 
         <article className="flex gap-4">
-          <VoteCount n={idea.voteCount} />
+          <VoteButton
+            orgSlug={portal.orgSlug}
+            ideaId={idea.id}
+            count={idea.voteCount}
+          />
           <div className="min-w-0 flex-1">
             <h2 className="text-xl font-semibold tracking-tight">
               {idea.title}

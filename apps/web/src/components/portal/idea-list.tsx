@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { VoteButton } from "@/components/portal/vote-button";
 import type { PortalIdea, PortalStage } from "@/lib/portal/ideas";
 
 /**
@@ -59,23 +60,29 @@ export function IdeaList({
       ) : (
         <ul className="space-y-3">
           {ideas.map((idea) => (
-            <li key={idea.id}>
-              <Link
-                href={`${base}/${idea.id}`}
-                className="flex gap-4 rounded-lg border p-4 transition-colors hover:bg-muted/50"
-              >
-                <VoteCount n={idea.voteCount} />
-                <div className="min-w-0 flex-1">
-                  <p className="font-medium">{idea.title}</p>
-                  {idea.description ? (
-                    <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
-                      {idea.description}
-                    </p>
-                  ) : null}
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    {idea.statusLabel}
+            // The vote control sits OUTSIDE the link, not inside it. A button
+            // nested in an anchor is invalid HTML, and in practice a click on it
+            // navigates to the detail page instead of voting, which is the bug
+            // that shape always produces.
+            <li
+              key={idea.id}
+              className="flex gap-4 rounded-lg border p-4 transition-colors hover:bg-muted/50"
+            >
+              <VoteButton
+                orgSlug={orgSlug}
+                ideaId={idea.id}
+                count={idea.voteCount}
+              />
+              <Link href={`${base}/${idea.id}`} className="min-w-0 flex-1">
+                <p className="font-medium">{idea.title}</p>
+                {idea.description ? (
+                  <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
+                    {idea.description}
                   </p>
-                </div>
+                ) : null}
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {idea.statusLabel}
+                </p>
               </Link>
             </li>
           ))}
@@ -110,26 +117,5 @@ function FilterChip({
         {children}
       </Link>
     </li>
-  );
-}
-
-/**
- * The demand signal. Rendered as a labelled count rather than a bare number so
- * a screen reader gets "12 votes" instead of "12", which is meaningless beside
- * a title.
- */
-export function VoteCount({ n }: { n: number }) {
-  return (
-    <div className="flex h-12 w-12 shrink-0 flex-col items-center justify-center rounded-md border">
-      <span aria-hidden className="text-sm font-semibold tabular-nums">
-        {n}
-      </span>
-      <span aria-hidden className="text-[10px] uppercase text-muted-foreground">
-        {n === 1 ? "vote" : "votes"}
-      </span>
-      <span className="sr-only">
-        {n} {n === 1 ? "vote" : "votes"}
-      </span>
-    </div>
   );
 }
