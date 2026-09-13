@@ -74,8 +74,20 @@ test.describe("public ideas portal", () => {
       );
     }
     // The portal is the one thing meant to be found, so it must NOT be
-    // disallowed. `/{org}/ideas` is not listed, and no rule may cover it.
+    // disallowed. Neither public surface may be covered by any rule.
     expect(body).not.toContain("Disallow: /*/ideas");
+
+    // `/{org}/roadmap` is the case this missed once. The rule for the INTERNAL
+    // roadmap was `Disallow: /*/roadmap`, and `*` spans slashes, so it matched
+    // the public roadmap too: that page shipped blocked from crawling while its
+    // own metadata said `index: true`. The internal rule is `/*/*/roadmap` now.
+    //
+    // Asserted as an absent exact line rather than by pattern-matching, because
+    // the failure was a rule that looked right in review.
+    expect(body).not.toContain("Disallow: /*/roadmap");
+    expect(body, "the internal roadmap must still be disallowed").toContain(
+      "Disallow: /*/*/roadmap",
+    );
   });
 
   test("serves a stranger exactly what it serves the admin", async ({
