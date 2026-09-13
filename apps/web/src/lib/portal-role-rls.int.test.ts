@@ -61,6 +61,7 @@ const unannouncedIdea = randomUUID();
 const shutIdea = randomUUID();
 const roadmapItem = randomUUID();
 const suffix = randomUUID().slice(0, 8);
+const voterEmail = `voter-${suffix}@portal.test`;
 
 describe.skipIf(!DB_URL)("row-level security on the portal connection", () => {
   let sql: postgres.Sql;
@@ -112,6 +113,12 @@ describe.skipIf(!DB_URL)("row-level security on the portal connection", () => {
       (${unannouncedIdea}, ${openWs}, ${unannouncedProduct}, 'Idea in unannounced product', 'planned'),
       (${shutIdea}, ${shutWs}, ${shutProduct}, 'Other workspace idea', 'planned')`;
 
+    // Two votes on the published idea, one of each identity kind, so the
+    // column-grant cases below have a real address to fail to read.
+    await sql`insert into idea_votes (workspace_id, idea_id, user_id, voter_email) values
+      (${openWs}, ${publishedIdea}, ${randomUUID()}, null),
+      (${openWs}, ${publishedIdea}, null, ${voterEmail})`;
+
     await sql`insert into workspace_levels (workspace_id, key, label, position, is_leaf)
       values (${openWs}, ${`feature-${suffix}`}, 'Feature', 0, false)`;
     await sql`insert into features (id, workspace_id, product_id, spec_id, level, title, status)
@@ -120,6 +127,7 @@ describe.skipIf(!DB_URL)("row-level security on the portal connection", () => {
   });
 
   afterAll(async () => {
+    await sql`delete from idea_votes where workspace_id in ${sql([openWs, shutWs])}`;
     await sql`delete from features where workspace_id in ${sql([openWs, shutWs])}`;
     await sql`delete from workspace_levels where workspace_id in ${sql([openWs, shutWs])}`;
     await sql`delete from ideas where workspace_id in ${sql([openWs, shutWs])}`;
@@ -254,6 +262,48 @@ describe.skipIf(!DB_URL)("row-level security on the portal connection", () => {
       await sql`delete from members where user_id = ${member}`;
       await sql`delete from users where id = ${member}`;
     }
+  });
+
+  it("can count votes without being able to read who cast them", async () => {
+    // The row policies on `idea_votes` decide WHICH votes this role sees. They
+    // say nothing about which columns, and since 0010 one of the columns is a
+    // verified customer email address. A table-wide `GRANT SELECT` would put
+    // one `select *` in a future read model between that column and the
+    // internet, with the RESTRICTIVE clamp doing nothing to stop it, so the
+    // grant is column-level and `voter_email` is not in it.
+    //
+    // Counting still works, which is the only thing the public views ask of
+    // this table.
+    const counted = await asPortal(
+      (tx) =>
+        tx<{ n: string }[]>`select count(*)::text as n from idea_votes
+          where idea_id = ${publishedIdea}`,
+    );
+    expect(counted[0]?.n).toBe("2");
+
+    // Naming the column fails at permission-check time, before any policy is
+    // consulted, so this holds for a published idea the role can otherwise read
+    // in full.
+    await expect(
+      asPortal((tx) => tx`select voter_email from idea_votes`),
+    ).rejects.toThrow(/permission denied/);
+
+    // `select *` is the realistic mistake, and it is the one that must not
+    // quietly return the address. Postgres expands the star against the
+    // relation, not against the grant, so this is denied too rather than
+    // silently returning the permitted subset.
+    await expect(
+      asPortal((tx) => tx`select * from idea_votes`),
+    ).rejects.toThrow(/permission denied/);
+
+    // Nor by the back door: a predicate is a read. Without this, the address
+    // could be recovered one guess at a time from whether a row comes back.
+    await expect(
+      asPortal(
+        (tx) =>
+          tx`select id from idea_votes where voter_email = ${voterEmail}`,
+      ),
+    ).rejects.toThrow(/permission denied/);
   });
 
   it("cannot reach a table it was never granted", async () => {
