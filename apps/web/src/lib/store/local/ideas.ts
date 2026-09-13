@@ -78,13 +78,13 @@ export async function createIdea(
     description: input.description?.trim() ? input.description.trim() : null,
     status: "new",
     productId,
-    submitterName: null,
-    submitterEmail: null,
-    // An internal capture, which is all local mode can produce today. Internal
+    // Null for an internal capture, set by the public portal intake. Internal
     // captures are published by default even on a review-first workspace:
     // moderation gates strangers writing to the board, not the team's own
     // capture. Migration 0012 carries the reasoning.
-    portalVisibility: "published",
+    submitterName: input.submitterName?.trim() || null,
+    submitterEmail: input.submitterEmail?.trim().toLowerCase() || null,
+    portalVisibility: input.portalVisibility ?? "published",
     promotedFeatureSpecId: null,
     voters: [],
     createdAt: new Date().toISOString(),

@@ -7,6 +7,7 @@ import {
   ideaVotes,
   ideas,
   inArray,
+  products,
 } from "@specboards/db";
 import { resolveIdeaStages, type IdeaStage } from "@specboards/core";
 
@@ -253,6 +254,55 @@ export async function readPortalIdea(
     voteCount: counts.get(row.id) ?? 0,
     createdAt: row.createdAt.toISOString(),
   };
+}
+
+/** A product this portal publishes, for the submission form's picker. */
+export interface PortalProduct {
+  id: string;
+  name: string;
+}
+
+/**
+ * The products this portal publishes, by name.
+ *
+ * Only the submission form needs these: a portal can publish several backlogs,
+ * and filing a stranger's idea against whichever happened to be first is how
+ * feedback ends up on the wrong board. The list view deliberately does NOT show
+ * a product per idea (the projection omits `productId` entirely), so this is
+ * not a way in to that.
+ *
+ * Read on the portal connection like everything else, where
+ * `products_portal_select` admits only published products, so an unannounced
+ * product's name cannot reach the picker even if `portalProductIds` were wrong.
+ */
+export async function listPortalProducts(
+  portal: PortalContext,
+): Promise<PortalProduct[]> {
+  const ids = portal.settings.portalProductIds;
+  if (ids.length === 0) return [];
+
+  if (isLocalFileMode()) {
+    const store = await getStore();
+    const all = await store.listProducts();
+    return all
+      .filter((p) => ids.includes(p.id))
+      .map((p) => ({ id: p.id, name: p.name }));
+  }
+
+  const db = getPortalDb();
+  if (!db) return [];
+  const rows = await db
+    .select({ id: products.id, name: products.name })
+    .from(products)
+    .where(
+      and(
+        eq(products.workspaceId, portal.workspaceId),
+        inArray(products.id, ids),
+      ),
+    );
+  // Ordered by the published set rather than by name, so the picker's order is
+  // the admin's and does not shuffle when a product is renamed.
+  return ids.flatMap((id) => rows.filter((r) => r.id === id));
 }
 
 /** Vote counts by idea id. Counts rows and reads no voter identity. */
