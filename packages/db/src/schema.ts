@@ -1428,6 +1428,21 @@ export const ideas = pgTable(
     description: text("description"),
     /** Idea review stage key (see core DEFAULT_IDEA_STAGES). */
     status: text("status").notNull().default("new"),
+    /**
+     * Portal publication state, independent of `status`: `published`, `pending`
+     * (awaiting moderation) or `hidden` (withheld by an admin). Constrained by
+     * `ideas_portal_visibility_chk`.
+     *
+     * Separate from the review stage because the two are independent questions:
+     * an idea can be `under_review` internally and fine to show, or `planned`
+     * and deliberately withheld. `pending` and `hidden` are both invisible and
+     * are not the same thing, which is what makes a moderation queue possible:
+     * nobody has looked yet, versus somebody looked and said no.
+     *
+     * Defaults to `published`, which is the non-breaking direction rather than
+     * the unsafe one; migration 0012 explains why at length.
+     */
+    portalVisibility: text("portal_visibility").notNull().default("published"),
     /** Internal member who captured the idea, or null (external submissions). */
     authorId: uuid("author_id"),
     /** External (portal) submitter's name; null for internal captures. */
@@ -1454,6 +1469,12 @@ export const ideas = pgTable(
     index("ideas_ws_idx").on(t.workspaceId),
     index("ideas_ws_status_idx").on(t.workspaceId, t.status),
     index("ideas_product_idx").on(t.productId),
+    // The moderation queue's only query. Partial, because `pending` is the
+    // small interesting set and an index over all three states would be mostly
+    // a copy of `ideas_ws_idx`.
+    index("ideas_pending_moderation_idx")
+      .on(t.workspaceId)
+      .where(sql`${t.portalVisibility} = 'pending'`),
   ],
 );
 

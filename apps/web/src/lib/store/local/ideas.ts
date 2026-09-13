@@ -32,6 +32,7 @@ import {
   type IdeaSettings,
   type IdeaSettingsPatch,
   isPortalModeration,
+  type PortalVisibility,
   type StatusStageInput,
   type WorkspaceScope,
 } from "../types";
@@ -78,6 +79,12 @@ export async function createIdea(
     status: "new",
     productId,
     submitterName: null,
+    submitterEmail: null,
+    // An internal capture, which is all local mode can produce today. Internal
+    // captures are published by default even on a review-first workspace:
+    // moderation gates strangers writing to the board, not the team's own
+    // capture. Migration 0012 carries the reasoning.
+    portalVisibility: "published",
     promotedFeatureSpecId: null,
     voters: [],
     createdAt: new Date().toISOString(),
@@ -115,6 +122,9 @@ export async function updateIdea(
   }
   if (patch.productId !== undefined) {
     idea.productId = patch.productId ?? (await ctx.defaultProductId());
+  }
+  if (patch.portalVisibility !== undefined) {
+    idea.portalVisibility = patch.portalVisibility;
   }
   await writeIdeas(ctx, rows);
   const title = idea.promotedFeatureSpecId
@@ -348,6 +358,10 @@ function toIdeaRecord(
     title: row.title,
     description: row.description,
     status: row.status,
+    // A file written before 0012 has no such key, and those ideas were
+    // published under the product/stage rules alone, so that is what they stay.
+    portalVisibility: row.portalVisibility ?? "published",
+    isExternalSubmission: (row.submitterEmail ?? null) !== null,
     productId: row.productId,
     authorName: null,
     submitterName: row.submitterName,
@@ -381,6 +395,20 @@ interface LocalIdea {
   status: string;
   productId: string | null;
   submitterName: string | null;
+  /**
+   * External submitter's email, or null for an internal capture. Local mode has
+   * no portal intake yet, so this is always null today; it is here because
+   * `isExternalSubmission` is derived from it and the two modes must agree on
+   * what that means.
+   */
+  submitterEmail?: string | null;
+  /**
+   * Portal publication state. Optional, because the file on disk was written by
+   * whatever version the user last ran: an ideas file from before 0012 has no
+   * such key, and reading it must produce `published` (what those ideas already
+   * were) rather than `undefined` reaching the portal's checks.
+   */
+  portalVisibility?: PortalVisibility;
   /** Feature specId this idea was promoted into, or null. */
   promotedFeatureSpecId: string | null;
   /** User ids that voted; local mode has a single user (LOCAL_USER). */

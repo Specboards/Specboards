@@ -310,6 +310,13 @@ async function listLocalPortalIdeas(
     ideas: all
       .filter(
         (i) =>
+          // The moderation state, checked FIRST because it is the one term with
+          // no database behind it here. On the hosted path
+          // `specboards_portal_shows_idea` refuses a pending or hidden idea
+          // whatever this function does; local mode has no RLS, so this line is
+          // the only thing standing between a rejected submission and the
+          // preview a self-hoster is using to decide what their portal shows.
+          i.portalVisibility === "published" &&
           published.has(i.status) &&
           // An idea whose product was deleted has a null product id and is in
           // no published set, so it is not published. Mirrors the null handling

@@ -85,6 +85,13 @@
       "when": 1787610000000,
       "tag": "0011_portal_reads_stage_labels",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1787620000000,
+      "tag": "0012_idea_portal_visibility_state",
+      "breakpoints": true
     }
   ]
 }

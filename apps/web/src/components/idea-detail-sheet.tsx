@@ -9,6 +9,11 @@ import { toast } from "sonner";
 
 import type { IdeaStage } from "@specboards/core";
 
+import {
+  PortalStateBadge,
+  ProvenanceBadge,
+  provenanceLine,
+} from "@/components/idea-portal-state";
 import { IdeaStatusSelect } from "@/components/idea-status-select";
 import { Badge } from "@/components/ui/badge";
 import { Box, BoxHeader } from "@/components/ui/box";
@@ -29,7 +34,7 @@ import {
 } from "@/lib/api-client/ideas";
 import { redirectOnAuthExpiry } from "@/lib/auth-expiry";
 import { orgProductPath } from "@/lib/org-path";
-import type { IdeaRecord } from "@/lib/store/types";
+import type { IdeaRecord, PortalVisibility } from "@/lib/store/types";
 import { cn } from "@/lib/utils";
 import { useResetOnChange } from "@/lib/use-reset-on-change";
 
@@ -139,6 +144,28 @@ export function IdeaDetailSheet({
     });
   }
 
+  /**
+   * Publish, hold or withdraw this idea on the portal.
+   *
+   * The same `updateIdea` call as every other field, deliberately: it is one
+   * column on one row, authorised identically (write on the idea's product),
+   * and a moderator publishing something usually retitles or restages it in the
+   * same visit. A separate endpoint would have been a second thing to
+   * authorise and a second thing to keep in step.
+   */
+  function setVisibility(portalVisibility: PortalVisibility, done: string) {
+    startTransition(async () => {
+      try {
+        await updateIdea(current.id, { portalVisibility });
+        toast.success(done);
+        router.refresh();
+      } catch (err) {
+        if (redirectOnAuthExpiry(err, router)) return;
+        toast.error(err instanceof Error ? err.message : "Update failed.");
+      }
+    });
+  }
+
   function saveEdits() {
     const nextTitle = title.trim();
     if (!nextTitle) {
@@ -209,7 +236,7 @@ export function IdeaDetailSheet({
         `/backlog/${current.promotedFeatureSpecId}`,
       )
     : null;
-  const by = current.submitterName ?? current.authorName ?? null;
+  const by = provenanceLine(current);
 
   return (
     <Sheet open onOpenChange={(open) => !open && onClose()}>
@@ -252,6 +279,8 @@ export function IdeaDetailSheet({
                 {productName}
               </Badge>
             ) : null}
+            <ProvenanceBadge idea={current} />
+            <PortalStateBadge visibility={current.portalVisibility} />
           </div>
 
           {editing ? (
@@ -298,7 +327,9 @@ export function IdeaDetailSheet({
               </h2>
               <Box>
                 <BoxHeader className="flex-wrap gap-x-3 text-xs font-normal text-muted-foreground">
-                  {by ? <span>by {by}</span> : null}
+                  {/* A whole sentence from `provenanceLine`, not a bare name,
+                      so it carries no "by " prefix of its own. */}
+                  {by ? <span>{by}</span> : null}
                   <span>{formatDate(current.createdAt)}</span>
                 </BoxHeader>
                 <div className="px-4 py-3">
@@ -326,7 +357,41 @@ export function IdeaDetailSheet({
         </div>
 
         {canEdit && !editing ? (
-          <div className="flex items-center gap-2 border-t px-5 py-3">
+          <div className="flex flex-wrap items-center gap-2 border-t px-5 py-3">
+            {/* Moderation first, and only when there is a decision to take.
+                A pending submission is the one thing on this drawer somebody
+                is waiting on, so it leads; on an ordinary published idea these
+                collapse to a single quiet "Hide" so the common case is not a
+                row of portal controls nobody asked for. */}
+            {current.portalVisibility === "pending" ? (
+              <>
+                <Button
+                  size="sm"
+                  onClick={() => setVisibility("published", "Published")}
+                  disabled={pending}
+                >
+                  Publish
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setVisibility("hidden", "Rejected")}
+                  disabled={pending}
+                >
+                  Reject
+                </Button>
+              </>
+            ) : null}
+            {current.portalVisibility === "hidden" ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setVisibility("published", "Published")}
+                disabled={pending}
+              >
+                Publish
+              </Button>
+            ) : null}
             <Button size="sm" variant="outline" onClick={startEdit}>
               Edit
             </Button>
@@ -340,12 +405,29 @@ export function IdeaDetailSheet({
                 Promote
               </Button>
             ) : null}
+            {current.portalVisibility === "published" ? (
+              <Button
+                variant="link"
+                size="inline"
+                onClick={() => setVisibility("hidden", "Hidden from the portal")}
+                disabled={pending}
+                className="ml-auto text-xs font-normal text-muted-foreground underline-offset-2 hover:text-foreground"
+              >
+                Hide from portal
+              </Button>
+            ) : null}
             <Button
               variant="link"
               size="inline"
               onClick={remove}
               disabled={pending}
-              className="ml-auto text-xs font-normal text-muted-foreground underline-offset-2 hover:text-destructive"
+              className={cn(
+                "text-xs font-normal text-muted-foreground underline-offset-2 hover:text-destructive",
+                // Only claim the spacer when "Hide from portal" has not; two
+                // `ml-auto` siblings put a gap between them instead of pushing
+                // the pair right.
+                current.portalVisibility !== "published" && "ml-auto",
+              )}
             >
               Delete
             </Button>

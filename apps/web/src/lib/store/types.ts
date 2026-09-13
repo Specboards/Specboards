@@ -1196,6 +1196,26 @@ export function compareShippedReleases(
 }
 
 /** An idea / feature request as the UI consumes it. */
+/**
+ * Whether an idea appears on the public portal, independent of its review
+ * stage.
+ *
+ * `pending` and `hidden` are both invisible, and the difference between them is
+ * the moderation queue: nobody has looked at a `pending` submission yet, so it
+ * belongs in a list of work; somebody looked at a `hidden` one and said no, so
+ * it must not come back to that list. A boolean could not tell them apart, and
+ * the queue would either re-present rejects forever or lose the decision.
+ */
+export const PORTAL_VISIBILITY = ["published", "pending", "hidden"] as const;
+export type PortalVisibility = (typeof PORTAL_VISIBILITY)[number];
+
+export function isPortalVisibility(v: unknown): v is PortalVisibility {
+  return (
+    typeof v === "string" &&
+    (PORTAL_VISIBILITY as readonly string[]).includes(v)
+  );
+}
+
 export interface IdeaRecord {
   id: string;
   title: string;
@@ -1203,6 +1223,23 @@ export interface IdeaRecord {
   description: string | null;
   /** Idea review stage key (see core DEFAULT_IDEA_STAGES). */
   status: string;
+  /**
+   * Portal publication state, independent of `status`. Internal only: the
+   * public read model in `lib/portal/ideas.ts` projects nothing of this, since
+   * a visitor cannot see an idea that is not published and has no use for
+   * knowing one was withheld.
+   */
+  portalVisibility: PortalVisibility;
+  /**
+   * True when this arrived through the public portal rather than being
+   * captured by a member.
+   *
+   * Derived from the submitter columns rather than stored, so it cannot
+   * disagree with them. It is not the same question as "has a submitter name":
+   * a submitter may leave the name blank, and an idea with no name is still an
+   * external submission that a moderator should treat as one.
+   */
+  isExternalSubmission: boolean;
   /** Owning product id, or null when unassigned. */
   productId: string | null;
   /** Display name of the internal author, or null (external/portal submitter). */
@@ -1232,6 +1269,14 @@ export type IdeaPatch = Partial<{
   description: string | null;
   status: string;
   productId: string | null;
+  /**
+   * Publish, hold, or withdraw an idea on the portal. Deliberately part of the
+   * ordinary idea patch rather than its own endpoint: it is one column on one
+   * row, it is authorised exactly like a status change (write on the idea's
+   * product), and a moderator publishing something usually retitles or
+   * restages it in the same breath.
+   */
+  portalVisibility: PortalVisibility;
 }>;
 
 /**
