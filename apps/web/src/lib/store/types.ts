@@ -1262,6 +1262,24 @@ export interface IdeaInput {
   description?: string | null;
   /** Owning product; defaults to the workspace's default product when omitted. */
   productId?: string | null;
+  /**
+   * External submitter's name, when this is a portal submission. Optional
+   * because a visitor may leave it blank.
+   *
+   * Set only by the public intake (`api/portal/[org]/ideas`). An idea captured
+   * by a member leaves these null and carries an `authorId` instead: the two
+   * are mutually exclusive, and `isExternalSubmission` is derived from the
+   * email so nothing has to keep a separate flag in step.
+   */
+  submitterName?: string | null;
+  /** External submitter's verified-format email. See `submitterName`. */
+  submitterEmail?: string | null;
+  /**
+   * Portal publication state for a new idea. Omitted everywhere except the
+   * public intake, which sets `pending` under review-first moderation; the
+   * column's own default (`published`) is what an internal capture gets.
+   */
+  portalVisibility?: PortalVisibility;
 }
 
 export type IdeaPatch = Partial<{

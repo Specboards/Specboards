@@ -167,6 +167,31 @@ export const QUOTAS = {
   accessRequest: { op: "access-request", limit: 5, windowSec: 3600 },
   accessRequestEmail: { op: "access-request-email", limit: 3, windowSec: 86_400 },
   /**
+   * Public idea submissions on a customer's portal. Same pair as the access
+   * request above and for the same two reasons, but the exposure is not the
+   * same and the numbers reflect it.
+   *
+   * `access-request` is one form on OUR marketing site, filled in once by a
+   * prospect. This is a form on every customer's branded page, linked from
+   * wherever they choose to link it, and each accepted submission writes a row
+   * that shows up on their board. Volume from one person is a much stronger
+   * signal of abuse here: somebody with three good ideas has three good ideas,
+   * and somebody with twenty in an hour is a script.
+   *
+   * Per client caps one source flooding a board. Per email caps a botnet with
+   * many addresses of attack on one, which the per-client limit cannot see, and
+   * it is the tighter of the two because an address is the thing we actually
+   * verified rather than a header we inferred.
+   *
+   * Where `lib/client-ip.ts` cannot identify the caller, `rateLimitKey` puts
+   * every such request in one shared `unknown-client` bucket. That is blunt on
+   * a self-host with no proxy (one abuser throttles everyone), and it is the
+   * right failure: the alternative is trusting a forgeable header, which reads
+   * as a per-IP limit while providing none.
+   */
+  portalIdea: { op: "portal-idea", limit: 10, windowSec: 3600 },
+  portalIdeaEmail: { op: "portal-idea-email", limit: 5, windowSec: 86_400 },
+  /**
    * `/api/mcp`, counted per JSON-RPC call and keyed per credential (see
    * `lib/mcp/rpc.ts` `credentialKeyFor`), not per user: one runaway agent must
    * not be able to exhaust its owner's other connections.

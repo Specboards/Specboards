@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { IdeaList } from "@/components/portal/idea-list";
+import { IdeaSubmit } from "@/components/portal/idea-submit";
 import { PortalShell } from "@/components/portal/portal-shell";
-import { listPortalIdeas } from "@/lib/portal/ideas";
+import { listPortalIdeas, listPortalProducts } from "@/lib/portal/ideas";
 import { portalShowsIdeas, resolvePortal } from "@/lib/portal/resolve";
 
 /**
@@ -96,7 +97,10 @@ export default async function PortalIdeasPage({
     );
   }
 
-  const { ideas, stages } = await listPortalIdeas(portal);
+  const [{ ideas, stages }, products] = await Promise.all([
+    listPortalIdeas(portal),
+    listPortalProducts(portal),
+  ]);
 
   // A `?status=` naming a stage this portal does not publish is treated as no
   // filter at all, rather than as an empty result. The query string is
@@ -109,16 +113,22 @@ export default async function PortalIdeasPage({
 
   return (
     <PortalShell title={portal.title}>
-      <IdeaList
-        orgSlug={portal.orgSlug}
-        ideas={
-          activeStatus
-            ? ideas.filter((i) => i.status === activeStatus)
-            : ideas
-        }
-        stages={stages}
-        activeStatus={activeStatus}
-      />
+      <div className="space-y-6">
+        {/* Above the list, because suggesting is the action a visitor arrives
+            wanting to take, and below nothing, because reading what is already
+            there should come first and often replaces the suggestion. */}
+        <IdeaSubmit orgSlug={portal.orgSlug} products={products} />
+        <IdeaList
+          orgSlug={portal.orgSlug}
+          ideas={
+            activeStatus
+              ? ideas.filter((i) => i.status === activeStatus)
+              : ideas
+          }
+          stages={stages}
+          activeStatus={activeStatus}
+        />
+      </div>
     </PortalShell>
   );
 }

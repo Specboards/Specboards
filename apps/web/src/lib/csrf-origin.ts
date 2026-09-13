@@ -84,12 +84,25 @@ const MUTATING = new Set(["POST", "PUT", "PATCH", "DELETE"]);
  *   anybody could see. Listing the path makes the route's stated contract the
  *   actual one.
  */
-const EXEMPT_PREFIXES = [
+export const EXEMPT_PREFIXES = [
   "/api/auth/",
   "/api/webhooks/",
   "/api/mcp",
   "/api/access-request",
   "/api/unsubscribe",
+  // NOT here, deliberately: `/api/portal/`, the public portal's intake.
+  //
+  // It looks like it belongs in this list, being unauthenticated and posted to
+  // by people with no account, and that reading is what the original portal
+  // card assumed. It is wrong. The portal is served from `/{org}/ideas` on this
+  // same origin, so a submission or a vote carries an `Origin` that already
+  // matches and `originAllowed` accepts it with no help.
+  //
+  // Since those endpoints read no session, the check costs them nothing and is
+  // one more thing keeping a cross-site POST off them. An exemption that buys
+  // nothing is surface area. This list is exported so that
+  // `lib/portal/intake-csrf.test.ts` can assert the absence directly, rather
+  // than inferring it from `needsOriginCheck` returning true.
 ];
 
 /** Whether this request should be origin-checked at all. */
