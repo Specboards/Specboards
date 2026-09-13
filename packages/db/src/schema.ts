@@ -1460,8 +1460,12 @@ export const ideas = pgTable(
 /**
  * A vote on an idea (demand signal). One row per (idea, voter); the vote count
  * is derived by counting rows, mirroring how a release's item count is derived.
- * `userId` is an internal member for now; the public portal (a later phase)
- * will introduce an anonymous/external voter identity.
+ *
+ * A voter is either an internal member (`userId`) or an external portal visitor
+ * who confirmed an emailed magic link (`voterEmail`), never both and never
+ * neither: `idea_votes_one_identity_chk` enforces the XOR. Migration 0010
+ * carries the reasoning for storing the address in the clear, and for the two
+ * partial unique indexes below.
  */
 export const ideaVotes = pgTable(
   "idea_votes",
@@ -1473,13 +1477,33 @@ export const ideaVotes = pgTable(
     ideaId: uuid("idea_id")
       .notNull()
       .references(() => ideas.id, { onDelete: "cascade" }),
-    userId: uuid("user_id").notNull(),
+    /** Internal member who voted, or null for an external portal voter. */
+    userId: uuid("user_id"),
+    /**
+     * Verified email of an external portal voter; null for a member vote.
+     *
+     * Stored in the clear so voters can be told when their idea ships, which is
+     * the property magic-link voting was chosen to buy. Never projected by a
+     * public read model, and unreadable by the `specboards_portal` role, whose
+     * SELECT on this table is column-level and omits it (0010).
+     */
+    voterEmail: text("voter_email"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
   },
   (t) => [
-    unique("idea_votes_idea_user_uq").on(t.ideaId, t.userId),
+    // One partial index per identity kind, not one index over a nullable
+    // column: NULLs do not conflict in Postgres, so a single
+    // `unique (idea_id, user_id)` would accept unlimited anonymous votes while
+    // looking constrained. Callers must restate these predicates in ON CONFLICT
+    // (`targetWhere`), because a partial index does not match a bare target.
+    uniqueIndex("idea_votes_idea_user_uq")
+      .on(t.ideaId, t.userId)
+      .where(sql`${t.userId} is not null`),
+    uniqueIndex("idea_votes_idea_email_uq")
+      .on(t.ideaId, sql`lower(${t.voterEmail})`)
+      .where(sql`${t.voterEmail} is not null`),
     index("idea_votes_idea_idx").on(t.ideaId),
     index("idea_votes_ws_idx").on(t.workspaceId),
   ],

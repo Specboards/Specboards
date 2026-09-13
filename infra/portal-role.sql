@@ -65,10 +65,18 @@ select public.specboards_portal_apply_grants();
 
 -- What that grants, so this file is still readable on its own: USAGE on the
 -- schema, EXECUTE on the four publication predicates, and SELECT on exactly
--- workspaces, idea_settings, idea_portal_products, products, ideas,
--- idea_votes, releases and features. Anything not in that list is unreachable
--- by this role, so a portal query reaching for a table it has no business in
--- fails rather than returns.
+-- workspaces, idea_settings, idea_portal_products, products, ideas, releases
+-- and features. Anything not in that list is unreachable by this role, so a
+-- portal query reaching for a table it has no business in fails rather than
+-- returns.
+--
+-- `idea_votes` is granted too, but COLUMN-LEVEL: (id, workspace_id, idea_id,
+-- created_at) and deliberately not `voter_email`. Since migration 0010 that
+-- column holds a verified customer email address, and a table-wide grant would
+-- put one `select *` in a future read model between it and the internet. The
+-- RESTRICTIVE clamps bound which ROWS this role sees and say nothing about
+-- columns, so the bound on this one has to be the grant. The public views only
+-- ever count these rows.
 
 -- 3. Nothing else, and keep it that way.
 --

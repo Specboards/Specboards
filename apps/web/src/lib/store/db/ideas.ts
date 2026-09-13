@@ -41,6 +41,7 @@ import {
   ideaVotes,
   ideas,
   inArray,
+  isNotNull,
   products,
   users,
 } from "@specboards/db";
@@ -289,11 +290,27 @@ export async function voteIdea(
     const idea = await hydrateIdea(ctx, tx, scope!, id);
     if (!idea) throw new IdeaError(`Unknown idea: ${id}`);
     // Idempotent: the unique (idea, user) index makes a repeat vote a no-op.
+    //
+    // `targetWhere` is not optional decoration. Since 0010 that index is
+    // PARTIAL (`where user_id is not null`), because external portal voters
+    // share this table and a nullable column cannot be made unique on its own.
+    // Postgres matches ON CONFLICT to a partial index only when the statement
+    // restates the predicate, and raises "no unique or exclusion constraint
+    // matching the ON CONFLICT specification" otherwise. It does not quietly
+    // degrade to an unconstrained insert, so the failure is loud, but it is a
+    // failure of the ordinary member vote path rather than of anything to do
+    // with the portal.
     await tx
       .insert(ideaVotes)
       .values({ workspaceId: ws, ideaId: id, userId: scope!.userId })
       .onConflictDoNothing({
         target: [ideaVotes.ideaId, ideaVotes.userId],
+        // On `onConflictDoNothing` this `where` is the TARGET predicate (it
+        // renders inside `on conflict (...) where ...`), not a filter on the
+        // insert. `onConflictDoUpdate` splits the two as `targetWhere` and
+        // `setWhere`; this overload has only the one, so there is nothing to
+        // pick wrongly. Asserted in `db-idea-votes.test.ts`.
+        where: isNotNull(ideaVotes.userId),
       });
     const updated = await hydrateIdea(ctx, tx, scope!, id);
     if (!updated) throw new IdeaError(`Unknown idea: ${id}`);

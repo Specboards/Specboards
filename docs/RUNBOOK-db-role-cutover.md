@@ -233,6 +233,22 @@ on a public URL.
 submissions and votes are writes and go through their own intake path on a
 different connection.
 
+Seven of those eight are granted whole. `idea_votes` is granted by column,
+`(id, workspace_id, idea_id, created_at)` and not `voter_email`, because since
+migration `0010_idea_votes_anonymous.sql` that column holds the verified email
+address of an external voter. The `RESTRICTIVE` clamps below bound which *rows*
+this role sees and say nothing about columns, so a table-wide grant would leave
+one `select *` in a future read model standing between a customer email list and
+the internet. Naming the column, or filtering on it, fails with `permission
+denied` on this connection. Verifying it by hand:
+
+```sql
+set role specboards_portal;
+select count(*) from idea_votes;      -- works: the public views only count
+select voter_email from idea_votes;   -- ERROR: permission denied
+reset role;
+```
+
 Unlike `specboards_app`, new tables are **not** auto-granted: `infra/portal-role.sql`
 issues no blanket grant and sets no `ALTER DEFAULT PRIVILEGES`, so a table added
 by a later migration is unreachable until somebody grants it on purpose. That is
