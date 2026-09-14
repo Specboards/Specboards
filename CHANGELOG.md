@@ -117,6 +117,13 @@ submissions wait for review, and whether the roadmap is included at all.
 - **A portal page that renders inside the app's chrome.** Adding `/{org}/roadmap`
   needed `isPortalPath` in middleware to learn about it; without that the page
   works but runs the session queries the portal branch exists to skip.
+- **The public roadmap was blocked from crawling.** `robots.txt` disallowed
+  `/*/roadmap` for the internal roadmap at `/{org}/{product}/roadmap`, and `*`
+  spans slashes, so it also matched the new public `/{org}/roadmap`. That page
+  sets `index: true` in its own metadata, so the deployment was sending two
+  contradictory signals and the crawler obeys the file. The internal rule is
+  `/*/*/roadmap` now, and the end-to-end assertion names both public surfaces
+  rather than only `/ideas`.
 
 ## [1.2.0] - 2026-09-08
 
