@@ -90,6 +90,42 @@ worth acting on rather than a number anybody can inflate.
 voting is unavailable rather than accepting an address and silently dropping the
 message. See the mail settings in Settings -> Notifications.
 
+## Keeping people posted
+
+Submitters and voters hear when an idea they care about changes, because that is
+what their address was collected for. A portal that gathers addresses and then
+goes silent is the worst of both trades.
+
+**Who is told.** The person who submitted the idea, and everybody who voted for
+it. Somebody who did both is one person and gets one email.
+
+**When.** When what the *public page* says about the idea changes: a held
+submission is published, or the idea moves onto a different published stage.
+
+Deliberately **not** on every internal move. A change between two stages you do
+not publish is invisible to the reader, so it sends nothing; otherwise a triage
+pass would put three near-identical emails in somebody's inbox. Withdrawing an
+idea from the portal is silent too: "your idea was removed" reads as a rejection
+notice for what is usually a stage change, and it would link to a page they can
+no longer open.
+
+**What it says.** The stage's own label, but only ever one you publish. Those are
+the same words the portal already shows on the idea's page, so nothing internal
+leaks into an inbox.
+
+**Unsubscribing.** Every message carries its own one-click unsubscribe link and
+a `List-Unsubscribe` header, so mail clients offer their native control. The link
+never expires: mail sits in inboxes for years, and a link that answers "this has
+expired" is, to the person reading it, a refusal to stop emailing them.
+
+Unsubscribing is **per portal**. Asking one company to stop says nothing about
+another, so somebody active on several portals makes the decision separately for
+each. There is no way to resubscribe from the link, and voting or submitting
+again does not restart the mail.
+
+**Mail must be configured**, as with voting. Nothing is sent otherwise, and the
+relay logs that it dropped the message.
+
 ## The roadmap
 
 Releases and the work scheduled into them, in two sections: what is coming
@@ -116,6 +152,8 @@ short and fixed:
 - Any review stage you have not published, including its label.
 - Any idea that is awaiting review or hidden.
 - Any internal workflow stage name, anywhere.
+- Any submitter's or voter's address to anyone else: each notification goes to
+  one recipient, with an unsubscribe link that names only them.
 
 Two independent things enforce this. The read models select only the fields
 above, and the database connection the portal reads on carries row-level

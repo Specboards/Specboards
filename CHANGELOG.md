@@ -63,6 +63,19 @@ submissions wait for review, and whether the roadmap is included at all.
   or a mail gateway prefetch all count once. Migration 0010 makes anonymous
   votes representable (`user_id` nullable, `voter_email` added, two partial
   unique indexes so a member and an outsider can each vote once).
+- **Submitters and voters hear what happened.** When a held submission is
+  published, or an idea moves onto a different published stage, everybody who
+  submitted or voted for it gets one email. Migration 0014 adds
+  `portal_email_opt_outs`, keyed per workspace, because these recipients have no
+  account and `users.notification_email_opted_out_at` is a column on a row they
+  do not have. Every message carries its own one-click unsubscribe link and a
+  `List-Unsubscribe` header; that link never expires, for the reason the account
+  unsubscribe gives.
+
+  Deliberately **not** an email per internal move. A change between two stages
+  the workspace does not publish sends nothing, so a triage pass stays quiet,
+  and a withdrawal is silent rather than a rejection notice linking to a page
+  the reader can no longer open.
 - **A public roadmap** at `/{org}/roadmap`, gated by its own switch. Releases in
   two sections, shipped and upcoming, with the work scheduled into them. Items
   show a coarse phase (Planned / In progress / Shipped) mapped from your

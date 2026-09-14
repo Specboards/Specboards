@@ -4,11 +4,14 @@ import { createHmac, timingSafeEqual } from "node:crypto";
  * The token in a "confirm your vote" link, and the cookie that saves the next
  * visitor from needing one.
  *
- * Both are HMACs keyed from `BETTER_AUTH_SECRET`, following
+ * All three are HMACs keyed from `BETTER_AUTH_SECRET`, following
  * `lib/notifications/unsubscribe.ts`, and each mixes its OWN purpose label into
- * the signature so a token minted for one can never verify as the other or as
- * an unsubscribe. That matters more here than there, because there are now
- * three token kinds sharing one secret and the failure would be silent.
+ * the signature so a token minted for one can never verify as another. That
+ * matters more here than there, because four token kinds now share one secret
+ * (these three plus the account unsubscribe) and the failure would be silent.
+ *
+ * The third kind, the portal unsubscribe, is defined further down and takes the
+ * OPPOSITE decision on expiry to the vote token. Its own comment says why.
  *
  * ── Where this deliberately differs from the unsubscribe token ─────────────
  * That module explains at length why an unsubscribe link has NO expiry: mail
@@ -35,6 +38,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 
 const VOTE_PURPOSE = "specboards.portal-vote-confirm.v1";
 const VOTER_PURPOSE = "specboards.portal-voter-identity.v1";
+const UNSUB_PURPOSE = "specboards.portal-email-unsubscribe.v1";
 
 /** How long a confirmation link stays usable. */
 export const VOTE_TOKEN_TTL_MS = 30 * 60 * 1000;
@@ -163,6 +167,61 @@ function isVotePayload(v: unknown): v is VotePayload {
     typeof o.exp === "number" &&
     Number.isFinite(o.exp)
   );
+}
+
+/**
+ * Mint the token in a portal unsubscribe link, or null.
+ *
+ * ── This one has NO expiry, unlike the vote token above ────────────────────
+ * Which is the opposite call, made for the reason `unsubscribe.ts` gives about
+ * the token it mints: "an unsubscribe link has to work whenever it is found.
+ * Mail sits in an inbox for years, and a link that answers 'this has expired,
+ * please sign in' is, to the person reading it, a refusal to stop emailing
+ * them." A refused unsubscribe is what turns "unsubscribe me" into "mark as
+ * spam", which costs the whole deployment its sending reputation.
+ *
+ * The exposure that buys is bounded by what the token can do, which is add one
+ * row to `portal_email_opt_outs` for one address on one portal. Somebody
+ * holding a stranger's unsubscribe link can stop that person's mail and can do
+ * nothing else at all: they cannot read it, cannot vote with it, and cannot
+ * resubscribe anybody.
+ */
+export function mintPortalUnsubscribeToken(
+  workspaceId: string,
+  email: string,
+): string | null {
+  const key = secret();
+  if (!key) return null;
+  const encoded = Buffer.from(
+    JSON.stringify({ w: workspaceId, e: email }),
+    "utf8",
+  ).toString("base64url");
+  return `${encoded}.${sign(UNSUB_PURPOSE, encoded, key)}`;
+}
+
+/** The workspace and address an unsubscribe token names, or null. */
+export function readPortalUnsubscribeToken(
+  token: string,
+): { workspaceId: string; email: string } | null {
+  const key = secret();
+  if (!key) return null;
+
+  const cut = token.lastIndexOf(".");
+  if (cut <= 0) return null;
+  const encoded = token.slice(0, cut);
+  if (!signatureMatches(token.slice(cut + 1), sign(UNSUB_PURPOSE, encoded, key)))
+    return null;
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+  } catch {
+    return null;
+  }
+  if (typeof payload !== "object" || payload === null) return null;
+  const o = payload as Record<string, unknown>;
+  if (typeof o.w !== "string" || typeof o.e !== "string") return null;
+  return { workspaceId: o.w, email: o.e };
 }
 
 /**

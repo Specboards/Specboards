@@ -23,6 +23,12 @@ import {
   type PendingNotificationEmail,
 } from "@/lib/notifications/email";
 import { fanOutNotifications } from "@/lib/notifications/fanout";
+import {
+  buildPortalEmails,
+  portalRecipients,
+  sendPortalEmails,
+  type PendingPortalEmail,
+} from "@/lib/portal/notify";
 import type { WebhookEnvelope, WebhookEventType } from "@/lib/webhooks/types";
 
 /**
@@ -64,15 +70,22 @@ export async function relayOutbox(): Promise<void> {
     // would otherwise hold the outbox row locked for the whole timeout, and a
     // send that failed would roll back the in-app notification, which is the
     // delivery somebody is actually waiting on. See notifications/email.ts.
-    const pending = await db.transaction((tx) => expandOne(tx, id));
+    const { pending, portal } = await db.transaction((tx) => expandOne(tx, id));
     await sendNotificationEmails(db, pending);
+    // Sent outside the transaction for the same reason as the in-app mail: a
+    // relay that hung on an SMTP connection would otherwise hold the outbox row
+    // locked for the whole timeout.
+    await sendPortalEmails(portal);
   }
 }
 
 async function expandOne(
   tx: Tx,
   id: string,
-): Promise<PendingNotificationEmail[]> {
+): Promise<{
+  pending: PendingNotificationEmail[];
+  portal: PendingPortalEmail[];
+}> {
   // Re-claim under a row lock; skip if another relay took it or it's already done.
   const [ev] = await tx
     .select()
@@ -80,7 +93,7 @@ async function expandOne(
     .where(and(eq(outboxEvents.id, id), isNull(outboxEvents.processedAt)))
     .for("update", { skipLocked: true })
     .limit(1);
-  if (!ev) return [];
+  if (!ev) return { pending: [], portal: [] };
 
   const productMatch =
     ev.productId === null
@@ -143,20 +156,81 @@ async function expandOne(
     notices.filter((n) => n.channels.email),
   );
 
+  // Third consumer: the people outside the workspace.
+  //
+  // Same claimed event, same transaction, same `processedAt` stamp, so a
+  // submitter can no more be told twice than a member can. It reads a different
+  // set of tables and produces messages for addresses rather than users, which
+  // is why it is its own module rather than a branch inside the fan-out.
+  const portal = await buildPortalNotices(tx, ev);
+
   await tx
     .update(outboxEvents)
     .set({ processedAt: new Date() })
     .where(eq(outboxEvents.id, ev.id));
 
-  return pending;
+  return { pending, portal };
+}
+
+/**
+ * Messages for submitters and voters, when this event is one they care about.
+ *
+ * Never throws, for the reason `fanOutNotifications` gives about itself: a
+ * notification is a courtesy on top of a change that has already committed, and
+ * failing here would strand the webhook deliveries in the same event and retry
+ * the whole expansion forever.
+ */
+async function buildPortalNotices(
+  tx: Tx,
+  ev: {
+    type: string;
+    data: unknown;
+    workspaceId: string;
+  },
+): Promise<PendingPortalEmail[]> {
+  if (ev.type !== "portal_idea.state_changed") return [];
+  try {
+    const data = (ev.data ?? {}) as Record<string, unknown>;
+    const ideaId = typeof data.ideaId === "string" ? data.ideaId : null;
+    const title = typeof data.title === "string" ? data.title : null;
+    const phrase = typeof data.phrase === "string" ? data.phrase : null;
+    if (!ideaId || !title || !phrase) return [];
+
+    const ws = await loadWorkspace(tx, ev.workspaceId);
+    if (!ws) return [];
+
+    const recipients = await portalRecipients(tx, ev.workspaceId, ideaId);
+    if (recipients.length === 0) return [];
+
+    const origin = (
+      process.env.APP_URL ??
+      process.env.BETTER_AUTH_URL ??
+      ""
+    ).replace(/\/$/, "");
+    // No configured origin means no link worth sending. A message whose only
+    // content is an unresolvable URL is worse than silence.
+    if (!origin) return [];
+
+    return buildPortalEmails(
+      ev.workspaceId,
+      ws.name,
+      origin,
+      ws.slug,
+      { ideaId, title, phrase },
+      recipients,
+    );
+  } catch (err) {
+    console.error("[portal-notify] building portal notices failed:", err);
+    return [];
+  }
 }
 
 async function loadWorkspace(
   tx: Tx,
   workspaceId: string,
-): Promise<{ id: string; slug: string } | null> {
+): Promise<{ id: string; slug: string; name: string } | null> {
   const [row] = await tx
-    .select({ id: workspaces.id, slug: workspaces.slug })
+    .select({ id: workspaces.id, slug: workspaces.slug, name: workspaces.name })
     .from(workspaces)
     .where(eq(workspaces.id, workspaceId));
   return row ?? null;
