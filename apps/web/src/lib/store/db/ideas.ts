@@ -282,9 +282,110 @@ export async function updateIdea(
       .update(ideas)
       .set(set)
       .where(and(eq(ideas.id, id), eq(ideas.workspaceId, ws)));
+
+    // Tell the people outside the workspace, if this changed what they can see.
+    await emitPortalIdeaChange(ctx, tx, scope!, {
+      ideaId: id,
+      title: (set.title as string | undefined) ?? current.title,
+      productId: (set.productId as string | null | undefined) ?? current.productId,
+      before: {
+        status: current.status,
+        visibility: asPortalVisibility(current.portalVisibility),
+      },
+      after: {
+        status: (set.status as string | undefined) ?? current.status,
+        visibility:
+          (set.portalVisibility as PortalVisibility | undefined) ??
+          asPortalVisibility(current.portalVisibility),
+      },
+    });
+
     const idea = await hydrateIdea(ctx, tx, scope!, id);
     if (!idea) throw new IdeaError(`Unknown idea: ${id}`);
     return idea;
+  });
+}
+
+/**
+ * Emit an outbox event when an idea's PUBLIC appearance changes.
+ *
+ * ── Only public transitions, and that is the volume control ────────────────
+ * The card asked for a submitter to hear about every state change. Taken
+ * literally that means an email every time a triager nudges a card, several a
+ * week to somebody who suggested one thing, which is how a portal teaches its
+ * customers to filter it.
+ *
+ * The rule here is narrower and, I think, what "state change" actually means to
+ * the person receiving it: tell them when what the PUBLIC PAGE says about their
+ * idea changes. A move between two stages the workspace does not publish is
+ * invisible to them and produces nothing. A move onto a published stage, or a
+ * moderator publishing a held submission, is real news and produces one
+ * message.
+ *
+ * ── Why the phrase is computed HERE and not in the relay ───────────────────
+ * Because the wording needs the stage LABELS, which live in `idea_statuses`,
+ * and the relay runs as `specboards_worker`, which has no grant on that table
+ * and should not have one: it is the workspace's internal vocabulary. The event
+ * therefore carries words already fit to publish, and the relay never has to
+ * decide what to call anything.
+ *
+ * A move to an UNPUBLISHED stage is silent for the same reason. There is
+ * nothing public to point the reader at, and naming the stage would publish the
+ * internal label to exactly the audience it is kept from.
+ */
+async function emitPortalIdeaChange(
+  ctx: DbStoreContext,
+  tx: Tx,
+  scope: WorkspaceScope,
+  change: {
+    ideaId: string;
+    title: string;
+    productId: string | null;
+    before: { status: string; visibility: PortalVisibility };
+    after: { status: string; visibility: PortalVisibility };
+  },
+): Promise<void> {
+  const { before, after } = change;
+  if (before.status === after.status && before.visibility === after.visibility) {
+    return;
+  }
+
+  const settings = await getIdeaSettings(ctx, scope);
+  // A portal that is off, or publishes nothing, has no audience to inform.
+  if (!settings.portalEnabled) return;
+  if (change.productId === null) return;
+  if (!settings.portalProductIds.includes(change.productId)) return;
+
+  const published = (v: PortalVisibility, status: string) =>
+    v === "published" && settings.portalIdeaStatuses.includes(status);
+
+  const wasVisible = published(before.visibility, before.status);
+  const isVisible = published(after.visibility, after.status);
+
+  // Invisible before and after: nothing the reader could see has changed.
+  // This is the case that keeps a triage pass silent.
+  if (!wasVisible && !isVisible) return;
+
+  // Visible before and not now: withdrawn. Deliberately silent rather than
+  // "your idea was removed", which reads as a rejection notice for what is
+  // usually a stage change, and which we would be sending about a page the
+  // reader can no longer open.
+  if (wasVisible && !isVisible) return;
+
+  const stages = await ideaStagesIn(ctx, tx, scope.workspaceId);
+  const label =
+    stages.find((st) => st.key === after.status)?.label ?? after.status;
+
+  await ctx.writeOutbox(tx, scope, {
+    type: "portal_idea.state_changed",
+    productId: change.productId,
+    data: {
+      ideaId: change.ideaId,
+      title: change.title,
+      // Already public words. The stage is one the workspace publishes, so its
+      // label is a string the portal already shows on the idea's own page.
+      phrase: wasVisible ? `is now ${label}` : `is now public on the ideas page`,
+    },
   });
 }
 

@@ -2,8 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { unsubscribeToken } from "@/lib/notifications/unsubscribe";
 import {
+  mintPortalUnsubscribeToken,
   mintVoteToken,
   mintVoterCookie,
+  readPortalUnsubscribeToken,
   readVoteToken,
   readVoterCookie,
   VOTE_TOKEN_TTL_MS,
@@ -147,7 +149,53 @@ describe("the voter cookie", () => {
   });
 });
 
-describe("the three token kinds cannot be traded for each other", () => {
+describe("the portal unsubscribe token", () => {
+  let saved: string | undefined;
+
+  beforeEach(() => {
+    saved = process.env.BETTER_AUTH_SECRET;
+    process.env.BETTER_AUTH_SECRET = SECRET;
+  });
+  afterEach(() => {
+    if (saved === undefined) delete process.env.BETTER_AUTH_SECRET;
+    else process.env.BETTER_AUTH_SECRET = saved;
+  });
+
+  it("round-trips the workspace and the address", () => {
+    const t = mintPortalUnsubscribeToken(WS, "ada@example.com")!;
+    expect(readPortalUnsubscribeToken(t)).toEqual({
+      workspaceId: WS,
+      email: "ada@example.com",
+    });
+  });
+
+  it("does not expire, unlike the vote token", () => {
+    // The opposite call to `readVoteToken`, deliberately. Mail sits in an inbox
+    // for years, and a link that answers "this has expired" is, to the person
+    // reading it, a refusal to stop emailing them. There is no clock in this
+    // token to advance, so the assertion is that the payload carries none.
+    const t = mintPortalUnsubscribeToken(WS, "ada@example.com")!;
+    const payload = JSON.parse(
+      Buffer.from(t.split(".")[0]!, "base64url").toString("utf8"),
+    );
+    expect(Object.keys(payload).sort()).toEqual(["e", "w"]);
+  });
+
+  it("refuses a tampered address", () => {
+    // Unsubscribing somebody else is the whole attack on this token, and it is
+    // a nuisance rather than a disclosure, which is why the token has no expiry
+    // and why it can do nothing but add one row.
+    const t = mintPortalUnsubscribeToken(WS, "ada@example.com")!;
+    const sig = t.slice(t.lastIndexOf(".") + 1);
+    const forged = Buffer.from(
+      JSON.stringify({ w: WS, e: "victim@example.com" }),
+      "utf8",
+    ).toString("base64url");
+    expect(readPortalUnsubscribeToken(`${forged}.${sig}`)).toBeNull();
+  });
+});
+
+describe("the four token kinds cannot be traded for each other", () => {
   let saved: string | undefined;
 
   beforeEach(() => {
@@ -173,6 +221,22 @@ describe("the three token kinds cannot be traded for each other", () => {
     expect(readVoteToken(cookie)).toBeNull();
   });
 
+  it("keeps a portal unsubscribe token from voting", () => {
+    // The one that would matter most: an unsubscribe link has no expiry and
+    // goes to everybody, so a token that could be replayed as a vote or as an
+    // identity would be the longest-lived credential in the product.
+    const unsub = mintPortalUnsubscribeToken(WS, "a@example.com")!;
+    expect(readVoteToken(unsub)).toBeNull();
+    expect(readVoterCookie(unsub, WS)).toBeNull();
+  });
+
+  it("keeps a vote token and a voter cookie from unsubscribing", () => {
+    const vote = mintVoteToken({ ideaId: IDEA, email: "a@example.com" })!;
+    const cookie = mintVoterCookie(WS, "a@example.com")!;
+    expect(readPortalUnsubscribeToken(vote)).toBeNull();
+    expect(readPortalUnsubscribeToken(cookie)).toBeNull();
+  });
+
   it("keeps an unsubscribe token out of both", () => {
     // The token kind that existed first, and the one whose module warned that
     // the purpose label is there so "a token minted here can never verify
@@ -180,5 +244,6 @@ describe("the three token kinds cannot be traded for each other", () => {
     const unsub = unsubscribeToken("some-user-id")!;
     expect(readVoteToken(unsub)).toBeNull();
     expect(readVoterCookie(unsub, WS)).toBeNull();
+    expect(readPortalUnsubscribeToken(unsub)).toBeNull();
   });
 });

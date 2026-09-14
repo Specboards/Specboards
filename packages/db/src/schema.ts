@@ -1531,6 +1531,40 @@ export const ideaVotes = pgTable(
 );
 
 /**
+ * An address that has asked one workspace's portal to stop emailing it.
+ *
+ * Keyed per workspace on purpose: unsubscribing from one customer's portal says
+ * nothing about another's, and an unsubscribe link in Acme's mail that muted a
+ * third party would be the wrong reading of what the person clicked.
+ *
+ * Not a column on `ideas` and not `users.notification_email_opted_out_at`: an
+ * opt-out is a statement about a PERSON, these people have no user row, and the
+ * same address may have submitted one idea and voted on nine. See 0014.
+ */
+export const portalEmailOptOuts = pgTable(
+  "portal_email_opt_outs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    email: text("email").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    // Case-folded, same reasoning as `idea_votes_idea_email_uq`: an address is
+    // one person however they capitalised it, and unique so that clicking the
+    // link twice is idempotent.
+    uniqueIndex("portal_email_opt_outs_ws_email_uq").on(
+      t.workspaceId,
+      sql`lower(${t.email})`,
+    ),
+  ],
+);
+
+/**
  * An admin-defined idea review stage (Settings -> Ideas). The ordered set of
  * stages an idea moves through during triage. `key` is the stable slug stored
  * in `ideas.status`; `label` is the editable display name. When a workspace has

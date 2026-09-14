@@ -127,6 +127,17 @@ grant select, insert, update             on item_watchers to specboards_worker;
 -- migration 0007.
 grant select                            on product_members    to specboards_worker;
 
+-- Portal mail: the relay tells submitters and voters when an idea they care
+-- about changes state. Also granted in migration 0014.
+--
+-- `idea_votes` includes `voter_email`, which the PORTAL role deliberately
+-- cannot read (column-level grant, migration 0010). The relay is the one place
+-- that has to: it is the address the message goes to. Narrow and on purpose,
+-- not a relaxation of that decision.
+grant select                            on ideas                 to specboards_worker;
+grant select                            on idea_votes            to specboards_worker;
+grant select                            on portal_email_opt_outs to specboards_worker;
+
 -- Read-only context both paths need to build envelopes / resolve scope.
 grant select                            on workspaces         to specboards_worker;
 grant select                            on users              to specboards_worker; -- no RLS
@@ -148,12 +159,32 @@ declare
     'members', 'notification_defaults', 'notification_preferences',
     'item_watchers', 'product_members'
   ];
+  -- Read-only surface, kept out of the FOR ALL loop above.
+  --
+  -- Everything in `worker_tables` gets a `FOR ALL` policy, bounded by the fact
+  -- that the role holds no write grant on most of them. These three are given a
+  -- `FOR SELECT` policy instead so the two statements agree: the relay reads a
+  -- submitter's address and an opt-out decision, and records neither.
+  --
+  -- Matching the policy names migration 0014 creates, so a database that ran
+  -- the migration and a database that ran this file converge rather than
+  -- carrying two policies each.
+  worker_read_tables text[] := array[
+    'ideas', 'idea_votes', 'portal_email_opt_outs'
+  ];
 begin
   foreach t in array worker_tables loop
     execute format('drop policy if exists %I on %I', t || '_worker_all', t);
     execute format(
       'create policy %I on %I for all to specboards_worker using (true) with check (true)',
       t || '_worker_all', t
+    );
+  end loop;
+  foreach t in array worker_read_tables loop
+    execute format('drop policy if exists %I on %I', t || '_worker_read', t);
+    execute format(
+      'create policy %I on %I for select to specboards_worker using (true)',
+      t || '_worker_read', t
     );
   end loop;
 end $$;

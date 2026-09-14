@@ -48,7 +48,7 @@ export const dynamic = "force-dynamic";
 
 type Params = {
   params: Promise<{ org: string }>;
-  searchParams: Promise<{ status?: string; voted?: string }>;
+  searchParams: Promise<{ status?: string; voted?: string; unsubscribed?: string }>;
 };
 
 export async function generateMetadata({
@@ -115,6 +115,16 @@ export default async function PortalIdeasPage({
   return (
     <PortalShell title={portal.title}>
       <div className="space-y-6">
+        {search.unsubscribed ? (
+          <p className="rounded-md border border-dashed px-4 py-3 text-sm text-muted-foreground">
+            {search.unsubscribed === "1"
+              ? "You will not receive any more email about ideas on this portal. Voting or submitting again will not restart it."
+              : search.unsubscribed === "failed"
+                ? "We could not record that just now. Please try the link again, or reply to the email you received."
+                : "That unsubscribe link is not valid. If you are still receiving email you did not ask for, reply to the message and we will stop it."}
+          </p>
+        ) : null}
+
         {/* The two vote outcomes that have no idea page to land on: a token
             that did not verify, and an idea that stopped being public between
             the mail going out and the link being opened. */}
