@@ -80,6 +80,9 @@ grant select, insert                    on notifications      to specboards_work
 -- for them, and the notice has to say what. Select only: the relay describes a
 -- proposal and never decides about one. Also granted in migration 0015.
 grant select                            on proposals          to specboards_worker;
+-- Telling an item's watchers that an agent finished means reading the run that
+-- finished. Select only, same bargain as `proposals`. Also granted in 0016.
+grant select                            on agent_runs         to specboards_worker;
 -- Sync canonicalises a spec's tags against the workspace registry and creates
 -- any that are new (see `resolveTags`), so ingestion inserts here. Select and
 -- insert only: the worker never renames or retires a tag. Also granted by the
@@ -170,11 +173,11 @@ declare
   -- `FOR SELECT` policy instead so the two statements agree: the relay reads a
   -- submitter's address and an opt-out decision, and records neither.
   --
--- Matching the policy names migrations 0014 and 0015 create, so a database
+-- Matching the policy names migrations 0014, 0015 and 0016 create, so a database
   -- that ran the migration and a database that ran this file converge rather
   -- than carrying two policies each.
   worker_read_tables text[] := array[
-    'ideas', 'idea_votes', 'portal_email_opt_outs', 'proposals'
+    'ideas', 'idea_votes', 'portal_email_opt_outs', 'proposals', 'agent_runs'
   ];
 begin
   foreach t in array worker_tables loop

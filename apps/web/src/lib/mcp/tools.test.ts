@@ -13,8 +13,16 @@ import { TOOLS } from "./tools";
  * typo.
  */
 
-/** Verbs that mutate. Everything else must be a read. */
-const MUTATING = /^(create|update|delete|link|unlink|rollover)_/;
+/**
+ * Verbs that mutate. Everything else must be a read.
+ *
+ * `report_` is here because a run report writes a row: the agent is not
+ * changing anything a person authored, but it is changing state, and `write`
+ * is what the RPC layer checks before letting a read-only credential through.
+ * A tool that writes and does not say so is the hole this guard exists for,
+ * regardless of how harmless what it writes happens to be.
+ */
+const MUTATING = /^(create|update|delete|link|unlink|rollover|report)_/;
 
 describe("the tool registry", () => {
   it("has no duplicate names", () => {
@@ -97,6 +105,9 @@ describe("the tool registry", () => {
       create_doc: "docs:write",
       update_doc: "docs:write",
       delete_doc: "docs:write",
+      // Its own resource, and the cheapest thing a workspace can grant an
+      // agent: it may say what it is doing and change nothing else.
+      report_run: "runs:write",
     };
     const actual = Object.fromEntries(
       TOOLS.map((t) => [t.name, `${t.scope.resource}:${t.scope.action}`]),

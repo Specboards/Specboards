@@ -57,6 +57,7 @@ import { reconcileLinkedPullRequestState } from "@/lib/pr-state-refresh";
 import { getStore, type GithubLink } from "@/lib/store";
 
 import { DOC_TOOLS } from "./doc-tools";
+import { RUN_TOOLS } from "./run-tools";
 import {
   McpToolError,
   optionalLimit,
@@ -1914,4 +1915,6 @@ export const TOOLS: McpTool[] = [
   },
   // Strategy / Research / Architecture: the narrative plan the work delivers.
   ...DOC_TOOLS,
+  // An agent saying what it is doing, so a person can watch and intervene.
+  ...RUN_TOOLS,
 ];

@@ -37,6 +37,9 @@ export const SCOPE_GROUPS: ScopeGroup[] = [
       // the "Author specs" preset below: an agent being granted these scopes is
       // already a model, and does not need a second one billed to the customer.
       { resource: "assistant", label: "Assistant (spends model credit)" },
+      // Deliberately above the editing scopes in the list: reporting work is
+      // the thing you grant an agent first, and it costs nothing.
+      { resource: "runs", label: "Agent runs (report progress)" },
       { resource: "statuses", label: "Stages" },
       { resource: "stage-gates", label: "Stage gates" },
       { resource: "properties", label: "Custom properties" },

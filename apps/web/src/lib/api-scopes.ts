@@ -48,6 +48,15 @@ export const SCOPE_RESOURCES = [
   // key granted `features:write` cannot also spend the workspace's inference
   // budget. See the note on the route.
   "assistant",
+  // Agent runs: the record that an agent is working on something, what it has
+  // done, and whether somebody has asked it to stop.
+  //
+  // Separate from `features` on purpose, and this is the separation worth
+  // having: an agent granted `runs:write` can say what it is doing and can
+  // change nothing. Folding it into `features:write` would mean the only way
+  // to let an agent report progress was to let it rewrite the board, which is
+  // the opposite of the default anybody wants.
+  "runs",
   // Separate from `assistant` for the same shape of reason `assistant` is
   // separate from `features`: a key that may ask questions must not also be able
   // to rewrite the standing instructions every future question is asked under.

@@ -2981,6 +2981,73 @@ export const assistantMessages = pgTable(
 );
 
 /**
+ * One attempt by one agent at one target.
+ *
+ * The object that says "an agent is working on this", so a person can see it
+ * happening, read what it did, and stop it. Before this a connected agent was
+ * a sequence of tool calls and nothing else.
+ *
+ * `status` is about the RUN, not about what it produced. The card that asked
+ * for this listed `proposed` / `applied` / `dismissed` too, but those are the
+ * proposal's lifecycle (see {@link proposals}); carrying them here as well
+ * would be two rows to keep in step. What a run produced is a proposal
+ * pointing back at it, and "this run's work landed" is a join.
+ *
+ * Cost is not a column. A native run's calls carry `runId` on their
+ * {@link modelUsageEvents} rows, so its cost is a sum over the same table the
+ * spend cap reads. A connected agent spending its own key reports nothing we
+ * could verify, so nothing is stored: an unverifiable figure beside a real one
+ * makes both untrustworthy.
+ *
+ * CHECK constraints live in migration 0016, as every other table's do.
+ */
+export const agentRuns = pgTable(
+  "agent_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    /** Routing snapshot for listing; not the authorization. */
+    productId: uuid("product_id").references(() => products.id, {
+      onDelete: "cascade",
+    }),
+    /** feature | release | doc_space. */
+    targetType: text("target_type").notNull(),
+    targetId: uuid("target_id").notNull(),
+    /** The service-account member doing the work; snapshot, no FK. */
+    agentId: uuid("agent_id"),
+    /** user | agent | api_key | system. */
+    actorType: text("actor_type").notNull(),
+    /** assignment | mention | schedule | event | manual. */
+    trigger: text("trigger").notNull(),
+    /** queued | running | awaiting_input | succeeded | failed | cancelled. */
+    status: text("status").notNull().default("queued"),
+    /** The agent's own one-line account of what it is doing. */
+    summary: text("summary"),
+    /** Why it failed, written for a person to read. */
+    error: text("error"),
+    /** A person's note to the agent, handed over on its next report. */
+    steer: text("steer"),
+    /** What it did, a step at a time. Capped in the service. */
+    trace: jsonb("trace").notNull().default([]),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("agent_runs_target_idx").on(t.targetType, t.targetId, t.createdAt),
+    index("agent_runs_ws_idx").on(t.workspaceId, t.createdAt),
+    index("agent_runs_active_idx").on(t.workspaceId, t.status),
+  ],
+);
+
+/**
  * A change an agent or the assistant has suggested, waiting for a human.
  *
  * Replaces the `proposal_*` columns on {@link assistantMessages}, which could
@@ -3020,8 +3087,14 @@ export const proposals = pgTable(
       () => assistantMessages.id,
       { onDelete: "cascade" },
     ),
-    /** The run that produced it. No FK until `agent_runs` exists. */
-    runId: uuid("run_id"),
+    /**
+     * The run that produced it. `cascade` rather than `set null` because
+     * `proposals_origin_source_ck` requires a run-origin proposal to have a
+     * run: nulling it would leave a row the check refuses.
+     */
+    runId: uuid("run_id").references(() => agentRuns.id, {
+      onDelete: "cascade",
+    }),
     /** Who drafted it; snapshot, no FK, as `outboxEvents` does. */
     actorId: uuid("actor_id"),
     /** user | agent | api_key | system. */
@@ -3156,6 +3229,13 @@ export const modelUsageEvents = pgTable(
     outcome: text("outcome").notNull(),
     /** The adapter's `ModelErrorKind`, when `outcome` is `error`. */
     errorKind: text("error_kind"),
+    /**
+     * The agent run this call belongs to, for a native run's cost roll-up.
+     * Null for an ordinary assistant turn, which belongs to no run.
+     */
+    runId: uuid("run_id").references(() => agentRuns.id, {
+      onDelete: "set null",
+    }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
