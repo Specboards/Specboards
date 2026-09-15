@@ -1,4 +1,13 @@
-import { and, agentRuns, eq, inArray, desc, type Database } from "@specboards/db";
+import {
+  and,
+  agentRuns,
+  desc,
+  eq,
+  inArray,
+  modelUsageEvents,
+  sql,
+  type Database,
+} from "@specboards/db";
 
 import { asUser } from "@/lib/db-scope";
 import type { WorkspaceScope } from "@/lib/store/types";
@@ -229,4 +238,51 @@ export async function listRunsForTarget(
       .orderBy(desc(agentRuns.createdAt)),
   );
   return rows.map(toRow);
+}
+
+/** What a run spent, when we were the ones spending it. */
+export interface RunTokens {
+  prompt: number;
+  completion: number;
+}
+
+/**
+ * Token totals per run, for the runs we actually billed.
+ *
+ * Summed from `model_usage_events` rather than counted onto the run as it
+ * goes, so the number on the card is the same one the spend cap and the usage
+ * ledger read. A second tally kept alongside them would eventually disagree
+ * with both, and the disagreement would surface as a billing question.
+ *
+ * A run with no rows is absent from the map, not zero. A connected agent
+ * spending its own key produces no usage events, and reporting that as "0
+ * tokens" would claim we know it was free.
+ */
+export async function tokensForRuns(
+  db: Database,
+  scope: WorkspaceScope,
+  runIds: string[],
+): Promise<Map<string, RunTokens>> {
+  if (runIds.length === 0) return new Map();
+  const rows = await asUser(db, scope.userId, (tx) =>
+    tx
+      .select({
+        runId: modelUsageEvents.runId,
+        prompt: sql<number>`coalesce(sum(${modelUsageEvents.promptTokens}), 0)::int`,
+        completion: sql<number>`coalesce(sum(${modelUsageEvents.completionTokens}), 0)::int`,
+      })
+      .from(modelUsageEvents)
+      .where(
+        and(
+          eq(modelUsageEvents.workspaceId, scope.workspaceId),
+          inArray(modelUsageEvents.runId, runIds),
+        ),
+      )
+      .groupBy(modelUsageEvents.runId),
+  );
+  const out = new Map<string, RunTokens>();
+  for (const r of rows) {
+    if (r.runId) out.set(r.runId, { prompt: r.prompt, completion: r.completion });
+  }
+  return out;
 }

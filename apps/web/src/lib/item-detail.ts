@@ -11,7 +11,9 @@ import {
 } from "@specboards/core";
 
 import { ALL_PRODUCTS } from "@/lib/active-product";
-import { getDb } from "@/lib/db";
+import type { RunView } from "@/lib/api-client/runs";
+import { getAppDb, getDb } from "@/lib/db";
+import { listRunsForItem, type RunWithTokens } from "@/lib/runs/service";
 import {
   listLinkableRepos,
   type LinkableRepo,
@@ -135,6 +137,16 @@ export interface ItemDetailData {
    * the control is not offered rather than being offered and inert.
    */
   watch: ItemWatchState | null;
+  /**
+   * What agents have done to this item, newest first. Empty when none ever
+   * has, which is most items.
+   *
+   * Loaded with the page rather than fetched when a section opens, unlike the
+   * change history: a run in flight is something the reader needs to SEE on
+   * arrival, not something they have to go looking for. An item nobody has
+   * pointed an agent at pays one indexed query that returns nothing.
+   */
+  runs: RunView[];
   /** Built-in field keys available at this level; null = all. */
   availableFields: string[] | null;
   /** The workspace's tag registry, offered by the item's tag picker. */
@@ -172,6 +184,31 @@ export interface ItemDetailData {
  * isn't visible to the caller. Mirrors what the item page assembles inline so
  * the flyout can render identical content from one round-trip.
  */
+/**
+ * A run as the browser receives it: timestamps as strings.
+ *
+ * Spelled out rather than spread, so a column added to the row does not
+ * silently start crossing to the client. The trace in particular is agent-
+ * written text and everything in it is here on purpose.
+ */
+function runView(run: RunWithTokens): RunView {
+  return {
+    id: run.id,
+    status: run.status,
+    trigger: run.trigger,
+    summary: run.summary,
+    error: run.error,
+    steer: run.steer,
+    trace: run.trace,
+    agentId: run.agentId,
+    actorType: run.actorType,
+    startedAt: run.startedAt?.toISOString() ?? null,
+    finishedAt: run.finishedAt?.toISOString() ?? null,
+    createdAt: run.createdAt.toISOString(),
+    tokens: run.tokens,
+  };
+}
+
 export async function getItemDetailData(
   specId: string,
   access: ItemDetailAccess,
@@ -307,6 +344,15 @@ export async function getItemDetailData(
   // not something the reader asks for.
   const watch = access ? await store.listWatchers(feature.specId, access) : null;
 
+  // Runs need the RLS-enforced connection and an acting user, so local file
+  // mode has none: there is no database for a run to live in, which is the
+  // same reason `report_run` refuses there.
+  const runDb = getAppDb();
+  const runs =
+    access && runDb
+      ? await listRunsForItem(runDb, access, feature.specId)
+      : [];
+
   const specTemplates = canCreateChildSpec
     ? await store.listDetailTemplates(access ?? undefined, feature.productId)
     : [];
@@ -332,6 +378,7 @@ export async function getItemDetailData(
     canCreateChildSpec,
     currentUserId: access?.userId ?? null,
     watch,
+    runs: runs.map(runView),
     availableFields,
     tags: tags.map((t) => t.name),
     levelLabel,

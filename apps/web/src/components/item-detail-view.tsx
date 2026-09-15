@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useState } from "react";
 import ReactMarkdown from "react-markdown";
 
+import { AgentRuns } from "@/components/agent-runs";
 import { AssistantPanel } from "@/components/assistant-panel";
 import { ConvertItemDialog } from "@/components/convert-item-dialog";
 import { CreateSpecButton } from "@/components/create-spec-button";
@@ -40,6 +41,11 @@ import { useResetOnChange } from "@/lib/use-reset-on-change";
  * Both the full item page and the resizable flyout render this, so the two
  * views are identical by construction.
  */
+/** Run statuses that mean something is still happening. Mirrors the server's
+ * `ACTIVE` set; duplicated rather than imported because the view holds the
+ * wire shape, where status is a plain string. */
+const ACTIVE_RUN = new Set(["queued", "running", "awaiting_input"]);
+
 export function ItemDetailView({
   data,
   variant,
@@ -233,6 +239,31 @@ export function ItemDetailView({
           initial={data.watch}
           hasChildren={feature.children.length > 0}
         />
+      ) : null}
+
+      {/* Above the body, for the same reason watching is: "is something
+          already happening to this?" is answered on arrival, not after
+          scrolling past the description.
+
+          Absent entirely when no agent has ever touched the item, which is
+          most of them: a permanently empty "Agent runs" heading on every card
+          is the noise the reveal-when-there-is-something rule exists to stop.
+
+          Open by default only while something is live. Once every run has
+          finished this is history, and history belongs collapsed next to the
+          change log rather than competing with the definition. */}
+      {data.runs.length > 0 ? (
+        <DetailSection
+          id="runs"
+          title="Agent runs"
+          defaultCollapsed={!data.runs.some((r) => ACTIVE_RUN.has(r.status))}
+        >
+          <AgentRuns
+            runs={data.runs}
+            members={data.members}
+            canEdit={data.canEdit}
+          />
+        </DetailSection>
       ) : null}
 
       {/* Description / body */}

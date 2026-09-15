@@ -21,7 +21,9 @@ import {
   getRun,
   listRunsForTarget,
   patchRun,
+  tokensForRuns,
   type RunRow,
+  type RunTokens,
 } from "./store";
 
 /**
@@ -237,6 +239,16 @@ export async function cancelRun(
   return cancelIfActive(db, scope, runId);
 }
 
+/** A run as the item card shows it. */
+export type RunWithTokens = RunRow & {
+  /**
+   * What it spent, or null when we did not do the spending. Null and zero are
+   * different answers here: a connected agent on its own key produces no
+   * usage events, and showing "0" would claim we know it was free.
+   */
+  tokens: RunTokens | null;
+};
+
 /**
  * Every run against one item, newest first, for its card.
  *
@@ -247,7 +259,15 @@ export async function listRunsForItem(
   db: Database,
   scope: WorkspaceScope,
   specId: string,
-): Promise<RunRow[]> {
+): Promise<RunWithTokens[]> {
   const { featureId } = await resolveItem(db, scope, specId);
-  return listRunsForTarget(db, scope, "feature", featureId);
+  const runs = await listRunsForTarget(db, scope, "feature", featureId);
+  // One grouped query for the whole list rather than one per run: an item
+  // with a long run history would otherwise be a query per row.
+  const tokens = await tokensForRuns(
+    db,
+    scope,
+    runs.map((r) => r.id),
+  );
+  return runs.map((r) => ({ ...r, tokens: tokens.get(r.id) ?? null }));
 }
