@@ -3,7 +3,7 @@ import { type Database } from "@specboards/db";
 import type { WorkspaceScope } from "@/lib/store/types";
 
 import { ProposalNotFoundError, ProposalSettledError } from "./errors";
-import { handlerFor, type ApplyOutcome } from "./handlers";
+import { handlerFor, type ApplyOutcome, type ApplyOverride } from "./handlers";
 import {
   claim,
   getProposal,
@@ -12,7 +12,7 @@ import {
   resolverName,
   type ProposalRow,
 } from "./store";
-import { consequencesOf, parseItemMetadata, type ProposalStatus } from "./types";
+import type { ProposalStatus } from "./types";
 
 /**
  * Deciding about a proposal.
@@ -34,7 +34,7 @@ import { consequencesOf, parseItemMetadata, type ProposalStatus } from "./types"
  * before step 3 is what stops a refusal needing to be un-claimed.
  */
 
-export interface ProposalDecision {
+interface ProposalDecision {
   id: string;
   status: ProposalStatus;
   resolvedAt: string;
@@ -71,12 +71,13 @@ export async function applyProposal(
   db: Database,
   scope: WorkspaceScope,
   id: string,
+  override?: ApplyOverride,
 ): Promise<ProposalDecision> {
   const row = await loadOpen(db, scope, id);
   const handler = handlerFor(row.kind);
 
   // Before the claim: every refusal in here leaves the proposal open.
-  const prepared = await handler.prepare(db, scope, row);
+  const prepared = await handler.prepare(db, scope, row, override);
 
   const claimed = await claim(db, scope, id, "applied");
   if (!claimed) {
@@ -128,22 +129,4 @@ export async function dismissProposal(
     resolvedAt: claimed.resolvedAt.toISOString(),
     outcome: {},
   };
-}
-
-/**
- * What a reviewer should be warned about before applying, if anything.
- *
- * Read off the payload rather than stored, so a proposal drafted before a
- * warning existed still gets it. Only metadata change sets have anything to
- * say today; the call is safe on every kind.
- */
-export function proposalConsequences(row: ProposalRow): string[] {
-  if (row.kind !== "item_metadata") return [];
-  try {
-    return consequencesOf(parseItemMetadata(row.payload));
-  } catch {
-    // An unreadable payload is the apply path's problem to report, with a
-    // proper error. Here it just means there is nothing to warn about.
-    return [];
-  }
 }

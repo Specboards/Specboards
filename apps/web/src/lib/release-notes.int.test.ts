@@ -510,7 +510,7 @@ describe.skipIf(!DB_URL)("drafting a release's notes", () => {
 
       const messageId = turns![1]!.id;
       const [row] = await sql<{ base: string | null }[]>`
-        select proposal_base_sha as base from assistant_messages where id = ${messageId}`;
+        select base_version as base from proposals where source_message_id = ${messageId}`;
       // The notes were empty when the prompt was built, so that is the base.
       // Recording the late edit here is the bug: it would make the check below
       // pass and the edit disappear.

@@ -3054,7 +3054,7 @@ export const proposals = pgTable(
     index("proposals_inbox_idx").on(t.workspaceId, t.status, t.createdAt),
     index("proposals_target_idx").on(t.targetType, t.targetId),
     index("proposals_run_idx").on(t.runId),
-    index("proposals_source_message_idx").on(t.sourceMessageId),
+    uniqueIndex("proposals_source_message_uq").on(t.sourceMessageId),
   ],
 );
 

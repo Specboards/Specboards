@@ -117,7 +117,7 @@ export function parseEvidence(raw: unknown): Evidence[] {
 }
 
 /** A whole replacement body for an item's description, a spec, or release notes. */
-export interface SpecContentPayload {
+interface SpecContentPayload {
   body: string;
 }
 

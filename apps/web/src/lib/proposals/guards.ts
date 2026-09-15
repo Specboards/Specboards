@@ -17,7 +17,7 @@ import { ProposalStaleError, ProposalTooLongError } from "./errors";
  */
 
 /** What the subject is called in the message a person reads. */
-export type GuardSubject = "item" | "release";
+type GuardSubject = "item" | "release";
 
 /**
  * Refuse an apply whose document could not have been sent to the model whole.

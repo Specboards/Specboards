@@ -1,15 +1,6 @@
-import {
-  and,
-  desc,
-  eq,
-  inArray,
-  isNull,
-  proposals,
-  users,
-  type Database,
-} from "@specboards/db";
+import { and, eq, proposals, users, type Database } from "@specboards/db";
 
-import { asUser } from "@/lib/db-scope";
+import { asUser, type ScopedTx } from "@/lib/db-scope";
 import type { WorkspaceScope } from "@/lib/store/types";
 
 import {
@@ -89,7 +80,7 @@ function toRow(r: Record<string, unknown>): ProposalRow {
   };
 }
 
-export interface CreateProposalInput {
+interface CreateProposalInput {
   workspaceId: string;
   productId: string | null;
   origin: ProposalOrigin;
@@ -103,38 +94,85 @@ export interface CreateProposalInput {
   payload: unknown;
   baseVersion: string | null;
   evidence?: Evidence[];
+  /**
+   * A decision the proposal arrives already carrying.
+   *
+   * Only for materialising a legacy `assistant_messages` proposal, which may
+   * have been accepted or rejected years before this table existed. A row
+   * created any other way starts `open`, and carrying the outcome across is
+   * what stops an already-accepted proposal becoming acceptable again.
+   */
+  status?: ProposalStatus;
+  resolvedBy?: string | null;
+  resolvedAt?: Date | null;
+  result?: unknown;
 }
 
-export async function createProposal(
+function values(input: CreateProposalInput) {
+  return {
+    workspaceId: input.workspaceId,
+    productId: input.productId,
+    origin: input.origin,
+    sourceMessageId: input.sourceMessageId ?? null,
+    runId: input.runId ?? null,
+    actorId: input.actorId,
+    actorType: input.actorType,
+    kind: input.kind,
+    targetType: input.targetType,
+    targetId: input.targetId,
+    payload: input.payload,
+    baseVersion: input.baseVersion,
+    evidence: input.evidence ?? [],
+    status: input.status ?? "open",
+    resolvedBy: input.resolvedBy ?? null,
+    resolvedAt: input.resolvedAt ?? null,
+    result: input.result ?? null,
+  };
+}
+
+/**
+ * Insert inside a transaction the caller already owns.
+ *
+ * Exists because a conversation proposal has to be written in the SAME
+ * transaction as the message it hangs off. A turn that recorded the answer but
+ * not its proposal would render an Accept button with nothing behind it, and
+ * the pair being atomic is the only thing that rules that out.
+ */
+export async function insertProposal(
+  tx: ScopedTx,
+  input: CreateProposalInput,
+): Promise<ProposalRow | null> {
+  const [row] = await tx
+    .insert(proposals)
+    .values(values(input))
+    // A message carries at most one proposal (`proposals_source_message_uq`).
+    // Losing the race is not an error: it means somebody else materialised the
+    // same legacy row a moment earlier, and the caller re-reads theirs.
+    .onConflictDoNothing()
+    .returning(COLUMNS);
+  return row ? toRow(row) : null;
+}
+
+
+/** The proposal attached to one conversation turn, if it has been recorded. */
+export async function getProposalBySourceMessage(
   db: Database,
   scope: WorkspaceScope,
-  input: CreateProposalInput,
-): Promise<ProposalRow> {
+  messageId: string,
+): Promise<ProposalRow | null> {
   const [row] = await asUser(db, scope.userId, (tx) =>
     tx
-      .insert(proposals)
-      .values({
-        workspaceId: input.workspaceId,
-        productId: input.productId,
-        origin: input.origin,
-        sourceMessageId: input.sourceMessageId ?? null,
-        runId: input.runId ?? null,
-        actorId: input.actorId,
-        actorType: input.actorType,
-        kind: input.kind,
-        targetType: input.targetType,
-        targetId: input.targetId,
-        payload: input.payload,
-        baseVersion: input.baseVersion,
-        evidence: input.evidence ?? [],
-      })
-      .returning(COLUMNS),
+      .select(COLUMNS)
+      .from(proposals)
+      .where(
+        and(
+          eq(proposals.workspaceId, scope.workspaceId),
+          eq(proposals.sourceMessageId, messageId),
+        ),
+      )
+      .limit(1),
   );
-  // The insert either returns its row or raised; a missing one means the
-  // schema and this file disagree about the columns, which is a bug to see
-  // rather than a null to thread through every caller.
-  if (!row) throw new Error("Proposal insert returned no row.");
-  return toRow(row);
+  return row ? toRow(row) : null;
 }
 
 /** One proposal, or null when it is gone or the caller cannot see its target. */
@@ -155,37 +193,6 @@ export async function getProposal(
   return row ? toRow(row) : null;
 }
 
-/**
- * The proposals attached to a set of conversation turns, keyed by message id.
- *
- * Batched rather than one query per turn: the panel renders a whole thread at
- * once, and asking per message is how a twenty-turn conversation becomes
- * twenty round trips.
- */
-export async function getProposalsForMessages(
-  db: Database,
-  scope: WorkspaceScope,
-  messageIds: string[],
-): Promise<Map<string, ProposalRow>> {
-  if (messageIds.length === 0) return new Map();
-  const rows = await asUser(db, scope.userId, (tx) =>
-    tx
-      .select(COLUMNS)
-      .from(proposals)
-      .where(
-        and(
-          eq(proposals.workspaceId, scope.workspaceId),
-          inArray(proposals.sourceMessageId, messageIds),
-        ),
-      ),
-  );
-  const out = new Map<string, ProposalRow>();
-  for (const r of rows) {
-    const row = toRow(r);
-    if (row.sourceMessageId) out.set(row.sourceMessageId, row);
-  }
-  return out;
-}
 
 /**
  * Take the decision, atomically, *before* anything is applied.
@@ -282,83 +289,5 @@ export async function resolverName(
   return row?.name ?? null;
 }
 
-/**
- * The review queue: open proposals nobody was watching arrive.
- *
- * Filtered to `origin = 'run'` on purpose. A conversation proposal is already
- * in front of the person who asked for it, and listing those here would fill a
- * shared queue with everybody's half-finished chats. Same object, same
- * lifecycle, different surface.
- *
- * Product scoping is the RLS policy's job, not a clause here: the policy
- * resolves each row's real target, which is the check that cannot be fooled by
- * a wrong `product_id`.
- */
-export async function listInbox(
-  db: Database,
-  scope: WorkspaceScope,
-  limit = 50,
-): Promise<ProposalRow[]> {
-  const rows = await asUser(db, scope.userId, (tx) =>
-    tx
-      .select(COLUMNS)
-      .from(proposals)
-      .where(
-        and(
-          eq(proposals.workspaceId, scope.workspaceId),
-          eq(proposals.origin, "run"),
-          eq(proposals.status, "open"),
-        ),
-      )
-      .orderBy(desc(proposals.createdAt))
-      .limit(limit),
-  );
-  return rows.map(toRow);
-}
 
-/** Everything proposed against one target, newest first, for its card. */
-export async function listForTarget(
-  db: Database,
-  scope: WorkspaceScope,
-  targetType: ProposalTargetType,
-  targetId: string,
-): Promise<ProposalRow[]> {
-  const rows = await asUser(db, scope.userId, (tx) =>
-    tx
-      .select(COLUMNS)
-      .from(proposals)
-      .where(
-        and(
-          eq(proposals.workspaceId, scope.workspaceId),
-          eq(proposals.targetType, targetType),
-          eq(proposals.targetId, targetId),
-        ),
-      )
-      .orderBy(desc(proposals.createdAt)),
-  );
-  return rows.map(toRow);
-}
 
-/** Open proposals against a target, for superseding them. */
-export async function openForTarget(
-  db: Database,
-  scope: WorkspaceScope,
-  targetType: ProposalTargetType,
-  targetId: string,
-): Promise<ProposalRow[]> {
-  const rows = await asUser(db, scope.userId, (tx) =>
-    tx
-      .select(COLUMNS)
-      .from(proposals)
-      .where(
-        and(
-          eq(proposals.workspaceId, scope.workspaceId),
-          eq(proposals.targetType, targetType),
-          eq(proposals.targetId, targetId),
-          eq(proposals.status, "open"),
-          isNull(proposals.resolvedAt),
-        ),
-      ),
-  );
-  return rows.map(toRow);
-}

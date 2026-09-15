@@ -23,7 +23,6 @@ import {
   assertNotStale,
   assertSentWhole,
   bodyFitsWhole,
-  metadataVersion,
   notesFitWhole,
 } from "./guards";
 import type { ProposalRow } from "./store";
@@ -71,7 +70,19 @@ export interface ApplyOutcome {
   mergedWith?: number;
 }
 
-export interface ProposalHandler {
+/**
+ * A reviewer's edit, applied on top of what was proposed.
+ *
+ * "Edit before accepting": the person read the diff, changed their mind about
+ * a line, and what lands is their text. It is still recorded as applied,
+ * because the question the record answers is "did a human decide this", and
+ * they did. The target's own history holds what actually landed.
+ */
+export interface ApplyOverride {
+  body?: string;
+}
+
+interface ProposalHandler {
   /**
    * Resolve the target, refuse anyone who may not change it, parse the
    * payload and run the guards. Throws on any refusal. Never writes.
@@ -80,6 +91,7 @@ export interface ProposalHandler {
     db: Database,
     scope: WorkspaceScope,
     row: ProposalRow,
+    override?: ApplyOverride,
   ): Promise<unknown>;
   /** Apply it. Only ever called after the claim succeeded. */
   apply(
@@ -170,8 +182,16 @@ interface PreparedSpecContent {
  * write path, which can three-way merge and only refuses a genuine overlap.
  */
 const specContent: ProposalHandler = {
-  async prepare(db, scope, row) {
-    const { body } = parseSpecContent(row.payload);
+  async prepare(db, scope, row, override) {
+    const proposed = parseSpecContent(row.payload).body;
+    const body = (override?.body ?? proposed).trim();
+    if (!body) {
+      // Emptying a description is a legitimate thing for a person to do, but
+      // not through this door and not as the outcome of clicking Apply.
+      throw new ProposalInvalidError(
+        "An applied proposal cannot be empty. Edit the target directly to clear it.",
+      );
+    }
 
     if (row.targetType === "release") {
       const release = await resolveRelease(scope, row.targetId);
@@ -318,4 +338,3 @@ export function handlerFor(kind: string): ProposalHandler {
   return handler;
 }
 
-export { metadataVersion };

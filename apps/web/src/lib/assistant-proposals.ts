@@ -2,7 +2,6 @@ import {
   and,
   assistantMessages,
   eq,
-  isNull,
   users,
   type Database,
 } from "@specboards/db";
@@ -11,69 +10,51 @@ import { asUser } from "@/lib/db-scope";
 
 import { parseAnswer } from "@/lib/ai/proposals";
 import {
-  ProposalForbiddenError,
   ProposalInvalidError,
   ProposalNotFoundError,
-  ProposalSettledError,
 } from "@/lib/proposals/errors";
+import { applyProposal, dismissProposal } from "@/lib/proposals/service";
 import {
-  assertNotStale,
-  assertSentWhole,
-  bodyFitsWhole,
-  notesFitWhole,
-} from "@/lib/proposals/guards";
+  getProposalBySourceMessage,
+  insertProposal,
+  type ProposalRow,
+} from "@/lib/proposals/store";
 import {
-  canEditItem,
   resolveAssistantItem,
   type AssistantMessageView,
 } from "@/lib/assistant-service";
-import { patchFeature } from "./features-service";
-import { canEditRelease } from "@/lib/release-notes-service";
 import { getStore } from "@/lib/store";
-import { updateSpecContent } from "@/lib/spec-content";
-import type {
-  FeatureDetail,
-  ReleaseRecord,
-  WorkspaceScope,
-} from "@/lib/store/types";
+import type { WorkspaceScope } from "@/lib/store/types";
 
 /**
  * Accepting or rejecting an edit the assistant proposed.
  *
- * ── The rule this module exists to enforce ──────────────────────────────────
- * Nothing the assistant produces reaches the repo without a human accepting it,
- * and once accepted it travels the exact same write path as a human edit: same
- * authorization, same write mode, same conflict guard, same pull request.
+ * ── What this file is now ──────────────────────────────────────────────────
+ * An adapter. The claim, the guards, the permission checks and the apply all
+ * live in `lib/proposals/`, shared with every other kind of agent deliverable.
+ * What is left here is the part specific to a proposal made inside a
+ * conversation: finding the right row from a message id, and shaping the
+ * answer the panel expects.
  *
- * That is why {@link acceptProposal} calls `updateSpecContent` and
- * `patchFeature` rather than writing anything itself. There is no faster route
- * and no privileged one. A proposal accepted on a repo in pull-request mode
- * becomes a pull request, exactly as an author's own save would, because it *is*
- * an author's own save: the text was drafted by a model and the decision was
- * made by a person, and the write path only ever sees the decision.
+ * The rule the old implementation existed to enforce is unchanged and now
+ * lives in `lib/proposals/handlers.ts`: nothing the assistant produces reaches
+ * the repo without a human accepting it, and once accepted it travels the
+ * exact same write path as a human edit.
  *
- * The shortcut worth naming, because it is genuinely tempting: this module
- * already holds the proposed body and the item, so it could write to git
- * directly and skip a permission check and two round trips. Doing that would
- * create a second way to change a spec, one that no review, audit record or
- * write-mode setting applies to, and nobody would notice until it mattered.
- *
- * ── Why accepting is a `features` write, not an `assistant` one ─────────────
+ * ── Why accepting is a `features` write, not an `assistant` one ────────────
  * The route lives under `/api/v1/features/{specId}/proposals`, so an API key
- * needs `features:write` to accept: the same grant that lets an integration edit
- * an item by hand. A key with only `assistant:write` can make the assistant
- * propose and cannot accept, which keeps "an agent may spend our model budget"
- * and "an agent may change our specs" as two separate decisions. Granting both
- * to one key does let an agent accept its own draft, and that is the customer's
- * call to make explicitly; what must not happen is it arriving as a side effect
- * of turning the assistant on.
+ * needs `features:write` to accept: the same grant that lets an integration
+ * edit an item by hand. A key with only `assistant:write` can make the
+ * assistant propose and cannot accept, which keeps "an agent may spend our
+ * model budget" and "an agent may change our specs" as two separate decisions.
+ * Granting both to one key does let an agent accept its own draft, and that is
+ * the customer's call to make explicitly; what must not happen is it arriving
+ * as a side effect of turning the assistant on.
  */
 
 /**
- * The refusal reasons and the two pre-claim guards now live in
- * `lib/proposals/`, so this path and the harness path refuse things for the
- * same reasons with the same words. Re-exported because the routes import them
- * from here, and moving a file should not be an API change.
+ * The refusal reasons still come from here, because the routes import them
+ * from here and moving a file should not be an API change.
  */
 export {
   ProposalForbiddenError,
@@ -87,48 +68,60 @@ export {
 interface ProposalResult {
   /** The turn as it now reads, so the panel can re-render from the answer. */
   message: AssistantMessageView;
-  /** The item's description after the change; unchanged text on a reject. */
+  /** The subject's text after the change; unchanged text on a reject. */
   body: string;
   /** Where an accepted edit landed in git, when it landed there directly. */
   commitSha?: string;
   /**
    * Set when the repo takes spec changes as pull requests. The change is then
-   * proposed to *git* and not yet live, which is a second review the person who
-   * clicked accept has to be told about: the board still shows the old text.
+   * proposed to *git* and not yet live, which is a second review the person
+   * who clicked accept has to be told about: the board still shows the old
+   * text.
    */
   pullRequest?: { number: number; url: string; created: boolean };
   /** Other people's changes the accept merged with on its way in. */
   mergedWith?: number;
 }
 
+/** The turn, and what the old columns say was decided about it. */
+interface LegacyTurn {
+  content: string;
+  authorId: string;
+  model: string | null;
+  createdAt: Date;
+  outcome: string | null;
+  resolvedBy: string | null;
+  resolvedAt: Date | null;
+  commitSha: string | null;
+  baseSha: string | null;
+}
+
 /**
- * Load a proposal and everything needed to decide about it, refusing anyone who
- * may not act on it.
+ * Read the turn, scoped to the subject the URL named.
  *
- * The message is looked up by id *and* by the feature the URL named, so a
- * message id from another item cannot be resolved through an item the caller
- * happens to have write access to.
+ * By message id *and* by the feature or release the URL named, so a message
+ * id from another thread cannot be resolved through a subject the caller
+ * happens to have write access to. That check predates this refactor and is
+ * why this does not simply look the message up by id.
  */
-async function loadProposal(
+async function readTurn(
   db: Database,
   scope: WorkspaceScope,
-  specId: string,
+  subject: { featureId: string } | { releaseId: string },
   messageId: string,
-): Promise<{ feature: FeatureDetail; proposed: string; baseSha: string | null }> {
-  const { feature, featureId } = await resolveAssistantItem(db, scope, specId);
-  if (!(await canEditItem(scope, feature))) {
-    throw new ProposalForbiddenError(
-      "Your role does not permit changing this item.",
-    );
-  }
-
+): Promise<LegacyTurn> {
   const [row] = await asUser(db, scope.userId, (tx) =>
     tx
       .select({
         content: assistantMessages.content,
         role: assistantMessages.role,
+        authorId: assistantMessages.authorId,
+        model: assistantMessages.model,
+        createdAt: assistantMessages.createdAt,
         outcome: assistantMessages.proposalOutcome,
         resolvedBy: assistantMessages.proposalResolvedBy,
+        resolvedAt: assistantMessages.proposalResolvedAt,
+        commitSha: assistantMessages.proposalCommitSha,
         baseSha: assistantMessages.proposalBaseSha,
       })
       .from(assistantMessages)
@@ -136,7 +129,9 @@ async function loadProposal(
         and(
           eq(assistantMessages.id, messageId),
           eq(assistantMessages.workspaceId, scope.workspaceId),
-          eq(assistantMessages.featureId, featureId),
+          "featureId" in subject
+            ? eq(assistantMessages.featureId, subject.featureId)
+            : eq(assistantMessages.releaseId, subject.releaseId),
         ),
       )
       .limit(1),
@@ -144,308 +139,197 @@ async function loadProposal(
   if (!row || row.role !== "assistant") {
     throw new ProposalNotFoundError("That proposal is no longer here.");
   }
-  if (row.outcome) {
-    // Named, because the useful thing to know is who got there first: the
-    // second person to click is usually looking at a stale panel.
-    const [who] = row.resolvedBy
-      ? await asUser(db, scope.userId, (tx) =>
-          tx
-            .select({ name: users.name })
-            .from(users)
-            .where(eq(users.id, row.resolvedBy!))
-            .limit(1),
-        )
-      : [];
-    throw new ProposalSettledError(
-      `${who?.name ?? "Someone"} already ${row.outcome} this proposal.`,
-    );
-  }
+  return row;
+}
 
-  const { proposal } = parseAnswer(row.content);
-  if (!proposal) {
-    throw new ProposalInvalidError("That message does not contain a proposal.");
-  }
-  return { feature, proposed: proposal, baseSha: row.baseSha };
+/** What the old outcome column means in the new lifecycle. */
+function statusOf(outcome: string | null) {
+  if (outcome === "accepted") return "applied" as const;
+  if (outcome === "rejected") return "dismissed" as const;
+  return "open" as const;
 }
 
 /**
- * Take the decision, atomically, *before* anything is applied.
+ * The proposal row for a turn, creating it from the old columns if this turn
+ * predates the table.
  *
- * The check in {@link loadProposal} is for the message it produces, not for
- * safety: between reading the row and writing to the item, a second request
- * (two people with the panel open, or one person double-clicking Accept) can do
- * the whole thing too, and the item gets written twice. A conditional update is
- * the only operation here that is atomic, so it is what decides who won, and it
- * runs first. If the write then fails the claim is released, which is why this
- * is a claim rather than a record.
+ * ── Why materialise here rather than backfill in the migration ─────────────
+ * Whether a message carries a proposal is decided by `parseAnswer`, whose
+ * leniency is the whole point of it: it copes with the several ways a small
+ * self-hosted model gets the marker block nearly right. Reimplementing that
+ * grammar in SQL would create a second, silently diverging definition of what
+ * a proposal is, and the divergence would show up as proposals that exist in
+ * the panel and not in the queue.
+ *
+ * So the grammar stays in one place and the row is created the first time
+ * somebody acts on the turn, which is the only moment it is needed. A turn
+ * nobody ever decides about costs nothing.
+ *
+ * The decision comes across too. A proposal accepted last year must not become
+ * acceptable again just because its row was written today.
  */
-async function claim(
+async function materialise(
   db: Database,
   scope: WorkspaceScope,
+  turn: LegacyTurn,
   messageId: string,
-  outcome: "accepted" | "rejected",
-): Promise<{ resolvedAt: Date }> {
-  const now = new Date();
-  const claimed = await asUser(db, scope.userId, (tx) =>
-    tx
-      .update(assistantMessages)
-      .set({
-        proposalOutcome: outcome,
-        proposalResolvedBy: scope.userId,
-        proposalResolvedAt: now,
-      })
-      .where(
-        and(
-          eq(assistantMessages.id, messageId),
-          // The whole guard. Anything already decided is not ours to decide.
-          isNull(assistantMessages.proposalOutcome),
-        ),
-      )
-      .returning({ id: assistantMessages.id }),
-  );
-  if (claimed.length === 0) {
-    throw new ProposalSettledError("Someone already decided about this proposal.");
-  }
-  return { resolvedAt: now };
-}
+  target: { type: "feature" | "release"; id: string; productId: string | null },
+): Promise<ProposalRow> {
+  const existing = await getProposalBySourceMessage(db, scope, messageId);
+  if (existing) return existing;
 
-/** Put a claim back when the write it was taken for did not happen. */
-async function releaseClaim(
-  db: Database,
-  scope: WorkspaceScope,
-  messageId: string,
-): Promise<void> {
-  await asUser(db, scope.userId, (tx) =>
-    tx
-      .update(assistantMessages)
-      .set({
-        proposalOutcome: null,
-        proposalResolvedBy: null,
-        proposalResolvedAt: null,
-      })
-      .where(eq(assistantMessages.id, messageId)),
+  const { proposal } = parseAnswer(turn.content);
+  if (!proposal) {
+    throw new ProposalInvalidError("That message does not contain a proposal.");
+  }
+
+  const status = statusOf(turn.outcome);
+  const created = await asUser(db, scope.userId, (tx) =>
+    insertProposal(tx, {
+      workspaceId: scope.workspaceId,
+      productId: target.productId,
+      origin: "conversation",
+      sourceMessageId: messageId,
+      actorId: turn.authorId,
+      actorType: "user",
+      kind: "spec_content",
+      targetType: target.type,
+      targetId: target.id,
+      payload: { body: proposal },
+      baseVersion: turn.baseSha,
+      status,
+      resolvedBy: turn.resolvedBy,
+      // A settled row must carry a time (`proposals_resolution_ck`). An old
+      // outcome with no timestamp falls back to when the turn was written:
+      // wrong by hours, and a great deal more right than null would be.
+      resolvedAt: status === "open" ? null : (turn.resolvedAt ?? turn.createdAt),
+      result: turn.commitSha ? { commitSha: turn.commitSha } : null,
+    }),
   );
+  if (created) return created;
+
+  // Lost the insert race against somebody clicking at the same moment. The
+  // unique index on `source_message_id` turned that into a no-op, so the row
+  // that won is the answer.
+  const winner = await getProposalBySourceMessage(db, scope, messageId);
+  if (!winner) {
+    throw new ProposalNotFoundError("That proposal is no longer here.");
+  }
+  return winner;
 }
 
 /** The turn as it now reads, for the panel to swap in. */
-async function settled(
-  db: Database,
-  scope: WorkspaceScope,
+function viewOf(
+  turn: LegacyTurn,
   messageId: string,
   outcome: "accepted" | "rejected",
-  resolvedAt: Date,
+  resolvedAt: string,
+  resolvedByName: string | null,
   commitSha: string | null,
-): Promise<AssistantMessageView> {
-  const { row, who } = await asUser(db, scope.userId, async (tx) => {
-    if (commitSha) {
-      // Written after the commit exists rather than guessed before it: a sha on
-      // a row that no commit matches is worse than no sha.
-      await tx
-        .update(assistantMessages)
-        .set({ proposalCommitSha: commitSha })
-        .where(eq(assistantMessages.id, messageId));
-    }
-    const [found] = await tx
-      .select({
-        id: assistantMessages.id,
-        content: assistantMessages.content,
-        authorId: assistantMessages.authorId,
-        model: assistantMessages.model,
-        createdAt: assistantMessages.createdAt,
-      })
-      .from(assistantMessages)
-      .where(eq(assistantMessages.id, messageId))
-      .limit(1);
-    const [resolver] = await tx
-      .select({ name: users.name })
-      .from(users)
-      .where(eq(users.id, scope.userId))
-      .limit(1);
-    return { row: found, who: resolver };
-  });
-  if (!row) throw new ProposalNotFoundError("That proposal is no longer here.");
-
+): AssistantMessageView {
   return {
-    id: row.id,
+    id: messageId,
     role: "assistant",
-    content: row.content,
-    authorId: row.authorId,
+    content: turn.content,
+    authorId: turn.authorId,
     // Not resolved: the panel already holds the thread and only replaces the
     // one turn, so it keeps the author name it loaded. Looking it up again
     // would be a query to restore a value the caller never lost.
     authorName: null,
-    model: row.model,
-    createdAt: row.createdAt.toISOString(),
-    // Answers carry no skill key: it is recorded on the question that asked for
-    // them, which is what `activeSkill` reads.
+    model: turn.model,
+    createdAt: turn.createdAt.toISOString(),
+    // Answers carry no skill key: it is recorded on the question that asked
+    // for them, which is what `activeSkill` reads.
     skillKey: null,
-    proposal: {
-      outcome,
-      resolvedByName: who?.name ?? null,
-      resolvedAt: resolvedAt.toISOString(),
-      commitSha,
-    },
+    proposal: { outcome, resolvedByName, resolvedAt, commitSha },
   };
 }
 
-/**
- * The same load, for a proposal against a release's notes.
- *
- * A sibling rather than a branch, because the two differ in every line that
- * matters: which subject is resolved, which permission decides it, and which
- * column the message hangs off. What they share is everything after the
- * decision, and that is shared for real: {@link claim}, {@link release} and
- * {@link settled} take a message id and know nothing about subjects.
- */
-async function loadReleaseProposal(
+/** The acting user's own name, for the decided-by line. */
+async function actingName(
   db: Database,
   scope: WorkspaceScope,
-  releaseId: string,
-  messageId: string,
-): Promise<{ release: ReleaseRecord; proposed: string; baseSha: string | null }> {
-  const store = await getStore();
-  const releases = await store.listReleases(scope);
-  const release = releases.find((r) => r.id === releaseId);
-  if (!release) throw new ProposalNotFoundError("That release is no longer here.");
-
-  if (!(await canEditRelease(scope, release.productId))) {
-    throw new ProposalForbiddenError(
-      "Your role does not permit changing this release.",
-    );
-  }
-
+): Promise<string | null> {
   const [row] = await asUser(db, scope.userId, (tx) =>
     tx
-      .select({
-        content: assistantMessages.content,
-        role: assistantMessages.role,
-        outcome: assistantMessages.proposalOutcome,
-        resolvedBy: assistantMessages.proposalResolvedBy,
-        baseSha: assistantMessages.proposalBaseSha,
-      })
-      .from(assistantMessages)
-      .where(
-        and(
-          eq(assistantMessages.id, messageId),
-          eq(assistantMessages.workspaceId, scope.workspaceId),
-          // By the release the URL named as well as by id, so a message id from
-          // another thread cannot be resolved through a release the caller
-          // happens to have write access to.
-          eq(assistantMessages.releaseId, releaseId),
-        ),
-      )
+      .select({ name: users.name })
+      .from(users)
+      .where(eq(users.id, scope.userId))
       .limit(1),
   );
-  if (!row || row.role !== "assistant") {
-    throw new ProposalNotFoundError("That proposal is no longer here.");
-  }
-  if (row.outcome) {
-    const [who] = row.resolvedBy
-      ? await asUser(db, scope.userId, (tx) =>
-          tx
-            .select({ name: users.name })
-            .from(users)
-            .where(eq(users.id, row.resolvedBy!))
-            .limit(1),
-        )
-      : [];
-    throw new ProposalSettledError(
-      `${who?.name ?? "Someone"} already ${row.outcome} this proposal.`,
-    );
-  }
-
-  const { proposal } = parseAnswer(row.content);
-  if (!proposal) {
-    throw new ProposalInvalidError("That message does not contain a proposal.");
-  }
-  return { release, proposed: proposal, baseSha: row.baseSha };
+  return row?.name ?? null;
 }
 
-/** Turn down a proposed change to a release's notes. Nothing is written. */
-export async function rejectReleaseProposal(
-  db: Database,
-  scope: WorkspaceScope,
-  releaseId: string,
-  messageId: string,
-): Promise<ProposalResult> {
-  const { release } = await loadReleaseProposal(db, scope, releaseId, messageId);
-  const { resolvedAt } = await claim(db, scope, messageId, "rejected");
+/** The item a thread hangs off, and the product the proposal row records. */
+async function itemTarget(db: Database, scope: WorkspaceScope, specId: string) {
+  const { feature, featureId } = await resolveAssistantItem(db, scope, specId);
   return {
-    message: await settled(db, scope, messageId, "rejected", resolvedAt, null),
-    body: release.releaseNotesBody ?? "",
+    turnSubject: { featureId },
+    target: {
+      type: "feature" as const,
+      id: featureId,
+      productId: feature.productId,
+    },
+    currentBody: feature.content ?? "",
+  };
+}
+
+/** The release a thread hangs off, resolved through the caller's own listing. */
+async function releaseTarget(scope: WorkspaceScope, releaseId: string) {
+  const store = await getStore();
+  const release = (await store.listReleases(scope)).find(
+    (r) => r.id === releaseId,
+  );
+  if (!release) {
+    throw new ProposalNotFoundError("That release is no longer here.");
+  }
+  return {
+    turnSubject: { releaseId },
+    target: {
+      type: "release" as const,
+      id: release.id,
+      productId: release.productId,
+    },
+    currentBody: release.releaseNotesBody ?? "",
   };
 }
 
 /**
- * Apply a proposal to a release's notes.
+ * Apply a proposal to the item.
  *
- * The write is `updateRelease`, which is the same call the editor makes when a
- * person types the notes themselves: same authorization, same validation, same
- * audit. There is no faster route from a model's output to the column, for the
- * reason this module opens with.
- *
- * ── How this is guarded ─────────────────────────────────────────────────────
- * A spec is guarded by its blob sha, because git gives us one. A release's
- * notes are a column with no version to point at, and this used to be left
- * unguarded on the reasoning that the notes are edited in one place and the
- * reviewer is looking at the diff when they click.
- *
- * Both halves of that turned out to be weaker than they read. "Edited in one
- * place" is a statement about habit rather than about the system, and the diff
- * the reviewer sees can itself be built from a stale browser copy, so the
- * mitigation could be describing a comparison against a version that is no
- * longer there. The base is now recorded as a content hash when the draft is
- * made and checked here, so a proposal drafted against text that has since
- * moved is refused rather than applied. See `assertNotStale`.
- *
- * Accepting also switches the notes on. A workspace with `releaseNotesMode` of
- * `none` that accepts a draft plainly means to have notes now, and leaving the
- * mode alone would apply the text and show nothing, which reads as the accept
- * having failed.
+ * `body` overrides what the assistant drafted, which is what "edit before
+ * accepting" is: the person read the diff, changed their mind about a line,
+ * and what lands is their text. It is recorded as accepted either way,
+ * because the question the record answers is "did a human decide this", and
+ * they did. The item's own history holds what actually landed.
  */
-export async function acceptReleaseProposal(
+export async function acceptProposal(
   db: Database,
   scope: WorkspaceScope,
-  releaseId: string,
+  specId: string,
   messageId: string,
   opts: { body?: string } = {},
 ): Promise<ProposalResult> {
-  const { release, proposed, baseSha } = await loadReleaseProposal(
-    db,
-    scope,
-    releaseId,
-    messageId,
-  );
-  const body = (opts.body ?? proposed).trim();
-  if (!body) {
-    throw new ProposalInvalidError(
-      "An accepted proposal cannot be empty. Edit the notes directly to clear them.",
-    );
-  }
+  const { turnSubject, target } = await itemTarget(db, scope, specId);
+  const turn = await readTurn(db, scope, turnSubject, messageId);
+  const row = await materialise(db, scope, turn, messageId, target);
 
-  // Before the claim, so a refused accept leaves the proposal actionable.
-  assertNotStale(baseSha, release.releaseNotesBody ?? "", "release");
-  assertSentWhole(notesFitWhole(release.releaseNotesBody), "release");
-
-  const { resolvedAt } = await claim(db, scope, messageId, "accepted");
-
-  const store = await getStore();
-  try {
-    await store.updateRelease(
-      release.id,
-      { releaseNotesMode: "in_app", releaseNotesBody: body },
-      scope,
-    );
-  } catch (err) {
-    // A refusal at the store leaves a proposal somebody can still act on,
-    // rather than one marked accepted with nothing to show for it.
-    await releaseClaim(db, scope, messageId);
-    throw err;
-  }
+  const { resolvedAt, outcome } = await applyProposal(db, scope, row.id, opts);
+  const name = await actingName(db, scope);
 
   return {
-    message: await settled(db, scope, messageId, "accepted", resolvedAt, null),
-    body,
+    message: viewOf(
+      turn,
+      messageId,
+      "accepted",
+      resolvedAt,
+      name,
+      outcome.commitSha ?? null,
+    ),
+    body: outcome.body ?? "",
+    ...(outcome.commitSha ? { commitSha: outcome.commitSha } : {}),
+    ...(outcome.pullRequest ? { pullRequest: outcome.pullRequest } : {}),
+    ...(outcome.mergedWith ? { mergedWith: outcome.mergedWith } : {}),
   };
 }
 
@@ -464,120 +348,60 @@ export async function rejectProposal(
   specId: string,
   messageId: string,
 ): Promise<ProposalResult> {
-  const { feature } = await loadProposal(db, scope, specId, messageId);
-  const { resolvedAt } = await claim(db, scope, messageId, "rejected");
-  return {
-    message: await settled(db, scope, messageId, "rejected", resolvedAt, null),
-    body: feature.content,
-  };
-}
-
-/**
- * Apply a proposal to the item.
- *
- * `body` overrides what the assistant drafted, which is what "edit before
- * accepting" is: the person read the diff, changed their mind about a line, and
- * what lands is their text. It is recorded as accepted either way, because the
- * question the record answers is "did a human decide this", and they did. The
- * item's own history holds what actually landed.
- */
-export async function acceptProposal(
-  db: Database,
-  scope: WorkspaceScope,
-  specId: string,
-  messageId: string,
-  opts: { body?: string } = {},
-): Promise<ProposalResult> {
-  const { feature, proposed, baseSha } = await loadProposal(
+  const { turnSubject, target, currentBody } = await itemTarget(
     db,
     scope,
     specId,
-    messageId,
   );
-  const body = (opts.body ?? proposed).trim();
-  if (!body) {
-    // Emptying an item's description is a legitimate thing for a person to do,
-    // but not through this door and not as the outcome of clicking Accept.
-    throw new ProposalInvalidError(
-      "An accepted proposal cannot be empty. Edit the item directly to clear it.",
-    );
-  }
+  const turn = await readTurn(db, scope, turnSubject, messageId);
+  const row = await materialise(db, scope, turn, messageId, target);
 
-  // Checked BEFORE the claim, so a refused accept leaves the proposal exactly
-  // as it was rather than needing to be un-claimed. A spec skips this and is
-  // guarded further down by its blob sha, which can merge rather than refuse.
-  if (feature.isDbNative) {
-    assertNotStale(baseSha, feature.content ?? "", "item");
-  }
-  // Applies to a spec as well as a card: a blob sha lets a merge resolve
-  // *concurrent* edits, and says nothing about whether the model ever saw the
-  // whole document.
-  assertSentWhole(bodyFitsWhole(feature.content), "item");
-
-  // Claimed before the write, so a double-click cannot apply the same text
-  // twice. Released if the write does not happen, so a refusal at the repo
-  // leaves a proposal somebody can still act on rather than one marked
-  // accepted with nothing to show for it.
-  const { resolvedAt } = await claim(db, scope, messageId, "accepted");
-
-  if (feature.isDbNative) {
-    // A card's body is a database column, so the human path is the ordinary
-    // patch and so is this one. `patchFeature` does its own product-write check
-    // and writes the change ledger, which is where the item's history of this
-    // edit comes from.
-    try {
-      await patchFeature(specId, { details: body }, scope);
-    } catch (err) {
-      await releaseClaim(db, scope, messageId);
-      throw err;
-    }
-    return {
-      message: await settled(db, scope, messageId, "accepted", resolvedAt, null),
-      body,
-    };
-  }
-
-  let result;
-  try {
-    result = await updateSpecContent(db, scope, specId, body, {
-      // Not a pre-built message: the write path decides whether the acting user
-      // also needs a co-author trailer, which depends on whose token authors the
-      // commit, and that is not knowable here.
-      assistantDrafted: true,
-      // Guarded against the version the model was shown, not against whatever is
-      // there now. A spec someone edited in the meantime is merged with, exactly
-      // as it would be for a human whose editor had been open that long, and only
-      // a genuine overlap is refused.
-      ...(baseSha ? { expectedBlobSha: baseSha } : {}),
-    });
-  } catch (err) {
-    // Most importantly a conflict: the reviewer has to be able to come back to
-    // this proposal once the collision is sorted out.
-    await releaseClaim(db, scope, messageId);
-    throw err;
-  }
-
+  const { resolvedAt } = await dismissProposal(db, scope, row.id);
+  const name = await actingName(db, scope);
   return {
-    message: await settled(
-      db,
-      scope,
-      messageId,
-      "accepted",
-      resolvedAt,
-      result.commitSha,
-    ),
-    body: result.mergedBody ?? body,
-    commitSha: result.commitSha,
-    ...(result.pullRequest
-      ? {
-          pullRequest: {
-            number: result.pullRequest.number,
-            url: result.pullRequest.url,
-            created: result.pullRequest.created,
-          },
-        }
-      : {}),
-    ...(result.mergedWith ? { mergedWith: result.mergedWith } : {}),
+    message: viewOf(turn, messageId, "rejected", resolvedAt, name, null),
+    body: currentBody,
   };
 }
 
+/** Apply a proposed change to a release's notes. */
+export async function acceptReleaseProposal(
+  db: Database,
+  scope: WorkspaceScope,
+  releaseId: string,
+  messageId: string,
+  opts: { body?: string } = {},
+): Promise<ProposalResult> {
+  const { turnSubject, target } = await releaseTarget(scope, releaseId);
+  const turn = await readTurn(db, scope, turnSubject, messageId);
+  const row = await materialise(db, scope, turn, messageId, target);
+
+  const { resolvedAt, outcome } = await applyProposal(db, scope, row.id, opts);
+  const name = await actingName(db, scope);
+  return {
+    message: viewOf(turn, messageId, "accepted", resolvedAt, name, null),
+    body: outcome.body ?? "",
+  };
+}
+
+/** Turn down a proposed change to a release's notes. Nothing is written. */
+export async function rejectReleaseProposal(
+  db: Database,
+  scope: WorkspaceScope,
+  releaseId: string,
+  messageId: string,
+): Promise<ProposalResult> {
+  const { turnSubject, target, currentBody } = await releaseTarget(
+    scope,
+    releaseId,
+  );
+  const turn = await readTurn(db, scope, turnSubject, messageId);
+  const row = await materialise(db, scope, turn, messageId, target);
+
+  const { resolvedAt } = await dismissProposal(db, scope, row.id);
+  const name = await actingName(db, scope);
+  return {
+    message: viewOf(turn, messageId, "rejected", resolvedAt, name, null),
+    body: currentBody,
+  };
+}

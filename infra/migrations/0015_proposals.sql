@@ -121,7 +121,14 @@ CREATE INDEX proposals_run_idx
 -- How the conversation panel finds the proposal for a turn it is rendering.
 -- This is the hot path for the surface that exists today, so it is partial for
 -- the same reason and pointed the other way.
-CREATE INDEX proposals_source_message_idx
+--
+-- UNIQUE, which is a rule and not just an index. One turn offers one edit, so
+-- a second row against the same message would mean two Accept buttons on one
+-- answer with no way to say which was the real one. It also makes the lazy
+-- materialisation of a legacy proposal safe to race: two people clicking
+-- Accept at the same moment both try to insert, one wins, and the loser's
+-- ON CONFLICT turns into a read of the row that won.
+CREATE UNIQUE INDEX proposals_source_message_uq
     ON proposals (source_message_id) WHERE source_message_id IS NOT NULL;
 --> statement-breakpoint
 
