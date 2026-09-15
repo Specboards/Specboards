@@ -40,6 +40,7 @@ describe.skipIf(!DB_URL)("the agent run lifecycle", () => {
   let sql: postgres.Sql;
   let db: Database;
   let runs: typeof import("./service");
+  let store: typeof import("./store");
   let types: typeof import("./types");
   let specId: string;
 
@@ -48,6 +49,7 @@ describe.skipIf(!DB_URL)("the agent run lifecycle", () => {
     const { createDb } = await import("@specboards/db");
     db = createDb(DB_URL!);
     runs = await import("./service");
+    store = await import("./store");
     types = await import("./types");
 
     await sql`insert into workspaces (id, name, slug) values
@@ -70,9 +72,9 @@ describe.skipIf(!DB_URL)("the agent run lifecycle", () => {
       values (${ws}, 'work', 'Work Items', 0, true)`;
     // Both agents may write the product, so nothing below passes for the
     // boring reason that an agent could not have acted anyway.
-    await sql`insert into product_members (product_id, user_id, role) values
-      (${product}, ${agentA}, 'contributor'),
-      (${product}, ${agentB}, 'contributor')`;
+    await sql`insert into product_members (workspace_id, product_id, user_id, role) values
+      (${ws}, ${product}, ${agentA}, 'contributor'),
+      (${ws}, ${product}, ${agentB}, 'contributor')`;
 
     const id = randomUUID();
     specId = id;
@@ -85,6 +87,27 @@ describe.skipIf(!DB_URL)("the agent run lifecycle", () => {
     await sql`delete from users where id in (${owner}, ${reader}, ${agentA}, ${agentB})`;
     await sql.end({ timeout: 5 });
   });
+
+  /**
+   * Block until some other backend on this database is waiting for a lock.
+   *
+   * Replaces a sleep. A sleep long enough to be safe is slow, and a sleep
+   * short enough to be quick stops discriminating between a build that takes
+   * the row lock and one that does not, which is how the timing-dependent
+   * version of the trace test came to pass against a broken build.
+   */
+  async function waitForABlockedBackend() {
+    for (let i = 0; i < 300; i++) {
+      const [row] = await sql<{ n: string }[]>`
+        select count(*) as n from pg_stat_activity
+        where datname = current_database()
+          and wait_event_type = 'Lock'
+          and pid <> pg_backend_pid()`;
+      if (Number(row!.n) > 0) return;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error("no backend ever blocked; the report never took a lock");
+  }
 
   /** Clear every run between tests, so each starts from no active run. */
   async function reset() {
@@ -164,39 +187,100 @@ describe.skipIf(!DB_URL)("the agent run lifecycle", () => {
     expect(second.steer).toBeNull();
   });
 
-  it("keeps every trace step when reports arrive together", async () => {
-    // AR-02. Each report used to write a whole replacement array built from
-    // what it had read, so one of two concurrent appends was lost.
+  it("does not overwrite a trace step written while it was in flight", async () => {
+    // AR-02. Each report writes a whole replacement array built from what it
+    // read, so a report that reads before somebody else's write and writes
+    // after it silently drops their step.
+    //
+    // The interleaving is driven rather than hoped for. Firing two reports at
+    // Promise.all and asserting both steps survive passed against a build
+    // with the row lock deliberately removed: the window between the read and
+    // the write is microseconds, so the two callers simply did not overlap.
+    // A test that only fails when you slow the code down is not a regression
+    // test. Here an outside transaction holds the row, we wait until the
+    // report is genuinely blocked on it, and only then write the step the
+    // report must not clobber.
     await reset();
     const run = await open(asAgentA, agentA);
-    const step = (label: string) => ({ at: new Date().toISOString(), label });
 
-    await Promise.all([
-      runs.reportRun(db, asAgentA, run.id, {
-        actorId: agentA,
-        status: "running",
-        step: step("one"),
-      }),
-      runs.reportRun(db, asAgentA, run.id, {
-        actorId: agentA,
-        status: "running",
-        step: step("two"),
-      }),
-    ]);
+    // The report is started inside the holder's transaction but awaited
+    // outside it. Awaiting it in there deadlocks: postgres.js waits on the
+    // callback's return value before committing, and the report is waiting
+    // on the very lock that commit would release.
+    const holder = postgres(DB_URL!, { prepare: false, max: 1 });
+    let report: Promise<unknown> | null = null;
+    try {
+      await holder.begin(async (tx) => {
+        await tx`select id from agent_runs where id = ${run.id} for update`;
+
+        report = runs.reportRun(db, asAgentA, run.id, {
+          actorId: agentA,
+          status: "running",
+          step: { at: new Date().toISOString(), label: "the agent's step" },
+        });
+        report.catch(() => {}); // settled below; this only avoids a warning
+        await waitForABlockedBackend();
+
+        // Whoever is blocked is blocked on this row. Under the lock the
+        // report has not read the trace yet, so it is about to see this
+        // step; without it the report read an empty trace before blocking on
+        // the UPDATE, and is about to write that empty trace back.
+        await tx`update agent_runs
+                   set trace = trace || ${sql.json([{ at: new Date().toISOString(), label: "somebody else's step" }])}::jsonb
+                 where id = ${run.id}`;
+      });
+      await report;
+    } finally {
+      await holder.end({ timeout: 5 });
+    }
 
     const [row] = await sql<{ n: number }[]>`
       select jsonb_array_length(trace) as n from agent_runs where id = ${run.id}`;
     expect(row!.n).toBe(2);
   });
 
-  it("opens one run when two opens race", async () => {
-    // AR-02. `findActiveRun` then `createRun` is a read and an unconditional
-    // write; the index that was supposed to stop this was not unique.
+  it("refuses a second active run for the same agent and target", async () => {
+    // AR-02, asserted where the guarantee actually lives. `findActiveRun`
+    // then `createRun` is a read and a write with a gap in between, so the
+    // only thing that can make "one active run per agent per target" true is
+    // the database. Migration 0016's comment claimed this; its index was not
+    // unique. 0017 makes the claim true, and this is what would catch it
+    // being dropped again.
     await reset();
-    const [first, second] = await Promise.all([
-      open(asAgentA, agentA),
-      open(asAgentA, agentA),
-    ]);
+    await open(asAgentA, agentA);
+
+    await expect(
+      sql`insert into agent_runs
+            (workspace_id, product_id, target_type, target_id, agent_id,
+             actor_type, trigger, status)
+          values (${ws}, ${product}, 'feature', ${specId}, ${agentA},
+                  'agent', 'assignment', 'queued')`,
+    ).rejects.toThrow(/agent_runs_one_active_uq/);
+  });
+
+  it("hands back the run that won rather than failing the loser", async () => {
+    // The other half: the constraint above turns a duplicate open into an
+    // error, and an agent that merely asked twice should not see one. The
+    // store swallows the conflict and the service reads the winner.
+    await reset();
+    const first = await open(asAgentA, agentA);
+
+    expect(
+      await store.createRun(db, asAgentA, {
+        workspaceId: ws,
+        productId: product,
+        targetType: "feature",
+        targetId: specId,
+        agentId: agentA,
+        actorType: "agent",
+        trigger: "assignment",
+        status: "running",
+        summary: null,
+        trace: [],
+      }),
+    ).toBeNull();
+
+    const second = await open(asAgentA, agentA);
     expect(second.id).toBe(first.id);
 
     const [row] = await sql<{ n: string }[]>`
