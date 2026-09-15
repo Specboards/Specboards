@@ -9,12 +9,21 @@ import {
 
 import { asUser } from "@/lib/db-scope";
 
-import { bodyFitsWhole } from "@/lib/ai/item-context";
 import { parseAnswer } from "@/lib/ai/proposals";
-import { notesFitWhole } from "@/lib/ai/release-context";
+import {
+  ProposalForbiddenError,
+  ProposalInvalidError,
+  ProposalNotFoundError,
+  ProposalSettledError,
+} from "@/lib/proposals/errors";
+import {
+  assertNotStale,
+  assertSentWhole,
+  bodyFitsWhole,
+  notesFitWhole,
+} from "@/lib/proposals/guards";
 import {
   canEditItem,
-  contentVersion,
   resolveAssistantItem,
   type AssistantMessageView,
 } from "@/lib/assistant-service";
@@ -60,100 +69,20 @@ import type {
  * of turning the assistant on.
  */
 
-/** No such message, or the caller cannot see the item. Routes map to 404. */
-export class ProposalNotFoundError extends Error {}
-/** The message carries no proposal, or the replacement body is empty. 422. */
-export class ProposalInvalidError extends Error {}
-/** Somebody already accepted or rejected it. Routes map to 409. */
-export class ProposalSettledError extends Error {}
-/** The caller may read the item but not change it. Routes map to 403. */
-export class ProposalForbiddenError extends Error {}
-
 /**
- * The document is too long to have been sent to the model whole, so a rewrite
- * of it cannot be applied. Routes map to 422.
- *
- * The persist path already refuses to record such a proposal, so reaching this
- * means the document grew past the limit between the draft and the accept, or
- * the row predates that guard. Either way applying it would delete everything
- * past the cut, which is not a thing to do because of when it was drafted.
+ * The refusal reasons and the two pre-claim guards now live in
+ * `lib/proposals/`, so this path and the harness path refuse things for the
+ * same reasons with the same words. Re-exported because the routes import them
+ * from here, and moving a file should not be an API change.
  */
-export class ProposalTooLongError extends Error {}
-
-/**
- * Refuse an accept whose document could not have been sent whole.
- *
- * Belt and braces beside the persist-time refusal in `persistTurns`, and not
- * redundant with it: an accept can happen a day later, and a description that
- * fitted when the draft was made may not fit now. The rule is one predicate
- * (`bodyFitsWhole` / `notesFitWhole`) used in three places, so the prompt, the
- * record and the accept cannot disagree about it.
- */
-function assertSentWhole(fits: boolean, subject: "item" | "release"): void {
-  if (fits) return;
-  throw new ProposalTooLongError(
-    subject === "item"
-      ? "This item's description is too long to send to the model in full, so a " +
-        "suggested rewrite cannot be applied: it would delete everything past " +
-        "the point the assistant could see. Shorten the description, or edit it " +
-        "directly."
-      : "These release notes are too long to send to the model in full, so a " +
-        "suggested rewrite cannot be applied: it would delete everything past " +
-        "the point the assistant could see. Shorten the notes, or edit them " +
-        "directly.",
-  );
-}
-
-/**
- * The document moved after the proposal was drafted, so accepting it would
- * replace somebody's newer work. Routes map to 409, like a git write conflict.
- *
- * Carries the current body, because refusing without showing the new state only
- * moves the problem to the reviewer: they clicked Accept on a diff, and the
- * useful next step is seeing what it should have been a diff against.
- */
-export class ProposalStaleError extends Error {
-  constructor(
-    message: string,
-    readonly currentBody: string,
-  ) {
-    super(message);
-    this.name = "ProposalStaleError";
-  }
-}
-
-/**
- * Refuse an accept whose base no longer matches what is there now.
- *
- * A git-backed spec does not come through here: it has a blob sha and goes down
- * the guarded, merged write path instead, which can three-way merge rather than
- * simply refuse. This is for the two subjects that have no blob, where the only
- * honest options are "apply blindly" and "stop and show them" - and applying
- * blindly is what the audit found.
- *
- * `null` recorded means the proposal predates this guard. Those are allowed
- * through rather than refused: refusing would break every draft already sitting
- * on a card, to protect against a race that has probably not happened. New
- * drafts all carry a version.
- */
-function assertNotStale(
-  recordedBase: string | null,
-  currentBody: string,
-  subject: "item" | "release",
-): void {
-  if (recordedBase === null) return;
-  if (recordedBase === contentVersion(currentBody)) return;
-  throw new ProposalStaleError(
-    subject === "item"
-      ? "This item's description changed after the assistant drafted this, so " +
-        "accepting would replace that newer version. Review the current text " +
-        "and ask again if the change is still wanted."
-      : "These release notes changed after the assistant drafted this, so " +
-        "accepting would replace that newer version. Review the current notes " +
-        "and ask again if the change is still wanted.",
-    currentBody,
-  );
-}
+export {
+  ProposalForbiddenError,
+  ProposalInvalidError,
+  ProposalNotFoundError,
+  ProposalSettledError,
+  ProposalStaleError,
+  ProposalTooLongError,
+} from "@/lib/proposals/errors";
 
 interface ProposalResult {
   /** The turn as it now reads, so the panel can re-render from the answer. */
