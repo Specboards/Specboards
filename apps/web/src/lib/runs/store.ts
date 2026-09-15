@@ -13,6 +13,8 @@ import { asUser } from "@/lib/db-scope";
 import type { WorkspaceScope } from "@/lib/store/types";
 
 import {
+  appendStep,
+  isTerminal,
   parseTrace,
   type RunStatus,
   type RunTrigger,
@@ -92,19 +94,27 @@ interface CreateRunInput {
   trace: TraceStep[];
 }
 
+/**
+ * Open a run, unless this agent already has one on this target.
+ *
+ * Returns null when `agent_runs_one_active_uq` refused the insert, which is
+ * the concurrent-open race: two requests both found no active run and both
+ * tried to create one. Losing is not an error, it means somebody else opened
+ * the run this caller was about to, so the caller reads the winner instead.
+ */
 export async function createRun(
   db: Database,
   scope: WorkspaceScope,
   input: CreateRunInput,
-): Promise<RunRow> {
+): Promise<RunRow | null> {
   const [row] = await asUser(db, scope.userId, (tx) =>
     tx
       .insert(agentRuns)
       .values({ ...input, startedAt: new Date() })
+      .onConflictDoNothing()
       .returning(COLUMNS),
   );
-  if (!row) throw new Error("Run insert returned no row.");
-  return toRow(row);
+  return row ? toRow(row) : null;
 }
 
 export async function getRun(
@@ -285,4 +295,97 @@ export async function tokensForRuns(
     if (r.runId) out.set(r.runId, { prompt: r.prompt, completion: r.completion });
   }
   return out;
+}
+
+/** Why a report was refused, for the caller to turn into a message. */
+type ReportRefusal = "missing" | "not_yours" | "settled";
+
+type ReportOutcome =
+  | { ok: true; run: RunRow; steer: string | null }
+  | { ok: false; reason: ReportRefusal; run: RunRow | null };
+
+interface ReportFields {
+  /** The authenticated caller. Must own the run. */
+  actorId: string | null;
+  status: RunStatus;
+  summary: string | null;
+  error: string | null;
+  step: TraceStep | null;
+}
+
+/**
+ * Apply an agent's report to its own run, under a row lock.
+ *
+ * ── Why a lock and not four clever predicates ─────────────────────────────
+ * A report has to do several things that each depend on what it just read:
+ * refuse if the caller does not own the run, refuse if the run has already
+ * finished, append to the trace, and take the steering note while clearing
+ * it. Written as a read followed by an unconditional UPDATE (which is what
+ * this was) every one of those is a lost-update race, found by the
+ * adversarial review as AR-01 and AR-02:
+ *
+ *   - a report could write `running` over a cancellation and undo it
+ *   - a report could clear a steering note left after it read the row,
+ *     so the note was never delivered to anybody
+ *   - two reports could each write a whole replacement trace, losing a step
+ *   - any caller with `runs:write` could do all of that to another agent's
+ *     run, because the predicate was `id + workspace` and a UUID is an
+ *     identifier, not an authorization boundary
+ *
+ * `SELECT ... FOR UPDATE` and then decide makes all four impossible in one
+ * move, and keeps the rules in TypeScript beside the tests that cover them.
+ * Expressing the same thing as compare-and-set predicates would work and
+ * would spread one decision across four `WHERE` clauses that have to agree.
+ */
+export async function reportUnderLock(
+  db: Database,
+  scope: WorkspaceScope,
+  runId: string,
+  input: ReportFields,
+): Promise<ReportOutcome> {
+  return asUser(db, scope.userId, async (tx) => {
+    const [locked] = await tx
+      .select(COLUMNS)
+      .from(agentRuns)
+      .where(
+        and(
+          eq(agentRuns.id, runId),
+          eq(agentRuns.workspaceId, scope.workspaceId),
+        ),
+      )
+      .for("update")
+      .limit(1);
+    if (!locked) return { ok: false, reason: "missing", run: null };
+
+    const run = toRow(locked);
+    // The ownership check the RLS policy cannot make: it knows the caller is
+    // a member, which is true of every other agent in the workspace too.
+    if (run.agentId !== input.actorId) {
+      return { ok: false, reason: "not_yours", run };
+    }
+    if (isTerminal(run.status)) {
+      return { ok: false, reason: "settled", run };
+    }
+
+    const finished = isTerminal(input.status);
+    const [updated] = await tx
+      .update(agentRuns)
+      .set({
+        status: input.status,
+        ...(input.summary === null ? {} : { summary: input.summary }),
+        ...(input.error === null ? {} : { error: input.error }),
+        ...(input.step ? { trace: appendStep(run.trace, input.step) } : {}),
+        finishedAt: finished ? new Date() : null,
+        // Taken and cleared inside the lock, so a note written while this
+        // report was in flight is either delivered by it or still waiting
+        // for the next one. It can no longer be cleared undelivered.
+        steer: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(agentRuns.id, runId))
+      .returning(COLUMNS);
+    if (!updated) return { ok: false, reason: "missing", run };
+
+    return { ok: true, run: toRow(updated), steer: run.steer };
+  });
 }

@@ -4,11 +4,13 @@ import { asUser } from "@/lib/db-scope";
 import { getStore } from "@/lib/store";
 import type { WorkspaceScope } from "@/lib/store/types";
 
+import { canEditItem } from "@/lib/assistant-service";
+
 import {
-  appendStep,
   isTerminal,
   parseError,
   parseSummary,
+  RunForbiddenError,
   RunInputError,
   type RunStatus,
   type RunTrigger,
@@ -21,6 +23,7 @@ import {
   getRun,
   listRunsForTarget,
   patchRun,
+  reportUnderLock,
   tokensForRuns,
   type RunRow,
   type RunTokens,
@@ -124,7 +127,7 @@ export async function openRun(
   );
   if (existing) return existing;
 
-  return createRun(db, scope, {
+  const created = await createRun(db, scope, {
     workspaceId: scope.workspaceId,
     productId,
     targetType: "feature",
@@ -136,42 +139,51 @@ export async function openRun(
     summary: input.summary,
     trace: input.step ? [input.step] : [],
   });
+  if (created) return created;
+
+  // `agent_runs_one_active_uq` refused it: another request opened the run
+  // between our check and our insert. The winner is the answer, which is the
+  // same outcome the check above was trying to produce.
+  const winner = await findActiveRun(
+    db,
+    scope,
+    input.agentId,
+    "feature",
+    featureId,
+  );
+  if (winner) return winner;
+  // The conflicting run finished in the meantime, so there is nothing to
+  // join and nothing blocking a fresh one. Rare enough to be worth an honest
+  // error rather than a retry loop.
+  throw new RunInputError(
+    "Another run on this item opened and closed while this one was starting. Try again.",
+  );
 }
 
 /**
  * Record what a run is doing, and hand back anything waiting for it.
  *
- * The status is applied first and the steering note collected second, so an
- * agent reporting `succeeded` still learns about a note left while it was
- * finishing. It cannot act on it, which is the right outcome: the note is
- * cleared either way and the person can see the run finished.
+ * Every decision here is taken under a row lock in {@link reportUnderLock}:
+ * whether the caller owns the run, whether it is still open, what the trace
+ * becomes, and whether there is a steering note to deliver. Written as a read
+ * and then an unconditional write, which is what this was, each one is a race
+ * (AR-01 and AR-02 in the September 2026 adversarial review).
+ *
+ * `actorId` is the authenticated caller, threaded from the tool or route
+ * rather than taken from the run, because the whole point is to compare them.
  */
 export async function reportRun(
   db: Database,
   scope: WorkspaceScope,
   runId: string,
   input: {
+    actorId: string | null;
     status: RunStatus;
     summary?: unknown;
     error?: unknown;
     step: TraceStep | null;
   },
 ): Promise<RunReport> {
-  const run = await getRun(db, scope, runId);
-  if (!run) throw new RunInputError(`Unknown run: ${runId}`);
-
-  // A cancelled run accepts nothing further and says so plainly. Reported
-  // rather than thrown: the agent did nothing wrong, and an error would
-  // invite it to retry.
-  if (run.status === "cancelled") {
-    return { runId, status: "cancelled", steer: null, cancelled: true };
-  }
-  if (isTerminal(run.status)) {
-    throw new RunInputError(
-      `This run already ${run.status}. Open a new one to report more work.`,
-    );
-  }
-
   const summary = parseSummary(input.summary);
   const error = parseError(input.error);
   if (input.status === "failed" && !error) {
@@ -182,25 +194,94 @@ export async function reportRun(
     );
   }
 
-  const finished = isTerminal(input.status);
-  const updated = await patchRun(db, scope, runId, {
+  const outcome = await reportUnderLock(db, scope, runId, {
+    actorId: input.actorId,
     status: input.status,
-    ...(summary === null ? {} : { summary }),
-    ...(error === null ? {} : { error }),
-    ...(input.step ? { trace: appendStep(run.trace, input.step) } : {}),
-    // The CHECK in migration 0016 ties these together, so this cannot drift
-    // into a finished run with no finishing time.
-    finishedAt: finished ? new Date() : null,
-    // Taken as it is handed over, so a note is delivered exactly once.
-    steer: null,
+    summary,
+    error,
+    step: input.step,
   });
 
-  return {
-    runId,
-    status: updated.status,
-    steer: run.steer,
-    cancelled: false,
-  };
+  if (outcome.ok) {
+    return {
+      runId,
+      status: outcome.run.status,
+      steer: outcome.steer,
+      cancelled: false,
+    };
+  }
+
+  switch (outcome.reason) {
+    case "missing":
+      throw new RunInputError(`Unknown run: ${runId}`);
+    case "not_yours":
+      // Deliberately not "that run belongs to <agent>": the caller has no
+      // business knowing whose it is, and the useful instruction is the same
+      // either way.
+      throw new RunForbiddenError(
+        "That run was opened by a different agent. Open your own run on this item.",
+      );
+    case "settled": {
+      // Being cancelled is not the agent doing anything wrong, so it is
+      // reported rather than thrown: an error would invite a retry, and the
+      // right response is to wind up.
+      const run = outcome.run!;
+      if (run.status === "cancelled") {
+        return { runId, status: "cancelled", steer: null, cancelled: true };
+      }
+      throw new RunInputError(
+        `This run already ${run.status}. Open a new one to report more work.`,
+      );
+    }
+  }
+}
+
+/**
+ * Refuse somebody who can see a run but may not act on it.
+ *
+ * Cancelling a run and steering it are changes to how an item's work is
+ * being done, so they take the same product-write check a human edit of that
+ * item takes. Before this, both were gated on workspace membership alone (the
+ * route's `authorizeWrite`, plus a membership-level RLS policy), so a
+ * read-only member could stop an agent working on a product they can only
+ * read. The item card hid the buttons behind `canEdit`, which made the API
+ * look closed while it was open: nobody would find it by using the product.
+ *
+ * Found while validating the September 2026 adversarial review; it is not one
+ * of that report's findings.
+ */
+async function assertMayControl(
+  db: Database,
+  scope: WorkspaceScope,
+  run: RunRow,
+): Promise<void> {
+  if (run.targetType !== "feature") {
+    throw new RunForbiddenError("Only runs against an item can be controlled here.");
+  }
+  const [row] = await asUser(db, scope.userId, (tx) =>
+    tx
+      .select({ specId: features.specId })
+      .from(features)
+      .where(
+        and(
+          eq(features.id, run.targetId),
+          eq(features.workspaceId, scope.workspaceId),
+        ),
+      )
+      .limit(1),
+  );
+  // Unreadable and nonexistent read the same from outside, so this cannot be
+  // used to probe for items in products the caller cannot see.
+  if (!row) throw new RunInputError(`Unknown run: ${run.id}`);
+
+  const store = await getStore();
+  const feature = await store.getFeature(row.specId, scope);
+  if (!feature) throw new RunInputError(`Unknown run: ${run.id}`);
+  if (!(await canEditItem(scope, feature))) {
+    throw new RunForbiddenError(
+      "Your role does not permit changing work on this item.",
+    );
+  }
 }
 
 /**
@@ -218,6 +299,7 @@ export async function steerRun(
 ): Promise<RunRow> {
   const run = await getRun(db, scope, runId);
   if (!run) throw new RunInputError(`Unknown run: ${runId}`);
+  await assertMayControl(db, scope, run);
   if (isTerminal(run.status)) {
     throw new RunInputError("This run has finished, so there is nobody to tell.");
   }
@@ -236,6 +318,11 @@ export async function cancelRun(
   scope: WorkspaceScope,
   runId: string,
 ): Promise<RunRow | null> {
+  const run = await getRun(db, scope, runId);
+  if (!run) throw new RunInputError(`Unknown run: ${runId}`);
+  await assertMayControl(db, scope, run);
+  // Still conditional on the run being active, so two people pressing Cancel,
+  // or a cancel racing the agent's own final report, resolve to one answer.
   return cancelIfActive(db, scope, runId);
 }
 

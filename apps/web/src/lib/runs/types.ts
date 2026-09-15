@@ -66,6 +66,15 @@ const REPORTABLE: readonly RunStatus[] = [
 /** A status an agent handed us that we do not accept. */
 export class RunInputError extends Error {}
 
+/**
+ * The caller may see this run and may not act on it.
+ *
+ * Two different situations, deliberately one error: an agent reporting
+ * against a run that is not its own, and a person cancelling a run on a
+ * product they can only read. Both are "you can see it, you cannot touch it".
+ */
+export class RunForbiddenError extends Error {}
+
 export function parseReportedStatus(raw: unknown): RunStatus {
   if (typeof raw !== "string" || !REPORTABLE.includes(raw as RunStatus)) {
     throw new RunInputError(
