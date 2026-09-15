@@ -31,21 +31,48 @@
 interface LabelledMember {
   name?: string | null;
   email?: string | null;
+  /**
+   * The workspace role. Only `service` changes anything here: it is what
+   * makes this an agent rather than a person.
+   */
+  role?: string | null;
 }
 
 /** A person with nothing usable to show, which the store should never produce
  * but the type system permits at several of these call sites. */
 const UNKNOWN = "Unknown member";
 
-/** One person's name, given the roster they are being shown alongside. */
+/**
+ * ── Why an agent is marked in the text, not with an icon ────────────────────
+ * One of these labels goes into a native `<option>`, where markup is not an
+ * option and an icon cannot go. Marking it anywhere else would mean the board
+ * said "this is a bot" and the assignee picker did not, which is the one place
+ * the distinction actually changes what somebody is about to do. So the marker
+ * is a word, and every surface that names an assignee gets it for free.
+ *
+ * Views that render their own markup are free to add an icon as well; this is
+ * the floor, not the ceiling.
+ */
+const AGENT = "agent";
+
+/** One member's name, given the roster they are being shown alongside. */
 function labelFor(member: LabelledMember, ambiguous: ReadonlySet<string>): string {
   const name = member.name?.trim() ?? "";
   const email = member.email?.trim() ?? "";
-  // No name at all: the address is the only thing left to call them, and it
-  // needs no parenthetical because it is not disambiguating anything.
-  if (!name) return email || UNKNOWN;
-  if (!email || !ambiguous.has(name)) return name;
-  return `${name} (${email})`;
+  const isAgent = member.role === "service";
+  // No name at all: the address is the only thing left to call them. Still
+  // marked, because "is this a person" matters more than tidiness.
+  if (!name) {
+    const fallback = email || UNKNOWN;
+    return isAgent ? `${fallback} (${AGENT})` : fallback;
+  }
+  // Both qualifiers in one parenthetical rather than two trailing pairs of
+  // brackets, which is how "Atlas (agent) (atlas@acme.com)" would read.
+  const needsEmail = Boolean(email) && ambiguous.has(name);
+  if (isAgent && needsEmail) return `${name} (${AGENT}, ${email})`;
+  if (isAgent) return `${name} (${AGENT})`;
+  if (needsEmail) return `${name} (${email})`;
+  return name;
 }
 
 /**

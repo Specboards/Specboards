@@ -12,6 +12,7 @@ import {
   gateFieldCatalog,
   gateSatisfied,
 } from "@/lib/gate-fields";
+import { patchEvents } from "@/lib/features-emit";
 import { applyItemReleaseCascade } from "@/lib/release-cascade-service";
 import { resolveWorkflowFor } from "@/lib/repo-config";
 import { isUuid } from "@/lib/uuid";
@@ -20,7 +21,6 @@ import {
   type FeatureDetail,
   type FeaturePatch,
   getStore,
-  type OutboxEmit,
   type WorkspaceScope,
 } from "@/lib/store";
 import type { CreateFeatureInput, FeatureRecord } from "@/lib/store/types";
@@ -335,48 +335,7 @@ async function applyFeaturePatch(
     }
   }
 
-  // Record the events in the SAME transaction as the update (via the store's
-  // outbox), so a crash can't leave the change persisted but the event lost.
-  // The relay fans them out to webhooks and to people's inboxes afterward.
-  //
-  // A patch can be more than one event: a card moved and handed over in one
-  // write is a status change and an assignment, and a consumer subscribed to
-  // only one of them still needs to hear about it.
-  const emit: OutboxEmit[] = [];
-  if (patch.status !== undefined && patch.status !== feature.status) {
-    emit.push({
-      type: "item.status_changed",
-      productId: feature.productId,
-      data: {
-        specId: feature.specId,
-        title: patch.title ?? feature.title,
-        level: feature.level,
-        from: feature.status,
-        to: patch.status,
-      },
-    });
-  }
-  // Only a change *to* somebody counts. Clearing an assignee is a real change
-  // (the ledger records it) but there is nobody it is addressed to, and the
-  // person losing the item is told by the item leaving their board.
-  if (
-    patch.assigneeId !== undefined &&
-    patch.assigneeId !== null &&
-    patch.assigneeId !== feature.assigneeId
-  ) {
-    emit.push({
-      type: "item.assigned",
-      productId: feature.productId,
-      data: {
-        specId: feature.specId,
-        title: patch.title ?? feature.title,
-        level: feature.level,
-        assigneeId: patch.assigneeId,
-        previousAssigneeId: feature.assigneeId,
-      },
-    });
-  }
-
+  const emit = await patchEvents(feature, patch, scope);
   await store.updateFeature(specId, patch, scope, emit);
 
   // Re-parenting away from an auto-created Feature grouping can leave it with

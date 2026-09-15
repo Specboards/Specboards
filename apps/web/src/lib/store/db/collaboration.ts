@@ -30,12 +30,14 @@ import {
   inArray,
   isNull,
   lt,
+  members,
   or,
   notifications,
   products,
   users,
 } from "@specboards/db";
 
+import { activeAgentsAmong } from "@/lib/agents/identity";
 import {
   CommentError,
   type CommentInput,
@@ -125,6 +127,7 @@ export async function createComment(
     // The mention list is passed through raw. The fan-out filters it to active
     // members and drops the author, and doing it twice in two places is how the
     // two would eventually disagree.
+    const mentioned = [...new Set(input.mentionedUserIds ?? [])];
     await ctx.writeOutbox(tx, scope!, {
       type: "comment.created",
       productId: feat.productId,
@@ -132,10 +135,47 @@ export async function createComment(
         commentId: row.id,
         featureId: feat.id,
         specId,
-        mentionedUserIds: [...new Set(input.mentionedUserIds ?? [])],
+        mentionedUserIds: mentioned,
         snippet: commentSnippet(body),
       },
     });
+
+    // ── Mentioning an agent is one of the four ways work reaches one ────────
+    //
+    // A second event rather than a flag on the first, because the two are
+    // addressed to different readers: `comment.created` is how people hear
+    // about a conversation, and `agent.mentioned` is a dispatch. An endpoint
+    // subscribes by type, so an agent that only wants to be woken when it is
+    // named would otherwise have to receive every comment on the board and
+    // throw almost all of them away.
+    //
+    // Resolved here, in the transaction that writes the comment, so the
+    // dispatch cannot be lost by a crash that keeps the comment: the same
+    // durability argument the `comment.created` write above rests on.
+    //
+    // Unlike `mentionedUserIds`, which is passed through raw for the fan-out
+    // to filter, this list is resolved rather than forwarded. The fan-out is
+    // deciding who to notify and can afford to be generous; this is deciding
+    // what to dispatch, and naming an agent that is retired or does not exist
+    // would raise an event nothing is listening for.
+    const mentionedAgents = mentioned.length
+      ? await tx
+          .select({ userId: members.userId })
+          .from(members)
+          .where(activeAgentsAmong(ws, mentioned))
+      : [];
+    if (mentionedAgents.length > 0) {
+      await ctx.writeOutbox(tx, scope!, {
+        type: "agent.mentioned",
+        productId: feat.productId,
+        data: {
+          commentId: row.id,
+          specId,
+          agentIds: mentionedAgents.map((m) => m.userId),
+          snippet: commentSnippet(body),
+        },
+      });
+    }
 
     // The author is the acting user; resolve their display fields so the
     // created row renders without a follow-up fetch.
