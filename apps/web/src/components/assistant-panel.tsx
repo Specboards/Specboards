@@ -44,7 +44,7 @@ import {
  * editor accepts and then edits the item, which is one more click and the right
  * shape.
  */
-function ProposalReview({
+export function ProposalReview({
   proposed,
   current,
   state,
@@ -63,6 +63,10 @@ function ProposalReview({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(proposed);
 
+  /** Every change ticked, which is where a proposal starts. */
+  const allHunks = (count: number) =>
+    new Set(Array.from({ length: count }, (_, i) => i));
+
   /**
    * How many separate changes this proposal makes, which is what a partial
    * accept picks from. Recomputed from the draft, so editing the text
@@ -75,12 +79,19 @@ function ProposalReview({
   );
 
   /** Changes being taken, by index. Everything, until someone unticks one. */
-  const [taken, setTaken] = useState<ReadonlySet<number>>(new Set());
+  const [taken, setTaken] = useState<ReadonlySet<number>>(() => allHunks(hunkCount));
   // Reset whenever the set of changes could have moved under the selection: a
   // stale index does not error, it applies a different change, which is the
   // one failure mode here that nobody would catch.
+  //
+  // The initial value above is not a duplicate of this reset, it is the half
+  // `useResetOnChange` deliberately does not do. The hook only fires when the
+  // key CHANGES, so on the first render of a proposal it does nothing, and an
+  // empty initial selection meant every proposal arrived with nothing ticked
+  // and a disabled "Accept 0 of N changes". The state has to start correct;
+  // the hook keeps it correct.
   useResetOnChange(`${hunkCount}|${current}|${draft}`, () => {
-    setTaken(new Set(Array.from({ length: hunkCount }, (_, i) => i)));
+    setTaken(allHunks(hunkCount));
   });
 
   const toggleHunk = (index: number) =>
