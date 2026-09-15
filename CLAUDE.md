@@ -70,6 +70,28 @@
 - **Always deploy to test first.** New code goes to `specboard-test` and is
   verified there before production. Never deploy production from a feature
   branch: merge to `main` first, then `pnpm deploy:prod`.
+- **Every chunk of work reaches `main` through a pull request.** Open one, let
+  the checks run, and let a human merge it. This holds for a one-line fix as
+  much as for a new surface, and it holds even when nobody else will read the
+  diff.
+  - **Why, concretely:** `.github/workflows/ci.yml` triggers on `pull_request`
+    and on pushes to `main`. Only the pull-request path runs the gate *before*
+    the code is on `main`, and code on `main` is already deploying to test (see
+    the next bullet). A direct push runs exactly the same checks a minute too
+    late: a red result then tells you test is already broken rather than
+    stopping it from breaking.
+  - **What the gate catches that a local run cannot:** the Postgres integration
+    suite (`pnpm --filter @specboards/web test:int`) and the Playwright e2e
+    suite. Both need Docker, which is often not running on a dev machine, so
+    "typecheck, lint, knip and unit tests all pass locally" is a weaker claim
+    than it sounds. Anything touching a migration, row-level security, a
+    transaction boundary, or the notification fan-out is only really tested in
+    CI.
+  - **Open it as a draft while the work is still landing**, and mark it ready
+    when the chunk is complete. A draft still runs the checks.
+  - **Agents open pull requests and do not merge them.** Merging is a human
+    decision, and so is pushing past this rule when something genuinely
+    warrants it.
 - **Merging to `main` deploys test automatically.** `.github/workflows/fly-deploy.yml`
   runs on every push to `main`, so a merged PR is on `specboard-test` within
   minutes without anyone running a command (it passes `GIT_SHA` too). Production

@@ -12,6 +12,21 @@
   breadth or polish. Prefer a working narrow slice over a complete-but-untested
   layer. (From The Pragmatic Programmer.)
 
+## Delivering work
+
+- **Every chunk of work reaches `main` through a pull request.** Open one, let
+  the checks run, and let a human merge it. A one-line fix included.
+  `.github/workflows/ci.yml` runs on `pull_request` and on pushes to `main`,
+  and only the pull-request path runs the gate before the code is on `main`
+  and already deploying to test. A direct push runs the same checks a minute
+  too late.
+- The gate covers the Postgres integration suite and the Playwright e2e suite,
+  neither of which runs without Docker. Passing typecheck, lint and unit tests
+  locally is a weaker claim than it sounds, especially for anything touching a
+  migration, row-level security, a transaction boundary, or notifications.
+- Open the pull request as a draft while the work is still landing. Agents open
+  pull requests and do not merge them.
+
 ## Writing style
 
 - **Never use em dashes (`—`).** This applies everywhere: code comments, docs,
