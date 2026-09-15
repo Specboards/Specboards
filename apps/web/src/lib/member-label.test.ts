@@ -59,4 +59,39 @@ describe("member labels", () => {
     // ambiguity it was trying to resolve.
     expect(label(noEmail)).toBe("Jonathan Butler");
   });
+
+  // ── Agents ────────────────────────────────────────────────────────────────
+  //
+  // Once an item can be handed to a service account, "who is this assigned
+  // to" stops being a question only about people. Getting it wrong is not
+  // cosmetic: assigning work to a bot thinking it was a colleague, or the
+  // reverse, is a mistake nothing downstream corrects.
+
+  it("marks an agent, so nobody assigns work to a bot by accident", () => {
+    const agent = { name: "Atlas agent", email: "atlas@specboards.net", role: "service" };
+    const label = memberLabels([agent, jonathanA]);
+    expect(label(agent)).toBe("Atlas agent (agent)");
+    // And a person is untouched: the marker means something because it is
+    // not on everybody.
+    expect(label(jonathanA)).toBe("Jonathan Butler");
+  });
+
+  it("marks an agent whose name is shared, without two sets of brackets", () => {
+    const agent = { name: "Atlas", email: "atlas@specboards.net", role: "service" };
+    const person = { name: "Atlas", email: "atlas.chen@specboards.net", role: "member" };
+    const label = memberLabels([agent, person]);
+    expect(label(agent)).toBe("Atlas (agent, atlas@specboards.net)");
+    expect(label(person)).toBe("Atlas (atlas.chen@specboards.net)");
+  });
+
+  it("marks a nameless agent too", () => {
+    const agent = { name: null, email: "bot@specboards.net", role: "service" };
+    expect(memberLabels([agent])(agent)).toBe("bot@specboards.net (agent)");
+  });
+
+  it("treats every other role as a person", () => {
+    // Only `service` is a machine account. An owner is not a bot.
+    const owner = { name: "Jo", email: "jo@specboards.net", role: "owner" };
+    expect(memberLabels([owner])(owner)).toBe("Jo");
+  });
 });

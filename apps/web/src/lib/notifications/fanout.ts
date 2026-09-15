@@ -6,6 +6,7 @@ import {
   features,
   inArray,
   isNull,
+  ne,
   itemWatchers,
   members,
   notifications,
@@ -197,7 +198,21 @@ async function applyPreferences(
   return out;
 }
 
-/** The subset of `userIds` that are still active members of the workspace. */
+/**
+ * The subset of `userIds` that are still active members and are people.
+ *
+ * ── Why agents are excluded ───────────────────────────────────────────────
+ * A service account is a `users` row with an address, so before agents could
+ * be assigned work this function was right by accident: nothing ever named
+ * one as a recipient. Assigning an item to an agent changed that, and without
+ * this filter it would file an inbox notice nobody will ever open and send
+ * "you have been assigned an item" to a machine account's mailbox.
+ *
+ * Agents are told about work through events, not through an inbox: that is
+ * what `run.requested` and `agent.mentioned` are for. An agent appearing in
+ * somebody's notification settings, or its address appearing in a mail log,
+ * would both be this confusion surfacing somewhere harder to explain.
+ */
 async function activeMembers(
   tx: Tx,
   workspaceId: string,
@@ -213,6 +228,7 @@ async function activeMembers(
         eq(members.workspaceId, workspaceId),
         inArray(members.userId, unique),
         isNull(members.deactivatedAt),
+        ne(members.role, "service"),
       ),
     );
   return new Set(rows.map((r) => r.userId));
@@ -302,6 +318,12 @@ async function resolveTargets(tx: Tx, ev: OutboxEventRow): Promise<Target[]> {
     default:
       // Including item.deleted, which is emitted for webhooks and cannot reach
       // an inbox: the notification row's feature is NOT NULL and cascades.
+      //
+      // And the three agent-facing types (`item.stage_entered`,
+      // `agent.mentioned`, `run.requested`), which are dispatch rather than
+      // news. Their whole audience is software subscribed to a webhook
+      // endpoint; putting them in a person's inbox would double every
+      // notification an agent-assigned item already produces.
       return [];
   }
 }

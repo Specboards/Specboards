@@ -14,6 +14,25 @@ export const WEBHOOK_EVENT_TYPES = [
   "item.deleted",
   "comment.created",
   "release.shipped",
+  // ── Agent-facing events ──────────────────────────────────────────────────
+  //
+  // The dispatch half of the harness. An agent subscribes to these to be told
+  // there is work, rather than polling the board for changes.
+  //
+  // `item.stage_entered` fires at the same moment as `item.status_changed`
+  // and is deliberately not the same event. They have different audiences and
+  // so different payloads: `item.status_changed` is the audit fact (this
+  // moved from A to B) and is what an integration mirroring the board wants,
+  // while `item.stage_entered` is a dispatch (this item is sitting in B, here
+  // is who owns it and whether that is an agent) and is what something
+  // deciding whether to start work needs. Folding them together would mean
+  // either an audit event carrying dispatch fields nothing else reads, or a
+  // dispatcher re-reading the item on every status change to find out if it
+  // cares. An endpoint subscribes by type, so the cost of the split is one
+  // extra outbox row per status change, pruned on the ordinary schedule.
+  "item.stage_entered",
+  "agent.mentioned",
+  "run.requested",
 ] as const;
 
 export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];
@@ -35,6 +54,9 @@ export const WEBHOOK_EVENT_LABELS: Record<WebhookEventType, string> = {
   "item.deleted": "Item deleted",
   "comment.created": "Comment posted",
   "release.shipped": "Release shipped",
+  "item.stage_entered": "Item entered a stage (for agents)",
+  "agent.mentioned": "Agent mentioned in a comment",
+  "run.requested": "Work handed to an agent",
 };
 
 export function isWebhookEventType(v: unknown): v is WebhookEventType {
