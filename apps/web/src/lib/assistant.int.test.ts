@@ -739,12 +739,15 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
       expect(turn.content).toContain("Here is a tighter version.");
       expect(turn.content).toContain("too long to send to the model in full");
 
-      // Nothing recorded in the row either, so a later accept has nothing to
-      // find even if the panel were coaxed into asking.
-      const [row] = await sql<{ base: string | null; content: string }[]>`
-        select proposal_base_sha as base, content from assistant_messages
-        where id = ${turn.id}`;
-      expect(row!.base).toBeNull();
+      // No proposal row at all, so a later accept has nothing to find even if
+      // the panel were coaxed into asking. Stronger than the old assertion
+      // that the base sha was null: there is nothing to accept, rather than
+      // something to accept with no guard on it.
+      const [row] = await sql<{ content: string; n: string }[]>`
+        select m.content,
+               (select count(*) from proposals p where p.source_message_id = m.id) as n
+        from assistant_messages m where m.id = ${turn.id}`;
+      expect(row!.n).toBe("0");
       expect(row!.content).not.toContain("BEGIN PROPOSED SPEC");
 
       // And the description is untouched.
@@ -787,9 +790,9 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
 
       expect(turn.proposal).toBeNull();
       expect(turn.content).not.toContain("BEGIN PROPOSED SPEC");
-      const [row] = await sql<{ base: string | null }[]>`
-        select proposal_base_sha as base from assistant_messages where id = ${turn.id}`;
-      expect(row!.base).toBeNull();
+      const [row] = await sql<{ n: string }[]>`
+        select count(*) as n from proposals where source_message_id = ${turn.id}`;
+      expect(row!.n).toBe("0");
 
       // And the item is untouched, which is the outcome that matters.
       expect(await bodyNow()).toBe(ITEM_BODY);
@@ -813,8 +816,8 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
       const grown = "y".repeat(BODY_CHAR_LIMIT + 1);
       await sql`update features set details = ${grown}
         where workspace_id = ${ws} and spec_id = ${specId}`;
-      await sql`update assistant_messages set proposal_base_sha = ${svc.contentVersion(grown)}
-        where id = ${turn.id}`;
+      await sql`update proposals set base_version = ${svc.contentVersion(grown)}
+        where source_message_id = ${turn.id}`;
 
       await expect(
         proposals.acceptProposal(db, asOwner, specId, turn.id),
@@ -822,9 +825,9 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
 
       // Refused before the claim, so the proposal is still actionable once
       // somebody shortens the description.
-      const [row] = await sql<{ outcome: string | null }[]>`
-        select proposal_outcome as outcome from assistant_messages where id = ${turn.id}`;
-      expect(row!.outcome).toBeNull();
+      const [row] = await sql<{ status: string }[]>`
+        select status from proposals where source_message_id = ${turn.id}`;
+      expect(row!.status).toBe("open");
 
       await sql`update features set details = ${ITEM_BODY}
         where workspace_id = ${ws} and spec_id = ${specId}`;
@@ -889,9 +892,9 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
 
       // The staleness check runs before the claim, so a refusal must not leave
       // the proposal marked as resolved by the person it just refused.
-      const [row] = await sql<{ proposal_outcome: string | null }[]>`
-        select proposal_outcome from assistant_messages where id = ${turn.id}`;
-      expect(row!.proposal_outcome).toBeNull();
+      const [row] = await sql<{ status: string }[]>`
+        select status from proposals where source_message_id = ${turn.id}`;
+      expect(row!.status).toBe("open");
     });
 
     it("still accepts when the item has not moved", async () => {
@@ -1032,6 +1035,86 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
       ).rejects.toThrow(proposals.ProposalSettledError);
     });
 
+    // ── Turns that predate the `proposals` table ─────────────────────────
+    //
+    // Before proposals became rows, a proposal was five columns on the
+    // message and a marker block in its text. Those turns are still in every
+    // existing workspace's threads, and they are not backfilled: the row is
+    // created the first time somebody acts on one, because `parseAnswer` is
+    // the only thing that knows whether a message carries a proposal and
+    // reimplementing its grammar in SQL would be a second definition of that.
+    //
+    // `legacy()` rewinds a freshly-made proposal into that older shape.
+    async function legacy(
+      messageId: string,
+      outcome: "accepted" | "rejected" | null,
+      baseSha: string | null,
+    ): Promise<void> {
+      await sql`delete from proposals where source_message_id = ${messageId}`;
+      await sql`update assistant_messages
+        set proposal_outcome = ${outcome},
+            proposal_resolved_by = ${outcome ? user.owner : null},
+            proposal_resolved_at = ${outcome ? new Date() : null},
+            proposal_base_sha = ${baseSha}
+        where id = ${messageId}`;
+    }
+
+    it("accepts a proposal made before proposals were rows", async () => {
+      const turn = await propose();
+      const [before] = await sql<{ base: string | null }[]>`
+        select base_version as base from proposals where source_message_id = ${turn.id}`;
+      await legacy(turn.id, null, before!.base);
+
+      // Nothing to find in the new table, so accepting has to materialise it.
+      await proposals.acceptProposal(db, asOwner, specId, turn.id);
+      expect(await bodyNow()).toBe(NEW_BODY);
+
+      const [row] = await sql<{ status: string; origin: string }[]>`
+        select status, origin from proposals where source_message_id = ${turn.id}`;
+      expect(row!.status).toBe("applied");
+      expect(row!.origin).toBe("conversation");
+    });
+
+    it("does not let an old decision be taken a second time", async () => {
+      // The trap in materialising on demand: a proposal accepted last year
+      // has no row, and writing a fresh one would default it to `open` and
+      // make it acceptable all over again, re-applying stale text over
+      // whatever the description says now.
+      const turn = await propose();
+      await legacy(turn.id, "accepted", null);
+
+      await expect(
+        proposals.acceptProposal(db, asOwner, specId, turn.id),
+      ).rejects.toBeInstanceOf(proposals.ProposalSettledError);
+
+      // And the row it wrote on the way to refusing carries the old decision,
+      // rather than sitting there open for the next person to click.
+      const [row] = await sql<{ status: string }[]>`
+        select status from proposals where source_message_id = ${turn.id}`;
+      expect(row!.status).toBe("applied");
+      expect(await bodyNow()).toBe(ITEM_BODY);
+    });
+
+    it("materialises once when two people act on an old turn at the same time", async () => {
+      const turn = await propose();
+      const [before] = await sql<{ base: string | null }[]>`
+        select base_version as base from proposals where source_message_id = ${turn.id}`;
+      await legacy(turn.id, null, before!.base);
+
+      // Both requests find no row and both try to write one. The unique index
+      // on `source_message_id` is what stops that becoming two proposals, and
+      // the claim is what stops it becoming two writes.
+      const results = await Promise.allSettled([
+        proposals.acceptProposal(db, asOwner, specId, turn.id),
+        proposals.acceptProposal(db, asOwner, specId, turn.id),
+      ]);
+      expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+
+      const [row] = await sql<{ n: string }[]>`
+        select count(*) as n from proposals where source_message_id = ${turn.id}`;
+      expect(row!.n).toBe("1");
+    });
+
     it("applies once when two accepts race", async () => {
       const turn = await propose();
       // The window the sequential check cannot close: two people with the panel
@@ -1045,8 +1128,8 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
       expect(await bodyNow()).toBe(NEW_BODY);
 
       const [row] = await sql<{ n: string }[]>`
-        select count(*) as n from assistant_messages
-        where id = ${turn.id} and proposal_outcome = 'accepted'`;
+        select count(*) as n from proposals
+        where source_message_id = ${turn.id} and status = 'applied'`;
       expect(row!.n).toBe("1");
     });
 

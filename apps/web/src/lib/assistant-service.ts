@@ -9,11 +9,14 @@ import {
   eq,
   features,
   modelProviders,
+  proposals,
+  releases,
   users,
   type Database,
 } from "@specboards/db";
 
-import { asUser } from "@/lib/db-scope";
+import { asUser, type ScopedTx } from "@/lib/db-scope";
+import { insertProposal } from "@/lib/proposals/store";
 
 import { estimatePromptTokens } from "@/lib/ai/estimate";
 import { assembleItemContext, type ContextField } from "@/lib/ai/item-context";
@@ -171,6 +174,11 @@ function toView(row: {
   proposalResolvedByName?: string | null;
   proposalResolvedAt?: Date | null;
   proposalCommitSha?: string | null;
+  /** From the `proposals` row, when this turn has one. Wins over the above. */
+  proposalStatus?: string | null;
+  proposalRowResolvedByName?: string | null;
+  proposalRowResolvedAt?: Date | null;
+  proposalRowResult?: unknown;
   skillKey?: string | null;
 }): AssistantMessageView {
   // Whether there is a proposal is decided by reading the content, never by the
@@ -178,6 +186,23 @@ function toView(row: {
   // never one". The content is the only place that distinction lives.
   const hasProposal =
     row.role === "assistant" && parseAnswer(row.content).proposal !== null;
+  // ── Two sources, for one release only ────────────────────────────────────
+  // Every proposal made from now on has a `proposals` row, and that row is the
+  // truth. What it cannot tell us about is a turn decided BEFORE the table
+  // existed: those carry their outcome in the old columns and will never gain
+  // a row unless somebody applies them, which they cannot, because they are
+  // already settled.
+  //
+  // So the fallback is display-only and finite. It goes when the
+  // `proposal_*` columns are dropped, which is safe once no settled turn old
+  // enough to need it is still being read.
+  const fromRow = row.proposalStatus != null;
+  const legacyOutcome =
+    row.proposalOutcome === "accepted" || row.proposalOutcome === "rejected"
+      ? row.proposalOutcome
+      : null;
+  const result = (row.proposalRowResult ?? null) as { commitSha?: string } | null;
+
   return {
     id: row.id,
     role: row.role === "assistant" ? "assistant" : "user",
@@ -189,16 +214,40 @@ function toView(row: {
     skillKey: row.skillKey ?? null,
     proposal: hasProposal
       ? {
-          outcome:
-            row.proposalOutcome === "accepted" || row.proposalOutcome === "rejected"
-              ? row.proposalOutcome
-              : null,
-          resolvedByName: row.proposalResolvedByName ?? null,
-          resolvedAt: row.proposalResolvedAt?.toISOString() ?? null,
-          commitSha: row.proposalCommitSha ?? null,
+          outcome: fromRow ? outcomeOf(row.proposalStatus!) : legacyOutcome,
+          resolvedByName:
+            (fromRow ? row.proposalRowResolvedByName : row.proposalResolvedByName) ??
+            null,
+          resolvedAt:
+            (fromRow
+              ? row.proposalRowResolvedAt
+              : row.proposalResolvedAt
+            )?.toISOString() ?? null,
+          commitSha:
+            (fromRow ? result?.commitSha : row.proposalCommitSha) ?? null,
         }
       : null,
   };
+}
+
+/**
+ * A proposal's lifecycle, in the two words the panel has always spoken.
+ *
+ * The table says `applied` / `dismissed`, because a proposal can now target
+ * things other than a conversation and "accepted" reads oddly against a
+ * scheduled run. The panel says "accepted" / "rejected", because that is what
+ * the person clicked. Translating here keeps the wire shape stable, so the
+ * whole cutover is invisible to the browser.
+ *
+ * `superseded` maps to no outcome rather than to "rejected": nobody turned it
+ * down, it stopped being the current offer. A conversation proposal cannot be
+ * superseded today, so this is a guard against a later surface rather than a
+ * case that fires now.
+ */
+function outcomeOf(status: string): "accepted" | "rejected" | null {
+  if (status === "applied") return "accepted";
+  if (status === "dismissed") return "rejected";
+  return null;
 }
 
 /**
@@ -269,11 +318,47 @@ function subjectColumns(subject: ThreadSubject) {
 }
 
 /**
+ * The product a subject belongs to, for the proposal row's routing snapshot.
+ *
+ * Only ever a filter: the read policy on `proposals` resolves the real target
+ * rather than trusting this, precisely so that getting it wrong here cannot
+ * widen who can see a proposal. Null is a legitimate answer (a portfolio
+ * release, an item with no product) and is stored as such.
+ */
+async function subjectProductId(
+  tx: ScopedTx,
+  subject: ThreadSubject,
+): Promise<string | null> {
+  if (subject.kind === "item") {
+    const [row] = await tx
+      .select({ productId: features.productId })
+      .from(features)
+      .where(eq(features.id, subject.featureId))
+      .limit(1);
+    return row?.productId ?? null;
+  }
+  const [row] = await tx
+    .select({ productId: releases.productId })
+    .from(releases)
+    .where(eq(releases.id, subject.releaseId))
+    .limit(1);
+  return row?.productId ?? null;
+}
+
+/**
  * Who accepted or rejected a proposal, joined separately from who asked. Two
  * aliases of `users` rather than one, because they are routinely different
  * people: that is the whole shape of a review.
  */
 const resolvers = alias(users, "proposal_resolvers");
+
+/**
+ * The same question asked of the `proposals` row, which is where a decision
+ * taken from now on is recorded. A second alias rather than a `coalesce` over
+ * one join, because the two columns are different facts from different eras
+ * and `toView` has to be able to tell which it is looking at.
+ */
+const rowResolvers = alias(users, "proposal_row_resolvers");
 
 export async function readThread(
   db: Database,
@@ -294,11 +379,19 @@ export async function readThread(
       proposalResolvedAt: assistantMessages.proposalResolvedAt,
       proposalCommitSha: assistantMessages.proposalCommitSha,
       proposalResolvedByName: resolvers.name,
+      proposalStatus: proposals.status,
+      proposalRowResolvedAt: proposals.resolvedAt,
+      proposalRowResult: proposals.result,
+      proposalRowResolvedByName: rowResolvers.name,
       skillKey: assistantMessages.skillKey,
     })
       .from(assistantMessages)
       .leftJoin(users, eq(users.id, assistantMessages.authorId))
       .leftJoin(resolvers, eq(resolvers.id, assistantMessages.proposalResolvedBy))
+      // At most one, enforced by `proposals_source_message_uq`, so this cannot
+      // turn one turn into several rows.
+      .leftJoin(proposals, eq(proposals.sourceMessageId, assistantMessages.id))
+      .leftJoin(rowResolvers, eq(rowResolvers.id, proposals.resolvedBy))
       .where(subjectWhere(scope.workspaceId, subject))
       .orderBy(asc(assistantMessages.createdAt)),
   );
@@ -842,7 +935,6 @@ export async function persistTurns(
         model,
         promptTokens: usage.promptTokens,
         completionTokens: usage.completionTokens,
-        proposalBaseSha,
         // One millisecond later, so the ordering of a pair written in the same
         // statement is decided here rather than by however Postgres happens to
         // resolve two identical timestamps.
@@ -850,6 +942,33 @@ export async function persistTurns(
       },
     ])
     .returning();
+
+  // ── The proposal, in the same transaction as the turn that carries it ────
+  // A turn that recorded the answer but not its proposal would render an
+  // Accept button with nothing behind it. Atomic is the only thing that rules
+  // that out, which is why this is `insertProposal` against the caller's `tx`
+  // rather than the ordinary `createProposal`.
+  const answerRow = written.find((r) => r.role === "assistant");
+  if (parsed.proposal !== null && !withheld && answerRow) {
+    await insertProposal(tx, {
+      workspaceId: scope.workspaceId,
+      productId: await subjectProductId(tx, subject),
+      origin: "conversation",
+      sourceMessageId: answerRow.id,
+      // The person who asked, matching `authorId` on the message above and for
+      // the same reason: every row names someone accountable for it. That a
+      // model wrote the text is said by the message's `role` and by this
+      // proposal's `origin`, not by pretending nobody was involved.
+      actorId: scope.userId,
+      actorType: "user",
+      kind: "spec_content",
+      targetType: subject.kind === "item" ? "feature" : "release",
+      targetId:
+        subject.kind === "item" ? subject.featureId : subject.releaseId,
+      payload: { body: parsed.proposal },
+      baseVersion: proposalBaseSha,
+    });
+  }
 
   // Looked up rather than taken from the history, which is empty on the first
   // turn of a thread and would leave that pair permanently unattributed.

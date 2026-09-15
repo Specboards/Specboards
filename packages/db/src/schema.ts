@@ -2981,6 +2981,84 @@ export const assistantMessages = pgTable(
 );
 
 /**
+ * A change an agent or the assistant has suggested, waiting for a human.
+ *
+ * Replaces the `proposal_*` columns on {@link assistantMessages}, which could
+ * hold exactly one kind of proposal, belonging to exactly one conversation,
+ * made while somebody was watching. An agent working an item unattended breaks
+ * all three, so a proposal becomes a row of its own with a lifecycle.
+ *
+ * `origin` decides which surface renders it, and it is the only difference in
+ * how the two are handled: a `conversation` proposal shows in the thread that
+ * produced it, a `run` proposal goes to the review inbox because nobody was
+ * there when it arrived. Both take the same claim and the same apply path, so
+ * an agent never gets a cheaper route to a write than the assistant has.
+ *
+ * `productId` is denormalised from the target so the inbox can filter cheaply.
+ * It is NOT what authorizes a read: the RLS policy in migration 0015 resolves
+ * the real target, because a wrong copy here would turn a data bug into a
+ * disclosure.
+ *
+ * CHECK constraints (origin, kind, target type, status, and the rule that a row
+ * carries exactly one source) live in the migration, as every other table's do.
+ */
+export const proposals = pgTable(
+  "proposals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    /** Routing snapshot for inbox filtering; not the authorization. */
+    productId: uuid("product_id").references(() => products.id, {
+      onDelete: "cascade",
+    }),
+    /** conversation | run. */
+    origin: text("origin").notNull(),
+    /** The turn that carried it, for a conversation proposal. */
+    sourceMessageId: uuid("source_message_id").references(
+      () => assistantMessages.id,
+      { onDelete: "cascade" },
+    ),
+    /** The run that produced it. No FK until `agent_runs` exists. */
+    runId: uuid("run_id"),
+    /** Who drafted it; snapshot, no FK, as `outboxEvents` does. */
+    actorId: uuid("actor_id"),
+    /** user | agent | api_key | system. */
+    actorType: text("actor_type").notNull(),
+    /** spec_content | item_metadata | item_batch | doc_draft. */
+    kind: text("kind").notNull(),
+    /** feature | release | doc_space. */
+    targetType: text("target_type").notNull(),
+    targetId: uuid("target_id").notNull(),
+    /** The proposed change, shaped per kind. */
+    payload: jsonb("payload").notNull(),
+    /** Blob sha, content version, or null for a row predating the guard. */
+    baseVersion: text("base_version"),
+    /** Where the claims came from: `{ kind, ref, label }[]`. */
+    evidence: jsonb("evidence").notNull().default([]),
+    /** open | applied | dismissed | superseded. */
+    status: text("status").notNull().default("open"),
+    resolvedBy: uuid("resolved_by"),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    /** What applying produced; written after the write, never guessed before. */
+    result: jsonb("result"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("proposals_inbox_idx").on(t.workspaceId, t.status, t.createdAt),
+    index("proposals_target_idx").on(t.targetType, t.targetId),
+    index("proposals_run_idx").on(t.runId),
+    uniqueIndex("proposals_source_message_uq").on(t.sourceMessageId),
+  ],
+);
+
+/**
  * A skill: standing instructions a team gives their assistant, shown as a button
  * on every item ("Grill me", "Find the gaps").
  *
