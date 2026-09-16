@@ -1357,9 +1357,12 @@ describe.skipIf(!DB_URL)("the assistant on an item", () => {
       const skills = await skillsSvc.listSkills(db, asOwner);
       // Filtered to this surface: the list now spans both panels, and the
       // release skills sit on the end in code order because no row places them.
+      // `architecture-impact` is an item skill this workspace has no row for,
+      // so it lands after the three it arranged rather than among them, which
+      // is the rule about newly shipped built-ins holding here too.
       expect(
         skills.filter((s) => s.surface === "item").map((s) => s.key),
-      ).toEqual(["draft", "grill", "gaps"]);
+      ).toEqual(["draft", "grill", "gaps", "architecture-impact"]);
     });
 
     it("reorders without freezing the wording we ship", async () => {

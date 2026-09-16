@@ -20,6 +20,11 @@ import { insertProposal } from "@/lib/proposals/store";
 
 import { estimatePromptTokens } from "@/lib/ai/estimate";
 import { assembleItemContext, type ContextField } from "@/lib/ai/item-context";
+import {
+  architectureGapMessage,
+  readArchitecture,
+  type ArchitectureContext,
+} from "@/lib/architecture-context";
 import { parseAnswer } from "@/lib/ai/proposals";
 import type { Skill } from "@/lib/ai/skills";
 import { findEnabledSkill, listSkills } from "@/lib/skills-service";
@@ -507,7 +512,7 @@ export async function getAssistantPanelData(
   const canEdit = await canEditItem(scope, feature);
   const [messages, assembled, modelConnected, skills] = await Promise.all([
     readThread(db, scope, { kind: "item", featureId }),
-    buildContext(scope, feature, canEdit),
+    buildContext(db, scope, feature, canEdit),
     isModelConnected(db, scope),
     listSkills(db, scope),
   ]);
@@ -596,16 +601,18 @@ export async function isModelConnected(
  * same skill pressed by a person.
  */
 export async function buildContext(
+  db: Database,
   scope: WorkspaceScope,
   feature: FeatureDetail,
   canEdit: boolean,
   skill: Skill | null = null,
 ) {
   const store = await getStore();
-  const [workflow, levels, goals] = await Promise.all([
+  const [workflow, levels, goals, architecture] = await Promise.all([
     resolveWorkflowFor(scope, feature.productId),
     store.listLevels(scope, feature.productId),
     store.listItemGoals(feature.specId, scope),
+    architectureFor(db, scope, feature, skill),
   ]);
 
   const ownIndex = levels.findIndex((l) => l.key === feature.level);
@@ -629,9 +636,43 @@ export async function buildContext(
       })),
       goals: goals.map((g) => g.title),
       tags: feature.tags,
+      ...(architecture ? { architecture } : {}),
     },
     skill,
   );
+}
+
+/**
+ * The architecture context, when the running skill asked for it.
+ *
+ * ── Why a refusal rather than a review of the spec alone ────────────────────
+ * A skill that says it checks work against the team's architecture, run where
+ * there is no architecture to check against, would produce a confident review
+ * of the item on its own. Nothing about that answer looks unusual: it reads
+ * like the check ran and found nothing, which is the one outcome that must
+ * never be manufactured. So the turn is refused before a model is called, with
+ * a sentence saying which of the three things is missing.
+ *
+ * Thrown rather than returned, because both callers already treat a refusal
+ * from here the right way: the turn endpoint surfaces an `AssistantInputError`
+ * to the person who pressed the button, and `runSkillOnItem` calls this before
+ * it opens a run, so nothing is left half-finished and the schedule dispatcher
+ * records the reason on the schedule.
+ */
+async function architectureFor(
+  db: Database,
+  scope: WorkspaceScope,
+  feature: FeatureDetail,
+  skill: Skill | null,
+): Promise<ArchitectureContext | null> {
+  if (!skill?.reads?.includes("architecture")) return null;
+  // An item with no product has no architecture area to belong to, which is
+  // the same answer as a product that never set one up and needs no separate
+  // sentence: either way there is nothing to review this against.
+  if (!feature.productId) throw new AssistantInputError(architectureGapMessage("none"));
+  const read = await readArchitecture(db, scope, feature.productId);
+  if (!read.ok) throw new AssistantInputError(architectureGapMessage(read.gap));
+  return read.context;
 }
 
 /**
@@ -729,7 +770,7 @@ export async function startAssistantTurn(
 
   const { feature, featureId } = await resolveAssistantItem(db, scope, specId);
   const canEdit = await canEditItem(scope, feature);
-  const { systemPrompt, canPropose } = await buildContext(scope, feature, canEdit, skill);
+  const { systemPrompt, canPropose } = await buildContext(db, scope, feature, canEdit, skill);
   const history = await readThread(db, scope, {
     kind: "item",
     featureId,
