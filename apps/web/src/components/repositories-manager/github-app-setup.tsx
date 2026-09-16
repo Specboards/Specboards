@@ -100,6 +100,10 @@ function ManualGitHubAppForm({
   const [org, setOrg] = useState("");
   const [appId, setAppId] = useState("");
   const [privateKey, setPrivateKey] = useState("");
+  /** The .pem the operator chose, so the field can confirm what it holds. */
+  const [keyFileName, setKeyFileName] = useState<string | null>(null);
+  /** Revealed on request: the paste path is the fallback, not the default. */
+  const [pasteKey, setPasteKey] = useState(false);
   const [clientSecret, setClientSecret] = useState("");
   const [webhookSecret, setWebhookSecret] = useState("");
   const [pending, startTransition] = useTransition();
@@ -118,8 +122,51 @@ function ManualGitHubAppForm({
     webhookActive: originIsPublic,
   });
 
+  /**
+   * Read a chosen .pem into the same state the textarea writes.
+   *
+   * Entirely in the browser: the file's text goes into the field the form was
+   * already submitting, so nothing about the request or the server changes.
+   * The alternative, posting the file itself, would mean a second endpoint
+   * and a second encryption path for the same secret.
+   *
+   * Only the filename and length are ever shown. A private key rendered back
+   * into the page would be readable in a screen share, which is exactly what
+   * somebody does while setting this up with a colleague.
+   */
+  async function readKeyFile(file: File | undefined) {
+    if (!file) return;
+    setError(null);
+    const text = await file.text().catch(() => "");
+    if (!/-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(text)) {
+      // The likely mistake is picking the wrong download: GitHub hands over a
+      // .pem, and the folder it lands in usually has several.
+      setError(
+        `${file.name} does not look like a private key. GitHub's download is ` +
+          `a .pem file beginning with "-----BEGIN".`,
+      );
+      return;
+    }
+    setPrivateKey(text);
+    setKeyFileName(file.name);
+    setPasteKey(false);
+  }
+
+  function clearKey() {
+    setPrivateKey("");
+    setKeyFileName(null);
+  }
+
   function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    // The textarea used to carry `required`, and it is now hidden behind
+    // "paste it instead", so the browser can no longer enforce this. Checked
+    // here rather than left to the server: a round trip to be told a field is
+    // empty is a worse answer than saying so immediately.
+    if (!privateKey.trim()) {
+      setError("Choose the .pem file GitHub downloaded, or paste its contents.");
+      return;
+    }
     startTransition(async () => {
       setError(null);
       try {
@@ -267,7 +314,9 @@ function ManualGitHubAppForm({
               <strong className="text-foreground">
                 Generate a private key
               </strong>
-              , which downloads a <code>.pem</code> file. Paste all three below.
+              , which downloads a <code>.pem</code> file. Bring all three back
+              here: the App ID and client secret are pasted, and the{" "}
+              <code>.pem</code> is uploaded as a file.
             </span>
           </li>
 
@@ -343,25 +392,70 @@ function ManualGitHubAppForm({
         />
       </label>
 
-      <label className="block space-y-1.5">
+      <div className="block space-y-1.5">
         <span className="text-xs font-medium text-muted-foreground">
           Private key
         </span>
-        <textarea
-          value={privateKey}
-          onChange={(e) => setPrivateKey(e.target.value)}
-          placeholder={"-----BEGIN RSA PRIVATE KEY-----\n…"}
-          rows={5}
-          disabled={pending}
-          required
-          spellCheck={false}
-          className="w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs"
-        />
-        <span className="block text-xs text-muted-foreground">
-          Generate one on the App&apos;s page and paste the whole .pem file. It
-          is encrypted before it is stored and never sent back to the browser.
-        </span>
-      </label>
+
+        {keyFileName ? (
+          <p className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="rounded-md bg-success/15 px-2 py-1 text-success-fg">
+              {keyFileName} loaded
+            </span>
+            {/* The length, never the key. A private key rendered back into the
+                page is readable in a screen share, which is what somebody is
+                often doing while setting this up. */}
+            <span className="text-muted-foreground">
+              {privateKey.length.toLocaleString()} characters
+            </span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={pending}
+              onClick={clearKey}
+            >
+              Choose a different file
+            </Button>
+          </p>
+        ) : (
+          <>
+            <input
+              type="file"
+              accept=".pem,application/x-pem-file,text/plain"
+              disabled={pending}
+              onChange={(e) => void readKeyFile(e.target.files?.[0])}
+              className="block w-full text-xs file:mr-3 file:rounded-md file:border file:border-input file:bg-transparent file:px-3 file:py-1.5 file:text-xs file:text-foreground hover:file:bg-muted"
+            />
+            <span className="block text-xs text-muted-foreground">
+              Choose the <code>.pem</code> GitHub downloaded when you pressed
+              Generate a private key. It is read in your browser, encrypted
+              before it is stored, and never sent back here.{" "}
+              <button
+                type="button"
+                className="text-link underline"
+                onClick={() => setPasteKey(true)}
+              >
+                Paste it instead
+              </button>
+              .
+            </span>
+          </>
+        )}
+
+        {pasteKey && !keyFileName ? (
+          <textarea
+            value={privateKey}
+            onChange={(e) => setPrivateKey(e.target.value)}
+            placeholder={"-----BEGIN RSA PRIVATE KEY-----\n…"}
+            rows={5}
+            disabled={pending}
+            spellCheck={false}
+            aria-label="Private key"
+            className="w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs"
+          />
+        ) : null}
+      </div>
 
       <label className="block space-y-1.5">
         <span className="text-xs font-medium text-muted-foreground">

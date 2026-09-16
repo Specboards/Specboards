@@ -44,6 +44,59 @@ const BLOB_READ_CONCURRENCY = 8;
 const MAX_MATCHING_FILES = 5_000;
 const MAX_TOTAL_BLOB_BYTES = 50 * 1024 * 1024; // 50 MB
 
+/**
+ * Raised when a repository row is not backed by a GitHub installation.
+ *
+ * Not every row in `repositories` is a GitHub connection. A workspace seeded
+ * with sample data gets one so the sample specs have somewhere to hang, and its
+ * installation id is a placeholder rather than a number.
+ *
+ * Before this existed, that placeholder went through `Number(...)` and reached
+ * octokit as `NaN`, which answered with "[@octokit/auth-app] installationId
+ * option is required for installation authentication". That is a true sentence
+ * about octokit's arguments and tells the person reading it nothing: they did
+ * connect GitHub, and it did work, and here is an error naming a repository
+ * they have never heard of. Found on a real self-host install, 2026-09-16.
+ */
+export class RepoNotConnectedError extends Error {
+  constructor(repo: string) {
+    super(
+      `${repo} is not connected to a GitHub installation, so it cannot be ` +
+        `synced. Sample repositories are created with the sample board and ` +
+        `have no GitHub connection behind them.`,
+    );
+    this.name = "RepoNotConnectedError";
+  }
+}
+
+/**
+ * Whether a repository row names a real GitHub installation.
+ *
+ * One definition, used by the callers that decide whether to sync a repo and
+ * by the guard below that refuses if one slips through. GitHub installation ids
+ * are positive integers; anything else is a row that was never connected.
+ */
+export function hasGithubInstallation(installationId: string | null): boolean {
+  if (!installationId) return false;
+  return /^\d+$/.test(installationId) && Number(installationId) > 0;
+}
+
+/**
+ * The installation id as octokit wants it, refusing a row that has none.
+ *
+ * Every GitHub call funnels through here, so a placeholder cannot reach the
+ * client library whatever route it took to get here.
+ */
+function installationNumber(
+  installationId: string,
+  repo: string,
+): number {
+  if (!hasGithubInstallation(installationId)) {
+    throw new RepoNotConnectedError(repo);
+  }
+  return Number(installationId);
+}
+
 /** Raised when a repository is too large to scan in one pass. */
 export class RepoTooLargeError extends Error {
   constructor(message: string) {
@@ -142,7 +195,9 @@ export async function listInstallationRepositories(
   app: App,
   installationId: string,
 ): Promise<InstallationRepo[]> {
-  const octokit = await app.getInstallationOctokit(Number(installationId));
+  const octokit = await app.getInstallationOctokit(
+    installationNumber(installationId, `installation ${installationId}`),
+  );
   const repos = await octokit.paginate(
     octokit.rest.apps.listReposAccessibleToInstallation,
     { per_page: 100 },
@@ -172,7 +227,10 @@ export async function getInstallationAccount(
   installationId: string,
 ): Promise<InstallationAccount> {
   const { data } = await app.octokit.rest.apps.getInstallation({
-    installation_id: Number(installationId),
+    installation_id: installationNumber(
+      installationId,
+      `installation ${installationId}`,
+    ),
   });
   const account = data.account;
   if (!account || !("login" in account) || typeof account.login !== "string") {
@@ -200,7 +258,9 @@ export async function createInstallationOrgRepository(
   installationId: string,
   input: { org: string; name: string; description?: string },
 ): Promise<CreatedRepo> {
-  const octokit = await app.getInstallationOctokit(Number(installationId));
+  const octokit = await app.getInstallationOctokit(
+    installationNumber(installationId, `installation ${installationId}`),
+  );
   const { data } = await octokit.rest.repos.createInOrg({
     org: input.org,
     name: input.name,
@@ -225,7 +285,12 @@ export async function createGitHubRepoClient(
   app: App,
   config: GitHubRepoConfig,
 ): Promise<GitHubRepoClient> {
-  const octokit = await app.getInstallationOctokit(Number(config.installationId));
+  const octokit = await app.getInstallationOctokit(
+    installationNumber(
+      config.installationId,
+      `${config.owner}/${config.name}`,
+    ),
+  );
   return new GitHubRepoClient(octokit, config);
 }
 

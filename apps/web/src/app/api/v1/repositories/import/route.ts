@@ -2,7 +2,7 @@ import { eq, repositories } from "@specboards/db";
 
 import { getDb } from "@/lib/db";
 import { authorizeOrgAdmin } from "@/lib/auth-session";
-import { syncRepository, type SyncSummary } from "@/lib/github-sync";
+import { canSyncRepo, syncRepository, type SyncSummary } from "@/lib/github-sync";
 import { enforceQuota, QUOTAS } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
@@ -29,10 +29,13 @@ export async function POST(req: Request) {
   const limited = await enforceQuota(db, QUOTAS.import, authz.scope.workspaceId);
   if (limited) return limited;
 
-  const repos = await db
+  const allRepos = await db
     .select()
     .from(repositories)
     .where(eq(repositories.workspaceId, authz.scope.workspaceId));
+  // Skipped rather than reported: a sample repository is not a failure and
+  // there is nothing for the person to do about it. See `canSyncRepo`.
+  const repos = allRepos.filter(canSyncRepo);
 
   const total: SyncSummary = {
     upserted: 0,
