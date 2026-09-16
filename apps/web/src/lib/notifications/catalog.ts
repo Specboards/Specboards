@@ -41,6 +41,7 @@ export const NOTIFICATION_EVENT_TYPES = [
   "spec_change_closed",
   "release.shipped",
   "proposal.opened",
+  "schedule.failed",
 ] as const;
 
 export type NotificationEventType = (typeof NOTIFICATION_EVENT_TYPES)[number];
@@ -77,6 +78,12 @@ export const NOTIFICATION_DEFAULTS: Record<
   // one finishes, which is exactly the volume immediate mail is worst at.
   // The bell is where a review queue belongs.
   "proposal.opened": { in_app: true, email: false },
+  // The one new type that is on by email, and the exception is the point. A
+  // schedule runs when nobody is watching, so the bell is exactly where its
+  // failure would sit unread. It is also rare by construction and addressed to
+  // one person who asked for the thing that broke, which is the same test
+  // `item.assigned` passes.
+  "schedule.failed": { in_app: true, email: true },
 };
 
 /**
@@ -134,5 +141,10 @@ export const NOTIFICATION_EVENT_LABELS: Record<
     label: "An agent proposes a change to an item you follow",
     description:
       "An agent drafts a change on an item you are assigned to or watching, and it is waiting for review.",
+  },
+  "schedule.failed": {
+    label: "A schedule you set up stops working",
+    description:
+      "A recurring agent run you created failed, or was switched off after failing repeatedly.",
   },
 };

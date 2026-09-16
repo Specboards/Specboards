@@ -397,6 +397,12 @@ function subjectFor(
     // which item is what decides whether this is worth opening now.
     case "proposal.opened":
       return `${title} has a change waiting for your review`;
+    // On by default, unlike every other agent notice. A schedule fails when
+    // nobody is watching, which is exactly when the bell is the wrong place
+    // for it. The snippet already says whether it was switched off, and that
+    // is the part deciding whether this needs opening now.
+    case "schedule.failed":
+      return trimSentence(notice.snippet) || `A schedule on ${title} failed`;
   }
 }
 

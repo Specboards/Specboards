@@ -38,6 +38,11 @@ export const WEBHOOK_EVENT_TYPES = [
   // An integration that only ever hears the dispatch half has to poll the
   // review queue to find out whether anything happened.
   "proposal.opened",
+  // A schedule that stopped working. The lesson behind this event is
+  // ChatGPT's scheduled tasks dying silently with the surface they hung off:
+  // an integration watching agent work needs to hear that a recurring job has
+  // stopped at least as much as a person does.
+  "schedule.failed",
 ] as const;
 
 export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];
@@ -63,6 +68,7 @@ export const WEBHOOK_EVENT_LABELS: Record<WebhookEventType, string> = {
   "agent.mentioned": "Agent mentioned in a comment",
   "run.requested": "Work handed to an agent",
   "proposal.opened": "An agent proposed a change",
+  "schedule.failed": "A scheduled run failed",
 };
 
 export function isWebhookEventType(v: unknown): v is WebhookEventType {

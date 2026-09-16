@@ -61,6 +61,11 @@ export const SCOPE_RESOURCES = [
   // separate from `features`: a key that may ask questions must not also be able
   // to rewrite the standing instructions every future question is asked under.
   "assistant-skills",
+  // Recurring agent runs. Its own resource rather than a path under `runs`,
+  // because the two grant very different things: `runs:write` lets an agent
+  // say what it is doing, while `schedules:write` commits the workspace to
+  // spending its model budget on a timer, unattended, from now on.
+  "schedules",
   "products",
   "repositories",
   "releases",
