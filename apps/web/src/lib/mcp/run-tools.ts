@@ -5,6 +5,7 @@ import {
   parseStep,
   parseSummary,
   parseTrigger,
+  RunForbiddenError,
   RunInputError,
   RUN_TRIGGERS,
 } from "@/lib/runs/types";
@@ -109,6 +110,9 @@ export const RUN_TOOLS: McpTool[] = [
         if (typeof args.runId === "string" && args.runId.trim() !== "") {
           const runId = requireUuid(args, "runId");
           return await reportRun(db, ctx.scope, runId, {
+            // The authenticated caller, compared against the run's owner so
+            // one agent cannot report against another's run (AR-01).
+            actorId: ctx.scope.userId,
             status,
             summary: args.summary,
             error: args.error,
@@ -140,7 +144,10 @@ export const RUN_TOOLS: McpTool[] = [
       } catch (err) {
         // Written for the model to act on, so it must survive the RPC layer's
         // withholding of internal error text.
+        // Both are written for the model to act on, so both have to survive
+        // the RPC layer's withholding of internal error text.
         if (err instanceof RunInputError) throw new McpToolError(err.message);
+        if (err instanceof RunForbiddenError) throw new McpToolError(err.message);
         throw err;
       }
     },

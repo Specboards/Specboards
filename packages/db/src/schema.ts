@@ -3044,6 +3044,15 @@ export const agentRuns = pgTable(
     index("agent_runs_target_idx").on(t.targetType, t.targetId, t.createdAt),
     index("agent_runs_ws_idx").on(t.workspaceId, t.createdAt),
     index("agent_runs_active_idx").on(t.workspaceId, t.status),
+    // One active run per agent per target, created in migration 0017. The
+    // partial predicate lives in the migration; Drizzle carries the shape so
+    // a reader of this file knows the constraint exists.
+    uniqueIndex("agent_runs_one_active_uq").on(
+      t.workspaceId,
+      t.agentId,
+      t.targetType,
+      t.targetId,
+    ),
   ],
 );
 

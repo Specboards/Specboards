@@ -2,7 +2,7 @@ import { readJsonBody } from "@/lib/api/body";
 import { authorizeWrite } from "@/lib/auth-session";
 import { getAppDb } from "@/lib/db";
 import { cancelRun, steerRun } from "@/lib/runs/service";
-import { parseSteer, RunInputError } from "@/lib/runs/types";
+import { parseSteer, RunForbiddenError, RunInputError } from "@/lib/runs/types";
 
 export const dynamic = "force-dynamic";
 
@@ -60,6 +60,12 @@ export async function PATCH(req: Request, { params }: Params) {
     }
     return Response.json({ run: await steerRun(db, authz.scope, id, note!) });
   } catch (err) {
+    // 403, not 404: the caller can see this run, they simply may not act on
+    // it. Collapsing the two would hide a permissions problem behind a
+    // "missing" that sends somebody looking for the wrong thing.
+    if (err instanceof RunForbiddenError) {
+      return Response.json({ error: err.message }, { status: 403 });
+    }
     if (err instanceof RunInputError) {
       return Response.json({ error: err.message }, { status: 404 });
     }
