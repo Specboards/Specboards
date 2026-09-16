@@ -58,6 +58,7 @@ import { getStore, type GithubLink } from "@/lib/store";
 
 import { DOC_TOOLS } from "./doc-tools";
 import { RUN_TOOLS } from "./run-tools";
+import { SKILL_TOOLS } from "./skill-tools";
 import {
   McpToolError,
   optionalLimit,
@@ -1917,4 +1918,7 @@ export const TOOLS: McpTool[] = [
   ...DOC_TOOLS,
   // An agent saying what it is doing, so a person can watch and intervene.
   ...RUN_TOOLS,
+  // The team's own procedures, so a connected agent works to the same
+  // definition of done as the native assistant.
+  ...SKILL_TOOLS,
 ];

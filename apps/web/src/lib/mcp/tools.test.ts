@@ -108,6 +108,10 @@ describe("the tool registry", () => {
       // Its own resource, and the cheapest thing a workspace can grant an
       // agent: it may say what it is doing and change nothing else.
       report_run: "runs:write",
+      // A read of the same rows GET /api/v1/assistant-skills serves. Separate
+      // from `assistant` because reading the procedures costs nothing and
+      // asking a question spends the workspace's inference budget.
+      list_skills: "assistant-skills:read",
     };
     const actual = Object.fromEntries(
       TOOLS.map((t) => [t.name, `${t.scope.resource}:${t.scope.action}`]),
