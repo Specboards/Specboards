@@ -706,6 +706,15 @@ export interface ReleaseInput {
   customFields?: Record<string, CustomFieldValue>;
 }
 
+/**
+ * What a write precondition is taken against: the two database-backed targets
+ * a proposal can be applied to. A git-backed spec is deliberately absent, as
+ * it already carries a blob sha down its own write path.
+ */
+export type WriteTarget =
+  | { kind: "feature"; specId: string }
+  | { kind: "release"; id: string };
+
 export type ReleasePatch = Partial<{
   name: string;
   productId: string | null;
@@ -1939,6 +1948,7 @@ interface ReleaseStore {
     patch: ReleasePatch,
     scope?: WorkspaceScope,
     emit?: OutboxEmit,
+    expect?: string,
   ): Promise<ReleaseRecord>;
   /** Delete a release; its items are unscheduled, not deleted. */
   deleteRelease(id: string, scope?: WorkspaceScope): Promise<void>;
@@ -2253,7 +2263,26 @@ interface ItemWriteStore {
     patch: FeaturePatch,
     scope?: WorkspaceScope,
     emit?: OutboxEmit | readonly OutboxEmit[],
+    expect?: string,
   ): Promise<void>;
+  /**
+   * A fingerprint of the fields a later write will change, for a caller that
+   * has to decide something before it writes and must not have that decision
+   * quietly invalidated in between. Pass it back as `expect` and the write
+   * refuses, having written nothing, if those fields moved.
+   *
+   * Null when the target is gone or invisible, which is a different answer
+   * from a stale one and reads as such at the call site.
+   *
+   * The fields are the keys of the patch that will be sent. Narrow on
+   * purpose: watching the whole row would refuse a tag change because
+   * somebody else set the assignee. See lib/store/precondition.ts.
+   */
+  writePrecondition(
+    target: WriteTarget,
+    fields: readonly string[],
+    scope?: WorkspaceScope,
+  ): Promise<string | null>;
   /**
    * Change an item's hierarchy level in place, keeping its id, body, status,
    * release, cycle, assignee, tags, comments and history.

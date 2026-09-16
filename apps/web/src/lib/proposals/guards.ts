@@ -1,6 +1,10 @@
 import { bodyFitsWhole } from "@/lib/ai/item-context";
 import { notesFitWhole } from "@/lib/ai/release-context";
 import { contentVersion } from "@/lib/assistant-service";
+// The same serialiser the write preconditions use. This file had its own copy
+// until AR-03 needed one at the store layer too; two of them would have been
+// two answers to "did these values change", drifting apart quietly.
+import { stable } from "@/lib/store/precondition";
 
 import { ProposalStaleError, ProposalTooLongError } from "./errors";
 
@@ -71,28 +75,6 @@ export function assertNotStale(
         "and ask again if the change is still wanted.",
     currentBody,
   );
-}
-
-/**
- * Order-independent JSON, so a hash means "these values" and not "these
- * values, serialised in this order".
- *
- * Object keys and array members both get sorted. Tags are the case that forces
- * it: the same three tags coming back in a different order from one read to
- * the next would read as a change, and every metadata proposal against that
- * item would then be refused as stale forever.
- */
-function stable(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(stable).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
-  }
-  if (typeof value === "object" && value !== null) {
-    const src = value as Record<string, unknown>;
-    const out: Record<string, unknown> = {};
-    for (const key of Object.keys(src).sort()) out[key] = stable(src[key]);
-    return out;
-  }
-  return value ?? null;
 }
 
 /**

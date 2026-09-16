@@ -24,6 +24,7 @@ import path from "node:path";
 import { isValidParentLevel, resolveLevels } from "@specboards/core";
 
 import { riceFields } from "@/lib/feature-helpers";
+import { assertUnchanged, fingerprintOf } from "@/lib/store/precondition";
 
 import {
   type ActivityQuery,
@@ -189,18 +190,51 @@ export async function pruneAutoGrouping(
   return false;
 }
 
+/**
+ * A fingerprint of the fields a later `updateFeature` will change.
+ *
+ * Fingerprinted over this store's own shapes, never the database store's.
+ * The two stores keep an item in different shapes (`parentSpecId` here is a
+ * column called `parentId` there), and the only thing that has to hold is
+ * that one store's fingerprint agrees with itself between the read and the
+ * write. See lib/store/precondition.ts.
+ */
+export async function featurePrecondition(
+  ctx: LocalStoreContext,
+  specId: string,
+  fields: readonly string[],
+): Promise<string | null> {
+  // No mapping needed, unlike the database store: local records keep
+  // `parentSpecId` under that name, so the patch keys already name the
+  // fields. Both sides of the comparison read this same shape.
+  const items = await ctx.readItems();
+  const item = items.find((i) => i.id === specId);
+  if (item) return fingerprintOf(item as unknown as Record<string, unknown>, fields);
+  const meta = (await ctx.readMetadata())[specId];
+  return meta
+    ? fingerprintOf(meta as unknown as Record<string, unknown>, fields)
+    : null;
+}
+
 export async function updateFeature(
   ctx: LocalStoreContext,
   specId: string,
   patch: FeaturePatch,
   _scope?: WorkspaceScope,
   _emit?: OutboxEmit | readonly OutboxEmit[], // DB-only; ignored in local file mode
+  expect?: string,
 ): Promise<void> {
   // DB-native items live in their own file, not the spec-metadata map.
   const items = await ctx.readItems();
   const idx = items.findIndex((i) => i.id === specId);
   if (idx >= 0) {
     const it = items[idx]!;
+    assertUnchanged(
+      expect,
+      it as unknown as Record<string, unknown>,
+      Object.keys(patch),
+      "item",
+    );
     if (patch.title !== undefined) it.title = patch.title;
     if (patch.status !== undefined) it.status = patch.status;
     if (patch.tags !== undefined) it.tags = patch.tags;
@@ -218,6 +252,12 @@ export async function updateFeature(
     return;
   }
   const meta = await ctx.readMetadata();
+  assertUnchanged(
+    expect,
+    (meta[specId] ?? {}) as unknown as Record<string, unknown>,
+    Object.keys(patch),
+    "item",
+  );
   meta[specId] = { ...meta[specId], ...patch };
   await ctx.writeMetadata(meta);
 }

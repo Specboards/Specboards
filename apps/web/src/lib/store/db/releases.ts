@@ -27,6 +27,11 @@ import {
 import { and, count, eq, features, isNull, ne, releases } from "@specboards/db";
 
 import {
+  assertUnchanged,
+  fingerprintOf,
+} from "@/lib/store/precondition";
+
+import {
   compareReleases,
   ReleaseError,
   RELEASE_STATUSES,
@@ -148,26 +153,85 @@ export async function createRelease(
   });
 }
 
+/**
+ * The columns `updateRelease` reads before it writes, and the ones a write
+ * precondition is taken over. One projection for both, so a fingerprint taken
+ * before an apply and the one re-checked under the row lock are reading the
+ * same thing. See lib/store/precondition.ts.
+ */
+const TRACKED_COLUMNS = {
+  productId: releases.productId,
+  name: releases.name,
+  status: releases.status,
+  shippedDate: releases.shippedDate,
+  startDate: releases.startDate,
+  targetDate: releases.targetDate,
+  notes: releases.notes,
+  releaseNotesMode: releases.releaseNotesMode,
+  releaseNotesBody: releases.releaseNotesBody,
+  releaseNotesUrl: releases.releaseNotesUrl,
+  customFields: releases.customFields,
+} as const;
+
+/** Patch keys that name a column the precondition can watch. */
+function preconditionFields(
+  patchKeys: readonly string[],
+): readonly string[] {
+  return patchKeys.filter((k) => k in TRACKED_COLUMNS);
+}
+
+/**
+ * A fingerprint of the columns a later `updateRelease` will change, so that
+ * write can refuse if somebody else moves them first. Null when the release
+ * is not there or not visible.
+ */
+export async function releasePrecondition(
+  ctx: DbStoreContext,
+  id: string,
+  fields: readonly string[],
+  scope?: WorkspaceScope,
+): Promise<string | null> {
+  return ctx.scoped(scope, async (tx) => {
+    const [row] = await tx
+      .select(TRACKED_COLUMNS)
+      .from(releases)
+      .where(
+        and(eq(releases.id, id), eq(releases.workspaceId, scope!.workspaceId)),
+      )
+      .limit(1);
+    if (!row) return null;
+    const access = await ctx.accessIn(tx, scope!);
+    if (!canWriteProductId(access, row.productId)) return null;
+    return fingerprintOf(row, preconditionFields(fields));
+  });
+}
+
 export async function updateRelease(
   ctx: DbStoreContext,
   id: string,
   patch: ReleasePatch,
   scope?: WorkspaceScope,
   emit?: OutboxEmit,
+  expect?: string,
 ): Promise<ReleaseRecord> {
   return ctx.scoped(scope, async (tx) => {
     const ws = scope!.workspaceId;
+    // Locked for the same reason `updateFeature`'s read is: it is what makes
+    // `expect` a compare-and-set rather than a check a concurrent write can
+    // slip between.
     const current = await tx
-      .select({
-        productId: releases.productId,
-        name: releases.name,
-        status: releases.status,
-        shippedDate: releases.shippedDate,
-      })
+      .select(TRACKED_COLUMNS)
       .from(releases)
       .where(and(eq(releases.id, id), eq(releases.workspaceId, ws)))
+      .for("update")
       .limit(1);
     if (!current[0]) throw new ReleaseError(`Unknown release: ${id}`);
+    assertUnchanged(
+      expect,
+      current[0],
+      preconditionFields(Object.keys(patch)),
+      "release",
+    );
     const access = await ctx.accessIn(tx, scope!);
     if (!canWriteProductId(access, current[0].productId)) {
       throw new ReleaseError(

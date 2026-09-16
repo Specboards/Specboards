@@ -116,6 +116,7 @@ import {
   type ActivitySummary,
   type ItemEvent,
   type WorkspaceScope,
+  type WriteTarget,
 } from "../types";
 
 /**
@@ -679,8 +680,18 @@ export class LocalFileStore implements FeatureStore, LocalStoreContext {
     patch: FeaturePatch,
     scope?: WorkspaceScope,
     emit?: OutboxEmit | readonly OutboxEmit[], // DB-only; ignored locally
+    expect?: string,
   ): Promise<void> {
-    return itemWriteStore.updateFeature(this, specId, patch, scope, emit);
+    return itemWriteStore.updateFeature(this, specId, patch, scope, emit, expect);
+  }
+
+  writePrecondition(
+    target: WriteTarget,
+    fields: readonly string[],
+  ): Promise<string | null> {
+    return target.kind === "feature"
+      ? itemWriteStore.featurePrecondition(this, target.specId, fields)
+      : releaseStore.releasePrecondition(this, target.id, fields);
   }
 
   convertFeatureLevel(
@@ -807,8 +818,9 @@ export class LocalFileStore implements FeatureStore, LocalStoreContext {
     patch: ReleasePatch,
     scope?: WorkspaceScope,
     emit?: OutboxEmit, // webhooks are DB-only; ignored in local file mode
+    expect?: string,
   ): Promise<ReleaseRecord> {
-    return releaseStore.updateRelease(this, id, patch, scope, emit);
+    return releaseStore.updateRelease(this, id, patch, scope, emit, expect);
   }
 
   deleteRelease(id: string, scope?: WorkspaceScope): Promise<void> {
