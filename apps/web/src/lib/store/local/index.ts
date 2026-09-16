@@ -699,8 +699,13 @@ export class LocalFileStore implements FeatureStore, LocalStoreContext {
     input: { level: string; detachParent: boolean },
     scope?: WorkspaceScope,
     emit?: OutboxEmit, // DB-only; ignored locally
+    expect?: string,
   ): Promise<void> {
-    return itemWriteStore.convertFeatureLevel(this, specId, input, scope, emit);
+    return itemWriteStore.convertFeatureLevel(this, specId, input, scope, emit, expect);
+  }
+
+  conversionPrecondition(specId: string): Promise<string | null> {
+    return itemWriteStore.conversionPrecondition(this, specId);
   }
 
   addRelation(

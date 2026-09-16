@@ -31,11 +31,35 @@ export async function previewConversion(
   return (await buildPlan(specId, to, scope)).plan;
 }
 
+/**
+ * Convert the item, refusing if the ground moved under the plan.
+ *
+ * ── Why a precondition and not just a re-read ────────────────────────────
+ * `buildPlan` decides against a snapshot: the item, its parent, its children,
+ * whether a spec is attached, the workflow and its gates. The write then
+ * changed the item's level and parent having re-read almost none of that. In
+ * between, another request could add a child, attach a spec or replace the
+ * parent, and the conversion would produce a hierarchy the planner would have
+ * rejected. The adversarial review filed it as AR-04.
+ *
+ * The fingerprint is taken BEFORE the plan is built, not after. Anything that
+ * changes while the plan is being read is then caught too, which matters
+ * because the plan is six queries and is where most of the window lives.
+ *
+ * ── Preview stays advisory ───────────────────────────────────────────────
+ * The other half of AR-04 is already true here and stays true: this builds
+ * its own plan rather than accepting one from the caller, so an execute
+ * request is a fresh validation and never permission to apply an earlier
+ * preview. The precondition is what makes that validation mean something at
+ * the moment of the write rather than only at the moment it was made.
+ */
 export async function convertItem(
   specId: string,
   to: string,
   scope?: WorkspaceScope,
 ): Promise<FeatureDetail> {
+  const store = await getStore();
+  const expect = await store.conversionPrecondition(specId, scope);
   const { plan, feature } = await buildPlan(specId, to, scope);
   if (plan.blockers.length > 0) {
     // The message carries every blocker, not the first: a user who fixes one
@@ -43,7 +67,6 @@ export async function convertItem(
     throw new InvalidPatchError(plan.blockers.map((b) => b.message).join(" "));
   }
 
-  const store = await getStore();
   const emit: OutboxEmit = {
     type: "item.converted",
     productId: feature.productId,
@@ -60,6 +83,10 @@ export async function convertItem(
     { level: to, detachParent: plan.detachesParent },
     scope,
     emit,
+    // Null means the item was not readable when the fingerprint was taken,
+    // which `buildPlan` has already turned into a FeatureNotFoundError. Not
+    // passing it on keeps "gone" and "moved" as different answers.
+    ...(expect === null ? [] : [expect]),
   );
   // A consumer's copy of the item would otherwise silently disagree about its
   // level, which is worse than not knowing: it looks like current data.

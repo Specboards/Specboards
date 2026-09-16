@@ -107,7 +107,26 @@ export function assertUnchanged(
   subject: string,
 ): void {
   if (expected === undefined) return;
-  if (expected === fingerprintOf(row, fields)) return;
+  assertSameFingerprint(expected, fingerprintOf(row, fields), subject, fields);
+}
+
+/**
+ * The same refusal, for a caller that has already computed both fingerprints.
+ *
+ * Item conversion needs this: what it fingerprints is not one row's columns
+ * but a neighbourhood (the item, its parent, its children, whether a spec is
+ * attached), so it builds its own and has nothing to hand {@link
+ * assertUnchanged}. Sharing the refusal rather than the computation keeps one
+ * wording for one situation.
+ */
+export function assertSameFingerprint(
+  expected: string | undefined,
+  actual: string | null,
+  subject: string,
+  fields: readonly string[] = [],
+): void {
+  if (expected === undefined) return;
+  if (expected === actual) return;
   throw new StaleWriteError(
     `This ${subject} changed while the change was being applied, so applying ` +
       `it would replace that newer version. Nothing was written. Review where ` +

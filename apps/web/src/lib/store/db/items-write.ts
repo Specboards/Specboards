@@ -35,6 +35,7 @@ import {
 
 import { riceFields } from "@/lib/feature-helpers";
 import {
+  assertSameFingerprint,
   assertUnchanged,
   fingerprintOf,
 } from "@/lib/store/precondition";
@@ -782,12 +783,90 @@ export async function updateFeature(
  * and then failed to change the level would leave the item orphaned for no
  * reason.
  */
+/**
+ * A fingerprint of everything a conversion plan was decided against.
+ *
+ * Wider than a write precondition over the row being written, because a
+ * conversion is judged against a neighbourhood rather than a row: whether
+ * this level may sit under that parent, whether it may hold those children,
+ * whether a spec is attached. A fingerprint over the item's own columns would
+ * miss every one of those, which is precisely the gap the adversarial review
+ * filed as AR-04.
+ *
+ * Both sides of the comparison come from here, as with `featurePrecondition`,
+ * so there is no second definition to drift.
+ */
+async function conversionFingerprint(
+  tx: Parameters<Parameters<DbStoreContext["scoped"]>[1]>[0],
+  specId: string,
+  ws: string,
+): Promise<string | null> {
+  const [self] = await tx
+    .select({
+      id: features.id,
+      level: features.level,
+      parentId: features.parentId,
+    })
+    .from(features)
+    .where(and(eq(features.specId, specId), eq(features.workspaceId, ws)))
+    .limit(1);
+  if (!self) return null;
+
+  const [spec] = await tx
+    .select({ featureId: specIndex.featureId })
+    .from(specIndex)
+    .where(eq(specIndex.featureId, self.id))
+    .limit(1);
+
+  const children = await tx
+    .select({ id: features.id, level: features.level })
+    .from(features)
+    .where(and(eq(features.parentId, self.id), eq(features.workspaceId, ws)));
+
+  const parent = self.parentId
+    ? ((
+        await tx
+          .select({ id: features.id, level: features.level })
+          .from(features)
+          .where(
+            and(eq(features.id, self.parentId), eq(features.workspaceId, ws)),
+          )
+          .limit(1)
+      )[0] ?? null)
+    : null;
+
+  // `stable` sorts array members, so the children come out order-independent
+  // and a plan does not go stale because two rows came back the other way up.
+  return fingerprintOf(
+    {
+      level: self.level,
+      parentId: self.parentId,
+      hasSpec: Boolean(spec),
+      children,
+      parent,
+    },
+    ["level", "parentId", "hasSpec", "children", "parent"],
+  );
+}
+
+/** See FeatureStore.conversionPrecondition. */
+export async function conversionPrecondition(
+  ctx: DbStoreContext,
+  specId: string,
+  scope?: WorkspaceScope,
+): Promise<string | null> {
+  return ctx.scoped(scope, (tx) =>
+    conversionFingerprint(tx, specId, scope!.workspaceId),
+  );
+}
+
 export async function convertFeatureLevel(
   ctx: DbStoreContext,
   specId: string,
   input: { level: string; detachParent: boolean },
   scope?: WorkspaceScope,
   emit?: OutboxEmit,
+  expect?: string,
 ): Promise<void> {
   await ctx.scoped(scope, async (tx) => {
     const ws = scope!.workspaceId;
@@ -801,8 +880,32 @@ export async function convertFeatureLevel(
       })
       .from(features)
       .where(and(eq(features.specId, specId), eq(features.workspaceId, ws)))
+      .for("update")
       .limit(1);
     if (!current[0]) throw new FeatureError(`Unknown work item: ${specId}`);
+
+    // ── What this does and does not guarantee ────────────────────────────
+    // The plan this write is executing was decided against a snapshot taken
+    // in the service, several queries and a round trip ago. Re-reading that
+    // snapshot here and refusing on a mismatch closes that window, which is
+    // the whole of what AR-04 reported: a child added, a spec attached or a
+    // parent replaced in the meantime can no longer be written over.
+    //
+    // It does NOT make the conversion serialisable. The item's own row is
+    // locked, but children and the parent are other rows, and a brand-new
+    // child is an INSERT no row lock can prevent. So a change committed
+    // between the fingerprint below and the UPDATE that follows is still
+    // theoretically possible. That window is one transaction wide rather
+    // than one request wide, which is the difference between a race somebody
+    // hits and one nobody will. Saying so here because a comment claiming
+    // atomicity it does not deliver is how AR-02 got missed.
+    if (expect !== undefined) {
+      assertSameFingerprint(
+        expect,
+        await conversionFingerprint(tx, specId, ws),
+        "item",
+      );
+    }
     const access = await ctx.accessIn(tx, scope!);
     if (!canWriteProductId(access, current[0].productId)) {
       throw new FeatureError("Your role does not permit editing this product.");
