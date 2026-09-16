@@ -1,13 +1,9 @@
 import { eq, repositories } from "@specboards/db";
-import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 
-import { AgentsCard } from "@/components/agents-card";
 import { ApiKeysCard } from "@/components/api-keys-card";
-import { ConnectedAgentsCard } from "@/components/connected-agents-card";
-import { IntegrationsTabs } from "@/components/integrations-tabs";
-import { McpCard } from "@/components/mcp-card";
-import { ModelProviderCard } from "@/components/model-provider-card";
 import { RepositoriesManager } from "@/components/repositories-manager";
+import { SettingsTabs, type SettingsTab } from "@/components/settings-tabs";
 import type { SetupNotice } from "@/components/repositories-manager/shared";
 import {
   Card,
@@ -17,46 +13,27 @@ import {
 } from "@/components/ui/card";
 import { WebhooksCard } from "@/components/webhooks-card";
 import { listApiKeys } from "@/lib/api-keys";
-import { listServiceAccounts } from "@/lib/service-accounts-service";
+import { appOrigin } from "@/lib/app-origin";
 import { getServerSessionUser } from "@/lib/auth-session";
-import { getAppDb, getDb } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { isGithubConfigured } from "@/lib/github-app";
 import {
   loadWorkspaceInstallations,
   NO_INSTALLATIONS,
 } from "@/lib/github-connect";
-import { listMcpConnections } from "@/lib/mcp/workspace-binding";
-import { getModelProvider } from "@/lib/model-provider-service";
 import { leafLevel } from "@specboards/core";
 
+import { orgPath } from "@/lib/org-path";
 import { getStore } from "@/lib/store";
 import { listProducts } from "@/lib/products-service";
 import { listRepoProductLinks } from "@/lib/repo-links-service";
 import { isPubliclyReachable } from "@/lib/public-origin";
+import { movedAgentsTab } from "@/lib/settings-tabs-moved";
 import { isSingleTenant } from "@/lib/tenancy";
-import { summarizeUsage } from "@/lib/usage-service";
-import { UsageCard } from "@/components/usage-card";
 import { listWebhookEndpoints } from "@/lib/webhooks-service";
-import { requireWorkspaceAccess } from "@/lib/workspace-access";
+import { currentOrgSlug, requireWorkspaceAccess } from "@/lib/workspace-access";
 
 export const dynamic = "force-dynamic";
-
-/** This deployment's own origin, e.g. https://test.specboards.ai. */
-async function appOrigin(): Promise<string> {
-  const configured = (
-    process.env.APP_URL ?? process.env.BETTER_AUTH_URL
-  )?.trim();
-  if (configured) return configured.replace(/\/+$/, "");
-  const h = await headers();
-  const proto = h.get("x-forwarded-proto") ?? "https";
-  const host = h.get("x-forwarded-host") ?? h.get("host") ?? "";
-  return `${proto}://${host}`;
-}
-
-/** This deployment's public MCP endpoint, e.g. https://test.specboards.ai/api/mcp. */
-async function mcpEndpoint(): Promise<string> {
-  return `${await appOrigin()}/api/mcp`;
-}
 
 /** Map the GitHub callback/setup query params to a user-facing banner. */
 function noticeFor(
@@ -99,24 +76,39 @@ function noticeFor(
 }
 
 /**
- * Integrations: everything that connects Specboards to the outside world in one
- * place - the MCP endpoint for coding agents, personal API keys, outbound
- * webhooks, and connected GitHub repositories. API keys are per-user (any role);
- * webhooks and repository setup are admin-only. All are unavailable in local
- * file mode (no accounts / no server).
+ * Integrations: the services outside Specboards that this workspace talks to.
+ *
+ * Connected GitHub repositories, outbound webhooks, and the personal API keys
+ * people use against our REST API. Keys are per-user (any role); webhooks and
+ * repository setup are admin-only. All unavailable in local file mode (no
+ * accounts, no server).
+ *
+ * The MCP endpoint, connected agents, agent identities, the model connection
+ * and the usage ledger used to be tabs here and now live under Settings >
+ * Agents. The line is whose service it is: GitHub and a customer's own webhook
+ * receiver are somebody else's, while the MCP endpoint is our front door and
+ * belongs with the rest of the agent configuration. Old `?tab=` links are
+ * forwarded rather than dropped - see `lib/settings-tabs-moved.ts`.
  */
 export default async function IntegrationsSettingsPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  const params = await searchParams;
+  const tab = typeof params.tab === "string" ? params.tab : undefined;
+  // Forward a link to a tab that moved to Agents before doing any work: a
+  // bookmark or an older redirect stub landing on the default tab instead of
+  // the one it named is the kind of breakage nobody reports.
+  const moved = movedAgentsTab(tab);
+  if (moved) {
+    redirect(
+      orgPath(await currentOrgSlug(), `/settings/agents?tab=${moved}`),
+    );
+  }
+
   const access = await requireWorkspaceAccess();
   const db = getDb();
-  // The model connection and the usage ledger are tenant data with live RLS
-  // policies, so they are read over the enforced connection. Everything else on
-  // this page (repositories, GitHub apps) still runs on the owner connection,
-  // which is why there are two handles here rather than one.
-  const appDb = getAppDb();
   const user = await getServerSessionUser();
 
   if (!access || !db || !user) {
@@ -127,12 +119,7 @@ export default async function IntegrationsSettingsPage({
     );
   }
 
-  const endpoint = await mcpEndpoint();
   const origin = await appOrigin();
-
-  // The caller's own OAuth connections. Per-user, not per-workspace: an OAuth
-  // connection acts as a person, so it is theirs to review and revoke.
-  const connections = await listMcpConnections(db, user.id);
 
   const keys = await listApiKeys(db, user.id);
   // Dates aren't serializable across the server/client boundary; send ISO.
@@ -156,24 +143,6 @@ export default async function IntegrationsSettingsPage({
   const endpoints = isAdmin
     ? await listWebhookEndpoints(db, access.workspaceId)
     : [];
-  // Agent identities are owner-only to see as well as to manage: the listing
-  // names every product each one can reach, which is not a member's business.
-  const agents = isAdmin
-    ? await listServiceAccounts(db, access.workspaceId)
-    : [];
-  // Same reasoning as agents: the row holds no secret, but it names where this
-  // workspace's inference goes and only an owner can change it, so only an
-  // owner is shown it.
-  const modelProvider = isAdmin
-    ? appDb
-      ? await getModelProvider(appDb, access)
-      : null
-    : null;
-
-  // Owner-only for the same reason the connection is, and one more: the
-  // breakdown names who spent what, which is management information rather than
-  // a member's business. The API route that serves it is gated identically.
-  const usage = isAdmin && appDb ? await summarizeUsage(appDb, access) : null;
 
   // Repository management: any member sees the connected list; only admins get
   // the GitHub setup/connect controls (matching the API authorization).
@@ -208,51 +177,11 @@ export default async function IntegrationsSettingsPage({
       ? await loadWorkspaceInstallations(db, access.workspaceId)
       : NO_INSTALLATIONS;
 
-  const params = await searchParams;
-  const tab = typeof params.tab === "string" ? params.tab : undefined;
-
-  return (
-    <IntegrationsTabs
-      initialTab={tab}
-      mcp={
-        <div className="space-y-4">
-          <McpCard endpoint={endpoint} />
-          <ConnectedAgentsCard initialConnections={connections} />
-        </div>
-      }
-      agents={
-        <AgentsCard
-          initialAgents={agents}
-          products={products.map((p) => ({ id: p.id, name: p.name }))}
-          canManage={isAdmin}
-        />
-      }
-      model={
-        <ModelProviderCard
-          initialProvider={modelProvider}
-          canManage={isAdmin}
-        />
-      }
-      usage={<UsageCard initialSummary={usage} canManage={isAdmin} />}
-      apiKeys={<ApiKeysCard initialKeys={initialKeys} />}
-      webhooks={
-        isAdmin ? (
-          <WebhooksCard
-            initialEndpoints={endpoints}
-            products={products.map((p) => ({ id: p.id, name: p.name }))}
-          />
-        ) : (
-          <Card>
-            <CardHeader>
-              <CardTitle>Webhooks</CardTitle>
-              <CardDescription>
-                Only the workspace owner can manage webhooks.
-              </CardDescription>
-            </CardHeader>
-          </Card>
-        )
-      }
-      repositories={
+  const tabs: SettingsTab[] = [
+    {
+      key: "repositories",
+      label: "Repositories",
+      content: (
         <RepositoriesManager
           repos={repoRows.map((r) => ({
             ...r,
@@ -281,7 +210,35 @@ export default async function IntegrationsSettingsPage({
           links={repoLinks}
           leafLevelKey={leafLevelKey}
         />
-      }
-    />
+      ),
+    },
+    {
+      key: "api-keys",
+      label: "API keys",
+      content: <ApiKeysCard initialKeys={initialKeys} />,
+    },
+    {
+      key: "webhooks",
+      label: "Webhooks",
+      content: isAdmin ? (
+        <WebhooksCard
+          initialEndpoints={endpoints}
+          products={products.map((p) => ({ id: p.id, name: p.name }))}
+        />
+      ) : (
+        <Card>
+          <CardHeader>
+            <CardTitle>Webhooks</CardTitle>
+            <CardDescription>
+              Only the workspace owner can manage webhooks.
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      ),
+    },
+  ];
+
+  return (
+    <SettingsTabs tabs={tabs} ariaLabel="Integrations" initialTab={tab} />
   );
 }
