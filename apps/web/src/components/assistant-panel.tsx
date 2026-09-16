@@ -413,7 +413,7 @@ export function AssistantPanel({
     if (box) box.scrollTop = box.scrollHeight;
   }, [streaming]);
 
-  const settingsHref = orgHref("/settings/integrations?tab=model");
+  const settingsHref = orgHref("/settings/agents?tab=model");
   // A key can outlive the skill it named: the workspace deleted it, or an admin
   // switched it off while this thread was mid-grilling. Resolving rather than
   // trusting the key means the chip disappears instead of naming nothing.

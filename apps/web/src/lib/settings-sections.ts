@@ -90,15 +90,17 @@ const SECTIONS: (SettingsSection & {
     label: "Hierarchy",
     visibleTo: (v) => v.isOwner,
   },
-  {
-    href: "/settings/assistant",
-    label: "Assistant",
-    visibleTo: (v) => v.isOwner,
-  },
+  // Everyone. Skills are pressed by every member on every item, and the MCP
+  // endpoint under Connections is how each of them points their own agent at
+  // this workspace. The owner-only halves of the page (the model connection,
+  // agent identities, the usage ledger) gate themselves card by card, exactly
+  // as they did when they were Integrations tabs. This entry was owner-only
+  // while the page behind it said "every member reads it": the page was right.
+  { href: "/settings/agents", label: "Agents", visibleTo: () => true },
   { href: "/settings/branding", label: "Branding", visibleTo: (v) => v.isOwner },
-  // Everyone: the MCP endpoint and personal API keys are per-user and are the
-  // reason most people open this page. Webhooks, agents, the model connection
-  // and repository setup inside it are already admin-gated on the page itself.
+  // Everyone: personal API keys are per-user and are the reason most people
+  // open this page. Webhooks and repository setup inside it are already
+  // admin-gated on the page itself.
   {
     href: "/settings/integrations",
     label: "Integrations",

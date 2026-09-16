@@ -76,7 +76,7 @@ export async function PUT(req: Request) {
 
   try {
     const skills = await replaceSkills(db, authz.scope, parseSkills(body.skills));
-    revalidatePath("/[org]/settings/assistant", "page");
+    revalidatePath("/[org]/settings/agents", "page");
     return Response.json({ skills });
   } catch (err) {
     if (err instanceof SkillInputError) {

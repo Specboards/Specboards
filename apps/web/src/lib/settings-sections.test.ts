@@ -37,7 +37,7 @@ describe("settings sections", () => {
       "Tags",
       "Ideas",
       "Hierarchy",
-      "Assistant",
+      "Agents",
       "Branding",
       "Integrations",
     ]);
@@ -45,12 +45,14 @@ describe("settings sections", () => {
 
   it("offers a member only what they can act on", () => {
     // Profile and Notifications are theirs. Company & Team is the roster, the
-    // only place that answers who their colleagues are. Integrations holds
-    // their own API keys and the MCP endpoint.
+    // only place that answers who their colleagues are. Agents holds the
+    // skills they press and the MCP endpoint they point their own agent at.
+    // Integrations holds their own API keys.
     expect(labels(member)).toEqual([
       "Profile",
       "Notifications",
       "Company & Team",
+      "Agents",
       "Integrations",
     ]);
   });
@@ -65,6 +67,7 @@ describe("settings sections", () => {
       "Company & Team",
       "Products",
       "Cards",
+      "Agents",
       "Integrations",
     ]);
   });
@@ -83,5 +86,13 @@ describe("settings sections", () => {
   it("hides Branding from a member, which is a placeholder nobody can configure", () => {
     expect(labels(member)).not.toContain("Branding");
     expect(labels(owner)).toContain("Branding");
+  });
+
+  it("offers Agents to a member, unlike the Assistant entry it replaced", () => {
+    // Assistant was owner-only in this list while its own page said every
+    // member reads it, and members do press skill buttons and do need the MCP
+    // endpoint. The owner-only cards on the page gate themselves.
+    expect(labels(member)).toContain("Agents");
+    expect(labels(member)).not.toContain("Assistant");
   });
 });
