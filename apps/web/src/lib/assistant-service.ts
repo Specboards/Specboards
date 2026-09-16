@@ -586,7 +586,16 @@ export async function isModelConnected(
   return Boolean(row);
 }
 
-async function buildContext(
+/**
+ * The system prompt for one item, and whether the model may propose against it.
+ *
+ * Exported for the run path in `runs/skill-run.ts`, which needs the same
+ * context an interactive turn gets. Two assemblies of "what the model is told
+ * about this item" would drift, and the drift would be invisible: a skill run
+ * unattended would quietly work from a different picture of the item than the
+ * same skill pressed by a person.
+ */
+export async function buildContext(
   scope: WorkspaceScope,
   feature: FeatureDetail,
   canEdit: boolean,
