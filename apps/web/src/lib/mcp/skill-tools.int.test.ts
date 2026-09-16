@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
+import { BUILT_IN_SKILLS } from "@/lib/ai/skills";
+
 /**
  * A connected agent reading the workspace's own procedures.
  *
@@ -177,13 +179,12 @@ describe.skipIf(!DB_URL)("list_skills over MCP", () => {
   it("says why the list is empty rather than leaving it to be guessed", async () => {
     // An empty array reads as "this team has no conventions", which is a
     // different and more discouraging claim than "nothing matched the filter".
-    for (const key of [
-      "grill",
-      "gaps",
-      "draft",
-      "release-notes",
-      "tighten",
-    ]) {
+    // Every built-in, read from the source rather than listed here. The claim
+    // is "switch them all off and the note explains the empty list", and a
+    // hand-written list makes that claim quietly weaker every time we ship a
+    // skill: the test would keep passing while no longer switching everything
+    // off.
+    for (const key of BUILT_IN_SKILLS.map((b) => b.key)) {
       await sql`insert into workspace_assistant_skills
         (workspace_id, key, name, description, instructions, surface, enabled, position)
         values (${workspace.id}, ${key}, null, null, null, 'item', false, 0)`;

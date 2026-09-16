@@ -128,7 +128,12 @@ export async function runSkillOnItem(
     input.specId,
   );
   const canEdit = await canEditItem(scope, feature);
+  // Before `openRun`, and that ordering carries weight: a skill that reads the
+  // architecture area refuses here when there is none to read, which is a
+  // refusal with no run to fail rather than a run that finished having checked
+  // nothing.
   const { systemPrompt, canPropose } = await buildContext(
+    db,
     scope,
     feature,
     canEdit,

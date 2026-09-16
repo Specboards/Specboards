@@ -29,6 +29,8 @@
  * a comment.
  */
 
+import type { ArchitectureContext } from "@/lib/architecture-context";
+
 import { breakdownInstructions } from "./breakdown";
 import { PROPOSAL_INSTRUCTIONS } from "./proposals";
 import { skillTask, type SkillDef } from "./skills";
@@ -69,6 +71,15 @@ export interface ItemContextInput {
   /** Titles of goals this item ladders up to. */
   goals: string[];
   tags: string[];
+  /**
+   * The product's architecture, when the running skill asked to read it.
+   *
+   * Absent for every ordinary turn and for every skill that did not ask, which
+   * is the point: the architecture area is not sent because it exists, it is
+   * sent because a skill whose job needs it is running. See
+   * `lib/architecture-context.ts` for what is chosen and why.
+   */
+  architecture?: ArchitectureContext | null;
 }
 
 interface AssembledContext {
@@ -309,12 +320,53 @@ function buildFields(input: ItemContextInput): ContextField[] {
     });
   }
 
+  // Before the description on purpose. The architecture is reference material
+  // and the item is the subject, and the subject reads best last, nearest the
+  // question being asked about it.
+  fields.push(...architectureFields(input.architecture));
+
   const body = input.body.trim();
   if (body) {
     const { value, truncated } = truncate(body, BODY_CHAR_LIMIT);
     fields.push({ label: "Description", value, truncated });
   }
 
+  return fields;
+}
+
+/**
+ * The architecture area as prompt fields, one per page plus the outline.
+ *
+ * One field per page rather than one field holding all of them, because the
+ * fields are the disclosure: a reader about to send their architecture docs to
+ * a model provider should see which pages, by name, and not a line saying
+ * "architecture (6 pages)".
+ *
+ * The outline marks the pages whose text follows. A model given a list of forty
+ * pages and the text of six has no way to tell which six unless it is told, and
+ * a model that cannot tell will cite a page it never read.
+ */
+function architectureFields(
+  architecture: ArchitectureContext | null | undefined,
+): ContextField[] {
+  if (!architecture || architecture.outline.length === 0) return [];
+
+  const sent = new Set(architecture.pages.map((p) => p.path));
+  const fields: ContextField[] = [
+    {
+      label: "Architecture pages in this product",
+      value: architecture.outline
+        .map((path) => (sent.has(path) ? `${path} (text below)` : path))
+        .join("\n"),
+      truncated: architecture.outlineTruncated,
+    },
+  ];
+
+  for (const page of architecture.pages) {
+    const body = page.body.trim();
+    if (!body) continue;
+    fields.push({ label: `Architecture page: ${page.path}`, value: body });
+  }
   return fields;
 }
 

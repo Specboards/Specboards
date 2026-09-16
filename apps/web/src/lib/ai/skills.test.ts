@@ -151,6 +151,7 @@ describe("the order a workspace arranged", () => {
       "gaps",
       "draft",
       // Unrowed built-ins keep code order on the end; see the test below.
+      "architecture-impact",
       "release-notes",
       "tighten",
     ]);
@@ -165,6 +166,7 @@ describe("the order a workspace arranged", () => {
       "draft",
       "grill",
       "gaps",
+      "architecture-impact",
       "release-notes",
       "tighten",
     ]);

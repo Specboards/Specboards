@@ -46,6 +46,22 @@ export const SKILL_SURFACE_LABELS: Record<SkillSurface, string> = {
   release: "Releases",
 };
 
+/**
+ * What a skill needs to read besides the item it is running on.
+ *
+ * Declared on the skill rather than decided by the caller, for the same reason
+ * {@link SkillSurface} is: what a skill reads is a fact about what its
+ * instructions are for. "Grill me" has no business sending a team's
+ * architecture docs to a model provider, and a flag the endpoint passed in
+ * would make that a thing a stray call could do.
+ *
+ * Resolved from the code always, never from a stored row (see
+ * {@link mergeSkills}). A team's own skill therefore cannot ask for the
+ * architecture area yet: that is a stored column and a migration, and nothing
+ * has asked for it. Adding one is a decision, not a default.
+ */
+export type SkillReads = "architecture";
+
 /** A skill as it is defined, whether in code or in a row. */
 export interface SkillDef {
   /**
@@ -66,6 +82,11 @@ export interface SkillDef {
    * a surface its instructions make no sense on.
    */
   surface: SkillSurface;
+  /**
+   * Extra context this skill's instructions need. Absent for the skills that
+   * run on the item alone, which is almost all of them.
+   */
+  reads?: readonly SkillReads[];
 }
 
 /** A skill as the app resolves it: a definition plus where it came from. */
@@ -211,6 +232,40 @@ export const BUILT_IN_SKILLS: readonly SkillDef[] = [
     ].join("\n"),
   },
   {
+    key: "architecture-impact",
+    surface: "item",
+    reads: ["architecture"],
+    name: "Architecture impact",
+    description:
+      "Reads this item against your Architecture pages and says what it touches.",
+    instructions: [
+      "Your task right now is to review this item against the architecture pages you have",
+      "been given, for the engineer who has to build it.",
+      "",
+      "You have the full list of pages in this product's Architecture area, and the text of",
+      "some of them. The list says which ones you were given the text of. Work from those.",
+      "A page you were not shown is still real: say you could not read it rather than",
+      "guessing what it says.",
+      "",
+      "Cover, in this order, and only where there is something to say:",
+      "- Which parts of the system this touches, named the way the architecture pages name",
+      "  them rather than in words of your own.",
+      "- Anything here that contradicts a page, quoting the line it contradicts.",
+      "- The decision this forces that nobody appears to have taken yet.",
+      "- What you needed to know and could not find anywhere in the area.",
+      "",
+      "Keep it short. Four real findings beat twelve, and a generic one teaches the reader",
+      "to skim the next one. If this item touches nothing architectural, say so plainly and",
+      "stop; that is a useful answer, not a failure.",
+      "",
+      "Do not rewrite the item\'s description as part of this. Point at what is affected.",
+      "",
+      "Name the page, or do not make the claim. An objection with no page behind it sends an",
+      "engineer looking for a rule that does not exist, and the second time that happens",
+      "nobody runs this again.",
+    ].join("\n"),
+  },
+  {
     key: "release-notes",
     surface: "release",
     name: "Draft the notes",
@@ -301,6 +356,10 @@ export function mergeSkills(rows: readonly SkillRow[]): Skill[] {
         // stored row say otherwise would make that a thing a stray write could
         // do silently.
         surface: def.surface,
+        // From the code for the same reason `surface` is, and the reason bites
+        // harder here: a stored row that could add "architecture" to a skill
+        // would be a stored row that widens what leaves the building.
+        ...(def.reads ? { reads: def.reads } : {}),
         builtIn: true,
         customised: Boolean(
           row && (row.name !== null || row.description !== null || row.instructions !== null),
