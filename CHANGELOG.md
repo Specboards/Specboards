@@ -25,6 +25,121 @@ for how and when the version is bumped.
 > `pnpm deploy:prod` and the dispatched workflow. See
 > [VERSIONING.md](./VERSIONING.md).
 
+## [1.3.0] - 2026-09-16
+
+The agent harness. Specboard can now hand work to an agent, watch it happen, and
+require a person to approve anything the agent wants to change.
+
+The shape is deliberate and is the point of the release: model output never
+writes directly. An agent is a workspace member with a `service` role, it is
+assigned work like anybody else, and what it produces arrives as a *proposal*
+that a human applies or dismisses. Two new objects carry that: **runs**, the
+durable record of an agent working, and **proposals**, which used to be five
+columns on a chat message and is now a table of its own with one lifecycle for
+the assistant and the harness alike.
+
+Roughly half this release is not features. An adversarial review of everything
+since v1.0.0 found seven defects, three of them in the harness code written for
+this release, and all seven are fixed here. Several were races that only appear
+under concurrent use; they are called out individually below because the fixes
+changed behaviour that customers can observe.
+
+> **Upgrading from v1.0.0? Deploy v1.0.1 first.**
+>
+> A database sitting on exactly **v1.0.0** cannot migrate straight to v1.3.0.
+> Deploy `ghcr.io/specboards/specboards:1.0.1`, let its migration finish, then
+> deploy v1.3.0. The migration runner refuses rather than applying a baseline
+> over a schema that already has objects, so nothing is damaged if you try, but
+> the deploy fails and the previous version keeps serving.
+>
+> **On v1.0.1 or later, including any v1.1.x or v1.2.x? Nothing to do.** Upgrade
+> as usual.
+
+### Added
+
+- **Agent runs** (migration 0016). A durable record of an agent working on an
+  item: status, a trace of what it did, token cost, and a summary. Visible on
+  the item it belongs to rather than in a separate console, because the question
+  it answers is "what has been done to this" and it is asked by the person who
+  owns the item. Cost is recorded in tokens rather than money, and is null
+  rather than zero when an external agent spends its own key, because zero is a
+  claim and null is the truth.
+- **Ask a run to stop, or steer it.** Labelled "Ask to stop", not "Cancel":
+  there is no channel to a connected agent, so stopping marks the run and the
+  agent finds out the next time it reports. What is guaranteed is that the run's
+  record stops there and anything the agent proposes afterwards still needs a
+  person.
+- **Proposals are a first-class object** (migration 0015). One table, one
+  lifecycle, one set of guards for the assistant and for agents, so an agent
+  cannot get a cheaper route to a write than the assistant has. Proposals carry
+  evidence (up to 20 citations, internal or external) and record what applying
+  them produced.
+- **A review queue at `/{org}/reviews`.** Changes agents have drafted, and runs
+  that stopped to ask something, in one workspace-wide list. Deliberately not a
+  tab on notifications: a notification is personal and read once, a review is
+  shared work with a lifecycle, and the two mean opposite things when empty.
+  Scoped by row-level security, so it shows only products you can read.
+- **Assign work to an agent, and tell it.** Agents appear in the assignee
+  picker, labelled as agents. Assigning one raises `item.stage_entered` and
+  `run.requested` webhooks so an agent can be told there is work rather than
+  polling the board. `agent.mentioned` fires when one is mentioned in a comment.
+- **`report_run` over MCP**, with its own `runs` scope. Separate from
+  `features:write` on purpose: an agent granted `runs:write` can say what it is
+  doing and change nothing, so letting an agent report progress does not mean
+  letting it rewrite the board.
+
+### Changed
+
+- **Applying a proposal now refuses if the target moved while it was being
+  applied**, rather than overwriting. Previously only git-backed specs were
+  protected, by their blob sha; database-backed targets (a card's body, item
+  metadata, release notes) had no equivalent and were replaced silently.
+- **A proposal being applied says `applying`, not `applied`.** A process that
+  died mid-apply used to leave a row asserting a change that never happened.
+  Where the outcome can be established afterwards it now settles itself; where
+  it cannot, the review queue shows it as "Outcome unknown" and points at the
+  target's history rather than guessing.
+- **Notifications are no longer sent to agents.** The fan-out now excludes
+  `service` members, which assignment events would otherwise have emailed.
+
+### Fixed
+
+- **A proposed edit could not be accepted.** The assistant's review panel opened
+  with no changes ticked, so the button read "Accept 0 of 1 changes" and was
+  disabled. Reported in production and fixed here: a proposal starts with every
+  change ticked, which is where it should always have started.
+- **One agent could report progress against another agent's run**, finishing,
+  failing or steering it. The run was matched on its id and workspace, which
+  every service member passes. A run id is an identifier, not an authorization
+  boundary. (AR-01)
+- **A report could undo a cancellation, or swallow a steering note.** Four
+  lost-update races on one row, including two concurrent reports each writing a
+  whole replacement trace and losing a step. Reports are now applied under a row
+  lock. (AR-02)
+- **Two concurrent requests could open two runs for one agent on one item.**
+  The index that was supposed to prevent it was not unique; migration 0017 makes
+  it so, and a duplicate open now returns the run that won rather than an error.
+  (AR-02)
+- **A read-only member could cancel or steer any run they could see.** The item
+  card hid both controls, so the interface looked right while the API was open
+  to anyone who could read the item. Found while validating the review rather
+  than in it. (AR-07)
+- **Avatar uploads were read in full before the size limit applied.** The
+  256 KB checks protected storage and bounded neither request memory nor
+  parsing work. The body is now capped as it arrives, like every other endpoint.
+  (AR-05)
+- **Item conversion validated one snapshot and wrote another.** A child added, a
+  spec attached or a parent replaced between the check and the write produced a
+  hierarchy the validation would have rejected. (AR-04)
+- **Agents were refused stage transitions that people were allowed.** Over MCP,
+  a product whose only gate sat on an unrelated stage looked to the server like
+  a product with no gates and inherited the workspace default. The rule now
+  lives in one place that both the web app and the MCP server use. (AR-06)
+- **`/{org}/notifications` broke the product links in the sidebar**, which read
+  "notifications" as the active product. Two lists that had to agree about which
+  URL segments are routes rather than products, and only one had a test holding
+  it to the route tree; they are now the same list.
+
 ## [1.2.1] - 2026-09-13
 
 The public Ideas portal, finished. v1.2.0 shipped the foundations and a page
