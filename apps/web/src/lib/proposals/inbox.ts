@@ -3,6 +3,7 @@ import {
   and,
   desc,
   eq,
+  inArray,
   features,
   proposals,
   releases,
@@ -49,7 +50,14 @@ import type { ProposalKind, ProposalTargetType } from "./types";
 /** A row in the queue: something an agent produced that wants a decision. */
 interface ReviewRow {
   id: string;
-  kind: "proposal" | "awaiting_run";
+  /**
+   * `stuck_apply` is a proposal somebody started applying that never
+   * finished. It is in this list because it needs a person more than an open
+   * one does, not less: the change may or may not have landed. Reconciliation
+   * settles the ones that can be decided (see reconcile.ts) before the page
+   * lists, so anything still showing here genuinely needs a human.
+   */
+  kind: "proposal" | "awaiting_run" | "stuck_apply";
   /** The proposal's own kind. Absent on an `awaiting_run` row. */
   proposalKind?: ProposalKind;
   targetType: ProposalTargetType | string;
@@ -99,6 +107,7 @@ async function listOpenProposals(
         productId: proposals.productId,
         runId: proposals.runId,
         evidence: proposals.evidence,
+        status: proposals.status,
         createdAt: proposals.createdAt,
         actorName: users.name,
         featureSpecId: features.specId,
@@ -127,7 +136,7 @@ async function listOpenProposals(
       .where(
         and(
           eq(proposals.workspaceId, scope.workspaceId),
-          eq(proposals.status, "open"),
+          inArray(proposals.status, ["open", "applying"]),
           eq(proposals.origin, "run"),
         ),
       )
@@ -137,7 +146,9 @@ async function listOpenProposals(
 
   return rows.map((r) => ({
     id: r.id,
-    kind: "proposal" as const,
+    kind: (r.status === "applying" ? "stuck_apply" : "proposal") as
+      | "proposal"
+      | "stuck_apply",
     proposalKind: r.kind as ProposalKind,
     targetType: r.targetType,
     targetId: r.targetId,

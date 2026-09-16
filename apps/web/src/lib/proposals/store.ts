@@ -43,6 +43,8 @@ export interface ProposalRow {
   resolvedAt: Date | null;
   result: unknown;
   createdAt: Date;
+  /** Moves on every write, including the claim. What 'stuck' is measured from. */
+  updatedAt: Date;
 }
 
 const COLUMNS = {
@@ -65,6 +67,7 @@ const COLUMNS = {
   resolvedAt: proposals.resolvedAt,
   result: proposals.result,
   createdAt: proposals.createdAt,
+  updatedAt: proposals.updatedAt,
 };
 
 /** Narrow the text columns the database has already CHECKed. */
@@ -208,11 +211,20 @@ export async function getProposal(
  * The guard moved from `proposal_outcome IS NULL` on a message to
  * `status = 'open'` on a proposal. That is the whole difference.
  */
+/**
+ * Take the decision, atomically.
+ *
+ * `applying` for an apply, `dismissed` for a turn-down. The asymmetry is the
+ * point: dismissing writes nothing to the target, so there is no window in
+ * which the record could be ahead of reality and no intermediate state to
+ * pass through. Applying does write, so it claims `applying` first and is
+ * settled by {@link settle} once the write has actually happened.
+ */
 export async function claim(
   db: Database,
   scope: WorkspaceScope,
   id: string,
-  status: Exclude<ProposalStatus, "open">,
+  status: "applying" | "dismissed",
 ): Promise<{ resolvedAt: Date } | null> {
   const now = new Date();
   const claimed = await asUser(db, scope.userId, (tx) =>
@@ -236,7 +248,14 @@ export async function claim(
   return claimed.length > 0 ? { resolvedAt: now } : null;
 }
 
-/** Put a claim back when the write it was taken for did not happen. */
+/**
+ * Put a claim back when the write it was taken for did not happen.
+ *
+ * Predicated on the row still being `applying`, so this can only ever undo
+ * the claim it was called for. Without that predicate it was an unconditional
+ * reset by id: harmless while the only caller was the failing request itself,
+ * and a way to reopen somebody else's applied proposal the moment it was not.
+ */
 export async function releaseClaim(
   db: Database,
   scope: WorkspaceScope,
@@ -251,29 +270,37 @@ export async function releaseClaim(
         resolvedAt: null,
         updatedAt: new Date(),
       })
-      .where(eq(proposals.id, id)),
+      .where(and(eq(proposals.id, id), eq(proposals.status, "applying"))),
   );
 }
 
 /**
- * Record what applying produced, after it has produced it.
+ * Mark an applied proposal applied, recording what the write produced.
  *
- * Separate from the claim for the reason `settled()` gives about a commit sha:
- * a result written before the write exists is a record of something that may
- * not have happened, and a sha no commit matches is worse than no sha.
+ * Status and result move in ONE statement, after the write has happened.
+ * They used to be two: the claim wrote `applied` and `recordResult` wrote the
+ * result afterwards, which left a window where a row said a change had landed
+ * and carried no record of what landed. Writing them together removes that
+ * window, and means a row reading `applied` always carries its outcome.
+ *
+ * Predicated on `applying`, so a proposal somebody else has since released or
+ * superseded is not quietly re-settled by a late caller. Returns false when
+ * the predicate did not match, which the caller reports rather than swallows.
  */
-export async function recordResult(
+export async function settle(
   db: Database,
   scope: WorkspaceScope,
   id: string,
   result: unknown,
-): Promise<void> {
-  await asUser(db, scope.userId, (tx) =>
+): Promise<boolean> {
+  const rows = await asUser(db, scope.userId, (tx) =>
     tx
       .update(proposals)
-      .set({ result, updatedAt: new Date() })
-      .where(eq(proposals.id, id)),
+      .set({ status: "applied", result, updatedAt: new Date() })
+      .where(and(eq(proposals.id, id), eq(proposals.status, "applying")))
+      .returning({ id: proposals.id }),
   );
+  return rows.length > 0;
 }
 
 /** Who settled a proposal, for the "someone got there first" message. */
