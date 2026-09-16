@@ -252,6 +252,9 @@ importers:
       tsx:
         specifier: ^4.23.12
         version: 4.23.12
+      vitest:
+        specifier: ^3.2.6
+        version: 3.2.6(@types/debug@4.1.13)(@types/node@22.20.0)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.12)(yaml@2.9.0)
 
   packages/git:
     dependencies:
