@@ -50,7 +50,13 @@ export type UsageFeature =
   | "assistant_turn"
   | "breakdown"
   | "release_notes_draft"
-  | "connection_test";
+  | "connection_test"
+  // A skill run unattended, as a run rather than as a chat turn. Its own label
+  // rather than folded into `assistant_turn`, because the question an owner
+  // asks the usage screen is "what is spending this while nobody is looking",
+  // and an answer that buries scheduled work inside the interactive total
+  // cannot be acted on.
+  | "skill_run";
 
 /** Human wording for the usage screen. Unknown keys fall back to the key. */
 const FEATURE_LABELS: Record<string, string> = {
@@ -58,6 +64,7 @@ const FEATURE_LABELS: Record<string, string> = {
   breakdown: "Breakdown proposals",
   release_notes_draft: "Release notes drafts",
   connection_test: "Connection tests",
+  skill_run: "Skill runs",
 };
 
 function usageFeatureLabel(feature: string): string {
