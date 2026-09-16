@@ -24,7 +24,11 @@ import path from "node:path";
 import { isValidParentLevel, resolveLevels } from "@specboards/core";
 
 import { riceFields } from "@/lib/feature-helpers";
-import { assertUnchanged, fingerprintOf } from "@/lib/store/precondition";
+import {
+  assertSameFingerprint,
+  assertUnchanged,
+  fingerprintOf,
+} from "@/lib/store/precondition";
 
 import {
   type ActivityQuery,
@@ -267,13 +271,60 @@ export async function updateFeature(
  * item's level in its own record and a spec's in the metadata sidecar, so the
  * write is the same two-branch shape as `updateFeature` above.
  */
+/**
+ * See FeatureStore.conversionPrecondition. Over this store's own shapes.
+ *
+ * The neighbourhood is the same question as in the database store, asked of
+ * the local records: this item's level and parent, whether it has a spec, and
+ * the levels of its parent and children.
+ */
+export async function conversionPrecondition(
+  ctx: LocalStoreContext,
+  specId: string,
+): Promise<string | null> {
+  const items = await ctx.readItems();
+  const self = items.find((i) => i.id === specId);
+  const meta = (await ctx.readMetadata())[specId];
+  if (!self && !meta) return null;
+
+  const level = self ? self.level : undefined;
+  const parentSpecId = self ? self.parentSpecId : undefined;
+  const children = items
+    .filter((i) => i.parentSpecId === specId)
+    .map((i) => ({ id: i.id, level: i.level }));
+  const parent = parentSpecId
+    ? (items.find((i) => i.id === parentSpecId) ?? null)
+    : null;
+
+  return fingerprintOf(
+    {
+      level: level ?? null,
+      parentId: parentSpecId ?? null,
+      // A local spec is one with a metadata sidecar entry rather than a row
+      // in a spec index; same fact, different storage.
+      hasSpec: Boolean(meta) && !self,
+      children,
+      parent: parent ? { id: parent.id, level: parent.level } : null,
+    },
+    ["level", "parentId", "hasSpec", "children", "parent"],
+  );
+}
+
 export async function convertFeatureLevel(
   ctx: LocalStoreContext,
   specId: string,
   input: { level: string; detachParent: boolean },
   _scope?: WorkspaceScope,
   _emit?: OutboxEmit, // DB-only; ignored in local file mode
+  expect?: string,
 ): Promise<void> {
+  if (expect !== undefined) {
+    assertSameFingerprint(
+      expect,
+      await conversionPrecondition(ctx, specId),
+      "item",
+    );
+  }
   const items = await ctx.readItems();
   const idx = items.findIndex((i) => i.id === specId);
   if (idx >= 0) {

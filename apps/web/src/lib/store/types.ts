@@ -2302,7 +2302,24 @@ interface ItemWriteStore {
     input: { level: string; detachParent: boolean },
     scope?: WorkspaceScope,
     emit?: OutboxEmit,
+    expect?: string,
   ): Promise<void>;
+  /**
+   * A fingerprint of everything a conversion plan is decided against: the
+   * item's level and parent, whether a spec is attached, and the ids and
+   * levels of its parent and children.
+   *
+   * Wider than {@link FeatureStore.writePrecondition} because a conversion is
+   * judged against a neighbourhood rather than a row. Pass it back to
+   * `convertFeatureLevel` as `expect` and the write refuses, having written
+   * nothing, if any of that moved after the plan was made.
+   *
+   * Null when the item is gone or invisible.
+   */
+  conversionPrecondition(
+    specId: string,
+    scope?: WorkspaceScope,
+  ): Promise<string | null>;
   /** Create a typed relation from `specId` to another feature. */
   addRelation(
     specId: string,
