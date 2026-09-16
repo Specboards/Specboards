@@ -3,6 +3,7 @@ import { AssistantSkillsEditor } from "@/components/assistant-skills-editor";
 import { ConnectedAgentsCard } from "@/components/connected-agents-card";
 import { McpCard } from "@/components/mcp-card";
 import { ModelProviderCard } from "@/components/model-provider-card";
+import { SchedulesCard } from "@/components/schedules-card";
 import { SettingsTabs, type SettingsTab } from "@/components/settings-tabs";
 import { UsageCard } from "@/components/usage-card";
 import { appOrigin } from "@/lib/app-origin";
@@ -12,6 +13,7 @@ import { getAppDb, getDb } from "@/lib/db";
 import { listMcpConnections } from "@/lib/mcp/workspace-binding";
 import { getModelProvider } from "@/lib/model-provider-service";
 import { listProducts } from "@/lib/products-service";
+import { listScheduleViews } from "@/lib/schedules-service";
 import { listServiceAccounts } from "@/lib/service-accounts-service";
 import { listSkills } from "@/lib/skills-service";
 import { summarizeUsage } from "@/lib/usage-service";
@@ -107,6 +109,13 @@ export default async function AgentsSettingsPage({
   // than a member's business. The API route that serves it is gated the same.
   const usage = isAdmin && appDb ? await summarizeUsage(appDb, access) : null;
 
+  // Read for every member, not just the owner. The rows are visible through
+  // row-level security anyway, and "what is running on its own in here" is a
+  // question a member has a legitimate stake in: a schedule is spending the
+  // workspace's budget and opening runs on items they own. Only the owner can
+  // change one, which the card gates separately.
+  const schedules = appDb ? await listScheduleViews(appDb, access) : [];
+
   const params = await searchParams;
   const tab = typeof params.tab === "string" ? params.tab : undefined;
 
@@ -164,6 +173,13 @@ export default async function AgentsSettingsPage({
       key: "usage",
       label: "Usage",
       content: <UsageCard initialSummary={usage} canManage={isAdmin} />,
+    },
+    {
+      key: "schedules",
+      label: "Schedules",
+      content: (
+        <SchedulesCard initialSchedules={schedules} canManage={isAdmin} />
+      ),
     },
   ];
 
