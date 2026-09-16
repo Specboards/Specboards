@@ -185,14 +185,80 @@ describe("planConversion: what it refuses", () => {
     ]);
   });
 
-  it("gets the article right on a level whose label starts with a vowel", () => {
-    // Levels are named by admins, so "a Epic" is a sentence the copy can
-    // produce unless the article is computed.
+  it("names the level that would be too shallow for the children", () => {
     const p = plan({
       to: "epic",
       children: [{ specId: "c1", title: "Card payments", level: "work" }],
     });
-    expect(p.blockers[0]!.message).toContain("an Epic holds Features");
+    expect(p.blockers[0]!.message).toContain("the Epic level holds Features");
+  });
+
+  it("says the leaf holds nothing rather than pluralising the word", () => {
+    // The leaf has no child level, and the placeholder standing in for one
+    // used to be pluralised into "holds nothings". This is the case nobody
+    // hits while developing, because the interesting conversions go upward.
+    const p = plan({
+      record: record({ level: "epic" }),
+      item: {
+        specId: "spec-1",
+        title: "Checkout flow",
+        level: "epic",
+        status: "backlog",
+        specPath: null,
+        parentSpecId: null,
+      },
+      to: "work",
+      children: [{ specId: "c1", title: "Card payments", level: "feature" }],
+    });
+    expect(kinds(p)).toEqual(["children-stranded"]);
+    expect(p.blockers[0]!.message).not.toMatch(/nothings/);
+    expect(p.blockers[0]!.message).toContain(
+      "the Work Item level is the lowest one and holds nothing",
+    );
+  });
+
+  it("reads correctly when an admin has named the levels in the plural", () => {
+    // Column headers read better in the plural, so admins name levels that
+    // way, and every article the copy puts in front of one is then wrong:
+    // this refusal used to open "a Work Items holds nothings".
+    const plural: WorkspaceLevel[] = [
+      { key: "initiative", label: "Initiatives", position: 0, isLeaf: false },
+      { key: "epic", label: "Epics", position: 1, isLeaf: false },
+      { key: "feature", label: "Features", position: 2, isLeaf: false },
+      { key: "work", label: "Work Items", position: 3, isLeaf: true },
+    ];
+    const p = plan({
+      record: record({ level: "epic" }),
+      item: {
+        specId: "spec-1",
+        title: "Checkout flow",
+        level: "epic",
+        status: "backlog",
+        specPath: null,
+        parentSpecId: null,
+      },
+      to: "work",
+      levels: plural,
+      children: [{ specId: "c1", title: "Card payments", level: "feature" }],
+    });
+    const message = p.blockers[0]!.message;
+    expect(message).toContain(
+      "the Work Items level is the lowest one and holds nothing",
+    );
+    expect(message).not.toMatch(/\ba Work Items\b/);
+    expect(message).not.toMatch(/nothings/);
+  });
+
+  it("still gets the article right where the copy needs one", () => {
+    // `withArticle` did not go away with the message above; levels are named
+    // by admins, so "a Epic" is a sentence the remaining copy can produce
+    // unless the article is computed.
+    const p = plan({
+      to: "epic",
+      parent: { specId: "p1", title: "Payments", level: "epic" },
+    });
+    const detached = p.effects.find((e) => e.kind === "parent-detached");
+    expect(detached?.message).toContain("an Epic sits under Initiatives");
   });
 
   it("allows a conversion whose children stay legal", () => {
