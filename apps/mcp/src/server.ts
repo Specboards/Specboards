@@ -15,6 +15,7 @@ import {
   descendantGroupIds,
   fieldGateSatisfied,
   gateFieldCatalog,
+  gatesCrossing,
   gateFieldLabel,
   isForwardTransition,
   isTransitionMode,
@@ -812,6 +813,21 @@ async function openGates(
   stageKeys: string[],
 ): Promise<string[]> {
   if (stageKeys.length === 0) return [];
+  // The whole set for this scope, NOT just the stages being crossed.
+  //
+  // Inheritance here is set-level, matching `stageGatesIn` in the web store: a
+  // product with gates of its own is governed by those, otherwise by the
+  // workspace default. Deciding that needs to see the product's whole set, so
+  // the stage filter cannot be part of this query. It used to be, and the
+  // effect was a false denial: a product whose only gate sat on `ready` had no
+  // row survive a `backlog` filter, looked to this function like a product
+  // with no gates at all, and inherited the workspace's `backlog` gate. The
+  // web path resolved the full set first and allowed the same move, so a
+  // person could advance an item and an agent could not.
+  //
+  // Not a bypass, which is why it is a parity bug rather than a security one,
+  // but it strands automation for exactly the customers who have bothered to
+  // configure gates per product.
   const rows = await db()
     .select({
       id: workspaceStageGates.id,
@@ -819,22 +835,14 @@ async function openGates(
       kind: workspaceStageGates.kind,
       fieldKey: workspaceStageGates.fieldKey,
       productId: workspaceStageGates.productId,
+      stageKey: workspaceStageGates.stageKey,
     })
     .from(workspaceStageGates)
-    .where(
-      and(
-        eq(workspaceStageGates.workspaceId, workspaceId),
-        inArray(workspaceStageGates.stageKey, stageKeys),
-      ),
-    );
-  // Set-level inheritance, matching `stageGatesIn` in the web store: a product
-  // with gates of its own is governed by those, otherwise by the workspace
-  // default. Previously every product's gates applied to every item, so one
-  // product's checklist blocked another product's work.
-  const own = feature.productId
-    ? rows.filter((r) => r.productId === feature.productId)
-    : [];
-  const gates = own.length > 0 ? own : rows.filter((r) => r.productId === null);
+    .where(eq(workspaceStageGates.workspaceId, workspaceId));
+  // Inheritance then stage filter, in that order, and the order is inside
+  // `gatesCrossing` rather than here so this call site cannot get it wrong
+  // again. The web store's `stageGatesIn` shares the same rule.
+  const gates = gatesCrossing(rows, feature.productId, stageKeys);
   if (gates.length === 0) return [];
 
   const done = new Set<string>();

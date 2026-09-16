@@ -102,6 +102,86 @@ export async function readTextBodyWithin(
   return text + decoder.decode();
 }
 
+/**
+ * Read the raw body as BYTES, refusing as soon as it exceeds `limit`.
+ *
+ * The binary sibling of {@link readTextBodyWithin}, with the same two-part
+ * policy and the same reasoning: a `Content-Length` fast path for the
+ * ordinary case, and a running total as chunks arrive for the chunked
+ * request that sends no length or lies about it, so at most `limit` plus one
+ * chunk is ever held.
+ *
+ * This exists for multipart uploads. `req.formData()` cannot be given a
+ * ceiling: by the time it returns, Next has consumed and parsed the entire
+ * body, so any size check afterwards bounds what gets stored and not what
+ * gets allocated. The avatar route did exactly that, which made a
+ * deliberately-built protection (this module) one that a multipart endpoint
+ * simply routed around. Reading the bytes here first and handing the bounded
+ * buffer to the platform's own multipart parser keeps the parser and bounds
+ * the allocation:
+ *
+ *   const raw = await readBinaryBodyWithin(req, LIMIT, "profile/avatar");
+ *   if (raw === null) return tooLargeResponse(LIMIT);
+ *   const form = await new Response(raw, {
+ *     headers: { "content-type": req.headers.get("content-type")! },
+ *   }).formData();
+ *
+ * Returns null when the limit was exceeded, logging `request-oversized`
+ * either way so oversized attempts stay greppable.
+ */
+export async function readBinaryBodyWithin(
+  req: Request,
+  limit: number,
+  endpoint: string,
+  // `Uint8Array<ArrayBuffer>`, not the default `ArrayBufferLike`: the buffer
+  // below is freshly allocated and not shared, which is what lets a caller
+  // hand it straight to `new Response(...)` without a cast.
+): Promise<Uint8Array<ArrayBuffer> | null> {
+  const declared = Number(req.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > limit) {
+    logSecurityEvent("request-oversized", { endpoint, bytes: declared });
+    return null;
+  }
+
+  if (!req.body) return new Uint8Array(new ArrayBuffer(0));
+
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > limit) {
+        logSecurityEvent("request-oversized", { endpoint, bytes });
+        // Tell the sender to stop rather than draining the rest politely.
+        await reader.cancel().catch(() => {});
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const out = new Uint8Array(new ArrayBuffer(bytes));
+  let at = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  return out;
+}
+
+/** The 413 a bounded reader's caller returns. */
+export function tooLargeResponse(limit: number): Response {
+  return Response.json(
+    { error: `Request body too large (limit ${limit} bytes).` },
+    { status: 413 },
+  );
+}
+
 /** The 413 for an oversized JSON body. Logging is the reader's job. */
 function tooLarge(limit: number): JsonBodyResult {
   return {

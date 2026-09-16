@@ -26,6 +26,7 @@
 
 import {
   DEFAULT_STATUSES,
+  gatesInScope,
   isPropertyType,
   propertyKeyFromLabel,
   resolveLevels,
@@ -1161,9 +1162,9 @@ async function stageGatesIn(
       asc(workspaceStageGates.stageKey),
       asc(workspaceStageGates.position),
     );
-  const own = productId ? rows.filter((r) => r.productId === productId) : [];
-  const source =
-    own.length > 0 ? own : rows.filter((r) => r.productId === null);
+  // Shared with the MCP server's `openGates`, which had this rule written out
+  // a second time and got the ordering wrong. See `gatesInScope` in core.
+  const source = gatesInScope(rows, productId);
   return source.map((r) => ({
     id: r.id,
     stageKey: r.stageKey,

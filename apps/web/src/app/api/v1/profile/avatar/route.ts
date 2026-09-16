@@ -3,11 +3,13 @@ import { eq, userAvatars, users } from "@specboards/db";
 
 import { getBrowserSessionUser } from "@/lib/auth-session";
 import { getDb } from "@/lib/db";
+import { readBinaryBodyWithin, tooLargeResponse } from "@/lib/api/body";
 import {
   avatarUrl,
   isAvatarMime,
   isUploadedAvatar,
   MAX_AVATAR_BYTES,
+  MAX_AVATAR_REQUEST_BYTES,
 } from "@/lib/avatars";
 
 export const dynamic = "force-dynamic";
@@ -42,9 +44,29 @@ export async function POST(req: Request) {
     return Response.json({ error: "Authentication required." }, { status: 401 });
   }
 
+  // ── Bound the request before parsing it ─────────────────────────────────
+  // `req.formData()` consumes and parses the whole body, so the size checks
+  // further down protect storage and bound neither request memory nor
+  // parsing work. That mattered here more than it looks: `lib/api/body.ts`
+  // streams and aborts at a byte ceiling precisely because the deployment
+  // has no outer request-size cap and runs on a 512 MB machine, and this
+  // route went around it. Reading the bytes with that same policy first, and
+  // handing the bounded buffer to the platform's multipart parser, keeps the
+  // parser and caps the allocation.
+  const raw = await readBinaryBodyWithin(
+    req,
+    MAX_AVATAR_REQUEST_BYTES,
+    "profile/avatar",
+  );
+  if (raw === null) return tooLargeResponse(MAX_AVATAR_REQUEST_BYTES);
+
   let form: FormData;
   try {
-    form = await req.formData();
+    // The content type carries the multipart boundary, so it has to be
+    // passed through for the parse to mean anything.
+    form = await new Response(raw, {
+      headers: { "content-type": req.headers.get("content-type") ?? "" },
+    }).formData();
   } catch {
     return Response.json(
       { error: "Send the image as multipart/form-data." },

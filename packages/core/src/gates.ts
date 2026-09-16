@@ -150,3 +150,54 @@ export function gateFieldLabel(
     : fieldKey;
   return `${fallback || bare} (no longer exists)`;
 }
+
+/**
+ * Set-level gate inheritance: a product with gates of its own is governed by
+ * those, otherwise by the workspace defaults.
+ *
+ * All-or-nothing per product, not per stage. A product that defines any gate
+ * has opted out of the workspace set entirely, so it does not silently pick
+ * up a workspace gate on a stage it happens not to have configured. Deciding
+ * that requires seeing the product's WHOLE set, which is the part that is
+ * easy to get wrong.
+ */
+export function gatesInScope<T extends { productId: string | null }>(
+  rows: readonly T[],
+  productId: string | null,
+): T[] {
+  const own = productId ? rows.filter((r) => r.productId === productId) : [];
+  return own.length > 0 ? [...own] : rows.filter((r) => r.productId === null);
+}
+
+/**
+ * The gates a move across `stageKeys` has to satisfy.
+ *
+ * ── Why the two steps are in one function ────────────────────────────────
+ * Inheritance is decided first, over the product's whole set, and only then
+ * is the result narrowed to the stages being crossed. Doing it the other way
+ * round is a real bug that shipped: the MCP server filtered by stage in its
+ * SQL `WHERE`, so a product whose only gate sat on `ready` had no row survive
+ * a `backlog` filter, looked like a product with no gates at all, and
+ * inherited the workspace's `backlog` gate. The web path resolved the full
+ * set first and allowed the same move, so a person could advance an item and
+ * an agent could not.
+ *
+ * Both orderings look equally reasonable at a call site, which is why the
+ * order lives in here rather than in a comment asking two code paths to
+ * agree. This module's header already made that argument about field gates;
+ * the same argument applies to which gates are in scope at all.
+ *
+ * `rows` must be every gate in the workspace, unfiltered by stage. Passing a
+ * pre-filtered list re-introduces exactly the bug this prevents.
+ */
+export function gatesCrossing<
+  T extends { productId: string | null; stageKey: string },
+>(
+  rows: readonly T[],
+  productId: string | null,
+  stageKeys: Iterable<string>,
+): T[] {
+  const crossed = new Set(stageKeys);
+  if (crossed.size === 0) return [];
+  return gatesInScope(rows, productId).filter((g) => crossed.has(g.stageKey));
+}
