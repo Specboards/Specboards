@@ -40,6 +40,7 @@ export const NOTIFICATION_EVENT_TYPES = [
   "spec_change_merged",
   "spec_change_closed",
   "release.shipped",
+  "proposal.opened",
 ] as const;
 
 export type NotificationEventType = (typeof NOTIFICATION_EVENT_TYPES)[number];
@@ -71,6 +72,11 @@ export const NOTIFICATION_DEFAULTS: Record<
   spec_change_merged: { in_app: true, email: true },
   spec_change_closed: { in_app: true, email: true },
   "release.shipped": { in_app: true, email: false },
+  // On in-app, off by email, and the reasoning is the same as item.created
+  // one step further on. Once agents run to a schedule this fires whenever
+  // one finishes, which is exactly the volume immediate mail is worst at.
+  // The bell is where a review queue belongs.
+  "proposal.opened": { in_app: true, email: false },
 };
 
 /**
@@ -123,5 +129,10 @@ export const NOTIFICATION_EVENT_LABELS: Record<
   "release.shipped": {
     label: "A release ships with your work in it",
     description: "A release containing an item of yours is marked shipped.",
+  },
+  "proposal.opened": {
+    label: "An agent proposes a change to an item you follow",
+    description:
+      "An agent drafts a change on an item you are assigned to or watching, and it is waiting for review.",
   },
 };
