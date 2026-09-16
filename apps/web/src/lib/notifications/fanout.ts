@@ -315,6 +315,8 @@ async function resolveTargets(tx: Tx, ev: OutboxEventRow): Promise<Target[]> {
       return commentTargets(tx, ev, data);
     case "release.shipped":
       return releaseShippedTargets(tx, ev, data);
+    case "proposal.opened":
+      return proposalOpenedTargets(tx, ev, data);
     default:
       // Including item.deleted, which is emitted for webhooks and cannot reach
       // an inbox: the notification row's feature is NOT NULL and cascades.
@@ -432,6 +434,58 @@ async function commentTargets(
     });
   }
   return out;
+}
+
+/**
+ * A change an agent drafted, told to the people following the item it targets.
+ *
+ * ── Why the item and not the queue ──────────────────────────────────────────
+ * The notice deep-links to the target, because the decision is made with the
+ * target's context in front of you. That is the same reasoning that keeps an
+ * Apply button off the queue row: a list is how you find out there is
+ * something to do, not where you should do it.
+ *
+ * ── The drafting agent is already excluded ──────────────────────────────────
+ * Twice over, and neither is a rule written here. The fan-out subtracts
+ * `ev.actorId` before the membership query, and `activeMembers` drops anyone
+ * whose member row is `role = 'service'`. An agent that drafts a proposal on
+ * an item it is also assigned to is filtered by both.
+ *
+ * ── Only a feature can be announced ─────────────────────────────────────────
+ * A proposal can target a release or a doc space, and neither has anywhere to
+ * land: `notifications.feature_id` is NOT NULL, so the row would fail to
+ * insert. This is the same wall that keeps `item.deleted` out of the catalog,
+ * and the same answer: leave it out rather than half-build it. Webhook
+ * subscribers still receive every `proposal.opened`, whatever it targets,
+ * because a delivery row has no such column.
+ *
+ * The `targetType` check below is deliberate but not load-bearing, and no test
+ * can tell: a release id is never a `features.id`, so the lookup that follows
+ * would return null and produce the same empty result. It is kept because it
+ * states the rule the schema imposes rather than leaving it as a coincidence
+ * of how ids are allocated, and because it saves a query that can only fail.
+ * Said plainly here rather than left for a reader to discover, the way
+ * `convertFeatureLevel` states what its precondition does not promise.
+ */
+async function proposalOpenedTargets(
+  tx: Tx,
+  ev: OutboxEventRow,
+  data: Record<string, unknown>,
+): Promise<Target[]> {
+  if (str(data.targetType) !== "feature") return [];
+  const targetId = str(data.targetId);
+  if (!targetId) return [];
+  const item = await itemById(tx, ev.workspaceId, targetId);
+  if (!item) return [];
+  const recipients = await followers(tx, ev.workspaceId, item);
+  const snippet = `${item.title} has a proposed change waiting for review.`;
+  return recipients.map((recipientId) => ({
+    recipientId,
+    type: "proposal.opened" as const,
+    featureId: item.id,
+    commentId: null,
+    snippet,
+  }));
 }
 
 /**

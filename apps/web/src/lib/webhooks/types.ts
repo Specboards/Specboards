@@ -33,6 +33,11 @@ export const WEBHOOK_EVENT_TYPES = [
   "item.stage_entered",
   "agent.mentioned",
   "run.requested",
+  // The return leg of the same harness. `run.requested` hands work out;
+  // `proposal.opened` says a result came back and is waiting for a person.
+  // An integration that only ever hears the dispatch half has to poll the
+  // review queue to find out whether anything happened.
+  "proposal.opened",
 ] as const;
 
 export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];
@@ -57,6 +62,7 @@ export const WEBHOOK_EVENT_LABELS: Record<WebhookEventType, string> = {
   "item.stage_entered": "Item entered a stage (for agents)",
   "agent.mentioned": "Agent mentioned in a comment",
   "run.requested": "Work handed to an agent",
+  "proposal.opened": "An agent proposed a change",
 };
 
 export function isWebhookEventType(v: unknown): v is WebhookEventType {

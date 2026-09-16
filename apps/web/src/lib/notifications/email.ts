@@ -392,6 +392,11 @@ function subjectFor(
       return `Your change to ${title} was closed`;
     case "release.shipped":
       return trimSentence(notice.snippet) || "A release shipped";
+    // Off by default, so this is read by somebody who deliberately asked to
+    // hear about agent work by mail. It names the item rather than the agent:
+    // which item is what decides whether this is worth opening now.
+    case "proposal.opened":
+      return `${title} has a change waiting for your review`;
   }
 }
 

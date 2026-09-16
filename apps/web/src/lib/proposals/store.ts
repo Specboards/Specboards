@@ -1,4 +1,11 @@
-import { and, eq, proposals, users, type Database } from "@specboards/db";
+import {
+  and,
+  eq,
+  outboxEvents,
+  proposals,
+  users,
+  type Database,
+} from "@specboards/db";
 
 import { asUser, type ScopedTx } from "@/lib/db-scope";
 import type { WorkspaceScope } from "@/lib/store/types";
@@ -153,7 +160,54 @@ export async function insertProposal(
     // same legacy row a moment earlier, and the caller re-reads theirs.
     .onConflictDoNothing()
     .returning(COLUMNS);
-  return row ? toRow(row) : null;
+  if (!row) return null;
+  const proposal = toRow(row);
+  await announce(tx, proposal);
+  return proposal;
+}
+
+/**
+ * Tell the workspace a run proposal is waiting, by appending to the outbox in
+ * the same transaction that created it.
+ *
+ * ── Why here and not at the call site ───────────────────────────────────────
+ * A run proposal is the only thing in the product that arrives while nobody is
+ * looking, so the notice is not a courtesy on top of it: without one the
+ * review queue is only found by somebody who thinks to open it. Emitting from
+ * the insert means the row and the intent to notify commit together, and means
+ * a producer added later cannot ship a proposal nobody hears about by
+ * forgetting a line. `notifications/fanout.ts` makes the same argument about
+ * why it reads the outbox rather than notifying at each write site: before it
+ * did, being assigned an item told nobody, because the event existed and
+ * nothing was listening.
+ *
+ * ── What is deliberately silent ─────────────────────────────────────────────
+ * A conversation proposal notifies nobody. The person who asked is sitting in
+ * front of the thread it appeared in, and telling them about their own request
+ * is the kind of notification that teaches people to ignore the bell.
+ *
+ * A row materialised with a status already settled notifies nobody either.
+ * That path exists to carry a legacy `assistant_messages` proposal across, and
+ * announcing a decision somebody made years ago as news would be worse than
+ * saying nothing.
+ */
+async function announce(tx: ScopedTx, row: ProposalRow): Promise<void> {
+  if (row.origin !== "run" || row.status !== "open") return;
+  await tx.insert(outboxEvents).values({
+    workspaceId: row.workspaceId,
+    productId: row.productId,
+    // The drafting agent. The fan-out subtracts the actor before it does
+    // anything else, which is what keeps an agent out of its own inbox.
+    actorId: row.actorId,
+    type: "proposal.opened",
+    data: {
+      proposalId: row.id,
+      targetType: row.targetType,
+      targetId: row.targetId,
+      kind: row.kind,
+      runId: row.runId,
+    },
+  });
 }
 
 
