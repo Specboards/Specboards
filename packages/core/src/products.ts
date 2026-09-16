@@ -58,6 +58,11 @@ export const RESERVED_PRODUCT_KEYS: ReadonlySet<string> = new Set([
   // child of /ideas, because the two surfaces answer different questions and a
   // workspace can publish either without the other.
   "roadmap",
+  // The review queue: /{org}/reviews. Workspace-scoped rather than
+  // product-scoped, because a proposal about one product and a proposal about
+  // another are one queue to work down, which is why the page has a product
+  // filter and not a product in its path.
+  "reviews",
 ]);
 
 /** Whether `key` collides with a route that would shadow the product. */

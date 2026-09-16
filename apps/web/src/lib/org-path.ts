@@ -49,11 +49,16 @@ export const LOCAL_ORG_SLUG = "local";
  * `/{org}/{seg}/…` is never read as a product. Next routes these to their
  * literal segments (which take priority over `[product]`); the client product
  * hook uses the same set to know when there's no product in context.
+ *
+ * This IS `RESERVED_PRODUCT_KEYS`, and used to be a second hand-maintained
+ * list of the same thing. The two answer one question, "is this segment a
+ * static route rather than a product key", and they had drifted:
+ * `notifications` was reserved there and missing here, so on
+ * `/{org}/notifications` the product hook read "notifications" as the active
+ * product and every product-scoped nav link pointed at
+ * `/{org}/notifications/backlog`. Only one of the two lists had a test
+ * holding it to the route tree, and it was not this one. Aliasing them means
+ * that test now covers both, and a new org-level route can only be forgotten
+ * in one place instead of two.
  */
-export const ORG_SCOPED_SEGMENTS = new Set([
-  "settings",
-  "repositories",
-  // The leadership dashboard spans every product, so it has no product segment.
-  // (A group's own roll-up is product-scoped: `/{org}/~key/dashboard`.)
-  "dashboard",
-]);
+export { RESERVED_PRODUCT_KEYS as ORG_SCOPED_SEGMENTS } from "@specboards/core";

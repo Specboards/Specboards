@@ -12,6 +12,7 @@ import {
   ProposalStaleError,
   ProposalTooLongError,
 } from "@/lib/assistant-proposals";
+import { decideProposal } from "@/lib/proposals/service";
 import { getAppDb } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -50,6 +51,33 @@ const NO_DB = Response.json(
  * It is still recorded as accepted, because the question the record answers is
  * whether a human decided, and they did.
  */
+/** See the item route's `decideById`: the same flattening, for a release. */
+async function decideById(
+  db: Parameters<typeof decideProposal>[0],
+  scope: Parameters<typeof decideProposal>[1],
+  releaseId: string,
+  proposalId: string,
+  action: "accept" | "reject",
+  input: Record<string, unknown>,
+) {
+  const decision = await decideProposal(
+    db,
+    scope,
+    proposalId,
+    action === "accept" ? "apply" : "dismiss",
+    { kind: "release", id: releaseId },
+    action === "accept" && typeof input.body === "string"
+      ? { body: input.body }
+      : undefined,
+  );
+  return {
+    id: decision.id,
+    status: decision.status,
+    resolvedAt: decision.resolvedAt,
+    body: decision.outcome.body ?? "",
+  };
+}
+
 export async function POST(req: Request, { params }: Params) {
   const authz = await authorizeWrite(req);
   if (!authz.ok) return authz.response;
@@ -62,9 +90,23 @@ export async function POST(req: Request, { params }: Params) {
   const input = parsed.body as Record<string, unknown>;
 
   const messageId = typeof input.messageId === "string" ? input.messageId : "";
+  // See the note on the item route: a run's proposal has no conversation
+  // turn, so the review inbox names it by its own id, through this same
+  // endpoint rather than a second one with its own copy of the rules.
+  const proposalId =
+    typeof input.proposalId === "string" ? input.proposalId : "";
   const action = input.action;
-  if (!messageId) {
-    return Response.json({ error: "messageId is required." }, { status: 422 });
+  if (!messageId && !proposalId) {
+    return Response.json(
+      { error: "messageId or proposalId is required." },
+      { status: 422 },
+    );
+  }
+  if (messageId && proposalId) {
+    return Response.json(
+      { error: "Name either messageId or proposalId, not both." },
+      { status: 422 },
+    );
   }
   if (action !== "accept" && action !== "reject") {
     return Response.json(
@@ -74,8 +116,9 @@ export async function POST(req: Request, { params }: Params) {
   }
 
   try {
-    const result =
-      action === "accept"
+    const result = proposalId
+      ? await decideById(db, authz.scope, id, proposalId, action, input)
+      : action === "accept"
         ? await acceptReleaseProposal(db, authz.scope, id, messageId, {
             ...(typeof input.body === "string" ? { body: input.body } : {}),
           })
