@@ -6,6 +6,7 @@ import { patchFeature } from "@/lib/features-service";
 import { canEditRelease } from "@/lib/release-notes-service";
 import { updateSpecContent } from "@/lib/spec-content";
 import { getStore } from "@/lib/store";
+import { StaleWriteError } from "@/lib/store/precondition";
 import type {
   FeatureDetail,
   FeaturePatch,
@@ -17,6 +18,7 @@ import {
   ProposalForbiddenError,
   ProposalInvalidError,
   ProposalNotFoundError,
+  ProposalStaleError,
 } from "./errors";
 import {
   assertMetadataNotStale,
@@ -166,8 +168,48 @@ async function resolveRelease(
   return release;
 }
 
+/**
+ * The patch keys each apply below sends, named once.
+ *
+ * The precondition is taken over exactly the fields the write will set, so
+ * these have to be the same list in both places. Two literals that had to
+ * agree is precisely the kind of thing that stops agreeing: naming them once
+ * means a field added to the patch and not to the precondition is a change to
+ * one constant, not a silent hole.
+ */
+const CARD_BODY_FIELDS = ["details"] as const;
+const RELEASE_NOTES_FIELDS = ["releaseNotesMode", "releaseNotesBody"] as const;
+
+/**
+ * Re-raise the store's refusal as the one the review surface already knows.
+ *
+ * `StaleWriteError` is the write predicate firing: between `prepare` deciding
+ * this proposal was safe to apply and the write going in, somebody changed
+ * the same fields. It is the same event as the prepare-time staleness check,
+ * caught a few milliseconds later and by the database rather than by us, so
+ * the reviewer should see the same thing: a 409, and what the target says
+ * now. Nothing was written, so the claim is released and the proposal is
+ * actionable again.
+ *
+ * `current` is a thunk because the re-read only happens on the rare path.
+ */
+async function asStaleProposal(
+  err: unknown,
+  current: () => Promise<string>,
+): Promise<never> {
+  if (!(err instanceof StaleWriteError)) throw err;
+  throw new ProposalStaleError(err.message, await current());
+}
+
 interface PreparedSpecContent {
   body: string;
+  /**
+   * The target's fingerprint over the fields this apply will write, taken
+   * during prepare and handed to the write so it can refuse rather than
+   * overwrite. Absent for a git-backed spec, which carries a blob sha down
+   * its own write path and can merge rather than refuse.
+   */
+  expect?: string;
   feature?: FeatureDetail;
   specId?: string;
   release?: ReleaseRecord;
@@ -197,7 +239,17 @@ const specContent: ProposalHandler = {
       const release = await resolveRelease(scope, row.targetId);
       assertNotStale(row.baseVersion, release.releaseNotesBody ?? "", "release");
       assertSentWhole(notesFitWhole(release.releaseNotesBody), "release");
-      return { body, release } satisfies PreparedSpecContent;
+      const store = await getStore();
+      const expect = await store.writePrecondition(
+        { kind: "release", id: release.id },
+        RELEASE_NOTES_FIELDS,
+        scope,
+      );
+      return {
+        body,
+        release,
+        ...(expect === null ? {} : { expect }),
+      } satisfies PreparedSpecContent;
     }
 
     if (row.targetType !== "feature") {
@@ -214,7 +266,24 @@ const specContent: ProposalHandler = {
     // concurrent edits, and says nothing about whether the model ever saw the
     // whole document.
     assertSentWhole(bodyFitsWhole(feature.content), "item");
-    return { body, feature, specId } satisfies PreparedSpecContent;
+    // Only the card. A spec's body is not a column, so there is nothing here
+    // to fingerprint, and it does not need one: `expectedBlobSha` below is
+    // this same guarantee, further down the same write.
+    if (!feature.isDbNative) {
+      return { body, feature, specId } satisfies PreparedSpecContent;
+    }
+    const store = await getStore();
+    const expect = await store.writePrecondition(
+      { kind: "feature", specId },
+      CARD_BODY_FIELDS,
+      scope,
+    );
+    return {
+      body,
+      feature,
+      specId,
+      ...(expect === null ? {} : { expect }),
+    } satisfies PreparedSpecContent;
   },
 
   async apply(db, scope, _row, prepared) {
@@ -222,11 +291,22 @@ const specContent: ProposalHandler = {
 
     if (p.release) {
       const store = await getStore();
-      await store.updateRelease(
-        p.release.id,
-        { releaseNotesMode: "in_app", releaseNotesBody: p.body },
-        scope,
-      );
+      try {
+        await store.updateRelease(
+          p.release.id,
+          { releaseNotesMode: "in_app", releaseNotesBody: p.body },
+          scope,
+          undefined,
+          p.expect,
+        );
+      } catch (err) {
+        await asStaleProposal(err, async () => {
+          const now = (await store.listReleases(scope)).find(
+            (r) => r.id === p.release!.id,
+          );
+          return now?.releaseNotesBody ?? "";
+        });
+      }
       return { body: p.body };
     }
 
@@ -238,7 +318,17 @@ const specContent: ProposalHandler = {
       // patch and so is this one. `patchFeature` does its own product-write
       // check and writes the change ledger, which is where the item's history
       // of this edit comes from.
-      await patchFeature(specId, { details: p.body }, scope);
+      try {
+        await patchFeature(specId, { details: p.body }, scope, {
+          expect: p.expect,
+        });
+      } catch (err) {
+        await asStaleProposal(err, async () => {
+          const store = await getStore();
+          const now = await store.getFeature(specId, scope);
+          return now?.content ?? "";
+        });
+      }
       return { body: p.body };
     }
 
@@ -273,6 +363,8 @@ const specContent: ProposalHandler = {
 interface PreparedItemMetadata {
   patch: ItemMetadataPayload;
   specId: string;
+  /** See {@link PreparedSpecContent.expect}. */
+  expect?: string;
 }
 
 /**
@@ -300,17 +392,45 @@ const itemMetadata: ProposalHandler = {
     // somebody already shipped it, would quietly walk the board backwards.
     assertMetadataNotStale(row.baseVersion, feature, Object.keys(patch));
 
-    return { patch, specId } satisfies PreparedItemMetadata;
+    // The same question the line above asks, asked again at the write and
+    // answered by the database. That one compares against what the agent was
+    // shown when it drafted, which can be days ago; this one compares against
+    // what was there a moment ago, and closes the window between the two.
+    const store = await getStore();
+    const expect = await store.writePrecondition(
+      { kind: "feature", specId },
+      Object.keys(patch),
+      scope,
+    );
+
+    return {
+      patch,
+      specId,
+      ...(expect === null ? {} : { expect }),
+    } satisfies PreparedItemMetadata;
   },
 
   async apply(_db, scope, _row, prepared) {
-    const { patch, specId } = prepared as PreparedItemMetadata;
+    const { patch, specId, expect } = prepared as PreparedItemMetadata;
     // Straight down the ordinary patch path, which runs the product-write
     // check, validates the stage transition against the workflow and its
     // gates, writes the change ledger and raises the outbox event. Everything
     // that makes a stage change loud happens because this is the same call a
     // person's own edit makes.
-    await patchFeature(specId, patch as FeaturePatch, scope);
+    try {
+      await patchFeature(specId, patch as FeaturePatch, scope, { expect });
+    } catch (err) {
+      await asStaleProposal(err, async () => {
+        const store = await getStore();
+        const now = await store.getFeature(specId, scope);
+        const snapshot: Record<string, unknown> = {};
+        for (const field of Object.keys(patch).sort()) {
+          snapshot[field] =
+            (now as unknown as Record<string, unknown> | null)?.[field] ?? null;
+        }
+        return JSON.stringify(snapshot, null, 2);
+      });
+    }
     return {};
   },
 };

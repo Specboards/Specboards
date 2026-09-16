@@ -34,6 +34,10 @@ import {
 } from "@specboards/core";
 
 import { riceFields } from "@/lib/feature-helpers";
+import {
+  assertUnchanged,
+  fingerprintOf,
+} from "@/lib/store/precondition";
 
 import {
   and,
@@ -538,12 +542,89 @@ export async function pruneAutoGrouping(
   });
 }
 
+/**
+ * The columns the change ledger reads before a write, and the same ones a
+ * write precondition is taken over. One projection, so a fingerprint taken
+ * before an apply and the one re-checked under the row lock cannot be reading
+ * different things. See lib/store/precondition.ts.
+ */
+const TRACKED_COLUMNS = {
+  id: features.id,
+  productId: features.productId,
+  title: features.title,
+  status: features.status,
+  tags: features.tags,
+  releaseId: features.releaseId,
+  cycleId: features.cycleId,
+  assigneeId: features.assigneeId,
+  customFields: features.customFields,
+  details: features.details,
+  parentId: features.parentId,
+  riceReach: features.riceReach,
+  riceImpact: features.riceImpact,
+  riceConfidence: features.riceConfidence,
+  riceEffort: features.riceEffort,
+} as const;
+
+/**
+ * The columns a patch will actually write, named as the projection above
+ * names them.
+ *
+ * `parentSpecId` is the one patch key that is not a column: it is resolved to
+ * `parentId` on the way in, so the precondition has to watch `parentId` too.
+ * Keys that touch nothing in the projection are dropped rather than
+ * fingerprinted as absent, so the fingerprint only ever means something.
+ */
+function preconditionFields(
+  patchKeys: readonly string[],
+): readonly string[] {
+  const out = patchKeys.map((k) => (k === "parentSpecId" ? "parentId" : k));
+  return out.filter((k) => k in TRACKED_COLUMNS);
+}
+
+/**
+ * A fingerprint of the columns a later `updateFeature` will change, so that
+ * write can refuse if somebody else moves them first.
+ *
+ * Returns null when the item is not there or not visible, which the caller
+ * reports as the item having gone rather than as a stale write.
+ */
+export async function featurePrecondition(
+  ctx: DbStoreContext,
+  specId: string,
+  fields: readonly string[],
+  scope?: WorkspaceScope,
+): Promise<string | null> {
+  return ctx.scoped(scope, async (tx) => {
+    const [row] = await tx
+      .select(TRACKED_COLUMNS)
+      .from(features)
+      .where(
+        and(
+          eq(features.specId, specId),
+          eq(features.workspaceId, scope!.workspaceId),
+        ),
+      )
+      .limit(1);
+    if (!row) return null;
+    const access = await ctx.accessIn(tx, scope!);
+    const productById = await ctx.productVisibilityIn(tx, scope!.workspaceId);
+    if (!canReadProductId(access, productById, row.productId)) return null;
+    // Through the same mapping the write uses. Passing the caller's field
+    // names straight in would fingerprint `parentSpecId`, which is not a
+    // column, while the write fingerprints `parentId`, which is: the two
+    // would never match and every prepared write would refuse.
+    return fingerprintOf(row, preconditionFields(fields));
+  });
+}
+
 export async function updateFeature(
   ctx: DbStoreContext,
   specId: string,
   patch: FeaturePatch,
   scope?: WorkspaceScope,
   emit?: OutboxEmit | readonly OutboxEmit[],
+  expect?: string,
 ): Promise<void> {
   // `parentSpecId` isn't a column, so translate it to the parent row's `parentId`.
   const { parentSpecId, ...rest } = patch;
@@ -552,28 +633,30 @@ export async function updateFeature(
     // Reads the fields the ledger tracks, not just the one authorization
     // needs: a change's previous value is knowable only here, before the
     // update overwrites it, and no later feature can reconstruct it.
+    //
+    // Locked, so what is read here is still true at the UPDATE below. That
+    // matters twice over: it is what makes `expect` a compare-and-set rather
+    // than a check somebody can slip past, and the ledger's "previous value"
+    // is read here too, so without the lock a concurrent write makes the
+    // recorded history wrong as well as the row. The lock is held over the
+    // validation queries that follow, which is a few milliseconds on one
+    // item row: concurrent edits to the same item are rare and are exactly
+    // the case that should serialise.
     const current = await tx
-      .select({
-        id: features.id,
-        productId: features.productId,
-        title: features.title,
-        status: features.status,
-        tags: features.tags,
-        releaseId: features.releaseId,
-        cycleId: features.cycleId,
-        assigneeId: features.assigneeId,
-        customFields: features.customFields,
-        details: features.details,
-        parentId: features.parentId,
-        riceReach: features.riceReach,
-        riceImpact: features.riceImpact,
-        riceConfidence: features.riceConfidence,
-        riceEffort: features.riceEffort,
-      })
+      .select(TRACKED_COLUMNS)
       .from(features)
       .where(and(eq(features.specId, specId), eq(features.workspaceId, ws)))
+      .for("update")
       .limit(1);
     if (!current[0]) throw new RelationError(`Unknown feature: ${specId}`);
+    // Before any other refusal, because a caller that prepared against a
+    // stale row should be told that and not something downstream of it.
+    assertUnchanged(
+      expect,
+      current[0],
+      preconditionFields(Object.keys(patch)),
+      "item",
+    );
     const [access, productById] = await Promise.all([
       ctx.accessIn(tx, scope!),
       ctx.productVisibilityIn(tx, ws),

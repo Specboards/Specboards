@@ -180,6 +180,17 @@ interface PatchOptions {
    */
   advance?: boolean;
   /**
+   * Refuse the write, having written nothing, if the fields this patch sets
+   * have moved since `store.writePrecondition` took this fingerprint.
+   *
+   * For a caller that decided something before it wrote and must not have
+   * that decision quietly invalidated: applying a proposal reviewed against
+   * one version of an item is the case it exists for. An ordinary edit does
+   * not pass it, and should not: a person acting on what is in front of them
+   * wants last write wins, not a conflict dialog.
+   */
+  expect?: string;
+  /**
    * After setting `releaseId`, give the same release to the descendants that
    * are not scheduled anywhere yet.
    *
@@ -223,7 +234,7 @@ async function applyPatch(
   options?: PatchOptions,
 ): Promise<FeatureDetail> {
   if (patch.status === undefined || !options?.advance) {
-    return applyFeaturePatch(specId, patch, scope);
+    return applyFeaturePatch(specId, patch, scope, options?.expect);
   }
 
   const store = await getStore();
@@ -240,7 +251,7 @@ async function applyPatch(
     );
   }
   // A single hop (or none) is an ordinary patch; no need to fan it out.
-  if (path.length <= 1) return applyFeaturePatch(specId, patch, scope);
+  if (path.length <= 1) return applyFeaturePatch(specId, patch, scope, options?.expect);
 
   let result = feature;
   for (const [i, hop] of path.entries()) {
@@ -249,7 +260,15 @@ async function applyPatch(
     const hopPatch =
       i === path.length - 1 ? { ...patch, status: hop } : { status: hop };
     try {
-      result = await applyFeaturePatch(specId, hopPatch, scope);
+      // Only the first hop checks the precondition. The later hops are moves
+      // this walk is itself making, so checking against a fingerprint taken
+      // before any of them would refuse on our own change.
+      result = await applyFeaturePatch(
+        specId,
+        hopPatch,
+        scope,
+        i === 0 ? options?.expect : undefined,
+      );
     } catch (err) {
       if (err instanceof InvalidPatchError && i > 0) {
         throw new InvalidPatchError(
@@ -268,6 +287,7 @@ async function applyFeaturePatch(
   specId: string,
   patch: FeaturePatch,
   scope?: WorkspaceScope,
+  expect?: string,
 ): Promise<FeatureDetail> {
   const store = await getStore();
   const feature = await store.getFeature(specId, scope);
@@ -336,7 +356,7 @@ async function applyFeaturePatch(
   }
 
   const emit = await patchEvents(feature, patch, scope);
-  await store.updateFeature(specId, patch, scope, emit);
+  await store.updateFeature(specId, patch, scope, emit, expect);
 
   // Re-parenting away from an auto-created Feature grouping can leave it with
   // nothing in it. Sync keys a grouping by the spec's folder and `create_spec`

@@ -89,6 +89,7 @@ import {
   type ActivitySummary,
   type ItemEvent,
   type WorkspaceScope,
+  type WriteTarget,
 } from "../types";
 
 import {
@@ -436,8 +437,19 @@ export class DbStore implements FeatureStore, DbStoreContext {
     patch: FeaturePatch,
     scope?: WorkspaceScope,
     emit?: OutboxEmit | readonly OutboxEmit[],
+    expect?: string,
   ): Promise<void> {
-    return itemWriteStore.updateFeature(this, specId, patch, scope, emit);
+    return itemWriteStore.updateFeature(this, specId, patch, scope, emit, expect);
+  }
+
+  writePrecondition(
+    target: WriteTarget,
+    fields: readonly string[],
+    scope?: WorkspaceScope,
+  ): Promise<string | null> {
+    return target.kind === "feature"
+      ? itemWriteStore.featurePrecondition(this, target.specId, fields, scope)
+      : releaseStore.releasePrecondition(this, target.id, fields, scope);
   }
 
   convertFeatureLevel(
@@ -564,8 +576,9 @@ export class DbStore implements FeatureStore, DbStoreContext {
     patch: ReleasePatch,
     scope?: WorkspaceScope,
     emit?: OutboxEmit,
+    expect?: string,
   ): Promise<ReleaseRecord> {
-    return releaseStore.updateRelease(this, id, patch, scope, emit);
+    return releaseStore.updateRelease(this, id, patch, scope, emit, expect);
   }
 
   deleteRelease(id: string, scope?: WorkspaceScope): Promise<void> {

@@ -11,6 +11,8 @@
  * moved. See ./context.ts.
  */
 
+import { assertUnchanged, fingerprintOf } from "@/lib/store/precondition";
+
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
@@ -120,16 +122,35 @@ export async function createRelease(
   };
 }
 
+/** See FeatureStore.writePrecondition. Over this store's own shapes. */
+export async function releasePrecondition(
+  ctx: LocalStoreContext,
+  id: string,
+  fields: readonly string[],
+): Promise<string | null> {
+  const release = (await readReleases(ctx)).find((r) => r.id === id);
+  return release
+    ? fingerprintOf(release as unknown as Record<string, unknown>, fields)
+    : null;
+}
+
 export async function updateRelease(
   ctx: LocalStoreContext,
   id: string,
   patch: ReleasePatch,
   _scope?: WorkspaceScope,
   _emit?: OutboxEmit, // webhooks are DB-only; ignored in local file mode
+  expect?: string,
 ): Promise<ReleaseRecord> {
   const rows = await readReleases(ctx);
   const release = rows.find((r) => r.id === id);
   if (!release) throw new ReleaseError(`Unknown release: ${id}`);
+  assertUnchanged(
+    expect,
+    release as unknown as Record<string, unknown>,
+    Object.keys(patch),
+    "release",
+  );
   if (patch.name !== undefined) {
     const name = patch.name.trim();
     if (!name) throw new ReleaseError("Release name is required.");
