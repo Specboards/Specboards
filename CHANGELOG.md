@@ -25,6 +25,118 @@ for how and when the version is bumped.
 > `pnpm deploy:prod` and the dispatched workflow. See
 > [VERSIONING.md](./VERSIONING.md).
 
+## [1.3.1] - 2026-09-16
+
+The agent harness, part two: agents that act without being asked each time.
+
+v1.3.0 made an agent something you hand work to. This release is about what
+happens when nobody is watching. A skill can now run as a **run** rather than a
+chat turn, which means it can be put on a **schedule**, and it can read more
+than the item it runs on: the first skill that does, **Architecture impact**,
+reviews work against a product's Architecture pages.
+
+The rule from v1.3.0 is unchanged and is still the point. Nothing an agent
+produces is written to your board. A scheduled run that drafts an edit leaves a
+proposal in the review queue exactly as an interactive one does, so an agent
+running at three in the morning has no cheaper route to a write than a person
+sitting in front of the assistant.
+
+> **Upgrading from v1.0.0? Deploy v1.0.1 first.**
+>
+> A database sitting on exactly **v1.0.0** cannot migrate straight here. Deploy
+> `ghcr.io/specboards/specboards:1.0.1`, let its migration finish, then deploy
+> this version. The migration runner refuses rather than applying a baseline
+> over a schema that already has objects, so **your data is not damaged** if you
+> try.
+>
+> What happens next depends on how you run it. On Fly, the release is aborted
+> and the previous version keeps serving. **On Docker Compose it is not:**
+> `setup.sh` recreates the web container, the migration fails, the container
+> does not start, and your instance is down until you deploy v1.0.1. Worse,
+> `setup.sh` currently still prints "Specboards is running" and exits 0. Check
+> `docker ps` rather than trusting that line. Fixing both is tracked for the
+> next release.
+>
+> **On v1.0.1 or later, including any v1.1.x or v1.2.x? Nothing to do.** Upgrade
+> as usual.
+
+### Added
+
+- **Scheduled agent runs** (migration 0019). Run a skill on an item every day,
+  every week or every month, at a time in a zone you choose. Set one up from the
+  item it should run on, because the place you know which item you mean is the
+  item; see all of them together under Settings, Agents, Schedules, because
+  "what is running on its own, and is any of it broken" is a question only a
+  workspace-wide list can answer.
+  - The cadence follows a wall clock, not a fixed interval, so "every Monday at
+    09:00" stays at 09:00 through a daylight-saving change rather than drifting
+    an hour twice a year.
+  - A schedule that was down for a week resumes. It does not fire seven times to
+    catch up.
+  - A day-of-month past the end of a short month fires on that month's last day,
+    and the form says so before you save rather than letting you find out in
+    February.
+  - Three failures in a row switches a schedule off and tells the workspace
+    owner why. The list says "switched off after repeated failures" rather than
+    merely showing it as off, because one is something that happened to you and
+    the other is something you did.
+- **Architecture impact review.** A new skill on the item panel that reads the
+  item against your product's Architecture pages: what the work touches, what it
+  contradicts, what decision it forces that nobody has taken, and what the area
+  does not answer. It is told to name the page or drop the claim, because an
+  architectural objection with no page behind it sends an engineer looking for a
+  rule that does not exist.
+  - It is the first skill that reads anything beyond its own item, and what it
+    reads is bounded and disclosed. You get the outline of the whole area plus
+    the text of as many pages as fit, and **every page sent is listed by name**
+    in the "what is sent" disclosure before you press anything.
+  - With no Architecture area, one that links out to a system we cannot read, or
+    one with no pages, it says so and stops without calling your model. A review
+    of the item alone would read exactly like a check that passed.
+- **Skills can run unattended**, as a run rather than a chat turn. A run has a
+  record you can watch and stop, and its output is a proposal in the review
+  queue rather than a message in a thread. This is what schedules fire, and it
+  is available to anything else that needs a skill to happen with nobody there.
+- **`list_skills` over MCP**, with its own `assistant-skills:read` scope. A
+  connected agent can read your workspace's skills in full, instructions
+  included, so it can follow your team's conventions instead of inventing its
+  own. Skills you have switched off are not listed: off means you decided your
+  assistant should not do that.
+- **Watchers are told when an agent proposes a change** to an item they follow.
+  The review queue no longer has to be checked by hand. The agent that made the
+  proposal is never notified about its own work.
+
+### Changed
+
+- **Agent and assistant configuration is now one Agents area** in Settings, with
+  Skills, Connections, Identities, Model, Usage and Schedules as tabs. These
+  were spread across Integrations and elsewhere, which meant configuring an
+  agent involved three screens and knowing which. Old `?tab=` links still work
+  and land on the right tab.
+- **Connecting GitHub takes the `.pem` file directly.** Pasting the key meant
+  opening the file, selecting all of it and hoping the selection was complete; a
+  partial selection produces a key that looks present and does not work. The
+  file is read in your browser, checked for a real private-key header, and only
+  its name and size are ever shown on screen. Pasting is still there, behind
+  "Paste it instead".
+
+### Fixed
+
+- **Importing repositories no longer reports an error about the sample
+  repository.** A workspace seeded with the sample board carries a repository
+  row with no GitHub connection behind it, and importing tried to sync it,
+  producing a message naming a library nobody has heard of and a repository
+  nobody connected. Your real repositories were always imported correctly. The
+  sample row is skipped now, and any GitHub call that somehow reaches a
+  placeholder fails by naming the repository instead.
+- **A failed migration prints all of its recovery instructions.** The ten lines
+  telling a self-hoster how to recover from the v1.0.0 upgrade wall were being
+  clipped to the first line, which ended in a comma. The one message that has to
+  survive a failure was the one being truncated by it.
+- **Conversion blockers read as English.** Converting an item whose children
+  would be stranded produced "a Work Items holds nothings" for a level with no
+  children beneath it, and got the article wrong before a vowel.
+
 ## [1.3.0] - 2026-09-16
 
 The agent harness. Specboard can now hand work to an agent, watch it happen, and
