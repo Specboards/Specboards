@@ -3,6 +3,7 @@ import {
   Compass,
   DraftingCompass,
   Gauge,
+  Inbox,
   KanbanSquare,
   Lightbulb,
   Map,
@@ -45,6 +46,11 @@ const GROUPS: NavGroup[] = [
     label: "Run",
     items: [
       { href: "/dashboard", label: "Dashboard", icon: Gauge },
+      // Work waiting on a person, so it belongs beside the two areas that
+      // say how the work is going rather than in one of the product-scoped
+      // groups: a proposal about one product and one about another are a
+      // single queue to work down, which is why it has no product segment.
+      { href: "/reviews", label: "Reviews", icon: Inbox },
       { href: "/activity", label: "Activity", icon: Activity, productScoped: true },
     ],
   },

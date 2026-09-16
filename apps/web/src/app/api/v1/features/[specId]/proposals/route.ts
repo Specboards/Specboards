@@ -13,6 +13,7 @@ import {
   ProposalTooLongError,
 } from "@/lib/assistant-proposals";
 import { AssistantItemError } from "@/lib/assistant-service";
+import { decideProposal } from "@/lib/proposals/service";
 import { getAppDb } from "@/lib/db";
 import { SpecConflictError, SpecContentError } from "@/lib/spec-content";
 
@@ -45,6 +46,45 @@ const NO_DB = Response.json(
 );
 
 /**
+ * The same decision, for a proposal named by its own id.
+ *
+ * Flattened into the shape the message-keyed path returns, minus `message`:
+ * a run proposal has no conversation turn, and inventing one so the two
+ * responses matched would be a lie the client then had to render. Callers
+ * read `message` only when they are the conversation panel, which never
+ * takes this path.
+ */
+async function decideById(
+  db: Parameters<typeof decideProposal>[0],
+  scope: Parameters<typeof decideProposal>[1],
+  specId: string,
+  proposalId: string,
+  action: "accept" | "reject",
+  input: Record<string, unknown>,
+) {
+  const decision = await decideProposal(
+    db,
+    scope,
+    proposalId,
+    action === "accept" ? "apply" : "dismiss",
+    { kind: "feature", specId },
+    action === "accept" && typeof input.body === "string"
+      ? { body: input.body }
+      : undefined,
+  );
+  const { outcome } = decision;
+  return {
+    id: decision.id,
+    status: decision.status,
+    resolvedAt: decision.resolvedAt,
+    body: outcome.body ?? "",
+    ...(outcome.commitSha ? { commitSha: outcome.commitSha } : {}),
+    ...(outcome.pullRequest ? { pullRequest: outcome.pullRequest } : {}),
+    ...(outcome.mergedWith ? { mergedWith: outcome.mergedWith } : {}),
+  };
+}
+
+/**
  * POST /api/v1/features/:specId/proposals
  * Body: `{ messageId, action: "accept" | "reject", body? }`.
  *
@@ -67,9 +107,25 @@ export async function POST(req: Request, { params }: Params) {
   const input = parsed.body as Record<string, unknown>;
 
   const messageId = typeof input.messageId === "string" ? input.messageId : "";
+  // A run's proposal has no conversation turn to name it by, so the review
+  // inbox addresses it by its own id. Same endpoint, same scope, same guards:
+  // a second route for the other origin would be a second set of rules to
+  // keep in agreement with these.
+  const proposalId =
+    typeof input.proposalId === "string" ? input.proposalId : "";
   const action = input.action;
-  if (!messageId) {
-    return Response.json({ error: "messageId is required." }, { status: 422 });
+  if (!messageId && !proposalId) {
+    return Response.json(
+      { error: "messageId or proposalId is required." },
+      { status: 422 },
+    );
+  }
+  if (messageId && proposalId) {
+    // Naming both would leave the route deciding which one the caller meant.
+    return Response.json(
+      { error: "Name either messageId or proposalId, not both." },
+      { status: 422 },
+    );
   }
   if (action !== "accept" && action !== "reject") {
     return Response.json(
@@ -79,8 +135,9 @@ export async function POST(req: Request, { params }: Params) {
   }
 
   try {
-    const result =
-      action === "accept"
+    const result = proposalId
+      ? await decideById(db, authz.scope, specId, proposalId, action, input)
+      : action === "accept"
         ? await acceptProposal(db, authz.scope, specId, messageId, {
             ...(typeof input.body === "string" ? { body: input.body } : {}),
           })

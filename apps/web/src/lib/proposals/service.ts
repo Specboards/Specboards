@@ -1,5 +1,6 @@
-import { type Database } from "@specboards/db";
+import { and, eq, features, type Database } from "@specboards/db";
 
+import { asUser } from "@/lib/db-scope";
 import type { WorkspaceScope } from "@/lib/store/types";
 
 import { ProposalNotFoundError, ProposalSettledError } from "./errors";
@@ -129,4 +130,83 @@ export async function dismissProposal(
     resolvedAt: claimed.resolvedAt.toISOString(),
     outcome: {},
   };
+}
+
+/**
+ * The target a URL names, for a caller that addresses a proposal by its id.
+ *
+ * A feature is named by `specId` in every route, and `proposals.target_id`
+ * holds `features.id`. The two meet here rather than at each call site.
+ */
+type ProposalTargetRef =
+  | { kind: "feature"; specId: string }
+  | { kind: "release"; id: string };
+
+/** Whether `row` is the proposal the URL claims it is. */
+async function targets(
+  db: Database,
+  scope: WorkspaceScope,
+  row: ProposalRow,
+  ref: ProposalTargetRef,
+): Promise<boolean> {
+  if (ref.kind === "release") {
+    return row.targetType === "release" && row.targetId === ref.id;
+  }
+  if (row.targetType !== "feature") return false;
+  const [hit] = await asUser(db, scope.userId, (tx) =>
+    tx
+      .select({ id: features.id })
+      .from(features)
+      .where(
+        and(
+          eq(features.id, row.targetId),
+          eq(features.specId, ref.specId),
+          eq(features.workspaceId, scope.workspaceId),
+        ),
+      )
+      .limit(1),
+  );
+  return Boolean(hit);
+}
+
+/**
+ * Decide about a proposal addressed by its own id.
+ *
+ * The review inbox needs this because a run proposal has no conversation
+ * turn to name it by, and the assistant panel's endpoints are keyed on the
+ * message. What the inbox must NOT get is an apply path of its own: two
+ * routes that both write a target would be two sets of guards to keep in
+ * agreement, which is the drift the single-lifecycle design exists to avoid.
+ * So this is the same `applyProposal` and `dismissProposal` underneath, and
+ * it hangs off the same per-target endpoints.
+ *
+ * ── Why the URL still has to name the target ─────────────────────────────
+ * An API key's scope is derived from the first path segment, so accepting an
+ * edit to an item costs `features:write`: the same grant as editing it by
+ * hand, which is what accepting is. A `/api/v1/proposals/:id` endpoint would
+ * have derived `proposals:write` instead, and a key holding both that and
+ * `assistant:write` could draft a change and approve its own draft, which is
+ * the exact failure this feature exists to prevent. Keeping the proposal
+ * under its target's URL keeps the scope honest, and this check is what
+ * stops the URL being a fiction: a proposal that does not target what the
+ * path names is a 404, not a quietly-accepted mismatch.
+ */
+export async function decideProposal(
+  db: Database,
+  scope: WorkspaceScope,
+  id: string,
+  action: "apply" | "dismiss",
+  ref: ProposalTargetRef,
+  override?: ApplyOverride,
+): Promise<ProposalDecision> {
+  const row = await getProposal(db, scope, id);
+  // Not found and not yours read the same from outside, as everywhere else
+  // here: telling them apart would let a caller probe for proposals against
+  // items in products they cannot see.
+  if (!row || !(await targets(db, scope, row, ref))) {
+    throw new ProposalNotFoundError("That proposal is no longer here.");
+  }
+  return action === "apply"
+    ? applyProposal(db, scope, id, override)
+    : dismissProposal(db, scope, id);
 }
