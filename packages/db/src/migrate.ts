@@ -21,6 +21,8 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
 
+import { describe, MigrationGuidance } from "./migrate-errors";
+
 /**
  * Where the SQL files and their journal live.
  *
@@ -59,6 +61,7 @@ const MIGRATIONS_FOLDER = migrationsFolder();
  */
 const LOCK_KEY = 8_073_216_559_204_147;
 
+
 /**
  * Migrations need DDL rights, which the app's RLS-scoped role may not have.
  * MIGRATE_DATABASE_URL lets an operator point the release step at an owner
@@ -67,9 +70,9 @@ const LOCK_KEY = 8_073_216_559_204_147;
 function connectionString(): string {
   const url = process.env.MIGRATE_DATABASE_URL ?? process.env.DATABASE_URL;
   if (!url) {
-    throw new Error(
+    throw new MigrationGuidance([
       "MIGRATE_DATABASE_URL or DATABASE_URL must be set to run migrations.",
-    );
+    ]);
   }
   return url;
 }
@@ -145,7 +148,7 @@ async function assertNotBehindBaseline(sql: postgres.Sql): Promise<void> {
   `;
   if (rows[0]?.present) return;
 
-  throw new Error(
+  throw new MigrationGuidance(
     [
       "This database has applied migrations but is behind the squashed baseline,",
       "so there is no path from where it is to where this release expects it.",
@@ -157,7 +160,7 @@ async function assertNotBehindBaseline(sql: postgres.Sql): Promise<void> {
       "To recover: deploy v1.0.1 (or any earlier release) against this database",
       "first and let it migrate to the end, then upgrade to this one. Nothing has",
       "been changed by this run.",
-    ].join("\n"),
+    ],
   );
 }
 
@@ -204,65 +207,6 @@ async function main(): Promise<void> {
     await sql`SELECT pg_advisory_unlock(${LOCK_KEY})`.catch(() => {});
     await sql.end({ timeout: 5 });
   }
-}
-
-/** Longest slice of a failed statement worth printing. */
-const QUERY_EXCERPT = 400;
-
-/**
- * A failure report that leads with the reason.
- *
- * Two things made the original one useless at the moment it mattered. Drizzle
- * wraps a failed migration in an error whose *message is the entire SQL file*
- * and whose `cause` holds the only sentence that says what Postgres objected
- * to, so printing `err.stack` gave four thousand lines of echoed schema and no
- * reason. And `process.exit()` does not wait for a pending `stderr` write, so
- * that flood was then truncated part-way through, taking the cause with it.
- *
- * So: the cause first, the Postgres fields next, and the failing statement last
- * and clipped. The process sets an exit code and ends on its own, which lets
- * the write drain.
- */
-function describe(err: unknown): string {
-  const lines: string[] = [];
-  const causes: string[] = [];
-
-  let current: unknown = err;
-  let depth = 0;
-  while (current instanceof Error && depth < 5) {
-    const pg = current as {
-      message: string;
-      code?: string;
-      detail?: string;
-      hint?: string;
-      position?: string;
-      cause?: unknown;
-    };
-    if (depth > 0 || !pg.message.startsWith("Failed query:")) {
-      causes.push(pg.message.split("\n")[0] ?? pg.message);
-    }
-    const fields = [
-      pg.code ? `code ${pg.code}` : null,
-      pg.detail ? `detail: ${pg.detail}` : null,
-      pg.hint ? `hint: ${pg.hint}` : null,
-      pg.position ? `position: ${pg.position}` : null,
-    ].filter(Boolean);
-    if (fields.length > 0) causes.push(`  ${fields.join(", ")}`);
-    current = pg.cause;
-    depth++;
-  }
-
-  lines.push(causes.length > 0 ? causes.join("\n") : String(err));
-
-  if (err instanceof Error && err.message.startsWith("Failed query:")) {
-    const query = err.message.slice("Failed query:".length).trim();
-    const excerpt =
-      query.length > QUERY_EXCERPT
-        ? `${query.slice(0, QUERY_EXCERPT)}\n  … (${query.length} chars total)`
-        : query;
-    lines.push(`while running:\n${excerpt}`);
-  }
-  return lines.join("\n");
 }
 
 main().catch((err: unknown) => {

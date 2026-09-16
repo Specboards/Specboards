@@ -23,7 +23,8 @@
     "seed": "tsx src/seed.ts",
     "lint": "eslint src",
     "build:migrate": "esbuild src/migrate.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/migrate.mjs --banner:js=\"import{createRequire}from'node:module';const require=createRequire(import.meta.url);\"",
-    "audit:keys": "node scripts/audit-reserved-keys.mjs"
+    "audit:keys": "node scripts/audit-reserved-keys.mjs",
+    "test": "vitest run"
   },
   "dependencies": {
     "@specboards/core": "workspace:*",
@@ -33,6 +34,7 @@
   "devDependencies": {
     "@types/node": "^22.20.0",
     "esbuild": "^0.28.2",
-    "tsx": "^4.23.12"
+    "tsx": "^4.23.12",
+    "vitest": "^3.2.6"
   }
 }
