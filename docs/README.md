@@ -72,6 +72,11 @@ databases.
   manual QA for the GitHub installation-bind takeover path.
 - [`RUNBOOK-specboard-dogfood.md`](./RUNBOOK-specboard-dogfood.md) - how we run
   Specboards on its own repo, including the PR to work-item status loop.
+- [`RUNBOOK-self-host-upgrade-verification.md`](./RUNBOOK-self-host-upgrade-verification.md) -
+  installing from an empty volume at the oldest supported version and walking
+  the documented upgrade path to current. Run once per release: every upgrade we
+  perform ourselves starts from a schema that is already nearly current, which
+  is the one case a self-hoster never has.
 
 ## Early research
 
