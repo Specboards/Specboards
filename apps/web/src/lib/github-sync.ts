@@ -28,6 +28,7 @@ import {
 import {
   createGitHubRepoClient,
   createGitHubUserRepoClient,
+  hasGithubInstallation,
   reconcileSpecs,
   type GitRepoClient,
 } from "@specboards/git";
@@ -408,10 +409,14 @@ export async function importedSpecIds(
  * whole scan.
  */
 export async function scanWorkspaceSpecs(db: Database, workspaceId: string): Promise<RepoScan[]> {
-  const repos = await db
+  const rows = await db
     .select()
     .from(repositories)
     .where(eq(repositories.workspaceId, workspaceId));
+  // Sample repositories have no GitHub installation behind them, so scanning
+  // one would report a failure about a repository nobody connected. See the
+  // note in the import route.
+  const repos = rows.filter((r) => hasGithubInstallation(r.githubInstallationId));
 
   const scans: RepoScan[] = [];
   for (const repo of repos) {
