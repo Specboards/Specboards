@@ -186,12 +186,24 @@ export function planConversion(input: ConversionInput): ConversionPlan {
     (c) => !isValidParentLevel(c.level, to, levels),
   );
   if (stranded.length > 0) {
+    // "the <label> level", not "a <label>". The label is the admin's word for
+    // it, and admins name levels in the plural because that is how they read
+    // as column headers, so an indefinite article here produced "a Work
+    // Items". Naming the level instead needs no article and no verb
+    // agreement, whichever way they named it.
+    //
+    // The leaf gets its own clause rather than a label. There is no child
+    // level to name, and the missing one is the whole reason this refusal
+    // fired, so it is worth a sentence that says so.
+    const childKey = childLevelKey(to, levels);
+    const holds = childKey
+      ? `the ${toLabel} level holds ${pluralLabel(labelFor(childKey, levels))}`
+      : `the ${toLabel} level is the lowest one and holds nothing`;
     blockers.push({
       kind: "children-stranded",
       message:
         `${countLabel(stranded.length, "item")} under this one would no longer ` +
-        `be allowed there: ${withArticle(toLabel)} holds ${pluralLabel(childLabelFor(to, levels))}. ` +
-        `Move or convert them first.`,
+        `be allowed there: ${holds}. Move or convert them first.`,
       items: stranded,
     });
   } else if (input.children.length > 0) {
@@ -370,11 +382,6 @@ function labelFor(key: string, levels: readonly WorkspaceLevel[]): string {
 
 function leafLabel(levels: readonly WorkspaceLevel[]): string {
   return levels.at(-1)?.label ?? "leaf item";
-}
-
-function childLabelFor(key: string, levels: readonly WorkspaceLevel[]): string {
-  const child = childLevelKey(key, levels);
-  return child ? labelFor(child, levels) : "nothing";
 }
 
 /**
