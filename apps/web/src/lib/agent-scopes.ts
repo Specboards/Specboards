@@ -40,6 +40,11 @@ export const SCOPE_GROUPS: ScopeGroup[] = [
       // Deliberately above the editing scopes in the list: reporting work is
       // the thing you grant an agent first, and it costs nothing.
       { resource: "runs", label: "Agent runs (report progress)" },
+      // Beside runs because it is the same subject, and labelled for what it
+      // costs rather than for what it is. Granting write here does not spend
+      // anything today; it commits the workspace to spending every week from
+      // now on, unattended, which is a bigger thing than it sounds.
+      { resource: "schedules", label: "Schedules (commits recurring spend)" },
       { resource: "statuses", label: "Stages" },
       { resource: "stage-gates", label: "Stage gates" },
       { resource: "properties", label: "Custom properties" },

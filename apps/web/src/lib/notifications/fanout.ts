@@ -317,6 +317,8 @@ async function resolveTargets(tx: Tx, ev: OutboxEventRow): Promise<Target[]> {
       return releaseShippedTargets(tx, ev, data);
     case "proposal.opened":
       return proposalOpenedTargets(tx, ev, data);
+    case "schedule.failed":
+      return scheduleFailedTargets(tx, ev, data);
     default:
       // Including item.deleted, which is emitted for webhooks and cannot reach
       // an inbox: the notification row's feature is NOT NULL and cascades.
@@ -434,6 +436,54 @@ async function commentTargets(
     });
   }
   return out;
+}
+
+/**
+ * A schedule that stopped working, told to the person who set it up.
+ *
+ * ── Only the owner, not the item's watchers ─────────────────────────────────
+ * A broken schedule is a broken thing somebody configured, not news about the
+ * item. Telling the item's watchers would put "a job you have never heard of
+ * failed" in the inbox of everybody following a busy card, and none of them
+ * can act on it. The owner can: they made it and they can fix or remove it.
+ *
+ * ── Why this one is not subtracted as the actor ─────────────────────────────
+ * It would be, if the dispatcher named the owner as the actor. It does not,
+ * and deliberately: `fanOutNotifications` removes `ev.actorId` before doing
+ * anything else, so a failure attributed to the schedule's owner would be
+ * delivered to nobody at all. No person fired this run. A sweep did, and the
+ * event carries no actor to say so.
+ */
+async function scheduleFailedTargets(
+  tx: Tx,
+  ev: OutboxEventRow,
+  data: Record<string, unknown>,
+): Promise<Target[]> {
+  const ownerId = str(data.ownerId);
+  if (!ownerId) return [];
+  // Same wall as `proposal.opened`: `notifications.feature_id` is NOT NULL, so
+  // a schedule over anything but an item has nowhere to land. Only `feature`
+  // targets exist today; this is what will silently do the right thing on the
+  // day another target type does.
+  if (str(data.targetType) !== "feature") return [];
+  const targetId = str(data.targetId);
+  if (!targetId) return [];
+  const item = await itemById(tx, ev.workspaceId, targetId);
+  if (!item) return [];
+
+  const name = str(data.name) ?? "A schedule";
+  const disabled = data.disabled === true;
+  return [
+    {
+      recipientId: ownerId,
+      type: "schedule.failed" as const,
+      featureId: item.id,
+      commentId: null,
+      snippet: disabled
+        ? `"${name}" failed repeatedly and has been switched off.`
+        : `"${name}" failed on ${item.title}.`,
+    },
+  ];
 }
 
 /**

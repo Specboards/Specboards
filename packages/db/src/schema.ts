@@ -3141,6 +3141,81 @@ export const proposals = pgTable(
 );
 
 /**
+ * A skill run on a recurring basis, with nobody watching.
+ *
+ * The harness was reactive-only: work reached an agent because somebody
+ * assigned it, mentioned it, or pressed a button, so the value only arrived
+ * when a person remembered to ask. A schedule is the proactive trigger.
+ *
+ * The wall clock and the zone are stored, not a UTC instant. A weekly digest
+ * set for Monday 09:00 has to arrive at 09:00 local in March and in July, and
+ * storing the instant and adding seven days drifts by an hour twice a year.
+ * `nextRunAt` is the resolved instant, recomputed after each firing by
+ * `lib/schedules/cadence.ts`, and doubles as the dispatcher's claim lease.
+ *
+ * CHECK constraints (target type, failure count, name and zone lengths) live in
+ * migration 0019, as every other table's do.
+ */
+export const agentSchedules = pgTable(
+  "agent_schedules",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    /** Routing snapshot for listing; not the authorization. */
+    productId: uuid("product_id").references(() => products.id, {
+      onDelete: "set null",
+    }),
+    /** What the person called it, so a list reads as their words. */
+    name: text("name").notNull(),
+    /**
+     * The skill to run. A key rather than a foreign key: built-in skills live
+     * in code and have no row to point at. A schedule naming a skill that has
+     * been deleted or switched off fails loudly at firing time.
+     */
+    skillKey: text("skill_key").notNull(),
+    /** `feature` only today; widened by the card that adds another surface. */
+    targetType: text("target_type").notNull(),
+    targetId: uuid("target_id").notNull(),
+    /** `{ every, hour, minute, weekday?, day? }`; shape enforced in the service. */
+    cadence: jsonb("cadence").notNull(),
+    timeZone: text("time_zone").notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    /**
+     * When this fires next, and the claim lease: claiming pushes it forward, so
+     * a firing that crashes becomes due again rather than being lost.
+     */
+    nextRunAt: timestamp("next_run_at", { withTimezone: true }).notNull(),
+    lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+    /** The run the last firing produced. No FK: runs are subject to retention. */
+    lastRunId: uuid("last_run_id"),
+    lastError: text("last_error"),
+    /** What tells a blip from a schedule that will never work again. */
+    consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+    /**
+     * Whose access and whose budget a firing uses. Snapshot, no FK, as
+     * `proposals.actor_id` is: a deleted user must not cascade the schedule
+     * away silently, it must fail loudly and say who is missing.
+     */
+    createdBy: uuid("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    // The dispatcher's only query. Partial on `enabled`, created in migration
+    // 0019; Drizzle carries the shape so a reader of this file knows it exists.
+    index("agent_schedules_due_idx").on(t.nextRunAt),
+    index("agent_schedules_ws_idx").on(t.workspaceId, t.createdAt),
+    index("agent_schedules_target_idx").on(t.targetType, t.targetId),
+  ],
+);
+
+/**
  * A skill: standing instructions a team gives their assistant, shown as a button
  * on every item ("Grill me", "Find the gaps").
  *

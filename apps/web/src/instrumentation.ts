@@ -28,6 +28,11 @@
  *    lib/bootstrap.ts). Inert once anybody has signed up.
  * 8. Start the in-process webhook outbox drainer. No-op in local file mode,
  *    where `startDrainer` finds no database.
+ * 9. Start the in-process schedule dispatcher, which fires recurring agent
+ *    runs. Same shape and the same no-op in local file mode. Separate from the
+ *    drainer rather than folded into it: one turns changes that already
+ *    happened into deliveries, the other decides that something should happen
+ *    now, and a failure in either must not stop the other sweeping.
  */
 export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME === "nodejs") {
@@ -64,5 +69,8 @@ export async function register(): Promise<void> {
 
     const { startDrainer } = await import("@/lib/webhooks/drainer");
     startDrainer();
+
+    const { startScheduleDispatcher } = await import("@/lib/schedules/dispatcher");
+    startScheduleDispatcher();
   }
 }
