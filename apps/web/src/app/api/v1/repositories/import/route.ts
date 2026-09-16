@@ -1,9 +1,8 @@
 import { eq, repositories } from "@specboards/db";
-import { hasGithubInstallation } from "@specboards/git";
 
 import { getDb } from "@/lib/db";
 import { authorizeOrgAdmin } from "@/lib/auth-session";
-import { syncRepository, type SyncSummary } from "@/lib/github-sync";
+import { canSyncRepo, syncRepository, type SyncSummary } from "@/lib/github-sync";
 import { enforceQuota, QUOTAS } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
@@ -34,13 +33,9 @@ export async function POST(req: Request) {
     .select()
     .from(repositories)
     .where(eq(repositories.workspaceId, authz.scope.workspaceId));
-  // A workspace seeded with the sample board has a repository row with no
-  // GitHub installation behind it, so the sample specs have somewhere to hang.
-  // Trying to sync it produced an error naming a repository the person has
-  // never heard of, every time they imported, alongside their real repos
-  // importing perfectly. Skipped rather than reported: there is nothing wrong
-  // and nothing for them to do.
-  const repos = allRepos.filter((r) => hasGithubInstallation(r.githubInstallationId));
+  // Skipped rather than reported: a sample repository is not a failure and
+  // there is nothing for the person to do about it. See `canSyncRepo`.
+  const repos = allRepos.filter(canSyncRepo);
 
   const total: SyncSummary = {
     upserted: 0,

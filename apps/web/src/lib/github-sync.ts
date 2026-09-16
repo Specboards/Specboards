@@ -84,6 +84,27 @@ export async function resolveRepoDefaultProduct(
  * The single choke point for every GitHub read/write in this module (and for
  * the GitHub-backed doc spaces in github-docs.ts).
  */
+/**
+ * Whether this repository row has something behind it to sync against.
+ *
+ * A workspace seeded with the sample board carries a repository row with no
+ * GitHub installation, so the sample specs have somewhere to hang. Syncing it
+ * cannot work, and trying produced an error naming a repository the person had
+ * never heard of, every time they imported, beside their real repos importing
+ * perfectly.
+ *
+ * It lives here, next to {@link resolveRepoClient}, because it is the same
+ * question that function answers and it has to give the same answer. Asking
+ * "does this row name a real installation" directly at the call sites was
+ * wrong in exactly one case and it was not the sample board: under E2E the
+ * fake stands in for every repo, installation id or not, so a caller that
+ * checked the id skipped every repository the suite had seeded.
+ */
+export function canSyncRepo(repo: Pick<RepoRecord, "githubInstallationId">): boolean {
+  if (isE2E()) return true;
+  return hasGithubInstallation(repo.githubInstallationId);
+}
+
 export async function resolveRepoClient(
   db: Database,
   repo: RepoRecord,
@@ -413,10 +434,8 @@ export async function scanWorkspaceSpecs(db: Database, workspaceId: string): Pro
     .select()
     .from(repositories)
     .where(eq(repositories.workspaceId, workspaceId));
-  // Sample repositories have no GitHub installation behind them, so scanning
-  // one would report a failure about a repository nobody connected. See the
-  // note in the import route.
-  const repos = rows.filter((r) => hasGithubInstallation(r.githubInstallationId));
+  // Sample repositories have nothing behind them to scan; see `canSyncRepo`.
+  const repos = rows.filter(canSyncRepo);
 
   const scans: RepoScan[] = [];
   for (const repo of repos) {
