@@ -1,6 +1,7 @@
 import { ReviewInbox, type ReviewRowView } from "@/components/review-inbox";
 import { getAppDb } from "@/lib/db";
 import { listReviewQueue } from "@/lib/proposals/inbox";
+import { reconcileStuck } from "@/lib/proposals/reconcile";
 import { getStore } from "@/lib/store";
 import { requireWorkspaceAccess } from "@/lib/workspace-access";
 
@@ -31,6 +32,11 @@ export default async function ReviewsPage({
 
   // Local file mode has no proposals table and no agents to fill it. An empty
   // queue is the honest answer there, and is what the component renders.
+  // Decide about anything left mid-apply before listing it. A row whose
+  // outcome can be established does not need to reach a person at all; what
+  // survives this is what genuinely does. Explicitly here rather than inside
+  // the listing, so the query stays a read.
+  if (db && access) await reconcileStuck(db, access);
   const rows = db && access ? await listReviewQueue(db, access) : [];
 
   // Product keys, for the links out. Resolved here rather than joined into

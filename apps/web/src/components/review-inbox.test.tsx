@@ -131,3 +131,29 @@ describe("the summary line", () => {
     expect(render([row()])).toContain("1 change to review");
   });
 });
+
+describe("a proposal left mid-apply", () => {
+  const stuck = row({ kind: "stuck_apply" });
+
+  it("says the outcome is unknown rather than showing it as a pending change", () => {
+    const html = render([stuck]);
+    expect(html).toContain("Outcome unknown");
+    expect(html).toContain("may or may not have landed");
+  });
+
+  it("is not dismissable, because the change may already have happened", () => {
+    // Dismissing means "we considered this and did not take it". For a row
+    // whose write may have landed that would be a false record.
+    expect(render([stuck])).not.toContain(">Dismiss<");
+  });
+
+  it("still links to the target, which is where the answer is", () => {
+    expect(render([stuck])).toContain('href="/acme/web/backlog/work/spec-1"');
+  });
+
+  it("is counted apart from changes waiting to be reviewed", () => {
+    const html = render([row({ id: "a" }), row({ id: "b", kind: "stuck_apply" })]);
+    expect(html).toContain("1 change to review");
+    expect(html).toContain("1 left mid-apply");
+  });
+});

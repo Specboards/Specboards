@@ -31,7 +31,22 @@ export type ProposalTargetType = "feature" | "release" | "doc_space";
  * proposal against the same target made this one moot, and marking it that way
  * says so without claiming anybody decided against it.
  */
-export type ProposalStatus = "open" | "applied" | "dismissed" | "superseded";
+/**
+ * Where a proposal is in its life.
+ *
+ * `applying` is the one that needs explaining: it means somebody claimed the
+ * proposal and the write to the target was started. It is not a second kind
+ * of `open` (the decision is made, and nobody else may claim it) and it is
+ * not `applied` (the write may not have landed). A process that dies mid-apply
+ * leaves this, which is the truth, where it used to leave `applied`, which was
+ * not. See migration 0018.
+ */
+export type ProposalStatus =
+  | "open"
+  | "applying"
+  | "applied"
+  | "dismissed"
+  | "superseded";
 
 /** Mirrors the actor model the event ledger already uses. */
 export type ProposalActorType = "user" | "agent" | "api_key" | "system";

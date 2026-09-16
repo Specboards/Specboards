@@ -8,7 +8,7 @@ import { handlerFor, type ApplyOutcome, type ApplyOverride } from "./handlers";
 import {
   claim,
   getProposal,
-  recordResult,
+  settle,
   releaseClaim,
   resolverName,
   type ProposalRow,
@@ -25,14 +25,25 @@ import type { ProposalStatus } from "./types";
  *      a person reads, not for safety.
  *   2. Resolve the target, check the caller may change it, run the guards.
  *      Still no writes, so any refusal here leaves the proposal actionable.
- *   3. Claim it. A conditional update is the only atomic operation available,
- *      so it is what actually decides who won when two people click at once.
+ *   3. Claim it, as `applying`. A conditional update is the only atomic
+ *      operation available, so it is what actually decides who won when two
+ *      people click at once.
  *   4. Apply. If this throws, put the claim back: a proposal marked applied
  *      with nothing to show for it is worse than one somebody has to retry.
- *   5. Record what the apply produced, after it has produced it.
+ *   5. Settle it to `applied`, with the result, in one statement.
  *
  * Step 3 before step 4 is what stops a double-click writing twice. Step 2
  * before step 3 is what stops a refusal needing to be un-claimed.
+ *
+ * ── Why the claim is `applying` and not `applied` ────────────────────────
+ * Steps 3 and 5 are separate transactions and always will be: step 4 goes
+ * through the ordinary human write path, which opens its own. So there is a
+ * window, and the only question is what the row says while it is open. It
+ * used to say `applied`, which a crash turned into a permanent lie: a
+ * proposal asserting a change that never happened. `applying` is the same
+ * window described accurately, and the `catch` below closes it for every
+ * failure that is not a killed process. What remains is reconcilable rather
+ * than wrong, which is the most this shape of code can honestly offer.
  */
 
 interface ProposalDecision {
@@ -54,6 +65,16 @@ async function loadOpen(
     // Named, because the useful thing to know is who got there first: the
     // second person to click is usually looking at a stale queue.
     const who = await resolverName(db, scope, row.resolvedBy);
+    if (row.status === "applying") {
+      // Not "already applying this proposal", which reads as a grammatical
+      // slip rather than a state. Somebody is mid-apply, or a process died
+      // mid-apply; either way the honest answer is that the outcome is not
+      // known yet and the target is where to look.
+      throw new ProposalSettledError(
+        `${who ?? "Someone"} started applying this proposal and it has not ` +
+          `finished. Check the target's history before deciding again.`,
+      );
+    }
     throw new ProposalSettledError(
       `${who ?? "Someone"} already ${row.status} this proposal.`,
     );
@@ -80,7 +101,7 @@ export async function applyProposal(
   // Before the claim: every refusal in here leaves the proposal open.
   const prepared = await handler.prepare(db, scope, row, override);
 
-  const claimed = await claim(db, scope, id, "applied");
+  const claimed = await claim(db, scope, id, "applying");
   if (!claimed) {
     throw new ProposalSettledError("Someone already decided about this proposal.");
   }
@@ -95,7 +116,19 @@ export async function applyProposal(
     throw err;
   }
 
-  await recordResult(db, scope, id, outcome);
+  // The write happened, so the row may now say so, and says what it produced
+  // in the same statement.
+  const settled = await settle(db, scope, id, outcome);
+  if (!settled) {
+    // The claim went somewhere else while the write was in flight, which
+    // should not happen and is not something to paper over: the target HAS
+    // been changed, and a row that no longer records that is exactly the
+    // inconsistency this state machine exists to make visible.
+    throw new ProposalSettledError(
+      "The change was applied, but this proposal was resolved by something " +
+        "else while it was being applied. Check the item's history.",
+    );
+  }
   return {
     id,
     status: "applied",

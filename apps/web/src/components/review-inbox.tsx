@@ -35,7 +35,7 @@ import { Card } from "@/components/ui/card";
 /** A row as the server hands it over. Dates are serialised. */
 export interface ReviewRowView {
   id: string;
-  kind: "proposal" | "awaiting_run";
+  kind: "proposal" | "awaiting_run" | "stuck_apply";
   proposalKind?: string;
   targetType: string;
   targetId: string;
@@ -117,10 +117,20 @@ export function ReviewInbox({
     () => ({
       proposals: rows.filter((r) => r.kind === "proposal").length,
       waiting: rows.filter((r) => r.kind === "awaiting_run").length,
+      stuck: rows.filter((r) => r.kind === "stuck_apply").length,
     }),
     [rows],
   );
 
+  /**
+   * A stuck apply is not dismissable, and the reason is worth stating.
+   *
+   * Dismissing means "we considered this and did not take it". For a row
+   * whose write may already have landed that would be a false record, and the
+   * item's own history is where the answer is. So the row says what happened
+   * and links to the target instead of offering a decision nobody can make
+   * from here.
+   */
   async function dismiss(row: ReviewRowView) {
     const target = targetFor(row);
     if (!target) return;
@@ -160,6 +170,8 @@ export function ReviewInbox({
         review
         {counts.waiting > 0 &&
           `, ${counts.waiting} ${counts.waiting === 1 ? "run" : "runs"} waiting for an answer`}
+        {counts.stuck > 0 &&
+          `, ${counts.stuck} left mid-apply with an unknown outcome`}
         .
       </p>
 
@@ -182,10 +194,14 @@ export function ReviewInbox({
                   <div className="flex flex-wrap items-center gap-2">
                     <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
                     <span className="font-medium">{row.targetTitle}</span>
-                    <Badge variant="secondary">
+                    <Badge
+                      variant={row.kind === "stuck_apply" ? "outline" : "secondary"}
+                    >
                       {row.kind === "awaiting_run"
                         ? "Waiting for an answer"
-                        : (meta?.label ?? "A change")}
+                        : row.kind === "stuck_apply"
+                          ? "Outcome unknown"
+                          : (meta?.label ?? "A change")}
                     </Badge>
                   </div>
                   <p className="text-sm text-muted-foreground">
@@ -196,6 +212,13 @@ export function ReviewInbox({
                   </p>
                   {row.summary && (
                     <p className="text-sm">{row.summary}</p>
+                  )}
+                  {row.kind === "stuck_apply" && (
+                    <p className="text-sm">
+                      Applying this was started and never finished, so the
+                      change may or may not have landed. Check the target&rsquo;s
+                      history before deciding again.
+                    </p>
                   )}
                 </div>
 
