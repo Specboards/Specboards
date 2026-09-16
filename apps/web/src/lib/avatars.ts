@@ -11,6 +11,23 @@
  */
 export const MAX_AVATAR_BYTES = 256 * 1024;
 
+/**
+ * The ceiling on the whole multipart REQUEST, as opposed to the image inside
+ * it.
+ *
+ * Larger than {@link MAX_AVATAR_BYTES} by an envelope, because a multipart
+ * body carries boundaries, per-part headers and possibly other fields around
+ * the file. Small enough that a request is refused while it is arriving
+ * rather than after it has been parsed: this is the bound on how much a
+ * caller can make the server allocate, and the per-file checks that follow
+ * are the bound on what gets stored. They are different jobs and need
+ * different numbers.
+ *
+ * 32 KB of envelope is roughly two orders of magnitude more than a real
+ * browser multipart preamble needs, so it costs nothing legitimate.
+ */
+export const MAX_AVATAR_REQUEST_BYTES = MAX_AVATAR_BYTES + 32 * 1024;
+
 /** The longest edge the picker downsamples to before uploading. */
 export const AVATAR_MAX_EDGE = 512;
 

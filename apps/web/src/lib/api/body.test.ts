@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_MAX_BODY_BYTES, readJsonBody, readTextBodyWithin } from "./body";
+import {
+  DEFAULT_MAX_BODY_BYTES,
+  readBinaryBodyWithin,
+  readJsonBody,
+  readTextBodyWithin,
+} from "./body";
 
 const URL = "https://example.test/api/v1/thing";
 
@@ -235,5 +240,78 @@ describe("readTextBodyWithin", () => {
 
   it("returns empty string for a request with no body", async () => {
     expect(await readTextBodyWithin(new Request(URL), 100, "test")).toBe("");
+  });
+});
+
+describe("readBinaryBodyWithin", () => {
+  it("returns the bytes unchanged when they fit", async () => {
+    const { req } = chunkedReq(["abc", "def"]);
+    const out = await readBinaryBodyWithin(req, 100, "test");
+    expect(new TextDecoder().decode(out!)).toBe("abcdef");
+  });
+
+  it("rejects on Content-Length before reading a byte", async () => {
+    const req = jsonReq("{}", { "content-length": "999999" });
+    expect(await readBinaryBodyWithin(req, 100, "test")).toBeNull();
+  });
+
+  it("cancels a chunked body near the limit instead of reading it all", async () => {
+    // AR-05's acceptance criterion. No Content-Length, so the header path
+    // cannot help: 20 chunks of 100 bytes against a 250-byte limit must not
+    // consume 2000. This is the difference between bounding what gets stored
+    // and bounding what the process allocates.
+    const { req, sent } = chunkedReq(
+      Array.from({ length: 20 }, () => "x".repeat(100)),
+    );
+    expect(await readBinaryBodyWithin(req, 250, "test")).toBeNull();
+    expect(sent()).toBeLessThanOrEqual(250 + 100);
+    expect(sent()).toBeLessThan(2000);
+  });
+
+  it("treats a body exactly at the limit as acceptable", async () => {
+    const at = await readBinaryBodyWithin(jsonReq("x".repeat(64)), 64, "test");
+    expect(at?.byteLength).toBe(64);
+    expect(await readBinaryBodyWithin(jsonReq("x".repeat(64)), 63, "test")).toBeNull();
+  });
+
+  it("returns an empty array for a request with no body", async () => {
+    const out = await readBinaryBodyWithin(new Request(URL), 100, "test");
+    expect(out?.byteLength).toBe(0);
+  });
+
+  it("preserves bytes a text reader would corrupt", async () => {
+    // The reason this is a separate reader rather than `readTextBodyWithin`
+    // re-encoded: image bytes are not UTF-8, and a decode/encode round trip
+    // replaces every invalid sequence with U+FFFD. 0xFF 0xFE is one.
+    const raw = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0xff, 0xfe, 0x00, 0x01]);
+    const req = new Request(URL, { method: "POST", body: raw });
+    const out = await readBinaryBodyWithin(req, 100, "test");
+    expect(Array.from(out!)).toEqual(Array.from(raw));
+  });
+
+  it("hands back something the multipart parser still reads", async () => {
+    // The other half of AR-05: bounding the request must not break a
+    // legitimate upload. The bytes go out as a real multipart body, come
+    // back through the bounded reader, and are parsed by the same platform
+    // parser the route uses.
+    const form = new FormData();
+    form.set(
+      "file",
+      new File([new Uint8Array(1024)], "face.png", { type: "image/png" }),
+    );
+    const source = new Request(URL, { method: "POST", body: form });
+    const contentType = source.headers.get("content-type")!;
+
+    const raw = await readBinaryBodyWithin(source, 100_000, "test");
+    expect(raw).not.toBeNull();
+
+    const parsed = await new Response(raw!, {
+      headers: { "content-type": contentType },
+    }).formData();
+    const file = parsed.get("file");
+    expect(file).toBeInstanceOf(File);
+    expect((file as File).name).toBe("face.png");
+    expect((file as File).type).toBe("image/png");
+    expect((file as File).size).toBe(1024);
   });
 });

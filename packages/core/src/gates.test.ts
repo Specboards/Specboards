@@ -6,6 +6,8 @@ import {
   gateFieldCatalog,
   gateFieldLabel,
   type GateSubject,
+  gatesInScope,
+  gatesCrossing,
 } from "./gates.js";
 
 const PROPERTIES = [
@@ -133,5 +135,92 @@ describe("gateFieldLabel", () => {
       "Target End Date",
     );
     expect(gateFieldLabel("assignee", CATALOG)).toBe("Assignee");
+  });
+});
+
+describe("which gates are in scope", () => {
+  const gate = (
+    productId: string | null,
+    stageKey: string,
+    label = `${productId ?? "ws"}:${stageKey}`,
+  ) => ({ productId, stageKey, label });
+
+  const WORKSPACE = [gate(null, "backlog"), gate(null, "ready")];
+
+  it("uses the workspace set when the product has defined none", () => {
+    expect(gatesInScope(WORKSPACE, "prod-1").map((g) => g.label)).toEqual([
+      "ws:backlog",
+      "ws:ready",
+    ]);
+  });
+
+  it("uses the product's own set when it has one, and inherits nothing", () => {
+    // All-or-nothing: defining any gate opts the product out of the whole
+    // workspace set, so it does not quietly pick up a workspace gate on a
+    // stage it chose not to configure.
+    const rows = [...WORKSPACE, gate("prod-1", "ready")];
+    expect(gatesInScope(rows, "prod-1").map((g) => g.label)).toEqual([
+      "prod-1:ready",
+    ]);
+  });
+
+  it("ignores another product's gates entirely", () => {
+    const rows = [...WORKSPACE, gate("prod-2", "backlog")];
+    expect(gatesInScope(rows, "prod-1").map((g) => g.label)).toEqual([
+      "ws:backlog",
+      "ws:ready",
+    ]);
+  });
+
+  it("uses the workspace set for an item with no product", () => {
+    const rows = [...WORKSPACE, gate("prod-1", "ready")];
+    expect(gatesInScope(rows, null).map((g) => g.label)).toEqual([
+      "ws:backlog",
+      "ws:ready",
+    ]);
+  });
+});
+
+describe("the gates a move has to satisfy", () => {
+  const gate = (
+    productId: string | null,
+    stageKey: string,
+    label = `${productId ?? "ws"}:${stageKey}`,
+  ) => ({ productId, stageKey, label });
+
+  it("does not inherit a workspace gate on a stage the product left unconfigured", () => {
+    // AR-06, and the reason the two steps live in one function. A product
+    // defines a gate at `ready` only; an agent advances an item across
+    // `backlog`. Filtering to `backlog` FIRST leaves no product row, the
+    // product looks gateless, and the workspace's `backlog` gate applies:
+    // a false denial, and one a person did not hit on the web path.
+    const rows = [gate(null, "backlog"), gate("prod-1", "ready")];
+    expect(gatesCrossing(rows, "prod-1", ["backlog"])).toEqual([]);
+  });
+
+  it("still applies the product's own gate on a stage being crossed", () => {
+    // The refusal above must not be "this product is never gated".
+    const rows = [gate(null, "backlog"), gate("prod-1", "ready")];
+    expect(gatesCrossing(rows, "prod-1", ["ready"]).map((g) => g.label)).toEqual(
+      ["prod-1:ready"],
+    );
+  });
+
+  it("applies the workspace gate when the product has defined none", () => {
+    const rows = [gate(null, "backlog")];
+    expect(
+      gatesCrossing(rows, "prod-1", ["backlog"]).map((g) => g.label),
+    ).toEqual(["ws:backlog"]);
+  });
+
+  it("covers every stage passed over, not just the first", () => {
+    const rows = [gate(null, "backlog"), gate(null, "defining"), gate(null, "ready")];
+    expect(
+      gatesCrossing(rows, null, ["backlog", "defining"]).map((g) => g.label),
+    ).toEqual(["ws:backlog", "ws:defining"]);
+  });
+
+  it("is empty when the move crosses nothing", () => {
+    expect(gatesCrossing([gate(null, "backlog")], null, [])).toEqual([]);
   });
 });
