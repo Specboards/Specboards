@@ -5,6 +5,7 @@ import { useCallback, useState } from "react";
 import ReactMarkdown from "react-markdown";
 
 import { AgentRuns } from "@/components/agent-runs";
+import { ItemSchedules } from "@/components/item-schedules";
 import { AssistantPanel } from "@/components/assistant-panel";
 import { ConvertItemDialog } from "@/components/convert-item-dialog";
 import { CreateSpecButton } from "@/components/create-spec-button";
@@ -265,6 +266,18 @@ export function ItemDetailView({
           />
         </DetailSection>
       ) : null}
+
+      {/* Recurring runs on this item.
+
+          Collapsed by default and always present, unlike Agent runs above,
+          which only appears once something has happened. The difference is
+          what the section is for: runs are a record, and an empty record is
+          noise, while this is a control, and a control nobody can find is a
+          feature nobody uses. It stays quiet by being collapsed rather than by
+          being absent. */}
+      <DetailSection id="schedules" title="Schedules" defaultCollapsed>
+        <ItemSchedules specId={feature.specId} canEdit={canEdit} />
+      </DetailSection>
 
       {/* Description / body */}
       <DescriptionBlock
