@@ -49,15 +49,15 @@
     "undici": "^8.10.0"
   },
   "devDependencies": {
-    "@axe-core/playwright": "^4.12.1",
-    "@playwright/test": "^1.62.1",
+    "@axe-core/playwright": "^4.13.0",
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/typography": "^0.5.20",
     "@types/node": "^22.20.0",
     "@types/nodemailer": "^8.0.1",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "eslint": "^9.39.5",
-    "eslint-config-next": "^16.3.1",
+    "eslint-config-next": "^16.3.5",
     "eslint-plugin-jsx-a11y": "^6.10.2",
     "postgres": "^3.4.5",
     "vitest": "^3.2.6"
