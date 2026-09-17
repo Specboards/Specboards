@@ -18,7 +18,7 @@
     "@specboards/core": "workspace:*",
     "@specboards/db": "workspace:*",
     "drizzle-orm": "^0.45.2",
-    "zod": "^4.4.3"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/node": "^22.20.0"
