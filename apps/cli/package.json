@@ -45,7 +45,7 @@
     "prepublishOnly": "rm -rf dist tsconfig.tsbuildinfo && tsc -b"
   },
   "devDependencies": {
-    "@types/node": "^22.20.0",
+    "@types/node": "^25.9.6",
     "vitest": "^3.2.6"
   }
 }
