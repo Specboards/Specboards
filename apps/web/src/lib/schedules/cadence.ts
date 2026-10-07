@@ -22,7 +22,7 @@
  */
 
 /** 0 is Sunday, matching `Date.prototype.getDay`. */
-export type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 
 export type Cadence =
   | { every: "day"; hour: number; minute: number }

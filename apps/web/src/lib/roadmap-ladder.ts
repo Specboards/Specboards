@@ -68,7 +68,7 @@ export interface LadderRow {
 }
 
 /** One drawn dependency. */
-export interface LadderEdge {
+interface LadderEdge {
   blockerSpecId: string;
   blockedSpecId: string;
   /**
@@ -82,7 +82,7 @@ export interface LadderEdge {
 }
 
 /** A release drawn as a background band behind the rows. */
-export interface LadderBand {
+interface LadderBand {
   release: TimelineRelease;
   span: Span;
   placement: Placement;

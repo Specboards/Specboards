@@ -39,7 +39,7 @@ export interface StoredSetting {
   enabled: boolean;
 }
 
-export interface MatrixCell {
+interface MatrixCell {
   enabled: boolean;
   /**
    * Where the value came from. The grids render "inherited" from this, and the

@@ -133,7 +133,7 @@ export function parseAxisScale(raw: string | string[] | undefined): AxisScale {
 const MAX_COLUMNS = 120;
 
 /** One column on the axis: a week, a month, or a quarter. */
-export interface AxisColumn {
+interface AxisColumn {
   /** Scale-qualified period start; stable React key. */
   key: string;
   /** Short label, e.g. "6 Jul", "Jul 26", "Q3 26". */
@@ -489,7 +489,7 @@ export interface TimelineRow {
   placement: Placement;
 }
 
-export interface TimelineGroup {
+interface TimelineGroup {
   release: TimelineRelease;
   span: Span;
   placement: Placement;

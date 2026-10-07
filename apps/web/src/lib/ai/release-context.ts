@@ -51,7 +51,7 @@ import { skillTask, type SkillDef } from "./skills";
 import { FENCE_RULE, fenceValue } from "./fence";
 
 /** One item in the release, as the prompt names it. */
-export interface ReleaseContextItem {
+interface ReleaseContextItem {
   title: string;
   statusLabel: string;
   /** The item's Markdown body. Empty for an item nobody has written up, which

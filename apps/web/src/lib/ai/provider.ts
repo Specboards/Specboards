@@ -37,7 +37,7 @@ export interface TokenUsage {
   totalTokens: number | null;
 }
 
-export interface CompletionResult {
+interface CompletionResult {
   text: string;
   usage: TokenUsage;
   /** The model the endpoint says answered, which is not always the one asked

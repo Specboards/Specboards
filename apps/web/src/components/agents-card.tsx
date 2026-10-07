@@ -22,7 +22,7 @@ import {
 } from "@/lib/agent-scopes";
 import type { ScopeResource } from "@/lib/api-scopes";
 
-export interface AgentProductGrant {
+interface AgentProductGrant {
   productId: string;
   role: "admin" | "contributor" | "viewer";
 }

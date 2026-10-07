@@ -60,7 +60,7 @@ export const SKILL_SURFACE_LABELS: Record<SkillSurface, string> = {
  * architecture area yet: that is a stored column and a migration, and nothing
  * has asked for it. Adding one is a decision, not a default.
  */
-export type SkillReads = "architecture";
+type SkillReads = "architecture";
 
 /** A skill as it is defined, whether in code or in a row. */
 export interface SkillDef {

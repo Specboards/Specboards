@@ -51,7 +51,7 @@ import { canEditProducts } from "@/lib/workspace-access";
 type ItemDetailAccess = (WorkspaceScope & { role: MemberRole }) | null;
 
 /** A lightweight {specId,title} pick used by the parent/relation selectors. */
-export interface ItemRef {
+interface ItemRef {
   specId: string;
   title: string;
 }

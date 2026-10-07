@@ -29,7 +29,7 @@ import type { PortalContext } from "./resolve";
  */
 
 /** One item on the public roadmap. The whole shape, deliberately. */
-export interface PortalRoadmapItem {
+interface PortalRoadmapItem {
   id: string;
   title: string;
   /** The workspace's own name for this level ("Feature", "Epic"). */

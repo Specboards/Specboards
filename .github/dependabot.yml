@@ -41,3 +41,16 @@ updates:
         update-types:
           - minor
           - patch
+    ignore:
+      # eslint 10 crashes eslint-plugin-react (`contextOrFilename.getFilename is
+      # not a function`), which eslint-config-next bundles; the plugin's latest
+      # release only supports eslint up to 9. Lift this once it supports 10.
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@eslint/js"
+        update-types: ["version-update:semver-major"]
+      # better-auth 1.7 removes the mcp and OAuth discovery plugins the MCP
+      # sign-in is built on, so it is a migration, not a bump. Patches on 1.6
+      # still come through. Lift this when that migration is planned.
+      - dependency-name: "better-auth"
+        update-types: ["version-update:semver-minor"]

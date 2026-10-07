@@ -73,7 +73,7 @@ const MAX_EVIDENCE_LABEL_CHARS = 200;
  * web, and it renders with its host visible: the reader should be able to see
  * that a claim rests on a vendor's own marketing page before they click it.
  */
-export type EvidenceKind = "idea" | "comment" | "item" | "doc" | "url";
+type EvidenceKind = "idea" | "comment" | "item" | "doc" | "url";
 
 export interface Evidence {
   kind: EvidenceKind;
