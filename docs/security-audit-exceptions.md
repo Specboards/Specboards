@@ -13,9 +13,17 @@ exception past its review-by date should be re-evaluated, not renewed by habit.
 
 ## Accepted exceptions
 
+None. The gate currently passes with nothing muted.
+
+## Retired exceptions
+
+Kept so a re-opened alert is recognised as one we have already reasoned about,
+rather than triaged from scratch.
+
 ### GHSA-82fw-gwwq-j7x9 - `vitest` / `@vitest/mocker` path traversal
 
-- **Accepted:** 2026-09-08. **Review by:** 2026-10-08.
+- **Accepted:** 2026-09-08. **Retired:** 2026-10-07, fixed by upgrade (vitest 4.1.11
+  across every workspace package).
 - **What it is:** `@vitest/mocker` registers a redirect mock's target path
   without checking it against the dev server's file-serving allowlist, so
   anything that can reach that dev server's WebSocket can read local files
@@ -46,11 +54,6 @@ exception past its review-by date should be re-evaluated, not renewed by habit.
 - **What this costs us:** the gate is no longer reporting on the whole
   production tree with nothing muted, which it had been. This is the first
   accepted exception since the round-1 `@hono/node-server` one was retired.
-
-## Retired exceptions
-
-Kept so a re-opened alert is recognised as one we have already reasoned about,
-rather than triaged from scratch.
 
 ### GHSA-frvp-7c67-39w9 - `@hono/node-server` serve-static path traversal
 

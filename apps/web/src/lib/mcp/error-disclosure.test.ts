@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 
 import { GithubSyncError } from "@/lib/github-sync";
 import { FeatureError } from "@/lib/store/types";
@@ -128,7 +128,7 @@ async function callTool(name: string): Promise<string> {
 }
 
 describe("what a failed tool call discloses", () => {
-  let info: ReturnType<typeof vi.spyOn>;
+  let info: MockInstance<typeof console.info>;
 
   beforeEach(() => {
     info = vi.spyOn(console, "info").mockImplementation(() => {});
