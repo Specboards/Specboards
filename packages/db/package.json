@@ -32,9 +32,9 @@
     "postgres": "^3.4.5"
   },
   "devDependencies": {
-    "@types/node": "^25.9.6",
+    "@types/node": "^25.9.9",
     "esbuild": "^0.28.2",
-    "tsx": "^4.23.12",
+    "tsx": "^4.23.15",
     "vitest": "^3.2.6"
   }
 }
