@@ -32,8 +32,10 @@ const config: KnipConfig = {
       vitest: false,
     },
   },
-  // Repo scripts invoked by path from package.json, not npm binaries.
-  ignoreBinaries: ["scripts/.+\\.sh"],
+  // System binaries, not npm ones: the TLS tests shell out to `openssl` to mint
+  // throwaway certificates. (knip 6 resolves `scripts/*.sh` invoked by path on
+  // its own, so those no longer need listing.)
+  ignoreBinaries: ["openssl"],
 };
 
 export default config;

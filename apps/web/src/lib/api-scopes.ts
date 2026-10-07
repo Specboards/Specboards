@@ -18,7 +18,7 @@
  * key-authenticated callers - see {@link isScopeExemptPath}.
  */
 
-export type ScopeAction = "read" | "write";
+type ScopeAction = "read" | "write";
 
 export interface RequiredScope {
   resource: string;

@@ -51,7 +51,7 @@ import type { FeatureRecord, StageGate } from "@/lib/store/types";
  */
 
 /** Enough of an item to plan a conversion of it. */
-export interface ConversionSubject {
+interface ConversionSubject {
   specId: string;
   title: string;
   level: string;
@@ -62,13 +62,13 @@ export interface ConversionSubject {
 }
 
 /** An item named in a blocker, so the UI can link the fix. */
-export interface ConversionItemRef {
+interface ConversionItemRef {
   specId: string;
   title: string;
   level: string;
 }
 
-export type ConversionBlocker =
+type ConversionBlocker =
   | { kind: "unknown-level"; message: string }
   | { kind: "same-level"; message: string }
   | { kind: "spec-attached"; message: string }
@@ -76,7 +76,7 @@ export type ConversionBlocker =
   | { kind: "gates-unsatisfiable"; message: string; gates: string[] };
 
 /** Something the conversion will do, stated before it is confirmed. */
-export interface ConversionEffect {
+interface ConversionEffect {
   kind:
     | "parent-detached"
     | "parent-kept"

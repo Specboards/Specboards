@@ -51,7 +51,7 @@ import type { DocPageRecord, WorkspaceScope } from "@/lib/store/types";
  */
 
 /** One page whose text is going into the prompt. */
-export interface ArchitecturePage {
+interface ArchitecturePage {
   /** Path within the area, as it appears in the outline. */
   path: string;
   body: string;

@@ -59,7 +59,7 @@ interface LocalLink {
   type: LocalLinkType;
 }
 
-export interface LocalMetadata {
+interface LocalMetadata {
   status?: string;
   rank?: string | null;
   tags?: string[];

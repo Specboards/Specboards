@@ -80,7 +80,7 @@ export function goalSpan(goal: {
 }
 
 /** One swimlane: a goal's period, and the work drawn inside it. */
-export interface GoalLane {
+interface GoalLane {
   goal: TimelineGoal;
   span: Span;
   placement: Placement;
