@@ -14,11 +14,11 @@
     "lint": "eslint src"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.32.0",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "@specboards/core": "workspace:*",
     "@specboards/db": "workspace:*",
-    "drizzle-orm": "^0.45.3",
-    "zod": "^4.6.5"
+    "drizzle-orm": "^0.45.4",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^25.9.9"
